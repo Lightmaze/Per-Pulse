@@ -1,0 +1,58 @@
+[project]
+name = "per-pulse"
+version = "0.1.0a1"
+description = "A persistent conversation workspace built on Pulse's native Home, Work, and Harness Kernel."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Lightmaze Contributors" }]
+keywords = ["ai", "persistent-agents", "conversation", "workspace", "pulse"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.32,<1",
+  "httpx>=0.28.1,<1",
+  "numpy>=2.5.1,<3",
+  "openai>=1.0,<4",
+  "sympy>=1.14.0,<2",
+]
+
+[project.urls]
+Repository = "https://github.com/Lightmaze/Per-Pulse"
+Issues = "https://github.com/Lightmaze/Per-Pulse/issues"
+
+[project.scripts]
+per-pulse = "per_pulse.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "build>=1,<2", "hatchling>=1.27"]
+anthropic = ["anthropic>=0.40"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/per_pulse", "src/pulse_system", "src/pulse_harness"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"web/dist" = "per_pulse/static"
+"src/pulse_harness/core/secrets.py" = "pulse_harness/core/secrets.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/web", "/tests", "/docs", "/AGENTS.md"]
+exclude = [
+  "/.venv", "/.git", "**/node_modules", "**/__pycache__", "**/.pytest_cache",
+  "*.pyc", "*.tsbuildinfo", "*.db", "*.db-wal", "*.db-shm", "*.jsonl", ".env*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/per_pulse"]
+pythonpath = ["src"]
+markers = ["real: requires explicit credentials and a real provider (excluded by default)"]
+addopts = "-m 'not real'"
