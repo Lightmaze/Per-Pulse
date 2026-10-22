@@ -51,6 +51,9 @@ exclude = [
   "*.pyc", "*.tsbuildinfo", "*.db", "*.db-wal", "*.db-shm", "*.jsonl", ".env*",
 ]
 
+[tool.hatch.build.targets.sdist.force-include]
+"web/dist" = "web/dist"
+
 [tool.pytest.ini_options]
 testpaths = ["tests/per_pulse"]
 pythonpath = ["src"]
