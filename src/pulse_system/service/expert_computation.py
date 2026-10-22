@@ -1,0 +1,217 @@
+"""Optional constructive expert work inside the existing native execution.
+
+The default enabled mode computes new task material with the configured LLM.
+The earlier signed-feature selector remains an explicitly selected baseline.
+"""
+from __future__ import annotations
+
+import os
+import sqlite3
+from pathlib import Path
+
+from pulse_harness.core import HarnessScope, HarnessStore, ModelRoundStatus, RecoveryManager, TranscriptStore, TurnRunner, TurnStatus
+from pulse_harness.core.errors import ProviderProtocolError, StoreUnavailable
+from pulse_harness.core.provider import CancellationRequested
+from pulse_harness.core.replay import bound_text, digest_json
+from pulse_harness.core.turn_advice import TURN_ADVICE_PREFIX, TurnAdvice, decode_advice
+from pulse_harness.plugins.expert_computation import ExpertStore, canonical, fingerprint
+from pulse_harness.plugins.expert_work import working_view, make_work_prompt, contribution_context
+from .coverme import _BorrowedModel, _NoTools
+
+
+def expert_enabled() -> bool:
+    value = os.environ.get("P_PULSE_EXPERT_COMPUTATION", "0")
+    if value not in {"0", "1"}:
+        raise ValueError("P_PULSE_EXPERT_COMPUTATION must be 0 or 1")
+    return value == "1"
+
+
+class ExpertRuntime:
+    def __init__(self, path, *, guard):
+        self.mode = os.environ.get("P_PULSE_EXPERT_MODE", "semantic")
+        if self.mode not in {"semantic", "retrieval_baseline"}:
+            raise ValueError("P_PULSE_EXPERT_MODE must be semantic or retrieval_baseline")
+        self.store = ExpertStore(path)
+        self.guard, self.trace = guard, None
+        try:
+            if self.mode == "semantic":
+                trace_path = ":memory:" if str(path) == ":memory:" else str(path) + ".trace"
+                self.trace = HarnessStore(trace_path)
+                if trace_path != ":memory:":
+                    Path(trace_path).chmod(0o600)
+                RecoveryManager(self.trace).recover(reason="expert_process_restart")
+        except BaseException:
+            if self.trace is not None:
+                self.trace.close()
+            self.store.close()
+            raise
+
+    def advisor(self, main_store, model, scope):
+        return _Advisor(self, main_store, model)
+
+    def record_outcome(self, main_store, scope, result):
+        self.guard()
+        if result.status.value not in {"succeeded", "failed", "cancelled"}:
+            return
+        actions = main_store.actions_for_turn(scope, limit=128)
+        outcome = {
+            "status": result.status.value, "error_code": result.error_code,
+            "assistant_text": bound_text(result.assistant_text or "", 16000)[0],
+            "actions": [{"id": action.action_request_id, "tool": action.tool_name,
+                         "status": action.status.value, "arguments_digest": action.args_digest,
+                         "result_digest": fingerprint(dict(action.result)) if action.result is not None else None}
+                        for action in actions],
+            "action_count": main_store.count_actions_for_turn(scope),
+            "source": {"scope": scope.as_dict()}, "judgment": "unjudged",
+        }
+        for previous in self.store.turn_decisions(scope.as_dict()):
+            if previous["outcome"] is None:
+                self.store.record_outcome(previous["id"], outcome)
+
+    def close(self):
+        if self.trace is not None:
+            self.trace.close()
+        self.store.close()
+
+
+class _Advisor:
+    def __init__(self, runtime, main_store, model):
+        self.runtime, self.main_store, self.model = runtime, main_store, model
+        self.continues = runtime.mode == "semantic"
+
+    def advise(self, request, *, cancel_event):
+        self.runtime.guard()
+        if cancel_event.is_set():
+            raise CancellationRequested("expert computation cancelled")
+        scope = request.scope
+        index = self.main_store.next_model_round_index(scope)
+        identity = scope.digest + (f":round:{index}" if index else "")
+        # A committed calculation can be recovered before rereading changing
+        # material. Main admission remains a separate durable boundary.
+        try:
+            saved = self.runtime.store.decision(identity)
+        except ValueError:
+            saved = None
+        if saved is not None:
+            return self._advice(saved)
+        if self.continues:
+            if index and not request.tool_results:
+                return None
+            # Host receipts bound attempts even if a sidecar write failed.
+            admitted = [m for m in TranscriptStore(self.main_store).messages(scope)
+                        if m.item_id.startswith(TURN_ADVICE_PREFIX)]
+            if len(admitted) >= 2:
+                return None
+        view, source = working_view(request)
+        situation = bound_text(canonical(view), 32000)[0]
+        owner = scope.world_id + ":" + scope.engram_id
+        if not self.continues:
+            decision = self.runtime.store.propose(
+                decision_id=identity, owner=owner, situation=situation, source=source)
+            return self._advice(decision)
+        source["native_model_round"] = index
+        materials = self.runtime.store.materials(owner, scope.context_id)
+        prompt = make_work_prompt(view, materials, model_round=index)
+        outcome, receipt = self._compute(request, prompt, identity, cancel_event)
+        context = None
+        if outcome.status is TurnStatus.SUCCEEDED:
+            try:
+                context = contribution_context(outcome.assistant_text)
+            except ValueError:
+                receipt["contribution_status"] = "invalid"
+            else:
+                receipt["contribution_status"] = "contributed" if context else "pass"
+        else:
+            receipt["contribution_status"] = "fork_failed"
+        computation = {"prompt_digest": fingerprint(prompt), "fork": receipt,
+                       "method": "constructive_work.v1"}
+        try:
+            decision = self.runtime.store.record_computation(
+                decision_id=identity, owner=owner, situation=situation, source=source,
+                context=context, computation=computation)
+        except (sqlite3.Error, ValueError):
+            # Keep provider cost and attempt provenance in the main store when
+            # optional journal retention fails. Do not claim learned experience.
+            self.runtime.guard()
+            return TurnAdvice(context=context, receipt={
+                "plugin": "expert_computation", "mode": "semantic",
+                "decision_id": identity, "status": "journal_write_failed", **computation})
+        self.runtime.guard()
+        return self._advice(decision)
+
+    @staticmethod
+    def _advice(decision):
+        receipt = {"plugin": "expert_computation", "decision_id": decision["id"],
+                   "selected": decision["selected"], "generation": decision["generation"],
+                   "status": "contributed" if decision["context"] else "none"}
+        if decision.get("kind") == "semantic_computation":
+            receipt.update(mode="semantic", **decision["computation"])
+        else:
+            receipt.update(mode="retrieval_baseline", policy_digest=decision["policy_digest"],
+                           corpus_digest=decision["corpus_digest"], explored=decision["explored"],
+                           encoder=decision["encoder"])
+        return TurnAdvice(context=decision["context"], receipt=receipt)
+
+    def _compute(self, request, prompt, identity, cancel_event):
+        self.runtime.guard()
+        clean, redacted, truncated = bound_text(prompt, self.runtime.trace.max_payload_bytes)
+        if redacted or truncated or clean != prompt:
+            raise ProviderProtocolError("expert working material cannot be persisted in full")
+        source = request.scope
+        fork_id = fingerprint(identity)
+        scope = HarnessScope(
+            world_id=source.world_id, engram_id=source.engram_id,
+            session_id="expert:" + fork_id, epoch=source.epoch, owner_id=source.owner_id,
+            context_id="expert:" + source.context_id, turn_id="compute:" + fork_id,
+            capability_digest=digest_json({"kind": "expert-work-no-tools.v1", "source": source.as_dict(),
+                                          "decision_id": identity}),
+        )
+        runner = TurnRunner(self.runtime.trace, model_adapter=_BorrowedModel(self.model, cancel_event),
+                            tool_provider=_NoTools(), max_model_rounds=1, max_model_stream_bytes=64 * 1024)
+        try:
+            outcome = runner.run(scope, prompt=prompt)
+            rounds = self.runtime.trace.model_rounds_for_turn(scope)
+            self.runtime.guard()
+            if any(record.status is ModelRoundStatus.UNCERTAIN for record in rounds):
+                raise StoreUnavailable("expert fork termination cannot be confirmed",
+                                       code="model_stream_cleanup_uncertain")
+            if cancel_event.is_set():
+                raise CancellationRequested("expert computation cancelled")
+            receipt = {"trace": "expert", "session_id": scope.session_id, "turn_id": scope.turn_id,
+                       "source_scope_digest": source.digest, "status": outcome.status.value,
+                       "rounds": [{"round_id": record.round_id, "status": record.status.value,
+                                   "provider_usage": dict(record.provider_usage) if record.provider_usage is not None else None,
+                                   "provider_response_id": record.provider_response_id} for record in rounds]}
+            return outcome, receipt
+        finally:
+            runner.close()
+
+
+def recorded_expert_usage(store, scope):
+    """Read host-owned fork receipts, including silence and failed computation."""
+    usage = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0,
+             "cache_write_tokens": 0, "provider_requests": 0}
+    accounted, seen = True, set()
+    for message in TranscriptStore(store).messages(scope):
+        if message.role != "system" or not message.item_id.startswith(TURN_ADVICE_PREFIX):
+            continue
+        envelope = decode_advice(message.content)
+        receipt = envelope["receipt"]
+        if receipt.get("plugin") != "expert_computation" or receipt.get("mode") != "semantic":
+            continue
+        fork = receipt.get("fork", {})
+        if envelope["scope_digest"] != scope.digest or fork.get("source_scope_digest") != scope.digest:
+            accounted = False
+            continue
+        for record in fork.get("rounds", []):
+            if record["round_id"] in seen:
+                continue
+            seen.add(record["round_id"])
+            usage["provider_requests"] += 1
+            values = record.get("provider_usage")
+            if record["status"] != ModelRoundStatus.COMPLETED.value or values is None:
+                accounted = False
+                continue
+            for key in ("input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens"):
+                usage[key] += int(values[key])
+    return usage, accounted
