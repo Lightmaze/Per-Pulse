@@ -10,6 +10,7 @@ The original public Pulse baseline is [Lightmaze/pulse](https://github.com/Light
 - `src/per_pulse/` adds the English workspace's HTTP projection and local entry point.
 - `web/` implements the English session-page client.
 - `src/pulse_system/service/kernel_runtime.py` adds an explicit `allow_unconfigured` option for a disconnected workspace. The option defaults to false. Without it, existing provider checks retain their behavior. Disconnected mode does not run the model loop or generate fallback replies.
+- Opt-in posture learning keeps attributed experience in the existing World's component state. The native `posture` tool captures causal-event sources and settles through the same Kernel. The existing expert advice and response-review boundaries interpret the material; combined reviews retain each plugin's usage receipt. Prior-turn advice and review context are not replayed as fresh instructions.
 
 Home and Work retain one continuity subject. A session page is a view over a native Work, with its own context. References and source anchors are lightweight metadata in the same World database. No parallel conversation database or replacement turn runner is introduced.
 

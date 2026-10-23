@@ -1,4 +1,4 @@
-import type { Bootstrap, DraftReference, PageReference, PageSummary, PageView } from './types';
+import type { Bootstrap, DraftReference, PageReference, PageSummary, PageView, PostureExperience, PostureView } from './types';
 
 export class ApiError extends Error {
   constructor(message: string, public readonly code: string, public readonly status: number) {
@@ -40,4 +40,13 @@ export const api = {
   bringHome: (id: string, content: string, messageId?: string) =>
     request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/return`, { method: 'POST', body: JSON.stringify({ content, messageId }) }),
   rename: (id: string, title: string) => request<PageView>(pagePath(id), { method: 'PATCH', body: JSON.stringify({ title }) }),
+  posture: (id: string, signal?: AbortSignal) => request<PostureView>(`${pagePath(id)}/posture`, { signal }),
+  reviseExperience: (pageId: string, experience: PostureExperience, changes: { active?: boolean; scope?: 'context' | 'subject' }) =>
+    request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}`, {
+      method: 'PATCH', body: JSON.stringify({ expectedRevision: experience.revision, changes }),
+    }),
+  experienceFeedback: (pageId: string, experience: PostureExperience, verdict: 'useful' | 'harmful', evidence: string) =>
+    request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}/feedback`, {
+      method: 'POST', body: JSON.stringify({ expectedRevision: experience.revision, verdict, evidence }),
+    }),
 };

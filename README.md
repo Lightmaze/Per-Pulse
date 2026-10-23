@@ -16,6 +16,7 @@ This first release provides an English interface, a local Python service, and a 
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
+- Learn conditional lessons from ordinary corrections, inspect their sources, and pause or share them explicitly when experience learning is enabled.
 
 The server stores pages, messages, and references in the existing Pulse persistence layer. Browser storage holds only local drafts and navigation positions, scoped to the persistent workspace and page. When no model is configured, the interface says **AI disconnected** and saves messages as queued input. It never substitutes a scripted answer for a model response.
 
@@ -67,6 +68,20 @@ If neither endpoint nor model is set, the workspace runs disconnected. Setting o
 
 Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. These describe adapter capabilities; compatibility with a specific remote model must be verified separately.
 
+### Learn from experience
+
+With a provider connected, enable experience learning with:
+
+```sh
+per-pulse --posture
+```
+
+Continue the conversation normally. When you correct a result, Per Pulse can retain a lesson together with the original encounter, the conditions where it applies, and a counterexample. A later ordinary task can use that experience before an action or delivery. The configured model interprets those boundaries; saving or recalling a lesson does not establish that the result improved.
+
+Open **Settings → View this page's lessons** to inspect the source, pause or resume a lesson, and give feedback about an actual result. Lessons stay in their source page until you explicitly make their abstraction available to other pages. The original conversation stays at the source.
+
+`PER_PULSE_POSTURE=1` enables the same feature. It is off by default and remains off in example mode. With no eligible lesson and the separate expert module disabled, it adds no posture side computations; learning tool calls can still add ordinary model rounds. With lessons available, it can add up to two pre-action computations and one delivery computation per turn, using the configured provider. See [posture engineering](docs/posture-engineering.md) for behavior and lifecycle details, and [posture evaluation](docs/posture-evaluation.md) for artifact-based comparisons.
+
 ## Develop
 
 Run the backend in one terminal:
@@ -92,6 +107,8 @@ python -m build --no-isolation
 ```
 
 Build the client before building a wheel. The wheel includes the compiled client, so an installed wheel serves the same interface without a Node.js process. No package has been published to PyPI by this repository's initial implementation.
+
+The [browser flow check](tests/browser/README.md) exercises natural correction capture, source navigation, pause/resume, explicit sharing, and feedback through the built interface with a clearly marked local transport fixture.
 
 ## How the pieces fit
 

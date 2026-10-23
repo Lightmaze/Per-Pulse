@@ -16,7 +16,7 @@ from threading import Event
 from pulse_harness.core import HarnessScope, HarnessStore, ModelRoundStatus, RecoveryManager, TranscriptStore, TurnRunner, TurnStatus
 from pulse_harness.core.errors import CapabilityDenied, ProviderProtocolError, ProviderUnavailable, StoreUnavailable
 from pulse_harness.core.replay import bound_text, digest_json
-from pulse_harness.core.response_review import RESPONSE_REVIEW_PREFIX, ResponseReview, decode_review_envelope
+from pulse_harness.core.response_review import RESPONSE_REVIEW_PREFIX, ResponseReview, decode_review_envelope, review_receipts
 from pulse_harness.plugins.coverme import CoverMeLimits, CoverMeReviewer, WikiIndex
 
 
@@ -215,33 +215,35 @@ def recorded_fork_usage(store: HarnessStore, scope: HarnessScope) -> tuple[dict[
         if message.role != "system" or not message.item_id.startswith(RESPONSE_REVIEW_PREFIX):
             continue
         envelope = decode_review_envelope(message.content)
-        receipt = envelope["receipt"]
-        fork = receipt.get("fork")
-        if receipt.get("plugin") != "CoverMe" or fork is None:
-            continue
-        if not isinstance(fork, dict) or fork.get("source_round_id") != envelope["round_id"]:
-            accounted = False
-            continue
-        rounds = fork.get("rounds")
-        if not isinstance(rounds, list) or len(rounds) > 1:
-            accounted = False
-            continue
-        for record in rounds:
-            if not isinstance(record, dict) or not isinstance(record.get("round_id"), str):
+        for receipt in review_receipts(envelope["receipt"]):
+            if receipt.get("accounting_incomplete"):
+                accounted = False
+            fork = receipt.get("fork")
+            if receipt.get("plugin") != "CoverMe" or fork is None:
+                continue
+            if not isinstance(fork, dict) or fork.get("source_round_id") != envelope["round_id"]:
                 accounted = False
                 continue
-            if record["round_id"] in seen:
-                continue
-            seen.add(record["round_id"])
-            usage["provider_requests"] += 1
-            values = record.get("provider_usage")
-            if record.get("status") != ModelRoundStatus.COMPLETED.value or not isinstance(values, dict):
+            rounds = fork.get("rounds")
+            if not isinstance(rounds, list) or len(rounds) > 1:
                 accounted = False
                 continue
-            keys = ("input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens")
-            if any(type(values.get(key)) is not int or values[key] < 0 for key in keys):
-                accounted = False
-                continue
-            for key in keys:
-                usage[key] += values[key]
+            for record in rounds:
+                if not isinstance(record, dict) or not isinstance(record.get("round_id"), str):
+                    accounted = False
+                    continue
+                if record["round_id"] in seen:
+                    continue
+                seen.add(record["round_id"])
+                usage["provider_requests"] += 1
+                values = record.get("provider_usage")
+                if record.get("status") != ModelRoundStatus.COMPLETED.value or not isinstance(values, dict):
+                    accounted = False
+                    continue
+                keys = ("input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens")
+                if any(type(values.get(key)) is not int or values[key] < 0 for key in keys):
+                    accounted = False
+                    continue
+                for key in keys:
+                    usage[key] += values[key]
     return usage, accounted

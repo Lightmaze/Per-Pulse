@@ -46,6 +46,7 @@ class PageService:
         data_dir: str | Path,
         *,
         example: bool = False,
+        posture: bool | None = None,
         model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None | object = _ENV_PROVIDER,
     ):
         self.data_dir = Path(data_dir).expanduser().resolve()
@@ -83,8 +84,11 @@ class PageService:
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
             model_factory=factory, allow_unconfigured=True, allow_mutations=False,
+            enable_posture=False if example else posture,
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
+        from .learning import PageLearning
+        self.learning = PageLearning(self)
         self._state_key = f"per-pulse-pages-v1:{self.runtime.world_id}"
         self._state = self.runtime.storage.load_component_state(self._state_key)
         if self._state is None:
@@ -207,6 +211,7 @@ class PageService:
                 "name": "Per Pulse", "version": __version__, "example": self.example,
                 "workspaceId": self.runtime.world_id,
                 "homeId": "home", "provider": self.provider, "pages": pages,
+                "postureEnabled": self.learning.enabled,
             }
 
     def view(self, page_id: str) -> dict:

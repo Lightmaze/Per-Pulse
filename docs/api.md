@@ -58,6 +58,7 @@ type Bootstrap = {
   homeId: "home";
   provider: ProviderState;
   pages: PageSummary[];
+  postureEnabled: boolean;
 };
 ```
 
@@ -124,6 +125,52 @@ Response `201`: `{messageId:string, reference:PageReference, view:PageView}`. `v
 ## Errors
 
 Errors use `{error:{code:string,message:string}}` with 400/404/409/422/503. Show the message in English. Never silently switch to an example or fabricated assistant response after an error.
+
+## Experience learning
+
+Start with `--posture` or `PER_PULSE_POSTURE=1`. All experience routes share the
+same origin, JSON-only mutation boundary, World storage, and page ownership as
+the conversation API. Example mode never enables learning.
+
+- `GET /api/pages/{id}/posture` returns `{enabled:boolean, experiences:[]}`.
+- `POST /api/pages/{id}/posture/experiences` creates an attributed lesson and returns `201 {experience}`.
+- `PATCH /api/pages/{id}/posture/experiences/{experienceId}` revises a lesson and returns `{experience}`.
+- `POST /api/pages/{id}/posture/experiences/{experienceId}/feedback` records operator feedback and returns `{experience}`.
+
+Creation requires `sourceMessageId` identifying a settled native assistant
+result and `feedbackMessageId` identifying a later user stimulus in the same
+page. The host captures the original encounter and provider evidence class.
+The body also contains `title`, `lesson`, `conditions`, `counterexamples`, and
+`shift: {understanding,candidates,delivery}`. `conditions` is text or a recursive
+`{all:[...]}`, `{any:[...]}`, or `{not:...}` expression. The optional `scope` is
+`context` by default; `subject` explicitly shares the abstraction across pages.
+The model's native tool always creates context-local records.
+
+A lesson includes `id`, `revision`, `active`, `scope`, its content,
+`record_type`, `canEdit`, `sourcePageId`, and timestamps. At its source page it
+also includes `encounter`, `source`, and `feedback`. A transferred projection
+omits those raw fields. A test transport source stays `constructed_fixture`.
+Source attribution does not verify that a user follow-up is semantically a
+correction or prove an improvement.
+
+Revision bodies use `expectedRevision` and `changes`. Editable fields are
+`title`, `lesson`, `conditions`, `counterexamples`, `shift`, `scope`, and
+`active`. Provenance and the original encounter cannot be overwritten.
+
+```json
+{"expectedRevision":1,"changes":{"active":false}}
+```
+
+Feedback bodies use `expectedRevision`, `verdict` (`useful`, `not_useful`,
+`harmful`, or `withdrawn`), and concrete `evidence`. Harmful or withdrawn
+feedback pauses the lesson. Every successful mutation increments the revision;
+stale updates return `409 experience_revision_conflict`. Shared lessons can be
+changed only from their source page. Disabled learning returns
+`409 posture_disabled` for writes, while reads return an empty disabled view.
+
+See [posture engineering](posture-engineering.md) for the native model-tool
+lifecycle and the boundary between pausing new activations and retaining
+already-existing conversation history.
 
 ## Explicit example mode
 

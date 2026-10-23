@@ -8,6 +8,7 @@ import { Sidebar } from './components/Sidebar';
 import { SessionLink, type Navigate } from './components/SessionLink';
 import { Conversation } from './components/Conversation';
 import { Composer } from './components/Composer';
+import { LearningDialog } from './components/LearningDialog';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
@@ -221,6 +222,7 @@ export default function App() {
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'rename' ? <RenameDialog initial={view?.page.title ?? ''} busy={busy} error={modalError} close={closeModal} rename={renamePage} /> : null}
-    {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} refresh={() => refreshBootstrap().then(() => setToast('Connection checked.')).catch(problem => setToast(errorMessage(problem)))} /> : null}
+    {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshBootstrap().then(() => setToast('Connection checked.')).catch(problem => setToast(errorMessage(problem)))} /> : null}
+    {modal?.kind === 'learning' ? <LearningDialog pageId={route.id} pageTitle={view?.page.title ?? 'this page'} close={closeModal} navigate={navigate} /> : null}
   </div>;
 }
