@@ -14,15 +14,15 @@ POSTURE_INSTRUCTION = """The posture experiences below are attributed, revisable
 They are offered by ownership and transfer scope, NOT classified as applicable.
 Interpret their all/any/not conditions and counterexamples against this task.
 Use an experience only when the actual situation supports its distinction;
-ordinary registration forms, precise diagrams, and small fixes may already be
-the right answer. Preserve them when they serve the actual purpose. A shared
+preserve an adequate approach when it serves the user's purpose and constraints.
+Extra exploration or reformulation is not automatically useful. A shared
 word, a role label, or a request to sound expert is not evidence of relevance.
 
 When an experience changes a real decision, do useful work at the point of
 change: correct the problem representation; produce a materially different
 candidate or next action; or apply a concrete completion test to the result.
-These are intervention locations, not a checklist to recite. Saying that user
-experience matters, planning a review, or quoting the lesson is not a changed
+These are intervention locations, not a checklist to recite. Repeating a
+principle, planning a review, or quoting the lesson is not a changed
 artifact or action. Keep the original encounter distinct from its abstraction,
 respect later counterevidence, and do not elevate synthetic fixtures or model
 summaries into observed external feedback. Transfer only the visible material.

@@ -13,6 +13,7 @@ import httpx
 import uvicorn
 
 from per_pulse.app import create_app
+from per_pulse.service import PageService
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 
 
@@ -76,7 +77,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--seed-later-messages", type=int, default=0)
     args = parser.parse_args()
     os.environ["PER_PULSE_BROWSER_TEST_KEY"] = "synthetic-browser-fixture"
-    uvicorn.run(create_app(args.data_dir, posture=True, model_factory=factory),
-                host="127.0.0.1", port=args.port, log_level="warning")
+    if args.seed_later_messages:
+        if not 1 <= args.seed_later_messages <= 600:
+            parser.error("fixture seed count must be between 1 and 600")
+        pages = PageService(args.data_dir, posture=True, model_factory=None)
+        try:
+            for index in range(args.seed_later_messages):
+                pages.runtime.inject(pages.runtime.continuity_engram_id,
+                                     f"Later queued browser fixture message {index}.", source="user")
+        finally:
+            pages.runtime.close()
+    else:
+        uvicorn.run(create_app(args.data_dir, posture=True, model_factory=None if args.offline else factory),
+                    host="127.0.0.1", port=args.port, log_level="warning")

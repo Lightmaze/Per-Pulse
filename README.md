@@ -125,7 +125,7 @@ See [the API contract](docs/api.md) and [source lineage](docs/source-lineage.md)
 
 ## Current scope
 
-This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The page view shows the latest 500 messages; older events remain in the durable store. The first UI does not expose the inherited runtime's full operational or approval console.
+This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The page view shows the latest 500 messages; a source link can also open its exact earlier message, with the history gap marked. Older events remain in the durable store. The first UI does not expose the inherited runtime's full operational or approval console.
 
 The runtime is configured with workspace mutation disabled in this entry point. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality.
 

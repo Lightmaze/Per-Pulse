@@ -824,12 +824,16 @@ class KernelHarnessRuntime:
                 ):
                     usage[key] += int(round_record.provider_usage[key])
             from .coverme import recorded_fork_usage
-            fork_usage, fork_accounted = recorded_fork_usage(self.kernel.store, scope)
+            fork_usage, fork_accounted = recorded_fork_usage(
+                self.kernel.store, scope, trace=self.coverme.store if self.coverme is not None else None,
+            )
             for key in usage:
                 usage[key] += fork_usage[key]
             accounted = accounted and fork_accounted
             from .expert_computation import recorded_expert_usage
-            expert_usage, expert_accounted = recorded_expert_usage(self.kernel.store, scope)
+            expert_usage, expert_accounted = recorded_expert_usage(
+                self.kernel.store, scope, trace=self.expert.trace if self.expert is not None else None,
+            )
             for key in usage:
                 usage[key] += expert_usage[key]
             accounted = accounted and expert_accounted

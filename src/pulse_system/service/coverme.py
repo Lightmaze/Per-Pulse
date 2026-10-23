@@ -11,13 +11,33 @@ from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
+import sqlite3
 from threading import Event
 
 from pulse_harness.core import HarnessScope, HarnessStore, ModelRoundStatus, RecoveryManager, TranscriptStore, TurnRunner, TurnStatus
-from pulse_harness.core.errors import CapabilityDenied, ProviderProtocolError, ProviderUnavailable, StoreUnavailable
+from pulse_harness.core.errors import CapabilityDenied, LeaseFenced, ProviderProtocolError, ProviderUnavailable, ScopeConflict, StoreUnavailable
 from pulse_harness.core.replay import bound_text, digest_json
 from pulse_harness.core.response_review import RESPONSE_REVIEW_PREFIX, ResponseReview, decode_review_envelope, review_receipts
 from pulse_harness.plugins.coverme import CoverMeLimits, CoverMeReviewer, WikiIndex
+
+
+def _fork_scope(source: HarnessScope, round_id: str) -> HarnessScope:
+    """Share the complete source binding between execution and metering."""
+    identity = hashlib.sha256((source.digest + ":" + round_id).encode()).hexdigest()
+    return HarnessScope(
+        world_id=source.world_id,
+        engram_id=source.engram_id,
+        session_id="coverme:" + identity,
+        epoch=source.epoch,
+        owner_id=source.owner_id,
+        context_id="coverme:" + source.context_id,
+        turn_id="review:" + identity,
+        capability_digest=digest_json({
+            "kind": "coverme-review-only.v1",
+            "source_scope": source.as_dict(),
+            "source_round_id": round_id,
+        }),
+    )
 
 
 def load_selected_wiki(workspace: Path) -> WikiIndex | None:
@@ -141,22 +161,7 @@ class _NativeReviewer:
         clean, redacted, truncated = bound_text(prompt, self.runtime.store.max_payload_bytes)
         if redacted or truncated or clean != prompt:
             raise ProviderProtocolError("CoverMe complete prompt cannot be persisted")
-        source = request.scope
-        identity = hashlib.sha256((source.digest + ":" + round_id).encode()).hexdigest()
-        scope = HarnessScope(
-            world_id=source.world_id,
-            engram_id=source.engram_id,
-            session_id="coverme:" + identity,
-            epoch=source.epoch,
-            owner_id=source.owner_id,
-            context_id="coverme:" + source.context_id,
-            turn_id="review:" + identity,
-            capability_digest=digest_json({
-                "kind": "coverme-review-only.v1",
-                "source_scope": source.as_dict(),
-                "source_round_id": round_id,
-            }),
-        )
+        scope = _fork_scope(request.scope, round_id)
         self._fork_receipt = {
             "trace": "coverme",
             "session_id": scope.session_id,
@@ -200,17 +205,43 @@ class _NativeReviewer:
             runner.close()
 
 
-def recorded_fork_usage(store: HarnessStore, scope: HarnessScope) -> tuple[dict[str, int], bool]:
-    """Count provider evidence copied by the native fork owner into its receipt.
+def recorded_fork_usage(
+    store: HarnessStore, scope: HarnessScope, *, trace: HarnessStore | None = None,
+) -> tuple[dict[str, int], bool]:
+    """Meter source-bound fork attempts, including before host admission.
 
-    The source-linked envelope survives restart even when CoverMe is disabled.
-    A missing/failed usage record remains unaccounted, not an invented zero-cost
-    review. This reads durable host receipts, never model-authored report text.
+    Without ``trace`` this compatibility interface reads only host-admitted
+    receipts. Production callers pass the existing CoverMe trace so cancellation
+    or a later reviewer's failure cannot erase a completed fork's provider cost.
+    Cancelled/unfinished durable rounds count as attempted requests with unknown
+    tokens and ``accounted=False``. Model-authored reports are never usage.
     """
     usage = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0,
              "cache_write_tokens": 0, "provider_requests": 0}
-    accounted = True
-    seen = set()
+    accounted, seen = True, {}
+
+    def include_round(record):
+        nonlocal accounted
+        if not isinstance(record, dict) or not isinstance(record.get("round_id"), str) or not record["round_id"]:
+            accounted = False
+            return
+        identity = record["round_id"]
+        observation = {"status": record.get("status"), "provider_usage": record.get("provider_usage")}
+        if identity in seen:
+            if seen[identity] != observation:
+                accounted = False
+            return
+        seen[identity] = observation
+        usage["provider_requests"] += 1
+        values = record.get("provider_usage")
+        keys = ("input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens")
+        if (record.get("status") != ModelRoundStatus.COMPLETED.value or not isinstance(values, dict)
+                or any(type(values.get(key)) is not int or values[key] < 0 for key in keys)):
+            accounted = False
+            return
+        for key in keys:
+            usage[key] += values[key]
+
     for message in TranscriptStore(store).messages(scope):
         if message.role != "system" or not message.item_id.startswith(RESPONSE_REVIEW_PREFIX):
             continue
@@ -229,21 +260,24 @@ def recorded_fork_usage(store: HarnessStore, scope: HarnessScope) -> tuple[dict[
                 accounted = False
                 continue
             for record in rounds:
-                if not isinstance(record, dict) or not isinstance(record.get("round_id"), str):
-                    accounted = False
-                    continue
-                if record["round_id"] in seen:
-                    continue
-                seen.add(record["round_id"])
-                usage["provider_requests"] += 1
-                values = record.get("provider_usage")
-                if record.get("status") != ModelRoundStatus.COMPLETED.value or not isinstance(values, dict):
-                    accounted = False
-                    continue
-                keys = ("input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens")
-                if any(type(values.get(key)) is not int or values[key] < 0 for key in keys):
-                    accounted = False
-                    continue
-                for key in keys:
-                    usage[key] += values[key]
+                include_round(record)
+    if trace is not None:
+        # Only a real source model round can start this fork. Reconstruct its
+        # complete identity rather than searching another turn's raw history.
+        for source_round in store.model_rounds_for_turn(scope):
+            expected = _fork_scope(scope, source_round.round_id)
+            try:
+                with trace._lock:
+                    trace._require_open()
+                    exists = trace._db.execute("SELECT 1 FROM sessions WHERE session_id=?", (expected.session_id,)).fetchone()
+                    if exists is None:
+                        continue
+                    rounds = trace.model_rounds_for_turn(expected)
+                for record in rounds:
+                    include_round({"round_id": record.round_id, "status": record.status.value,
+                                   "provider_usage": dict(record.provider_usage) if record.provider_usage is not None else None})
+            except (sqlite3.Error, LeaseFenced, ScopeConflict, StoreUnavailable):
+                # Keep any already-proven receipt usage while making the
+                # unavailable supplementary accounting evidence explicit.
+                accounted = False
     return usage, accounted

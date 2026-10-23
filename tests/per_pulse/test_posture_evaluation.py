@@ -514,6 +514,20 @@ def test_continuing_transfer_keeps_budget_failure_instead_of_skipping_training(t
     assert not result["native_lesson_admitted"]
 
 
+def test_custom_transfer_prompt_with_explicit_reminder_never_gets_default_withdrawal_claim(tmp_path, monkeypatch):
+    prompt = "Use the posture tool and the earlier lesson before writing the customer update."
+    result = run_transfer_trial(tmp_path / "trial", model_factory=transfer_fixture_factory(monkeypatch, []),
+                                transfer_task=prompt, stage_timeout=10)
+    assert result["status"] == "completed", result
+    assert result["protocol"][-1]["prompt"] == prompt
+    assert not result["transfer_prompt_is_registered_default"]
+    assert "has not been reviewed for explicit reminders" in result["limitation"]
+    assert "contains no explicit reminder" not in result["limitation"]
+    assert result["review_status"] == "unreviewed"
+    assert not result["eligible_for_behavior_comparison"]
+    assert audit_transfer_trial(tmp_path / "trial")["status"] == "verified"
+
+
 def test_offline_fixture_smoke_never_uses_configured_network_provider(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("P_PULSE_CHAT_ENDPOINT", "https://not-contacted.invalid/chat/completions")
     monkeypatch.setenv("P_PULSE_CHAT_MODEL", "not-contacted")

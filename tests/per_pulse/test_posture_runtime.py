@@ -251,7 +251,7 @@ def run_with_posture(tmp_path, monkeypatch, *, learned=False, correction=False):
         outcome = runner.run(scope, prompt="Build a useful first experience for a language practice page.")
         expert.record_outcome(store, scope, outcome)
         transcript = list(TranscriptStore(store).messages(scope))
-        usage = recorded_expert_usage(store, scope)
+        usage = recorded_expert_usage(store, scope, trace=expert.trace)
         decisions = expert.store.turn_decisions(scope.as_dict())
         return requests, outcome, transcript, usage, decisions
     finally:
@@ -487,8 +487,9 @@ def test_combined_review_keeps_each_real_fork_cost_and_partial_failure(tmp_path,
     try:
         assert runner.run(scope, prompt="Produce the requested first experience.").status is TurnStatus.SUCCEEDED
         assert len(requests) == 4
-        expert_usage, expert_accounted = recorded_expert_usage(store, scope)
-        cover_usage, cover_accounted = recorded_fork_usage(store, scope)
+        expert_usage, expert_accounted = recorded_expert_usage(store, scope, trace=expert.trace)
+        cover_usage, cover_accounted = recorded_fork_usage(store, scope, trace=cover.store)
+        assert recorded_fork_usage(store, scope) == (cover_usage, cover_accounted)
         assert expert_usage["provider_requests"] == 2 and expert_usage["input_tokens"] == 20
         assert cover_usage["provider_requests"] == 1 and cover_usage["input_tokens"] == 10
         assert expert_accounted is (not broken_neighbor)
@@ -777,9 +778,114 @@ def test_parent_cancellation_during_provider_stream_closes_fork_without_learning
         assert len(sessions) == 1
         rounds = expert.trace.model_rounds_for_session(sessions[0].scope)
         assert len(rounds) == 1 and rounds[0].status.value == "cancelled"
+        usage, accounted = recorded_expert_usage(store, scope, trace=expert.trace)
+        assert usage["provider_requests"] == 1 and not accounted
+        assert usage["input_tokens"] == usage["output_tokens"] == 0  # Unknown, not certified free.
+        expert.close()
+        expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None, posture_memory=memory, expert_active=False)
+        assert recorded_expert_usage(store, scope, trace=expert.trace) == (usage, accounted)
+        other = HarnessScope("world", "subject", "other-session", 0, "owner", turn_id="another-task")
+        store.create_session(other.session_scope())
+        store.create_turn(other, "An unrelated task in the same subject and context.")
+        other_usage, other_accounted = recorded_expert_usage(store, other, trace=expert.trace)
+        assert other_usage["provider_requests"] == 0 and other_accounted
+        assert expert.store.decisions() == []
     finally:
         expert.close()
         model.close()
+        store.close()
+        storage.close()
+
+
+@pytest.mark.parametrize("completed_coverme_first", [False, True])
+def test_cancelled_delivery_fork_is_metered_before_host_review_admission_and_after_restart(
+    tmp_path, monkeypatch, completed_coverme_first,
+):
+    from pulse_harness.plugins.coverme import WikiEntry, WikiIndex
+    from pulse_system.service.coverme import CoverMeRuntime, recorded_fork_usage
+
+    monkeypatch.setenv("POSTURE_TEST_KEY", "synthetic-transport-key")
+    requests, current_cancel = [], {}
+
+    class CancellingReviewStream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b'data: {"choices":[{"index":0,"delta":{"content":"Partial review"},"finish_reason":null}]}\n\n'
+            current_cancel["event"].set()
+            yield b'data: [DONE]\n\n'
+
+    def handler(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        if "WORK_MATERIAL_JSON" in json.dumps(body["messages"]):
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=CancellingReviewStream())
+        is_coverme = "UNTRUSTED_REVIEW_DATA_JSON" in json.dumps(body["messages"])
+        chunks = [
+            {"choices": [{"index": 0, "delta": {"content": '{"mode":"none"}' if is_coverme else "A synthetic candidate"}, "finish_reason": None}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+             "usage": {"prompt_tokens": 7 if is_coverme else 10, "completion_tokens": 3}},
+        ]
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              content="".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + "data: [DONE]\n\n")
+
+    storage = Storage()
+    memory = PostureMemory(storage, "world")
+    memory.add_experience(**episode(context_id=""))
+    expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None, posture_memory=memory, expert_active=False)
+    index = WikiIndex((WikiEntry("fixture", "synthetic candidate", "A synthetic source for cancellation accounting.",
+                                 "https://example.invalid/synthetic-source"),))
+    cover = (CoverMeRuntime(tmp_path / "coverme.db", index, guard=lambda: None)
+             if completed_coverme_first else None)
+    store = HarnessStore(tmp_path / "kernel.db")
+    scope = HarnessScope("world", "subject", "session", 0, "owner", turn_id="delivery-cancel")
+    model = ChatHTTPModelAdapter(
+        ChatHTTPConfig("https://fixture.invalid/chat/completions", "posture-review-cancellation-fixture", credential_env="POSTURE_TEST_KEY"),
+        transport=httpx.MockTransport(handler))
+    actual_stream = model.stream
+
+    def observe_cancellation(request, *, cancel_event=None):
+        current_cancel["event"] = cancel_event
+        return actual_stream(request, cancel_event=cancel_event)
+
+    monkeypatch.setattr(model, "stream", observe_cancellation)
+    reviewer = expert.posture_reviewer(store, model, scope)
+    if cover is not None:
+        reviewer = CombinedResponseReviewer((("CoverMe", cover.reviewer(store, model, scope)),
+                                             ("expert_computation", reviewer)))
+    runner = TurnRunner(store, model_adapter=model, tool_provider=NoTools(),
+                        response_reviewer=reviewer)
+    try:
+        assert runner.run(scope, prompt="A task cancelled in its delivery review.").status is TurnStatus.CANCELLED
+        assert len(requests) == 2 + completed_coverme_first
+        usage, accounted = recorded_expert_usage(store, scope, trace=expert.trace)
+        assert usage["provider_requests"] == 1 and not accounted
+        if cover is not None:
+            cover_usage, cover_accounted = recorded_fork_usage(store, scope, trace=cover.store)
+            assert cover_usage == {"input_tokens": 7, "output_tokens": 3, "cached_tokens": 0,
+                                   "cache_write_tokens": 0, "provider_requests": 1}
+            assert cover_accounted
+        assert expert.store.decisions() == []
+        assert not any(message.item_id.startswith(RESPONSE_REVIEW_PREFIX) for message in TranscriptStore(store).messages(scope))
+        runner.close()
+        expert.close()
+        if cover is not None:
+            cover.close()
+        store.close()
+        store = HarnessStore(tmp_path / "kernel.db")
+        expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None, posture_memory=memory, expert_active=False)
+        assert recorded_expert_usage(store, scope, trace=expert.trace) == (usage, accounted)
+        if cover is not None:
+            cover = CoverMeRuntime(tmp_path / "coverme.db", index, guard=lambda: None)
+            assert recorded_fork_usage(store, scope, trace=cover.store) == (cover_usage, cover_accounted)
+            other = HarnessScope("world", "subject", "session", 0, "owner", turn_id="unrelated-task")
+            store.create_turn(other, "An unrelated task in the same session.")
+            other_usage, other_accounted = recorded_fork_usage(store, other, trace=cover.store)
+            assert other_usage["provider_requests"] == 0 and other_accounted
+        assert len(requests) == 2 + completed_coverme_first and expert.store.decisions() == []
+    finally:
+        runner.close()
+        expert.close()
+        if cover is not None:
+            cover.close()
         store.close()
         storage.close()
 

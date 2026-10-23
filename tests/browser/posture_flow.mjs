@@ -22,9 +22,10 @@ const port = socket.address().port;
 await new Promise(resolve => socket.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 let serverLog = '';
-const startServer = () => {
+const startServer = ({ offline = false } = {}) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/posture_server.py'), '--data-dir', directory, '--port', String(port),
+    ...(offline ? ['--offline'] : []),
   ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', data => { serverLog += data; });
   child.stderr.on('data', data => { serverLog += data; });
@@ -59,6 +60,9 @@ try {
   await page.goto(base);
   await page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();
   const openLessons = async () => {
+    if (!(await page.getByRole('button', { name: 'Settings', exact: true }).isVisible())) {
+      await page.getByRole('button', { name: 'Toggle navigation', exact: true }).click();
+    }
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('button', { name: 'View this page’s lessons', exact: true }).click();
     await page.getByRole('dialog', { name: 'Lessons from the work', exact: true }).waitFor();
@@ -147,8 +151,98 @@ try {
   if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-mobile.png') });
   await page.keyboard.press('Escape');
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await stopServer(server);
+  await new Promise((resolve, reject) => {
+    const seed = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
+      join(root, 'tests/browser/posture_server.py'), '--data-dir', directory, '--port', String(port),
+      '--seed-later-messages', '505',
+    ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    seed.stdout.on('data', data => { output += data; });
+    seed.stderr.on('data', data => { output += data; });
+    seed.once('error', reject);
+    seed.once('exit', code => code === 0 ? resolve() : reject(new Error(`Fixture history seed failed: ${output}`)));
+  });
+  server = startServer({ offline: true });
+  await wait(async () => { try { return (await fetch(base + '/api/health')).ok; } catch { return false; } }, 'offline history reopened');
+  await page.reload();
+  await openLessons();
+  await lesson.getByText('Source experience', { exact: true }).click();
+  await lesson.getByRole('button', { name: 'Go to original result', exact: true }).click();
+  await page.getByText('Earlier source message', { exact: true }).waitFor();
+  assert.equal(await page.locator('.message').count(), 501);
+  await page.locator('.message').first().getByText('The first screen is a twelve-field intake form. [Explicit browser test fixture]', { exact: true }).waitFor();
+  await page.getByText('Recent conversation · Some messages after the source are not shown.', { exact: true }).waitFor();
+  const sourceIsInViewport = () => {
+    const bounds = document.querySelector('.message')?.getBoundingClientRect();
+    return bounds && bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+  };
+  await page.waitForFunction(sourceIsInViewport);
+  await page.reload();
+  await page.getByText('Earlier source message', { exact: true }).waitFor();
+  assert.equal(await page.locator('.message').count(), 501);
+  await page.waitForFunction(sourceIsInViewport);
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-earlier-source.png') });
+  await page.locator('.message').first().getByRole('button', { name: 'Link page', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Registration tool', exact: false }).click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await page.getByText('Earlier source message', { exact: true }).waitFor();
+  assert.equal(await page.locator('.message').count(), 501);
+
+  // A retry uses the same refresh path as polling. Deliver its stale response
+  // before the new navigation response in both directions on the same page.
+  let readMode = 'normal';
+  let heldReads = [];
+  await page.route('**/api/pages/home*', async intercepted => {
+    const request = intercepted.request();
+    if (new URL(request.url()).pathname !== '/api/pages/home' || request.method() !== 'GET') {
+      await intercepted.continue(); return;
+    }
+    if (readMode === 'fail') {
+      readMode = 'normal';
+      await intercepted.fulfill({ status: 503, contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'browser_fixture_retry', message: 'Temporary browser fixture interruption.' } }) });
+      return;
+    }
+    if (readMode === 'hold') {
+      const response = await intercepted.fetch();
+      const pending = { done: false };
+      const gate = new Promise(resolve => { pending.release = resolve; });
+      heldReads.push(pending);
+      await gate;
+      await intercepted.fulfill({ response });
+      pending.done = true;
+      return;
+    }
+    await intercepted.continue();
+  });
+  const openOldSource = async () => {
+    await openLessons();
+    await lesson.getByText('Source experience', { exact: true }).click();
+    await lesson.getByRole('button', { name: 'Go to original result', exact: true }).click();
+  };
+  const openRecent = () => page.locator('.breadcrumbs').getByRole('button', { name: 'Home', exact: true }).click();
+  for (const fromSource of [true, false]) {
+    readMode = 'fail';
+    await (fromSource ? openOldSource() : openRecent());
+    await page.getByRole('alert').getByText('Temporary browser fixture interruption.', { exact: true }).waitFor();
+    heldReads = []; readMode = 'hold';
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
+    await wait(() => heldReads.length === 1, 'old refresh request held');
+    await (fromSource ? openRecent() : openOldSource());
+    await wait(() => heldReads.length === 2, 'new navigation request held');
+    heldReads[0].release();
+    await wait(() => heldReads[0].done, 'old refresh response delivered');
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    heldReads[1].release();
+    await wait(() => heldReads[1].done, 'new navigation response delivered');
+    readMode = 'normal';
+    await wait(async () => await page.locator('.message').count() === (fromSource ? 500 : 501), 'latest navigation wins stale refresh');
+    if (!fromSource) await page.waitForFunction(sourceIsInViewport);
+  }
+  await page.unroute('**/api/pages/home*');
   assert.deepEqual(errors, []);
-  console.log('PASS: browser learning, background admission refresh, provenance, service restart, sharing boundaries, concurrent revision recovery, feedback, mobile dialog and Escape. Explicit synthetic transport only.');
+  console.log('PASS: browser learning, background admission refresh, provenance, service restart, sharing boundaries, concurrent revision recovery, feedback, mobile dialog, Escape, older source navigation/reload/linking, and delayed-read navigation races. Explicit synthetic transport only.');
 } finally {
   await browser?.close();
   await stopServer(server);

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import type { Message, PageReference, PageSummary, PageView } from '../types';
 import { Icon } from './Icon';
 import { SessionLink, type Navigate } from './SessionLink';
@@ -37,8 +37,11 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
   const pageMap = new Map(pages.map(page => [page.id, page]));
   const pageReferences = view.references.filter(reference => !reference.sourceMessageId);
   return <div className="conversation" aria-label="Conversation">
-    {view.hasMore ? <p className="conversation-note">Showing the most recent messages.</p> : null}
-    {view.messages.map(message => <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id} key={message.id}>
+    {view.hasMore && !view.earlierSourceMessageId ? <p className="conversation-note">Showing the most recent messages.</p> : null}
+    {view.messages.map((message, index) => <Fragment key={message.id}>
+      {message.id === view.earlierSourceMessageId ? <p className="conversation-note">Earlier source message</p> : null}
+      {view.earlierSourceMessageId && index === 1 ? <p className="conversation-note">Recent conversation · Some messages after the source are not shown.</p> : null}
+      <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id}>
       <div className="message-label">{message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Per Pulse' : 'Workspace'}</div>
       {message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">From <SessionLink pageId={message.sourcePageId} label={pageMap.get(message.sourcePageId)?.title ?? 'Source page'} targetMessageId={message.sourceMessageId ?? undefined} navigate={navigate} /></div> : null}
       <MessageContent message={message} pageId={view.page.id} navigate={navigate} />
@@ -55,7 +58,7 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
           }} title="Bring selected text or this message to Home"><Icon name="return" size={14} />Bring to Home</button> : null}
         </div>
       </div>
-    </article>)}
+    </article></Fragment>)}
     {pageReferences.length ? <div className="page-references">{pageReferences.map(reference => <SessionLink key={reference.id} pageId={reference.targetPageId} label={reference.label} referenceId={reference.id} origin={{ pageId: view.page.id, referenceId: reference.id }} navigate={navigate} />)}</div> : null}
     {!view.messages.length && !pageReferences.length ? <p className="empty-conversation">{view.page.kind === 'home' ? 'Start a conversation, and give each idea a place of its own.' : 'This is a space to work things through. Pick up the conversation below.'}</p> : null}
   </div>;

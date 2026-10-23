@@ -193,9 +193,11 @@ input/result order, continuity or committed succession, native memory admission,
 action receipts, request digests, provider origin, and exported response bytes.
 
 This protocol uses **explicit teaching**. It does not show that an ordinary
-correction spontaneously causes learning. The later current message has no
-reminder, but earlier teaching remains in the same context's history; the trial
-alone cannot separate memory effects from retained conversation. Its output is
+correction spontaneously causes learning. The registered default later message
+has no reminder. A custom `--transfer-task` remains unreviewed for reminders;
+inspect its declared prompt before interpreting the trial. Earlier teaching
+remains in the same context's history, so this trial alone cannot separate
+memory effects from retained conversation. Its output is
 always `unreviewed` and never a capability score. Review the actual later
 message and compare against matched controls before claiming a behavior gain.
 Unconfigured providers stop before creating a trial or making a request.

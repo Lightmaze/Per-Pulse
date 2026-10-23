@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 
 from pulse_harness.core import HarnessScope, HarnessStore, ModelRoundStatus, RecoveryManager, TranscriptStore, TurnRunner, TurnStatus
-from pulse_harness.core.errors import ProviderProtocolError, StoreUnavailable
+from pulse_harness.core.errors import LeaseFenced, ProviderProtocolError, ScopeConflict, StoreUnavailable
 from pulse_harness.core.provider import CancellationRequested
 from pulse_harness.core.replay import bound_text, digest_json
 from pulse_harness.core.turn_advice import TURN_ADVICE_PREFIX, TurnAdvice, decode_advice
@@ -26,6 +26,18 @@ def expert_enabled() -> bool:
     if value not in {"0", "1"}:
         raise ValueError("P_PULSE_EXPERT_COMPUTATION must be 0 or 1")
     return value == "1"
+
+
+def _fork_scope(source, identity):
+    """The same complete source binding is used for execution and metering."""
+    fork_id = fingerprint(identity)
+    return HarnessScope(
+        world_id=source.world_id, engram_id=source.engram_id,
+        session_id="expert:" + fork_id, epoch=source.epoch, owner_id=source.owner_id,
+        context_id="expert:" + source.context_id, turn_id="compute:" + fork_id,
+        capability_digest=digest_json({"kind": "expert-work-no-tools.v1", "source": source.as_dict(),
+                                      "decision_id": identity}),
+    )
 
 
 class ExpertRuntime:
@@ -261,14 +273,7 @@ class _Advisor:
         if redacted or truncated or clean != prompt:
             raise ProviderProtocolError("expert working material cannot be persisted in full")
         source = request.scope
-        fork_id = fingerprint(identity)
-        scope = HarnessScope(
-            world_id=source.world_id, engram_id=source.engram_id,
-            session_id="expert:" + fork_id, epoch=source.epoch, owner_id=source.owner_id,
-            context_id="expert:" + source.context_id, turn_id="compute:" + fork_id,
-            capability_digest=digest_json({"kind": "expert-work-no-tools.v1", "source": source.as_dict(),
-                                          "decision_id": identity}),
-        )
+        scope = _fork_scope(source, identity)
         runner = TurnRunner(self.runtime.trace, model_adapter=_BorrowedModel(self.model, cancel_event),
                             tool_provider=_NoTools(), max_model_rounds=1, max_model_stream_bytes=64 * 1024)
         try:
@@ -367,11 +372,41 @@ class _PostureReviewer:
         return ResponseReview(context=advice.context, receipt=advice.receipt)
 
 
-def recorded_expert_usage(store, scope):
-    """Read host-owned fork receipts, including silence and failed computation."""
+def recorded_expert_usage(store, scope, *, trace=None):
+    """Meter source-bound fork attempts, without granting learning credit.
+
+    Without ``trace`` this compatibility interface reads only host-admitted
+    receipts. Production callers pass the existing expert trace so cancellation
+    or a crash before advice admission cannot make a real attempt disappear.
+    A durable cancelled/unfinished round counts as an attempted request, with
+    unknown tokens and ``accounted=False``; it is not a zero-cost assertion.
+    """
     usage = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0,
              "cache_write_tokens": 0, "provider_requests": 0}
-    accounted, seen = True, set()
+    accounted, seen = True, {}
+
+    def include_round(record):
+        nonlocal accounted
+        if not isinstance(record, dict) or not isinstance(record.get("round_id"), str) or not record["round_id"]:
+            accounted = False
+            return
+        identity = record["round_id"]
+        observation = {"status": record.get("status"), "provider_usage": record.get("provider_usage")}
+        if identity in seen:
+            if seen[identity] != observation:
+                accounted = False
+            return
+        seen[identity] = observation
+        usage["provider_requests"] += 1
+        values = record.get("provider_usage")
+        keys = ("input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens")
+        if (record.get("status") != ModelRoundStatus.COMPLETED.value or not isinstance(values, dict)
+                or any(type(values.get(key)) is not int or values[key] < 0 for key in keys)):
+            accounted = False
+            return
+        for key in keys:
+            usage[key] += values[key]
+
     for message in TranscriptStore(store).messages(scope):
         if message.role != "system":
             continue
@@ -406,19 +441,32 @@ def recorded_expert_usage(store, scope):
                 accounted = False
                 continue
             for record in rounds:
-                if not isinstance(record, dict) or not isinstance(record.get("round_id"), str) or not record["round_id"]:
-                    accounted = False
-                    continue
-                if record["round_id"] in seen:
-                    continue
-                seen.add(record["round_id"])
-                usage["provider_requests"] += 1
-                values = record.get("provider_usage")
-                keys = ("input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens")
-                if (record.get("status") != ModelRoundStatus.COMPLETED.value or not isinstance(values, dict)
-                        or any(type(values.get(key)) is not int or values[key] < 0 for key in keys)):
-                    accounted = False
-                    continue
-                for key in keys:
-                    usage[key] += values[key]
+                include_round(record)
+    if trace is not None:
+        # An advisor runs before the next main model round exists; a delivery
+        # reviewer runs while its source main round is still streaming. Include
+        # both boundaries, and reconstruct their exact deterministic scopes.
+        main_rounds = store.model_rounds_for_turn(scope)
+        indices = {0, store.next_model_round_index(scope), *(item.round_index for item in main_rounds)}
+        identities = [scope.digest + (f":round:{index}" if index else "") for index in sorted(indices)]
+        identities += [scope.digest + ":posture-review:" + fingerprint(item.round_id) for item in main_rounds]
+        for identity in identities:
+            expected = _fork_scope(scope, identity)
+            try:
+                # Avoid catalog scans across another task's raw history. The
+                # indexed existence probe is followed by the store's complete
+                # scope/capability/integrity validation before reading usage.
+                with trace._lock:
+                    trace._require_open()
+                    exists = trace._db.execute("SELECT 1 FROM sessions WHERE session_id=?", (expected.session_id,)).fetchone()
+                    if exists is None:
+                        continue
+                    rounds = trace.model_rounds_for_turn(expected)
+                for record in rounds:
+                    include_round({"round_id": record.round_id, "status": record.status.value,
+                                   "provider_usage": dict(record.provider_usage) if record.provider_usage is not None else None})
+            except (sqlite3.Error, LeaseFenced, ScopeConflict, StoreUnavailable):
+                # The caller can still show already-proven costs, but cannot
+                # claim complete accounting when the source trace is unreadable.
+                accounted = False
     return usage, accounted

@@ -604,8 +604,9 @@ def run_transfer_trial(
     """Run one continuing native subject through correction and a later task.
 
     No benchmark rubric is supplied to the model. Teaching text is fixed before
-    execution. The current transfer message has no reminder; retained history
-    remains a confound, so native learning admission is not a capability score.
+    execution. The registered default transfer message has no reminder; custom
+    prompts are unreviewed. Retained history remains a confound, so native
+    learning admission is not a capability score.
     """
     from per_pulse.service import PageService
     from pulse_harness.adapters.chat_http import model_factory_from_env
@@ -681,7 +682,10 @@ def run_transfer_trial(
               "native_lesson_admitted": False,
               "teaching_was_explicit": True, "spontaneous_learning_claim": False,
               "transfer_prompt_is_registered_default": transfer_task == TRANSFER_TASK,
-              "limitation": "The current transfer message contains no explicit reminder. Earlier correction remains in native history; this trial alone cannot isolate memory effects from retained history."}
+              "limitation": (("The registered current transfer message contains no explicit reminder. "
+                              if transfer_task == TRANSFER_TASK else
+                              "The custom transfer message has not been reviewed for explicit reminders; inspect its declared prompt before interpreting the trial. ")
+                             + "Earlier correction remains in native history; this trial alone cannot isolate memory effects from retained history.")}
     manifest = {"schema": SCHEMA, "experiment": record["experiment"], "protocol": record["protocol"],
                 "budget": ceilings, "adapter_test_only": test_only}
     (output / "transfer-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -745,7 +749,7 @@ def run_transfer_trial(
                                     for action in store.actions_for_turn(scope)]
                 rounds = list(store.model_rounds_for_turn(scope))
                 accounted = all(value.provider_usage is not None for value in rounds)
-                side_usage, side_accounted = recorded_expert_usage(store, scope)
+                side_usage, side_accounted = recorded_expert_usage(store, scope, trace=runtime.harness.expert.trace)
                 entry["usage"] = {"main_provider_rounds": len(rounds),
                                   "main_input_tokens": sum(value.provider_usage["input_tokens"] for value in rounds) if accounted else None,
                                   "main_output_tokens": sum(value.provider_usage["output_tokens"] for value in rounds) if accounted else None,
@@ -1057,7 +1061,7 @@ def run_provider_case(
         if expert is not None and expert.trace is not None:
             # Fork usage is already embedded in host-owned contribution receipts.
             from pulse_system.service.expert_computation import recorded_expert_usage
-            posture_usage, posture_accounted = recorded_expert_usage(store, scope)
+            posture_usage, posture_accounted = recorded_expert_usage(store, scope, trace=expert.trace)
         else:
             posture_usage, posture_accounted = {"provider_requests": 0, "input_tokens": 0, "output_tokens": 0}, True
         main_accounted = all(r.provider_usage is not None for r in rounds)

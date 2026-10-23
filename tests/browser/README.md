@@ -28,5 +28,10 @@ lesson after refreshing a panel that was open during background learning,
 checks its exact source, pauses it and restarts the service, resumes it, shares it with
 a new page, verifies that the original encounter stays at the source, returns
 to that source, resolves a revision conflict between two browser tabs, and
-records harmful feedback. It also checks the mobile dialog,
-keyboard dismissal, and browser runtime errors.
+records harmful feedback. It also checks the mobile dialog, keyboard dismissal,
+and browser runtime errors. After adding 505 queued fixture messages with the
+provider disconnected, it opens the earlier lesson source and reloads that
+location, checking that the original message and recent window remain distinct.
+It adds a page link without losing that source, then deliberately delivers a
+stale background-read response before a new navigation response in both
+directions. The current source or recent view must win the race.

@@ -61,6 +61,7 @@ export default function App() {
 
   useLayoutEffect(() => {
     if (!view || loading || !workspaceId) return;
+    if (route.targetMessageId && !view.messages.some(message => message.id === route.targetMessageId)) return;
     const key = `${workspaceId}-${route.id}-${route.serial}`;
     if (restored.current === key) return;
     const frame = requestAnimationFrame(() => {
@@ -144,8 +145,8 @@ export default function App() {
     }
     setBusy(true); setModalError('');
     try {
-      const response = await api.reference(route.id, { targetPageId: page.id, label: page.title, sourceMessageId: modal.message?.id });
-      applyView(response.view); setModal(null); setToast(`Linked to ${page.title}.`);
+      await api.reference(route.id, { targetPageId: page.id, label: page.title, sourceMessageId: modal.message?.id });
+      await refreshPage(route.id); setModal(null); setToast(`Linked to ${page.title}.`);
     } catch (problem) { setModalError(errorMessage(problem)); }
     finally { setBusy(false); }
   };
@@ -164,7 +165,7 @@ export default function App() {
 
   const renamePage = async (title: string) => {
     setBusy(true); setModalError('');
-    try { const next = await api.rename(route.id, title); applyView(next); setModal(null); }
+    try { await api.rename(route.id, title); await refreshPage(route.id); setModal(null); }
     catch (problem) { setModalError(errorMessage(problem)); }
     finally { setBusy(false); }
   };

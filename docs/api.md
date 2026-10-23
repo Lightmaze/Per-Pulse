@@ -49,6 +49,7 @@ type PageView = {
   breadcrumbs: { id: string; title: string }[];
   provider: ProviderState;
   hasMore: boolean;
+  earlierSourceMessageId: string | null;
 };
 type Bootstrap = {
   name: "Per Pulse";
@@ -66,6 +67,10 @@ type Bootstrap = {
 
 - `GET /api/bootstrap` -> `Bootstrap`.
 - `GET /api/pages/{id}` -> `PageView` (latest bounded messages).
+  Optional `sourceMessageId` includes one authorized earlier source event when
+  it is outside the latest 500 messages. `earlierSourceMessageId` identifies
+  that first message; the remaining messages are still the recent window, with
+  a visible history gap in the client. Unknown or cross-page sources return 404.
 - `GET /api/health` -> `{status:"ok", providerConfigured:boolean}`.
 
 Scope browser drafts, scroll positions, and navigation history by `workspaceId`

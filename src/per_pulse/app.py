@@ -180,8 +180,8 @@ def create_app(
         return pages(request).bootstrap()
 
     @app.get("/api/pages/{page_id}")
-    def page(page_id: str, request: Request):
-        return pages(request).view(page_id)
+    def page(page_id: str, request: Request, sourceMessageId: Identifier | None = None):
+        return pages(request).view(page_id, source_message_id=sourceMessageId)
 
     @app.post("/api/pages", status_code=201)
     def create(body: NewPage, request: Request):

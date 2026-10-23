@@ -46,6 +46,7 @@ export type PageView = {
   breadcrumbs: { id: string; title: string }[];
   provider: ProviderState;
   hasMore: boolean;
+  earlierSourceMessageId: string | null;
 };
 
 export type Bootstrap = {

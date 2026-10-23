@@ -46,6 +46,14 @@ available, the existing pre-action allowance is at most two computations per
 turn, plus at most one delivery computation. Other enabled modules have their
 own costs.
 
+Usage audit readers reconcile admitted receipts with the retained, fully
+source-bound expert and CoverMe traces. A cancellation before receipt admission
+does not erase a durable fork attempt or an earlier reviewer's completed usage;
+unknown tokens remain explicitly unaccounted. The compatibility readers without
+a supplied trace inspect admitted receipts only. This is trace reconciliation,
+not a billing ledger: a cancelled World turn still returns an error without a
+settled usage summary, and auditing its attempts requires the retained traces.
+
 The delivery checkpoint can request one continuation when there is remaining
 Kernel round budget. It does not certify the eventual artifact. Ordinary
 optional-plugin failures retain the existing fail-open behavior; cancellation,
@@ -140,6 +148,11 @@ implemented by this version.
 
 All routes use the existing local service and page IDs. Read
 `GET /api/pages/{pageId}` to obtain actual message IDs, then use these endpoints:
+
+Source navigation can include `?sourceMessageId={messageId}` to reopen the
+exact authorized message after it falls outside the recent conversation
+window. The client identifies that earlier source and marks the gap before
+recent messages; it does not imply that all intervening history is visible.
 
 | Method and route | Body or result |
 | --- | --- |

@@ -9253,6 +9253,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         unattributed: bool = False,
         session_admitted: bool = False,
         limit: int = 100,
+        event_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = [
             "world_id = ?",
@@ -9261,6 +9262,9 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             "'assistant_result', 'delegation_result')",
         ]
         params: list[Any] = [self._world_id]
+        if event_id is not None:
+            clauses.append("id = ?")
+            params.append(event_id)
         if center_id is not None:
             clauses.append("center_id = ?")
             params.append(center_id)

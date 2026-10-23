@@ -173,3 +173,30 @@ def test_invalid_mutations_preserve_revision_and_never_echo_credentials(tmp_path
         current = client.get("/api/pages/home/posture").json()["experiences"][0]
         assert current["revision"] == 1 and current["active"]
         assert current["lesson"] == saved["lesson"] and current["feedback"] == []
+
+
+def test_lesson_source_remains_reachable_after_recent_window_without_exposing_other_pages(tmp_path, monkeypatch):
+    with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
+        _, source, feedback = observed_pair(client)
+        result = client.post("/api/pages/home/posture/experiences", json=lesson(source, feedback))
+        assert result.status_code == 201
+        original = next(message for message in client.get("/api/pages/home").json()["messages"] if message["id"] == source)
+        other_page = new_page(client)["page"]["id"]
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        runtime = client.app.state.pages.runtime
+        for index in range(505):
+            runtime.inject(runtime.continuity_engram_id, f"Later queued fixture message {index}.", source="user")
+        recent = client.get("/api/pages/home").json()
+        assert len(recent["messages"]) == 500 and recent["hasMore"]
+        assert source not in {message["id"] for message in recent["messages"]}
+        anchored = client.get("/api/pages/home", params={"sourceMessageId": source})
+        assert anchored.status_code == 200
+        view = anchored.json()
+        assert view["earlierSourceMessageId"] == source
+        assert view["messages"][0] == original
+        assert view["messages"][1:] == recent["messages"]
+        assert view["page"] == recent["page"]
+        current = client.get("/api/pages/home", params={"sourceMessageId": recent["messages"][-1]["id"]}).json()
+        assert current["earlierSourceMessageId"] is None and len(current["messages"]) == 500
+        assert client.get(f"/api/pages/{other_page}", params={"sourceMessageId": source}).status_code == 404
+        assert client.get("/api/pages/home", params={"sourceMessageId": "missing-event"}).status_code == 404
