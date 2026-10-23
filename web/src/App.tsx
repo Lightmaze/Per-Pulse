@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { useWorkspace } from './useWorkspace';
+import { getPageActivity } from './status';
 import { EMPTY_DRAFT, readDraft, readPosition, saveDraft, savePosition } from './storage';
 import type { Draft, Message, NavigationOrigin, PageSummary } from './types';
 import { Icon } from './components/Icon';
@@ -14,7 +15,7 @@ const errorMessage = (error: unknown) => error instanceof Error ? error.message 
 
 export default function App() {
   const workspace = useWorkspace();
-  const { bootstrap, route, view, loading, error, setError, applyView, refreshBootstrap, refreshPage } = workspace;
+  const { bootstrap, route, view, loading, error, setError, applyView, refreshPage, syncError, isRefreshing, refreshWorkspace } = workspace;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
@@ -22,6 +23,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState('');
+  const [sourceNotice, setSourceNotice] = useState('');
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
@@ -31,6 +33,8 @@ export default function App() {
   const scrollTimer = useRef<number | undefined>(undefined);
   const composerSelection = useRef({ start: 0, end: 0 });
   const workspaceId = bootstrap?.workspaceId;
+  const currentPage = useRef(route.id);
+  currentPage.current = route.id;
   const draftKey = `${workspaceId ?? ''}/${route.id}`;
   const draft = workspaceId ? drafts[draftKey] ?? readDraft(workspaceId, route.id) : EMPTY_DRAFT;
 
@@ -63,12 +67,19 @@ export default function App() {
     const key = `${workspaceId}-${route.id}-${route.serial}`;
     if (restored.current === key) return;
     const frame = requestAnimationFrame(() => {
-      if (route.targetMessageId) document.getElementById(`message-${route.targetMessageId}`)?.scrollIntoView({ block: 'center' });
+      const target = route.targetMessageId ? document.getElementById(`message-${route.targetMessageId}`) : null;
+      if (target && !route.restoreFocus) target.scrollIntoView({ block: 'center' });
       else if (main.current) main.current.scrollTop = readPosition(workspaceId, route.id);
+      setSourceNotice(route.targetMessageId && !target && !route.restoreFocus ? 'This source is outside the messages currently shown.' : '');
+      const origin = route.restoreFocus;
+      const originContainer = origin?.messageId ? document.getElementById(`message-${origin.messageId}`) : main.current;
+      const originLink = origin?.referenceId ? originContainer?.querySelector<HTMLElement>(`[data-reference-id="${CSS.escape(origin.referenceId)}"]`) : null;
+      const focusTarget = originLink ?? target ?? main.current?.querySelector<HTMLElement>('h1');
+      focusTarget?.focus({ preventScroll: true });
       restored.current = key;
     });
     return () => cancelAnimationFrame(frame);
-  }, [view, loading, route.id, route.serial, route.targetMessageId, workspaceId]);
+  }, [view, loading, route.id, route.serial, route.targetMessageId, route.restoreFocus, workspaceId]);
 
   useEffect(() => {
     const preservePosition = () => {
@@ -108,8 +119,10 @@ export default function App() {
       draftsRef.current = updated;
       setDrafts(updated);
       saveDraft(workspaceId, id, nextDraft);
-      requestAnimationFrame(() => document.getElementById(`message-${response.messageId}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
-      input.current?.focus();
+      if (currentPage.current === id) {
+        requestAnimationFrame(() => { if (currentPage.current === id) document.getElementById(`message-${response.messageId}`)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });
+        input.current?.focus();
+      }
     } catch (problem) { setError(errorMessage(problem)); }
     finally { setSending(false); }
   };
@@ -173,7 +186,7 @@ export default function App() {
     if (workspaceId) savePosition(workspaceId, route.id, main.current?.scrollTop ?? 0);
     if (route.origin) {
       const origin = route.origin;
-      if (history.length > 1) history.back();
+      if (route.canGoBack) history.back();
       else navigate(origin.pageId, undefined, origin.messageId);
     } else navigate(view?.page.sourcePageId ?? 'home', undefined, view?.page.sourceMessageId ?? undefined);
   };
@@ -181,9 +194,10 @@ export default function App() {
   const pages = bootstrap?.pages ?? [];
   const sourcePage = view?.page.sourcePageId ? pages.find(page => page.id === view.page.sourcePageId) : undefined;
   const breadcrumbs = view?.breadcrumbs.length ? view.breadcrumbs : [{ id: 'home', title: 'Home' }];
+  const activity = view ? getPageActivity(view.page.status, view.provider.configured, Boolean(syncError)) : null;
 
   return <div className={`app-shell ${sidebarHidden ? 'is-sidebar-collapsed' : ''}`}>
-    <Sidebar bootstrap={bootstrap} activePageId={route.id} open={sidebarOpen} close={() => setSidebarOpen(false)} navigate={navigate} onSearch={() => openModal({ kind: 'picker', mode: 'search' })} onCreate={() => openModal({ kind: 'create' })} onSettings={() => openModal({ kind: 'settings' })} />
+    <Sidebar stale={Boolean(syncError)} bootstrap={bootstrap} activePageId={route.id} open={sidebarOpen} close={() => setSidebarOpen(false)} navigate={navigate} onSearch={() => openModal({ kind: 'picker', mode: 'search' })} onCreate={() => openModal({ kind: 'create' })} onSettings={() => openModal({ kind: 'settings' })} />
     <div className="workspace">
       <header className="topbar">
         <button className="icon-button nav-toggle" aria-label="Toggle navigation" onClick={() => { if (window.matchMedia('(max-width: 760px)').matches) setSidebarOpen(previous => !previous); else setSidebarHidden(previous => !previous); }}><Icon name="menu" size={20} /></button>
@@ -193,7 +207,7 @@ export default function App() {
             {crumb.id === route.id && crumb.id !== 'home' ? <span className="current-crumb" aria-current="page" title={crumb.title}>{crumb.title}</span> : <button className="crumb-ancestor" onClick={() => navigate(crumb.id)} title={crumb.title}>{crumb.id === 'home' ? <Icon name="home" size={18} /> : null}<span>{crumb.title}</span></button>}
           </Fragment>)}
         </nav>
-        {route.id !== 'home' ? <button className="text-button return-to-thread" onClick={goBack}><Icon name="back" size={16} /><span>Back to conversation</span></button> : null}
+        {route.id !== 'home' ? <button className="text-button return-to-thread" onClick={goBack} aria-label="Back to conversation"><Icon name="back" size={16} /><span className="return-label-long">Back to conversation</span><span className="return-label-short">Back</span></button> : null}
       </header>
       <main className="workspace-main" ref={main} onScroll={() => {
         if (!workspaceId) return;
@@ -204,23 +218,26 @@ export default function App() {
       }}>
         <div className="page-column">
           <section className="page-heading">
-            {route.id === 'home' ? <><h1>A place to keep going.</h1><p className="page-subtitle">Your conversations, connected.</p></> : <>
-              <h1><button className="editable-title" onClick={() => openModal({ kind: 'rename' })} title="Rename page">{view?.page.title ?? 'Opening your page…'}<Icon name="edit" size={21} /></button></h1>
+            {route.id === 'home' ? <><h1 tabIndex={-1}>A place to keep going.</h1><p className="page-subtitle">Your conversations, connected.</p></> : <>
+              <h1 tabIndex={-1}><button className="editable-title" onClick={() => openModal({ kind: 'rename' })} title="Rename page">{view?.page.title ?? 'Opening your page…'}<Icon name="edit" size={21} /></button></h1>
               {sourcePage ? <p className="page-subtitle page-origin">A conversation from <SessionLink pageId={sourcePage.id} label={sourcePage.title} navigate={navigate} targetMessageId={view?.page.sourceMessageId ?? undefined} /></p> : <p className="page-subtitle">A little room to work things through.</p>}
             </>}
-            {bootstrap?.example ? <p className="mobile-workspace-status">Example workspace · {bootstrap.provider.label}</p> : null}
+            {bootstrap?.example ? <p className="mobile-workspace-status">Example workspace</p> : null}
+            {activity ? <div className="page-activity" role="status" aria-atomic="true"><span className={`activity-indicator tone-${activity.tone}`}><span className="activity-dot" aria-hidden="true" />{activity.label}</span>{['attention', 'error'].includes(activity.tone) ? <p className="page-activity-detail">{activity.detail}</p> : null}</div> : null}
+            {sourceNotice ? <p className="conversation-note source-notice" role="status">{sourceNotice}</p> : null}
           </section>
-          {error ? <div className="error-notice" role="alert"><span>{error}</span><button onClick={() => { setError(''); Promise.all([refreshBootstrap(), refreshPage(route.id)]).catch(problem => setError(errorMessage(problem))); }}>Try again</button></div> : null}
-          {view ? <Conversation view={view} pages={pages} navigate={navigate} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />Opening your conversation…</div> : null}
-          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
+          {error ? <div className="error-notice" role="alert"><span>{error}</span><button disabled={isRefreshing} onClick={() => { setError(''); refreshWorkspace().catch(problem => setError(errorMessage(problem))); }}>Try again</button></div> : null}
+          {syncError && !error ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? 'Checking…' : 'Refresh updates'}</button></div> : null}
+          {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />Opening your conversation…</div> : null}
+          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
     </div>
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
     {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
-    {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
+    {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'rename' ? <RenameDialog initial={view?.page.title ?? ''} busy={busy} error={modalError} close={closeModal} rename={renamePage} /> : null}
-    {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} refresh={() => refreshBootstrap().then(() => setToast('Connection checked.')).catch(problem => setToast(errorMessage(problem)))} /> : null}
+    {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} refresh={() => refreshWorkspace().then(() => setToast('Connection checked.')).catch(problem => setToast(errorMessage(problem)))} /> : null}
   </div>;
 }
