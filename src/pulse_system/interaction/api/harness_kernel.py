@@ -84,6 +84,16 @@ class KernelSessionRuntime:
     provider: ToolProvider
 
 
+class _ControlOnlyTools:
+    """No effect surface for cancelling a recovered, unattached turn."""
+
+    def descriptors(self):
+        return ()
+
+    def execute(self, _call, _cancellation):
+        raise ScopeConflict("a control-only runner cannot execute tools")
+
+
 ModelAdapterFactory = Callable[[HarnessScope], Any | None]
 ToolProviderFactory = Callable[[HarnessStore, Path, Path], ToolProvider]
 ResponseReviewerFactory = Callable[[HarnessStore, Any, HarnessScope], Any]
@@ -449,12 +459,35 @@ class HarnessKernelService:
         prompt: str | None = None,
         reason: str = "user_control",
     ) -> dict[str, Any]:
-        runtime = self._runtime(scope)
         if operation in {"interrupt", "abort", "cancel"}:
-            outcome = runtime.runner.abort(scope, reason=reason)
+            # Cancellation is a control operation even when no model is
+            # configured. Recovered sessions have no attached process runner;
+            # constructing their provider would incorrectly require credentials
+            # merely to stop old work. Use the same canonical abort state
+            # machine with a read-only model-round permit and no tool surface.
+            # Do not cache this object: later actual work must still go through
+            # the normal provider/worker construction path.
+            with self._runtime_lock:
+                self._require_open()
+                self.store.get_turn(scope)  # Existing durable scope is required.
+                session_scope = scope.session_scope()
+                runtime = self._runtimes.get(session_scope.session_id)
+                if runtime is not None:
+                    if runtime.scope != session_scope:
+                        raise LeaseFenced("kernel session runtime is fenced by scope")
+                    outcome = runtime.runner.abort(scope, reason=reason)
+                else:
+                    runner = TurnRunner(
+                        self.store, model_adapter=None, tool_provider=_ControlOnlyTools(),
+                    )
+                    try:
+                        outcome = runner.abort(scope, reason=reason)
+                    finally:
+                        runner.close()
         elif operation == "steer":
             if prompt is None:
                 raise HarnessKernelApiError("steer requires prompt", code="prompt_required")
+            runtime = self._runtime(scope)
             outcome = runtime.runner.steer(scope, prompt)
         else:
             raise HarnessKernelApiError("unsupported control operation", code="control_invalid")

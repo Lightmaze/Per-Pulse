@@ -25,6 +25,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from .workspace import StructuredWorkspaceToolProvider
+from .resources import workspace_write_resource
 from ..core.contracts import ActionStatus, ToolDescriptor
 from ..core.errors import EffectUnknown, IdempotencyConflict, ProviderProtocolError, ProviderUnavailable, ScopeConflict
 from ..core.replay import digest_json, redact_text
@@ -84,6 +85,7 @@ class DockerCommandExecutor:
                 or image.startswith('-') or any(c.isspace() for c in image)):
             raise ProviderProtocolError("invalid operator-selected command image")
         self.workspace = workspace.resolve(strict=True)
+        self._write_resource = workspace_write_resource(self.workspace)
         if ',' in str(self.workspace):
             raise ProviderProtocolError("Docker mount path must not contain a comma")
         self.docker = shutil.which("docker")
@@ -230,6 +232,9 @@ class DockerCommandExecutor:
                 self._active.discard(name)
                 if not cleaned:
                     self._unresolved.add(name)
+                    # A possibly live container outlives the Python lock. Keep
+                    # cooperating writers fenced until close confirms cleanup.
+                    self._write_resource.quarantine(name)
             if forced:
                 # Stopping the container never proves its prior writes did not
                 # occur. The kernel recovery path owns the uncertain action.
@@ -250,6 +255,7 @@ class DockerCommandExecutor:
                     raise ProviderUnavailable("command cleanup is unresolved", code="command_cleanup_unresolved")
             with self._lock:
                 self._unresolved.discard(name)
+                self._write_resource.confirm_cleanup(name)
         with self._lock:
             self._closed = True
         self._config_dir.cleanup()
@@ -310,6 +316,15 @@ class CommandWorkspaceToolProvider(StructuredWorkspaceToolProvider):
     def execute_for_scope(self, scope, call, cancellation, *, action_request_id=None):
         if call.name != "run_command":
             return super().execute_for_scope(scope, call, cancellation, action_request_id=action_request_id)
+        # Commands can mutate any workspace path. Share the file/restore lane
+        # through authority validation, process cleanup, and adapter receipt.
+        # This is resource exclusion, not a publication transaction: only the
+        # executor's brief start_guard holds that guard, so shutdown may cancel
+        # a running command or a writer waiting for this lane.
+        with self._write_resource.write(cancellation):
+            return self._execute_command_locked(scope, call, cancellation, action_request_id=action_request_id)
+
+    def _execute_command_locked(self, scope, call, cancellation, *, action_request_id=None):
         if not action_request_id:
             raise ScopeConflict("command requires a kernel-owned approved action")
         self.bind_action_authority(scope, call, action_request_id=action_request_id)

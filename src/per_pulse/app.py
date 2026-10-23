@@ -8,6 +8,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
+from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
@@ -22,6 +23,7 @@ from pulse_system.service.runtime import ServiceError
 
 from . import __version__
 from .service import PageError, PageService, _ENV_PROVIDER
+from .execution import ExecutionError
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
 Content = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32_000)]
@@ -62,6 +64,14 @@ class Rename(Input):
     title: Title
 
 
+class StopTurn(Input):
+    turnId: Identifier
+
+
+class DecideAction(Input):
+    decision: Literal["allow_once", "deny", "cancel"]
+
+
 def _error(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
@@ -78,6 +88,7 @@ def create_app(
     data_dir: str | Path,
     *,
     example: bool = False,
+    allow_workspace_actions: bool = False,
     web_dir: str | Path | None = None,
     model_factory: Any = _ENV_PROVIDER,
 ) -> FastAPI:
@@ -85,6 +96,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         pages = await asyncio.to_thread(
             PageService, data_dir, example=example, model_factory=model_factory,
+            allow_workspace_actions=allow_workspace_actions,
         )
         app.state.pages = pages
         try:
@@ -124,6 +136,10 @@ def create_app(
 
     @app.exception_handler(PageError)
     async def page_error(_request: Request, error: PageError):
+        return _error(error.code, error.message, error.status)
+
+    @app.exception_handler(ExecutionError)
+    async def execution_error(_request: Request, error: ExecutionError):
         return _error(error.code, error.message, error.status)
 
     @app.exception_handler(ServiceError)
@@ -175,6 +191,30 @@ def create_app(
     @app.patch("/api/pages/{page_id}")
     def rename(page_id: str, body: Rename, request: Request):
         return pages(request).rename(page_id, body.title)
+
+    @app.get("/api/pages/{page_id}/execution")
+    def execution(page_id: str, request: Request):
+        return pages(request).execution.snapshot(page_id)
+
+    @app.get("/api/pages/{page_id}/artifacts")
+    def artifacts(page_id: str, request: Request):
+        return pages(request).artifacts.snapshot(page_id)
+
+    @app.get("/api/pages/{page_id}/artifacts/{artifact_id}")
+    def artifact(page_id: str, artifact_id: str, request: Request):
+        return pages(request).artifacts.read(page_id, artifact_id)
+
+    @app.post("/api/pages/{page_id}/execution/stop")
+    def stop(page_id: str, body: StopTurn, request: Request):
+        service = pages(request)
+        receipt = service.execution.cancel(page_id, body.turnId)
+        return {**receipt, "view": service.view(page_id)}
+
+    @app.post("/api/pages/{page_id}/execution/actions/{action_id}")
+    def decide(page_id: str, action_id: str, body: DecideAction, request: Request):
+        service = pages(request)
+        receipt = service.execution.resolve_approval(page_id, action_id, body.decision)
+        return {**receipt, "view": service.view(page_id)}
 
     # Mount only the compiled frontend. User data and workspace files are
     # never exposed as static content.

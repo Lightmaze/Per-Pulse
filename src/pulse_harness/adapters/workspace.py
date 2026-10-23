@@ -14,6 +14,8 @@ The workspace boundary is conservative by design:
 * the expected digest is checked before checkpointing and immediately before
   replacement;
 * the pre-image is checkpointed outside the workspace before the replace;
+* cooperating providers in this process share one workspace write lane across
+  validation, checkpointing, replacement, verification and restoration;
 * replacement uses a same-directory temporary file and a fixed-parent,
   handle-relative atomic rename (POSIX ``dir_fd`` or the Windows native
   ``FILE_RENAME_INFORMATION`` primitive through ``NtSetInformationFile``);
@@ -41,6 +43,7 @@ import tempfile
 from typing import Any, Mapping, Sequence
 from weakref import ref
 
+from .resources import workspace_write_resource
 from ..core.changes import ChangePreview
 from ..core.contracts import (
     ActionStatus,
@@ -662,6 +665,7 @@ class StructuredWorkspaceToolProvider:
         self.checkpoint_root = checkpoint_input.resolve()
         if not self.workspace_root.is_dir() or not self.checkpoint_root.is_dir():
             raise WorkspaceValidationError("workspace roots must be directories", code="workspace_root_invalid")
+        self._write_resource = workspace_write_resource(self.workspace_root)
         if _is_within(self.checkpoint_root, self.workspace_root) or _is_within(
             self.workspace_root, self.checkpoint_root
         ):
@@ -742,6 +746,8 @@ class StructuredWorkspaceToolProvider:
             "workspace_provenance": self._workspace_provenance,
             "checkpoint_provenance": self._checkpoint_provenance,
             "authority_binding": "durable_manifest+process_local_store_provider_token",
+            "workspace_write_state": "quarantined" if self._write_resource.unresolved_commands else "ready",
+            "workspace_unresolved_commands": len(self._write_resource.unresolved_commands),
             "max_file_bytes": self._max_file_bytes,
         }
 
@@ -1107,6 +1113,12 @@ class StructuredWorkspaceToolProvider:
     def restore(self, scope: HarnessScope, checkpoint_id: str) -> Mapping[str, Any]:
         """Restore a sealed checkpoint only when the post-image is still present."""
 
+        # Restore and ordinary mutations share the same effect lane. This is
+        # independent of the runtime publication fence and does not block reads.
+        with self._write_resource.write():
+            return self._restore_locked(scope, checkpoint_id)
+
+    def _restore_locked(self, scope: HarnessScope, checkpoint_id: str) -> Mapping[str, Any]:
         if not isinstance(checkpoint_id, str) or _CHECKPOINT_ID.fullmatch(checkpoint_id) is None:
             raise WorkspaceValidationError("checkpoint id is invalid", code="checkpoint_id_invalid")
         self.store.get_session(scope.session_scope())
@@ -1303,6 +1315,22 @@ class StructuredWorkspaceToolProvider:
         }
 
     def _mutate(
+        self,
+        scope: HarnessScope,
+        call: ToolCall,
+        cancellation: CancellationToken,
+        *,
+        action_request_id: str | None,
+    ) -> Mapping[str, Any]:
+        # Different Kernel sessions have different providers but can share this
+        # workspace. Re-plan only after acquiring the common lane: digest checks
+        # followed by rename alone are not compare-and-swap across two writers.
+        with self._write_resource.write(cancellation):
+            return self._mutate_locked(
+                scope, call, cancellation, action_request_id=action_request_id,
+            )
+
+    def _mutate_locked(
         self,
         scope: HarnessScope,
         call: ToolCall,

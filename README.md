@@ -15,6 +15,8 @@ This first release provides an English interface, a local Python service, and a 
 - Continue in the linked page and return to the source while retaining your unsent draft and reading position.
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
+- Review a proposed file action, allow or decline it, and stop an exact running turn without stopping other pages.
+- Open confirmed text file results with their source and content version; changed files are identified before preview.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
 
 The server stores pages, messages, and references in the existing Pulse persistence layer. Browser storage holds only local drafts and navigation positions, scoped to the persistent workspace and page. When no model is configured, the interface says **AI disconnected** and saves messages as queued input. It never substitutes a scripted answer for a model response.
@@ -67,6 +69,18 @@ If neither endpoint nor model is set, the workspace runs disconnected. Setting o
 
 Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. These describe adapter capabilities; compatibility with a specific remote model must be verified separately.
 
+### Enable workspace actions
+
+Ordinary startup uses the read-only native tool profile. To enable workspace actions explicitly:
+
+```sh
+per-pulse --allow-workspace-actions
+```
+
+File effects still require their native exact-action approval. Review the proposed content on its page, then choose **Allow once** or **Decline**. **Stop this turn** cancels the named admitted turn; completed effects and later queued messages remain. Example mode stays read-only. The flag selects the existing native mutation profile, including its Work/team/local operations; it does not install browser or connector capabilities.
+
+Successful native text-file writes appear under **Files from this page**. Opening one verifies the recorded content digest and shows a bounded, redacted preview. This first artifact view does not retain immutable old versions or include binary and command-created files. If a large receipt cannot preserve its source metadata, the view reports incomplete results instead of inventing provenance.
+
 ## Develop
 
 Run the backend in one terminal:
@@ -104,13 +118,13 @@ Build the client before building a wheel. The wheel includes the compiled client
 
 Page IDs are native Work IDs, and message IDs are native causal-event IDs. Reference metadata lives in the same World's component state. Creating or following a reference does not copy another page's history or start an additional agent. Bringing text Home is an explicit user contribution with provenance; the source page remains open.
 
-See [the API contract](docs/api.md) and [source lineage](docs/source-lineage.md).
+See [the API contract](docs/api.md), [core harness foundation and priorities](docs/harness-foundation.md), [phase verification](docs/harness-verification.md), and [source lineage](docs/source-lineage.md).
 
 ## Current scope
 
 This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The page view shows the latest 500 messages; older events remain in the durable store. The first UI does not expose the inherited runtime's full operational or approval console.
 
-The runtime is configured with workspace mutation disabled in this entry point. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality.
+Workspace mutation is disabled by default and enabled explicitly with the flag above. Shared file and command writers coordinate within one runtime process; this is not cross-process filesystem isolation. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality. Durable spending reservations, native browser/connector brokerage, semantic mid-turn steering and unattended trigger admission remain future work.
 
 ## License
 
