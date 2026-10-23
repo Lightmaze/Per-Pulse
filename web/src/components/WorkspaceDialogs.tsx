@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { Bootstrap, Message, PageSummary } from '../types';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
@@ -28,22 +28,39 @@ export function CreatePageDialog({ initial, busy, error, close, create }: { init
 
 export function PagePickerDialog({ pages, mode, busy, error, close, select, create }: { pages: PageSummary[]; mode: 'search' | 'compose' | 'reference'; busy: boolean; error: string; close: () => void; select: (page: PageSummary) => void; create: () => void }) {
   const [query, setQuery] = useState('');
-  const matches = pages.filter(page => `${page.title} ${page.description}`.toLowerCase().includes(query.toLowerCase()));
+  const [activeIndex, setActiveIndex] = useState(0);
+  const pickerId = useId();
+  const matches = pages.filter(page => `${page.title} ${page.description}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const selectedIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
+  const activeId = matches[selectedIndex] ? `${pickerId}-${matches[selectedIndex].id}` : undefined;
+  useEffect(() => { if (activeId) document.getElementById(activeId)?.scrollIntoView({ block: 'nearest' }); }, [activeId]);
   return <Dialog title={mode === 'search' ? 'Find your place.' : 'Link a page'} onClose={close} className="picker-dialog">
-    <div className="search-field"><Icon name="search" size={19} /><input aria-label="Search pages" placeholder="Search your pages…" value={query} onChange={event => setQuery(event.target.value)} autoFocus /></div>
-    <div className="picker-results">
-      {matches.map(page => <button key={page.id} className="picker-result" disabled={busy} onClick={() => select(page)}><Icon name={page.kind === 'home' ? 'home' : 'page'} /><span><strong>{page.title}</strong>{page.description ? <small>{page.description}</small> : null}</span><Icon name="chevron" size={16} /></button>)}
-      {!matches.length ? <p className="picker-empty">No pages found. There’s room for a new one.</p> : null}
+    <div className="search-field"><Icon name="search" size={19} /><input aria-label="Search pages" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${pickerId}-results`} aria-activedescendant={activeId} aria-describedby={`${pickerId}-hint`} placeholder="Search your pages…" value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} onKeyDown={event => {
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (matches.length) setActiveIndex(event.key === 'ArrowDown' ? Math.min(selectedIndex + 1, matches.length - 1) : Math.max(selectedIndex - 1, 0));
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!busy && matches[selectedIndex]) select(matches[selectedIndex]);
+      }
+    }} autoFocus /></div>
+    <p className="picker-results-meta" role="status">{matches.length} {matches.length === 1 ? 'page' : 'pages'} {query.trim() ? 'found' : 'available'}</p>
+    <div className="picker-results" id={`${pickerId}-results`} role="listbox" aria-label="Pages">
+      {matches.map((page, index) => <button key={page.id} id={`${pickerId}-${page.id}`} type="button" role="option" aria-selected={index === selectedIndex} tabIndex={-1} className="picker-result" disabled={busy} onMouseEnter={() => setActiveIndex(index)} onClick={() => select(page)}><Icon name={page.kind === 'home' ? 'home' : 'page'} /><span><strong>{page.title}</strong>{page.description ? <small>{page.description}</small> : null}</span><Icon name="chevron" size={16} /></button>)}
     </div>
+    {!matches.length ? <p className="picker-empty">{pages.length ? 'No matching pages. Try another name.' : 'No pages yet. Create one to begin.'}</p> : null}
+    <p id={`${pickerId}-hint`} className="picker-keyboard-hint">↑ ↓ to choose · Enter to {mode === 'search' ? 'open' : 'link'} · Esc to close</p>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
-    <button className="create-from-picker" onClick={create}><Icon name="plus" size={18} />Create a new page</button>
+    <button className="create-from-picker" disabled={busy} onClick={create}><Icon name="plus" size={18} />Create a new page</button>
   </Dialog>;
 }
 
-export function ReturnDialog({ initial, busy, error, close, send }: { initial: string; busy: boolean; error: string; close: () => void; send: (content: string) => void }) {
+export function ReturnDialog({ initial, busy, error, close, send, sourceTitle }: { initial: string; busy: boolean; error: string; close: () => void; send: (content: string) => void; sourceTitle?: string }) {
   const [content, setContent] = useState(initial);
   return <Dialog title="Bring this back to Home." onClose={close}>
     <p className="dialog-description">Choose what belongs in the main conversation. A link will lead back to this source.</p>
+    <div className="return-preview"><span className="return-preview-source">From <strong>{sourceTitle || 'this page'}</strong></span><span aria-hidden="true">→</span><span className="return-preview-destination">Home</span></div>
     <form onSubmit={event => { event.preventDefault(); if (content.trim() && !busy) send(content.trim()); }}>
       <label className="field-label" htmlFor="return-content">What would you like to bring back?</label>
       <textarea id="return-content" autoFocus value={content} onChange={event => setContent(event.target.value)} rows={7} required />

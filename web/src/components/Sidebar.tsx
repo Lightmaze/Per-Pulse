@@ -3,8 +3,8 @@ import { pageHref } from '../storage';
 import { Icon } from './Icon';
 import { interceptNavigation, type Navigate } from './SessionLink';
 
-export function Sidebar({ bootstrap, activePageId, open, close, navigate, onSearch, onCreate, onSettings }: {
-  bootstrap: Bootstrap | null; activePageId: string; open: boolean; close: () => void; navigate: Navigate; onSearch: () => void; onCreate: () => void; onSettings: () => void;
+export function Sidebar({ bootstrap, activePageId, stale = false, open, close, navigate, onSearch, onCreate, onSettings }: {
+  bootstrap: Bootstrap | null; activePageId: string; stale?: boolean; open: boolean; close: () => void; navigate: Navigate; onSearch: () => void; onCreate: () => void; onSettings: () => void;
 }) {
   const pages = bootstrap?.pages.filter(page => page.kind === 'work') ?? [];
   return <>
@@ -17,7 +17,7 @@ export function Sidebar({ bootstrap, activePageId, open, close, navigate, onSear
       </nav>
       <div className="pages-label"><span>Pages</span><button className="icon-button" aria-label="Create a page" title="Create a page" onClick={onCreate}><Icon name="plus" size={17} /></button></div>
       <nav className="page-nav" aria-label="Pages">
-        {pages.map(page => <a key={page.id} href={pageHref(page.id)} className={`nav-row ${activePageId === page.id ? 'is-active' : ''}`} aria-current={activePageId === page.id ? 'page' : undefined} onClick={event => interceptNavigation(event, () => navigate(page.id))}><Icon name="page" /><span>{page.title}</span>{page.status === 'working' ? <span className="working-dot" aria-label="Working" /> : null}</a>)}
+        {pages.map(page => <a key={page.id} href={pageHref(page.id)} className={`nav-row ${activePageId === page.id ? 'is-active' : ''}`} aria-current={activePageId === page.id ? 'page' : undefined} onClick={event => interceptNavigation(event, () => navigate(page.id))}><Icon name="page" /><span>{page.title}</span>{page.status === 'working' && bootstrap?.provider.configured && !stale ? <span className="working-dot" aria-label="Working" /> : null}</a>)}
         {!pages.length ? <button className="empty-pages" onClick={onCreate}>Make room for a new idea.</button> : null}
       </nav>
       <div className="sidebar-footer">

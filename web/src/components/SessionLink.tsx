@@ -14,7 +14,7 @@ export function interceptNavigation(event: MouseEvent<HTMLAnchorElement>, onNavi
 export function SessionLink({ pageId, label, referenceId, origin, navigate, targetMessageId }: {
   pageId: string; label: string; referenceId?: string; origin?: NavigationOrigin; navigate: Navigate; targetMessageId?: string;
 }) {
-  return <a className="session-link" href={pageHref(pageId)} data-reference-id={referenceId} onClick={event => interceptNavigation(event, () => navigate(pageId, origin, targetMessageId))}>
+  return <a className="session-link" href={pageHref(pageId, targetMessageId)} data-reference-id={referenceId} onClick={event => interceptNavigation(event, () => navigate(pageId, origin, targetMessageId))}>
     <Icon name="page" size={17} /><span>{label}</span>
   </a>;
 }
