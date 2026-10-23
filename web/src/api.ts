@@ -1,4 +1,13 @@
-import type { Bootstrap, DraftReference, PageReference, PageSummary, PageView } from './types';
+import type { ArtifactRead, Bootstrap, DraftReference, PageReference, PageSummary, PageView } from './types';
+
+export type ActionReceipt = {
+  accepted: boolean;
+  repeated: boolean;
+  actionStatus: string;
+  actionCompleted: boolean;
+  continuationError: { code: string; message: string } | null;
+  view: PageView;
+};
 
 export class ApiError extends Error {
   constructor(message: string, public readonly code: string, public readonly status: number) {
@@ -40,4 +49,7 @@ export const api = {
   bringHome: (id: string, content: string, messageId?: string) =>
     request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/return`, { method: 'POST', body: JSON.stringify({ content, messageId }) }),
   rename: (id: string, title: string) => request<PageView>(pagePath(id), { method: 'PATCH', body: JSON.stringify({ title }) }),
+  stop: (id: string, turnId: string) => request<{ accepted: boolean; repeated: boolean; view: PageView }>(`${pagePath(id)}/execution/stop`, { method: 'POST', body: JSON.stringify({ turnId }) }),
+  decide: (id: string, actionId: string, decision: 'allow_once' | 'deny' | 'cancel') => request<ActionReceipt>(`${pagePath(id)}/execution/actions/${encodeURIComponent(actionId)}`, { method: 'POST', body: JSON.stringify({ decision }) }),
+  artifact: (id: string, artifactId: string) => request<ArtifactRead>(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}`),
 };

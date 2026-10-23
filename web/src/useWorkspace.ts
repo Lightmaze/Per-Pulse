@@ -30,8 +30,15 @@ export function useWorkspace() {
   }, [applyView]);
 
   const refreshBootstrap = useCallback(async () => {
+    const startedVersions = { ...versions.current };
     const next = await api.bootstrap();
-    setBootstrap(next);
+    setBootstrap(previous => {
+      if (!previous || previous.workspaceId !== next.workspaceId) return next;
+      const previousPages = new Map(previous.pages.map(page => [page.id, page]));
+      return { ...next, pages: next.pages.map(page =>
+        (versions.current[page.id] ?? 0) !== (startedVersions[page.id] ?? 0)
+          ? previousPages.get(page.id) ?? page : page) };
+    });
     return next;
   }, []);
 
@@ -85,12 +92,24 @@ export function useWorkspace() {
   }, [route.id, route.serial, applyView]);
 
   const activeView = views[route.id];
-  const shouldPoll = activeView?.provider.configured && ['queued', 'working'].includes(activeView.page.status);
+  // Background pages and Home returns can change while the current page is
+  // idle. Poll the workspace as well as the visible page, with one flight at
+  // a time and no requests while this browser document is hidden.
+  const shouldPoll = bootstrap?.provider.configured;
   useEffect(() => {
     if (!shouldPoll) return;
-    const timer = window.setInterval(() => { refreshPage(route.id).catch(() => { /* A temporary polling failure does not replace saved work. */ }); }, 2000);
-    return () => window.clearInterval(timer);
-  }, [route.id, shouldPoll, refreshPage]);
+    let stopped = false;
+    let pending = false;
+    const poll = async () => {
+      if (stopped || pending || document.visibilityState === 'hidden') return;
+      pending = true;
+      try { await Promise.allSettled([refreshPage(route.id), refreshBootstrap()]); }
+      finally { pending = false; }
+    };
+    const timer = window.setInterval(poll, 2000);
+    document.addEventListener('visibilitychange', poll);
+    return () => { stopped = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', poll); };
+  }, [route.id, shouldPoll, refreshPage, refreshBootstrap]);
 
   return { bootstrap, route, view: activeView, loading, error, setError, navigate, applyView, refreshPage, refreshBootstrap };
 }

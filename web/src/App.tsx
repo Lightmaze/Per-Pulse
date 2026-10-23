@@ -8,6 +8,8 @@ import { Sidebar } from './components/Sidebar';
 import { SessionLink, type Navigate } from './components/SessionLink';
 import { Conversation } from './components/Conversation';
 import { Composer } from './components/Composer';
+import { ExecutionStatus } from './components/ExecutionStatus';
+import { PageArtifacts } from './components/PageArtifacts';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
@@ -211,6 +213,8 @@ export default function App() {
             {bootstrap?.example ? <p className="mobile-workspace-status">Example workspace · {bootstrap.provider.label}</p> : null}
           </section>
           {error ? <div className="error-notice" role="alert"><span>{error}</span><button onClick={() => { setError(''); Promise.all([refreshBootstrap(), refreshPage(route.id)]).catch(problem => setError(errorMessage(problem))); }}>Try again</button></div> : null}
+          {view ? <ExecutionStatus key={route.id} view={view} applyView={applyView} /> : null}
+          {view ? <PageArtifacts key={`artifacts-${route.id}`} view={view} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />Opening your conversation…</div> : null}
           {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
