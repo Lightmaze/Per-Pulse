@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 import threading
@@ -21,6 +22,7 @@ from pulse_harness.adapters.chat_http import ChatHTTPModelAdapter, model_factory
 from pulse_harness.core import HarnessScope
 from pulse_system.service.kernel_runtime import KernelHarnessFactory
 from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
+from pulse_system.core.pulse.context import ContextPulseConfig as PulseSettings
 
 from . import __version__
 
@@ -46,6 +48,7 @@ class PageService:
         data_dir: str | Path,
         *,
         example: bool = False,
+        pulse: PulseSettings | None = None,
         model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None | object = _ENV_PROVIDER,
     ):
         self.data_dir = Path(data_dir).expanduser().resolve()
@@ -79,6 +82,7 @@ class PageService:
             default_max_wait=0.3,
             connectivity_interval_ticks=None,
             living_concern_reentry_budget_per_tick=0,
+            context_pulse=pulse or PulseSettings(),
         )
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
@@ -125,6 +129,46 @@ class PageService:
     async def close(self) -> None:
         await self.runtime.stop(timeout=5)
         await asyncio.to_thread(self.runtime.close)
+
+    def _center(self, page_id: str) -> str | None:
+        front = self._front(page_id)
+        return front.center_id if front else None
+
+    def pulse_status(self) -> dict:
+        with self._lock:
+            controller = self.runtime.context_pulse
+            state = controller.snapshot()
+            centers = {front["center_id"]: front["id"] for front in self.runtime.list_task_fronts()}
+            for connection in state["connections"]:
+                connection["sourcePageId"] = centers.get(connection["source_center_id"], "home")
+                connection["targetPageId"] = centers.get(connection["target_center_id"], "home")
+            for context in state["contexts"]:
+                context["pageId"] = centers.get(context["center_id"], "home")
+            for activation in state["recentActivations"]:
+                activation["pageId"] = centers.get(activation["centerId"], "home")
+            state["running"] = self.runtime.running and state["enabled"]
+            state["providerConfigured"] = self.configured
+            return state
+
+    def connect_pages(self, source_page_id: str, target_page_id: str,
+                      weight: float = 0.6, kind: str = "excitatory") -> dict:
+        with self._lock:
+            self.runtime._require_runtime_owner()
+            source, target = self._center(source_page_id), self._center(target_page_id)
+            try:
+                edge = self.runtime.context_pulse.connect(source, target, weight, kind)
+            except ValueError as exc:
+                raise PageError("invalid_connection", str(exc)) from exc
+            return {"connection": {**asdict(edge), "sourcePageId": source_page_id,
+                                    "targetPageId": target_page_id}, "pulse": self.pulse_status()}
+
+    def disconnect_pages(self, source_page_id: str, target_page_id: str) -> dict:
+        with self._lock:
+            self.runtime._require_runtime_owner()
+            removed = self.runtime.context_pulse.disconnect(
+                self._center(source_page_id), self._center(target_page_id),
+            )
+            return {"removed": removed, "pulse": self.pulse_status()}
 
     def _save(self) -> None:
         self.runtime._require_runtime_owner()
@@ -216,13 +260,21 @@ class PageService:
             rows = rows[-MAX_MESSAGES:]
             refs = [dict(r) for r in self._state["references"] if r["sourcePageId"] == page_id]
             messages = []
+            center_pages = {front["center_id"]: front["id"] for front in self.runtime.list_task_fronts()}
             for row in rows:
                 origin = self._state["messageOrigins"].get(row["event_id"], {})
+                activation = None
+                if row["kind"] == "propagation" and row["metadata"].get("context_connection_id"):
+                    source_center = row["metadata"].get("source_center_id")
+                    origin = {"pageId": "home" if source_center is None else center_pages.get(source_center),
+                              "messageId": row["parent_event_id"]}
+                    activation = "propagation"
                 messages.append({
-                    "id": row["event_id"], "role": row["role"], "content": row["content"],
+                    "id": row["event_id"], "role": "system" if activation else row["role"], "content": row["content"],
                     "createdAt": row["timestamp"], "status": row["status"],
                     "sourcePageId": origin.get("pageId"),
                     "sourceMessageId": origin.get("messageId"),
+                    "activation": activation,
                     "references": [r for r in refs if r["sourceMessageId"] == row["event_id"]],
                 })
             crumbs, seen, cursor = [], set(), page_id

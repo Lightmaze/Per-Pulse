@@ -16,6 +16,7 @@ This first release provides an English interface, a local Python service, and a 
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
+- Enable bounded local pulses: a context can continue from its retained history, and explicit computational connections can carry its results into related contexts.
 
 The server stores pages, messages, and references in the existing Pulse persistence layer. Browser storage holds only local drafts and navigation positions, scoped to the persistent workspace and page. When no model is configured, the interface says **AI disconnected** and saves messages as queued input. It never substitutes a scripted answer for a model response.
 
@@ -67,6 +68,27 @@ If neither endpoint nor model is set, the workspace runs disconnected. Setting o
 
 Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. These describe adapter capabilities; compatibility with a specific remote model must be verified separately.
 
+### Enable local pulse computation
+
+```sh
+per-pulse --pulse --pulse-budget 12
+```
+
+With a model configured, this enables local reentry and propagation through
+explicit context connections, with at most twelve background pulse admissions
+per rolling hour. Home and Work retain one subject and separate histories.
+Refractory time, decaying inhibition and a causal depth ceiling bound the local
+activity. The quota and causal evidence survive restart. Ordinary user messages
+remain available when the background quota is exhausted.
+
+`GET /api/pulse` exposes the current state and recent activation outcomes;
+`POST /api/pulse/connections` connects source and target page IDs. Page links
+remain navigation links. The detailed [pulse core contract](docs/pulse-core.md)
+explains configuration, connection semantics, recovery and verification.
+
+The default command leaves automatic pulses disabled. The quota counts
+background admissions, not individual provider requests, tokens or money.
+
 ## Develop
 
 Run the backend in one terminal:
@@ -104,7 +126,7 @@ Build the client before building a wheel. The wheel includes the compiled client
 
 Page IDs are native Work IDs, and message IDs are native causal-event IDs. Reference metadata lives in the same World's component state. Creating or following a reference does not copy another page's history or start an additional agent. Bringing text Home is an explicit user contribution with provenance; the source page remains open.
 
-See [the API contract](docs/api.md) and [source lineage](docs/source-lineage.md).
+See [the API contract](docs/api.md), [pulse core](docs/pulse-core.md) and [source lineage](docs/source-lineage.md).
 
 ## Current scope
 

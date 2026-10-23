@@ -54,6 +54,7 @@ from pulse_system.core.causality.flow_contract import (
     assert_causal_flow,
     assert_causal_turn,
     causal_turn_violation_codes,
+    may_emit_content_propagation,
 )
 from pulse_system.core.causality.amplification import (
     CausalAmplificationSnapshot,
@@ -673,6 +674,226 @@ class CausalLedger:
 
     enqueue_causal_event = enqueue
 
+    def enqueue_context_propagation(
+        self,
+        *,
+        source_result_id: str,
+        target_center_id: str | None,
+        connection_id: str,
+        depth: int,
+        engram_id: str | None = None,
+        priority: float = 0.8,
+        admission_guard: Callable[[sqlite3.Connection], None] | None = None,
+        runtime_fence: RuntimeFence | None = None,
+    ) -> CausalEvent:
+        """Deliver a settled result to another context of the same subject.
+
+        Ordinary child events still inherit their parent's Center. This is the
+        explicit exception for a configured context connection: it proves a
+        successful source turn, preserves its causal lineage and exact text,
+        and only addresses an active context of that subject (or a committed
+        successor). The result/connection pair is a durable delivery identity;
+        a coordinator restart can discover and return it without redelivery.
+
+        ``admission_guard`` runs in the insertion transaction, after the
+        idempotency check. It can enforce a durable background-event budget.
+        """
+
+        source_result_id = _require_id(source_result_id, "source_result_id")
+        target_center_id = _optional_id(target_center_id, "target_center_id")
+        connection_id = _require_id(connection_id, "connection_id")
+        engram_id = _optional_id(engram_id, "engram_id")
+        if type(depth) is not int or depth < 1:
+            raise ValueError("context propagation depth must be a positive integer")
+        if (
+            isinstance(priority, bool)
+            or not isinstance(priority, (int, float))
+            or not math.isfinite(priority)
+            or priority < 0.0
+        ):
+            raise ValueError("context propagation priority must be finite and nonnegative")
+        if admission_guard is not None and not callable(admission_guard):
+            raise TypeError("admission_guard must be callable or null")
+        identity = hashlib.sha256(json.dumps(
+            [source_result_id, connection_id], separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        idempotency_key = f"context-propagation-v1:{identity}"
+
+        with self._transaction() as conn:
+            self._assert_runtime_fence_uncommitted(conn, runtime_fence)
+            result = self._get_event_uncommitted(conn, source_result_id)
+            if result is None:
+                raise KeyError(f"unknown source result: {source_result_id}")
+            source_root = (
+                self._get_event_uncommitted(conn, result.parent_event_id)
+                if result.parent_event_id is not None else None
+            )
+            if (
+                result.kind is not CausalEventKind.ASSISTANT_RESULT
+                or result.domain is not CausalEventDomain.HARNESS
+                or result.source is not CausalEventSource.SELF
+                or result.status is not CausalEventStatus.SETTLED
+                or result.settled_at is None
+                or result.engram_id is None
+                or not isinstance(result.content, str)
+                or not result.content.strip()
+                or result.metadata.get("execution_regime") == "replay"
+                or source_root is None
+                or source_root.status is not CausalEventStatus.SETTLED
+                or source_root.settled_at is None
+                or source_root.world_id != result.world_id
+                or source_root.causal_id != result.causal_id
+                or source_root.engram_id != result.engram_id
+                or source_root.center_id != result.center_id
+                or not may_emit_content_propagation(source_root)
+                or source_root.kind not in {
+                    CausalEventKind.STIMULUS, CausalEventKind.SPONTANEOUS,
+                    CausalEventKind.PROPAGATION, CausalEventKind.PULSE,
+                }
+                or source_root.metadata.get("generation_stage")
+                or source_root.metadata.get("execution_regime") == "replay"
+            ):
+                raise CausalTransitionError(
+                    "context propagation requires a settled ordinary source result"
+                )
+            turns = conn.execute(
+                "SELECT event_id, engram_id, state, prompt_accepted "
+                "FROM harness_turns WHERE result_event_id = ?",
+                (result.id,),
+            ).fetchall()
+            if (
+                len(turns) != 1
+                or turns[0][0] != source_root.id
+                or turns[0][1] != result.engram_id
+                or turns[0][2] != HarnessTurnState.SETTLED.value
+                or turns[0][3] != 1
+            ):
+                raise CausalTransitionError(
+                    "context propagation requires one accepted source Harness turn"
+                )
+            source_depth = source_root.metadata.get("depth", 0)
+            if type(source_depth) is not int or source_depth < 0 or depth != source_depth + 1:
+                raise CausalTransitionError(
+                    "context propagation must advance the source causal depth by one"
+                )
+            subject_id = engram_id or result.engram_id
+            if not self._is_same_or_committed_successor_uncommitted(
+                conn, result.engram_id, subject_id,
+            ):
+                raise CausalTransitionError("context propagation cannot switch subjects")
+            if target_center_id == result.center_id:
+                raise CausalTransitionError("context propagation requires a different target context")
+            metadata = {
+                "context_pulse": "propagation",
+                "context_connection_id": connection_id,
+                "source_center_id": result.center_id,
+                "source_engram_id": result.engram_id,
+                "depth": depth,
+                "priority": float(priority),
+            }
+            existing_row = conn.execute(
+                f"SELECT {_EVENT_COLUMNS} FROM causal_events WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if existing_row is not None:
+                existing = self._row_to_event(existing_row)
+                if (
+                    existing.world_id != result.world_id
+                    or existing.causal_id != result.causal_id
+                    or existing.parent_event_id != result.id
+                    or existing.center_id != target_center_id
+                    or not self._is_same_or_committed_successor_uncommitted(
+                        conn, result.engram_id, existing.engram_id,
+                    )
+                    or existing.content != result.content
+                    or any(existing.metadata.get(key) != value for key, value in metadata.items())
+                ):
+                    raise CausalTransitionError(
+                        "context connection delivery is already bound to another identity"
+                    )
+                return existing
+
+            active = conn.execute(
+                "SELECT 1 FROM engrams WHERE id = ? AND status = 'active'", (subject_id,),
+            ).fetchone()
+            if active is None:
+                raise CausalTransitionError("context propagation subject must be active")
+            for center_id in (result.center_id, target_center_id):
+                if center_id is None:
+                    continue  # Home is the subject's unbound execution context.
+                eligible = conn.execute(
+                    "SELECT 1 FROM activity_centers AS center "
+                    "JOIN center_memberships AS member ON member.center_id = center.id "
+                    "WHERE center.id = ? AND center.status = 'active' "
+                    "AND center.focal_engram_id = ? AND member.engram_id = ?",
+                    (center_id, subject_id, subject_id),
+                ).fetchone()
+                if eligible is None:
+                    raise CausalTransitionError(
+                        "context propagation centers must be active subject memberships"
+                    )
+            if admission_guard is not None:
+                admission_guard(conn)
+            event = CausalEvent(
+                world_id=result.world_id,
+                causal_id=result.causal_id,
+                parent_event_id=result.id,
+                engram_id=subject_id,
+                center_id=target_center_id,
+                flow=CausalEventFlow.CONTENT,
+                domain=CausalEventDomain.PULSE,
+                kind=CausalEventKind.PROPAGATION,
+                source=CausalEventSource.PROPAGATION,
+                status=CausalEventStatus.QUEUED,
+                content=result.content,
+                metadata=metadata,
+                idempotency_key=idempotency_key,
+            )
+            self._insert_event_uncommitted(conn, event)
+            return self._get_event_uncommitted(conn, event.id)
+
+    def cancel_context_connection(
+        self,
+        connection_id: str,
+        *,
+        world_id: str,
+        runtime_fence: RuntimeFence | None = None,
+    ) -> int:
+        """Revoke unstarted deliveries for one removed context connection.
+
+        Claim and cancellation share SQLite's write transaction boundary. A
+        queued event with a scheduling reservation can still be cancelled;
+        its worker cannot subsequently claim it. Running or terminal work
+        keeps its observed status and source evidence. Repeated cancellation
+        is a no-op, and idempotent delivery lookup cannot resurrect the row.
+        """
+
+        connection_id = _require_id(connection_id, "connection_id")
+        world_id = _require_id(world_id, "world_id")
+        now = _now()
+        with self._transaction() as conn:
+            self._assert_runtime_fence_uncommitted(conn, runtime_fence)
+            cancelled = conn.execute(
+                "UPDATE causal_events SET status = 'cancelled', "
+                "metadata = json_set(metadata, '$.context_cancel_reason', 'connection_removed'), "
+                "updated_at = ?, settled_at = ?, resolution = NULL, resolution_note = NULL "
+                "WHERE world_id = ? AND status = 'queued' AND flow = 'content' "
+                "AND domain = 'pulse' AND ("
+                "(kind = 'propagation' AND source = 'propagation' "
+                "AND json_extract(metadata, '$.context_pulse') = 'propagation' "
+                "AND json_extract(metadata, '$.context_connection_id') = ?) OR "
+                "(kind = 'pulse' AND source = 'self' "
+                "AND json_extract(metadata, '$.context_pulse') = 'convergence' "
+                "AND id IN (SELECT integration.aggregate_event_id "
+                "FROM dendritic_integrations AS integration "
+                "JOIN dendritic_integration_members AS member ON member.integration_id = integration.id "
+                "JOIN causal_events AS input ON input.id = member.event_id "
+                "WHERE integration.world_id = ? "
+                "AND json_extract(input.metadata, '$.context_connection_id') = ?)))",
+                (_ts(now), _ts(now), world_id, connection_id, world_id, connection_id),
+            )
+            return cancelled.rowcount
+
     def get_event(self, event_id: str) -> CausalEvent | None:
         with self._storage._lock:
             return self._get_event_uncommitted(self._storage._conn, event_id)
@@ -885,6 +1106,18 @@ class CausalLedger:
             source_id = event.metadata.get("source_engram_id")
             if not isinstance(source_id, str) or not source_id.strip():
                 return None
+            if event.metadata.get("context_connection_id") is not None:
+                if (
+                    event.metadata.get("context_pulse") != "propagation"
+                    or "source_center_id" not in event.metadata
+                ):
+                    return None
+                source_center = event.metadata["source_center_id"]
+                if source_center is None:
+                    return "propagation", "context:home"
+                if not isinstance(source_center, str) or not source_center.strip():
+                    return None
+                return "propagation", f"context:center:{source_center}"
             return "propagation", f"engram:{source_id}"
         # External adapters do not acquire Engram authority by writing an
         # arbitrary metadata string.  Their durable identity is the typed
@@ -986,6 +1219,12 @@ class CausalLedger:
     ) -> None:
         """Anchor a propagation label to its settled source Harness turn."""
 
+        if event.metadata.get("context_connection_id") is not None:
+            CausalLedger._assert_context_propagation_provenance_uncommitted(
+                conn, event, source_identity,
+            )
+            return
+
         source_engram_id = event.metadata.get("source_engram_id")
         depth = event.metadata.get("depth")
         if (
@@ -1049,6 +1288,94 @@ class CausalLedger:
             raise CausalTransitionError(
                 "dendritic propagation lacks one accepted source Harness turn"
             )
+
+    @staticmethod
+    def _assert_context_propagation_provenance_uncommitted(
+        conn: sqlite3.Connection,
+        event: CausalEvent,
+        source_identity: str,
+    ) -> None:
+        """Prove a context source without granting arbitrary center switches."""
+
+        parent = (
+            CausalLedger._get_event_uncommitted(conn, event.parent_event_id)
+            if event.parent_event_id is not None else None
+        )
+        source_root = (
+            CausalLedger._get_event_uncommitted(conn, parent.parent_event_id)
+            if parent is not None and parent.parent_event_id is not None else None
+        )
+        connection_id = event.metadata.get("context_connection_id")
+        source_center = event.metadata.get("source_center_id")
+        expected_source = (
+            "context:home" if source_center is None else f"context:center:{source_center}"
+        )
+        depth = event.metadata.get("depth")
+        if (
+            not isinstance(connection_id, str) or not connection_id.strip()
+            or event.metadata.get("context_pulse") != "propagation"
+            or "source_center_id" not in event.metadata
+            or (source_center is not None and (not isinstance(source_center, str) or not source_center.strip()))
+            or source_identity != expected_source
+            or event.domain is not CausalEventDomain.PULSE
+            or type(depth) is not int or depth < 1
+            or parent is None or source_root is None
+            or parent.world_id != event.world_id or source_root.world_id != event.world_id
+            or parent.causal_id != event.causal_id or source_root.causal_id != event.causal_id
+            or parent.center_id != source_center or source_root.center_id != source_center
+            or event.center_id == source_center
+            or parent.engram_id is None
+            or source_root.engram_id != parent.engram_id
+            or event.metadata.get("source_engram_id") != parent.engram_id
+            or not CausalLedger._is_same_or_committed_successor_uncommitted(conn, parent.engram_id, event.engram_id)
+            or parent.kind is not CausalEventKind.ASSISTANT_RESULT
+            or parent.domain is not CausalEventDomain.HARNESS
+            or parent.source is not CausalEventSource.SELF
+            or parent.status is not CausalEventStatus.SETTLED or parent.settled_at is None
+            or parent.metadata.get("execution_regime") == "replay"
+            or parent.content != event.content
+            or parent.created_at > event.created_at
+            or source_root.status is not CausalEventStatus.SETTLED or source_root.settled_at is None
+            or not may_emit_content_propagation(source_root)
+            or source_root.kind not in {
+                CausalEventKind.STIMULUS, CausalEventKind.SPONTANEOUS,
+                CausalEventKind.PROPAGATION, CausalEventKind.PULSE,
+            }
+            or source_root.metadata.get("generation_stage")
+            or source_root.metadata.get("execution_regime") == "replay"
+            or type(source_root.metadata.get("depth", 0)) is not int
+            or depth != source_root.metadata.get("depth", 0) + 1
+        ):
+            raise CausalTransitionError("context propagation source lineage is not canonical")
+        identity = hashlib.sha256(json.dumps(
+            [parent.id, connection_id], separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        if event.idempotency_key != f"context-propagation-v1:{identity}":
+            raise CausalTransitionError("context propagation delivery identity drifted")
+        turns = conn.execute(
+            "SELECT event_id, engram_id, state, prompt_accepted "
+            "FROM harness_turns WHERE result_event_id = ?", (parent.id,),
+        ).fetchall()
+        if (
+            len(turns) != 1 or turns[0][0] != source_root.id or turns[0][1] != parent.engram_id
+            or turns[0][2] != HarnessTurnState.SETTLED.value or turns[0][3] != 1
+        ):
+            raise CausalTransitionError("context propagation lacks one accepted source Harness turn")
+
+    @staticmethod
+    def _context_convergence_metadata(events: Iterable[CausalEvent]) -> dict[str, Any]:
+        """Keep every contributing connection visible at later admission."""
+
+        members = tuple(events)
+        connection_ids = [event.metadata.get("context_connection_id") for event in members]
+        if not any(value is not None for value in connection_ids):
+            return {}
+        if not all(isinstance(value, str) and value.strip() for value in connection_ids):
+            raise CausalTransitionError("context and Engram propagation cannot converge")
+        return {
+            "context_pulse": "convergence",
+            "context_connection_ids": sorted(set(connection_ids)),
+        }
 
     @staticmethod
     def _dendritic_event_set_sha256(event_ids: Iterable[str]) -> str:
@@ -1225,7 +1552,11 @@ class CausalLedger:
                 ).fetchone()
                 if (
                     event is None
-                    or identity != (event.world_id, event.engram_id)
+                    or identity is None
+                    or identity[0] != event.world_id
+                    or not self._is_same_or_committed_successor_uncommitted(
+                        conn, identity[1], event.engram_id,
+                    )
                 ):
                     raise CausalTransitionError(
                         "dendritic input policy identity drifted"
@@ -1522,6 +1853,7 @@ class CausalLedger:
                 "dendritic_window_id": window_id,
                 "depth": max(depths),
                 "priority": max(priorities),
+                **self._context_convergence_metadata(ordered),
             },
             idempotency_key=f"dendritic:{member_set_sha256}",
             attempts=0,
@@ -2213,6 +2545,89 @@ class CausalLedger:
 
     # ── Harness turn lifecycle ──────────────────────────────────
 
+    def _assert_context_turn_admission_uncommitted(
+        self, conn: sqlite3.Connection, event: CausalEvent,
+    ) -> None:
+        """Reserved context markers are proven again at the claim boundary."""
+
+        marker = event.metadata.get("context_pulse")
+        connection_id = event.metadata.get("context_connection_id")
+        if marker == "propagation" and connection_id is None:
+            raise CausalTransitionError("context propagation requires a connection identity")
+        if connection_id is None and marker not in {"reentry", "convergence"}:
+            return
+        if connection_id is not None:
+            signature = self._dendritic_source_signature(event, require_queued=True)
+            if signature is None or signature[0] != "propagation":
+                raise CausalTransitionError("context delivery marker requires canonical propagation")
+            self._assert_context_propagation_provenance_uncommitted(conn, event, signature[1])
+        elif marker == "convergence":
+            row = conn.execute(
+                f"SELECT {_DENDRITIC_INTEGRATION_COLUMNS} FROM dendritic_integrations WHERE aggregate_event_id = ?",
+                (event.id,),
+            ).fetchone()
+            if row is None:
+                raise CausalTransitionError("context convergence requires durable member evidence")
+            self._row_to_dendritic_integration(conn, row)
+        else:
+            parent = (
+                self._get_event_uncommitted(conn, event.parent_event_id)
+                if event.parent_event_id is not None else None
+            )
+            root = (
+                self._get_event_uncommitted(conn, parent.parent_event_id)
+                if parent is not None and parent.parent_event_id is not None else None
+            )
+            if (
+                event.kind is not CausalEventKind.SPONTANEOUS
+                or event.source is not CausalEventSource.SELF
+                or event.domain is not CausalEventDomain.PULSE
+                or event.flow is not None or event.content is not None
+                or parent is None or root is None
+                or parent.kind is not CausalEventKind.ASSISTANT_RESULT
+                or parent.domain is not CausalEventDomain.HARNESS
+                or parent.source is not CausalEventSource.SELF
+                or parent.status is not CausalEventStatus.SETTLED or parent.settled_at is None
+                or parent.engram_id is None
+                or parent.world_id != event.world_id or root.world_id != event.world_id
+                or parent.causal_id != event.causal_id or root.causal_id != event.causal_id
+                or parent.center_id != event.center_id or root.center_id != event.center_id
+                or root.engram_id != parent.engram_id
+                or not self._is_same_or_committed_successor_uncommitted(conn, parent.engram_id, event.engram_id)
+                or parent.metadata.get("execution_regime") == "replay"
+                or root.metadata.get("execution_regime") == "replay"
+                or root.metadata.get("generation_stage")
+                or root.kind not in {CausalEventKind.STIMULUS, CausalEventKind.SPONTANEOUS,
+                                     CausalEventKind.PROPAGATION, CausalEventKind.PULSE}
+                or root.status is not CausalEventStatus.SETTLED or root.settled_at is None
+                or not may_emit_content_propagation(root)
+                or event.metadata.get("source_result_id") != parent.id
+                or type(event.metadata.get("depth")) is not int
+                or event.metadata["depth"] < 0
+                or type(root.metadata.get("depth", 0)) is not int
+                or event.metadata["depth"] != root.metadata.get("depth", 0)
+                or event.idempotency_key != f"context-reentry:{event.world_id}:{parent.id}"
+            ):
+                raise CausalTransitionError("context reentry requires a settled same-context result")
+            turns = conn.execute(
+                "SELECT event_id, engram_id, state, prompt_accepted "
+                "FROM harness_turns WHERE result_event_id = ?", (parent.id,),
+            ).fetchall()
+            if len(turns) != 1 or tuple(turns[0]) != (root.id, parent.engram_id, "settled", 1):
+                raise CausalTransitionError("context reentry requires one accepted source Harness turn")
+        if conn.execute(
+            "SELECT 1 FROM engrams WHERE id = ? AND status = 'active'", (event.engram_id,),
+        ).fetchone() is None:
+            raise CausalTransitionError("context turn requires an active subject")
+        if event.center_id is not None and conn.execute(
+            "SELECT 1 FROM activity_centers AS center "
+            "JOIN center_memberships AS member ON member.center_id = center.id "
+            "WHERE center.id = ? AND center.status = 'active' "
+            "AND center.focal_engram_id = ? AND member.engram_id = ?",
+            (event.center_id, event.engram_id, event.engram_id),
+        ).fetchone() is None:
+            raise CausalTransitionError("context turn requires an active subject-owned context")
+
     def begin_turn(
         self,
         event_id: str,
@@ -2250,6 +2665,7 @@ class CausalLedger:
                 assert_causal_turn(event)
             except CausalFlowInvariantError as exc:
                 raise CausalTransitionError(str(exc)) from exc
+            self._assert_context_turn_admission_uncommitted(conn, event)
             if event.engram_id is not None and event.engram_id != engram_id:
                 raise CausalTransitionError(
                     "event is already assigned to another Engram"
@@ -4017,7 +4433,12 @@ class CausalLedger:
                 or input_policy is None
                 or policy_identity is None
                 or policy_identity[0] != window.world_id
-                or policy_identity[1] != window.formation_engram_id
+                # The opening policy remains a historical fact of its
+                # original holder. A committed continuation may close that
+                # same window without replacing the policy or its timestamp.
+                or not CausalLedger._is_same_or_committed_successor_uncommitted(
+                    conn, policy_identity[1], window.formation_engram_id,
+                )
                 or not (
                     event.created_at
                     <= _parse_ts(policy_identity[2])
@@ -4026,7 +4447,9 @@ class CausalLedger:
                 or event.seq != member.event_seq
                 or event.created_at != member.arrived_at
                 or event.world_id != window.world_id
-                or event.engram_id != window.formation_engram_id
+                or not CausalLedger._is_same_or_committed_successor_uncommitted(
+                    conn, window.formation_engram_id, event.engram_id,
+                )
                 or causal_turn_violation_codes(event)
                 or event.metadata.get("dendritic_integration_version") == 1
                 or (
@@ -4054,8 +4477,12 @@ class CausalLedger:
             )
         member_ids = {member.event_id for member in members}
         interval_rows = conn.execute(
+            "WITH RECURSIVE lineage(id) AS (SELECT ? UNION "
+            "SELECT generation.successor_id FROM generation_transitions generation "
+            "JOIN lineage current ON generation.predecessor_id = current.id "
+            "WHERE generation.state = 'committed' AND generation.successor_id IS NOT NULL) "
             f"SELECT {_EVENT_COLUMNS} FROM causal_events "
-            "WHERE world_id = ? AND engram_id = ? "
+            "WHERE world_id = ? AND engram_id IN (SELECT id FROM lineage) "
             "AND created_at >= ? AND created_at <= ? "
             "AND seq <= ? AND NOT EXISTS ("
             "SELECT 1 FROM dendritic_window_members member "
@@ -4065,8 +4492,8 @@ class CausalLedger:
             "WHERE policy.event_id = causal_events.id"
             ") ORDER BY seq ASC",
             (
-                window.world_id,
                 window.formation_engram_id,
+                window.world_id,
                 _ts(window.window_opened_at),
                 _ts(window.window_closed_at),
                 window.observed_event_seq,
@@ -4424,7 +4851,14 @@ class CausalLedger:
             "dendritic_member_set_sha256": integration.member_set_sha256,
             "depth": max(depths),
             "priority": max(priorities),
+            **CausalLedger._context_convergence_metadata(source_events),
         }
+        if (
+            expected_metadata.get("context_pulse") == "convergence"
+            and aggregate.status is CausalEventStatus.CANCELLED
+            and aggregate.metadata.get("context_cancel_reason") == "connection_removed"
+        ):
+            expected_metadata["context_cancel_reason"] = "connection_removed"
         if window is not None:
             expected_metadata["dendritic_window_id"] = window.id
         if (

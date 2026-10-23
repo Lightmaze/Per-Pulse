@@ -172,6 +172,7 @@ from pulse_system.core.engram import EngramManager
 from pulse_system.core.habitat import ManagedHabitat
 from pulse_system.core.pulse import PulseEngine, PulseEngineConfig, PulseEvent
 from pulse_system.core.pulse.engine import SpontaneousDispatch
+from pulse_system.core.pulse.context import ContextPulseConfig, ContextPulseController
 from pulse_system.core.runtime import (
     CenterSchedulingConfig,
     DurableCenterScheduler,
@@ -533,6 +534,9 @@ class RuntimeServiceConfig:
     default_max_wait: float = 30.0
     propagation_threshold: float = 0.3
     base_spontaneous_rate: float = 0.02
+    # Optional local-context dynamics for the single-subject Kernel product.
+    # None retains the inherited Engram-level behavior for existing callers.
+    context_pulse: ContextPulseConfig | None = None
     inhibition_propagation_gate: float = 0.0
     topology_interval_ticks: int | None = None
     # Compact connection viability is production observability: every 100
@@ -573,6 +577,8 @@ class RuntimeServiceConfig:
     metrics_replay_bytes: int = 4 * 1024 * 1024
 
     def __post_init__(self) -> None:
+        if self.context_pulse is not None and not isinstance(self.context_pulse, ContextPulseConfig):
+            raise ValueError("context_pulse must be ContextPulseConfig or None")
         if not isinstance(self.harness_kind, str) or not self.harness_kind.strip():
             raise ValueError("harness_kind must be a non-empty string")
         self.harness_kind = self.harness_kind.strip().lower()
@@ -6564,6 +6570,13 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 reservation_history_limit=c.center_reservation_history_limit,
             ),
         )
+        self._context_pulse = (
+            ContextPulseController(
+                self._storage, self._causal_ledger, self._world,
+                world_id=self._world_id, subject=lambda: self._front_id,
+                fence=lambda: self._current_runtime_fence(), config=c.context_pulse,
+            ) if c.context_pulse is not None else None
+        )
         self._engine = PulseEngine(
             storage=self._storage,
             engram_manager=self._mgr,
@@ -6579,6 +6592,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             spontaneous_center=self._spontaneous_center_for_engram,
             spontaneous_emitter=self._spontaneous_dispatch_for_engram,
             scheduler=self._scheduler,
+            admission_filter=(self._context_pulse.admits if self._context_pulse else None),
             runtime_fence=self._current_runtime_fence(),
             execution_context=(
                 self._native_kernel_execution_context
@@ -7239,6 +7253,10 @@ class RuntimeService(_RuntimeShutdownCoordinator):
     @property
     def engine(self) -> PulseEngine:
         return self._engine
+
+    @property
+    def context_pulse(self) -> ContextPulseController | None:
+        return self._context_pulse
 
     @property
     def dendrite(self) -> DendriteProcessor:
@@ -12097,6 +12115,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             # creates an event, changes its status, or replays uncertainty.
             self._repair_living_orientation_engagements()
             try:
+                if self._context_pulse is not None:
+                    self._context_pulse.tick()
                 result = self._engine.tick()
             except RuntimeLeaseError as exc:
                 # The owner can change in the narrow interval after the
