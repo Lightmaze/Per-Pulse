@@ -152,6 +152,22 @@ button, a, input, textarea { outline-offset: 4px; }
 .sidebar-scrim { display: none; }
 
 @keyframes pulse { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
+.learning-dialog { max-width: 680px; }
+.lesson { border-top: 1px solid var(--border); padding-top: 22px; margin-top: 22px; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.lesson-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; }
+.lesson h3, .lessons-empty h3 { font-size: 15px; font-weight: 500; margin: 0; }
+.lesson-heading > span, .lesson-scope, .lesson-note { font-size: 11px; color: var(--muted); }
+.lesson-heading > span { flex-shrink: 0; }
+.lesson p { margin: 10px 0; white-space: pre-wrap; }
+.lesson details { margin: 12px 0; }
+.lesson summary { cursor: pointer; color: var(--accent); }
+.lesson h4 { font-size: 12px; font-weight: 500; margin: 14px 0 6px; }
+.lesson dt { color: var(--muted); font-size: 11px; margin-top: 12px; }
+.lesson dd { margin: 3px 0 0; white-space: pre-wrap; }
+.lesson ul { padding-left: 20px; }
+.lesson-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 17px 0 10px; }
+.lesson-paused .lesson-heading h3 { color: var(--muted); }
+.lessons-empty { padding: 14px 0; font-size: 13px; line-height: 1.75; color: var(--muted); }
 @media (min-width: 761px) {
   .is-sidebar-collapsed .sidebar { display: none; }
   .is-sidebar-collapsed .toast { left: 50%; }

@@ -46,6 +46,7 @@ class PageService:
         data_dir: str | Path,
         *,
         example: bool = False,
+        posture: bool | None = None,
         model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None | object = _ENV_PROVIDER,
     ):
         self.data_dir = Path(data_dir).expanduser().resolve()
@@ -83,8 +84,11 @@ class PageService:
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
             model_factory=factory, allow_unconfigured=True, allow_mutations=False,
+            enable_posture=False if example else posture,
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
+        from .learning import PageLearning
+        self.learning = PageLearning(self)
         self._state_key = f"per-pulse-pages-v1:{self.runtime.world_id}"
         self._state = self.runtime.storage.load_component_state(self._state_key)
         if self._state is None:
@@ -138,7 +142,8 @@ class PageService:
             raise PageError("page_not_found", "This page does not exist.", 404)
         return front
 
-    def _rows(self, page_id: str, *, limit: int = MAX_MESSAGES + 1) -> list[dict]:
+    def _rows(self, page_id: str, *, limit: int = MAX_MESSAGES + 1,
+              event_id: str | None = None) -> list[dict]:
         front = self._front(page_id)
         return self.runtime._causal_message_projection(
             center_id=front.center_id if front else None,
@@ -146,7 +151,7 @@ class PageService:
             unattributed=front is None,
             # Offline input is real queued input. Do not hide it until a
             # provider admits a Kernel turn, and do not fabricate a transcript.
-            session_admitted=False, limit=limit,
+            session_admitted=False, limit=limit, event_id=event_id,
         )
 
     def _check_message(self, page_id: str, message_id: str | None) -> None:
@@ -207,13 +212,25 @@ class PageService:
                 "name": "Per Pulse", "version": __version__, "example": self.example,
                 "workspaceId": self.runtime.world_id,
                 "homeId": "home", "provider": self.provider, "pages": pages,
+                "postureEnabled": self.learning.enabled,
             }
 
-    def view(self, page_id: str) -> dict:
+    def view(self, page_id: str, *, source_message_id: str | None = None) -> dict:
         with self._lock:
+            self._check_message(page_id, source_message_id)
             rows = self._rows(page_id)
             has_more = len(rows) > MAX_MESSAGES
             rows = rows[-MAX_MESSAGES:]
+            summary_rows = rows
+            earlier_source_id = None
+            if source_message_id and not any(row["event_id"] == source_message_id for row in rows):
+                # A source link must survive beyond the recent conversation
+                # window. Fetch one authorized native event, not all history.
+                source_rows = self._rows(page_id, limit=1, event_id=source_message_id)
+                if not source_rows:
+                    raise PageError("message_not_found", "The selected message does not belong to this page.", 404)
+                rows = source_rows + rows
+                earlier_source_id = source_message_id
             refs = [dict(r) for r in self._state["references"] if r["sourcePageId"] == page_id]
             messages = []
             for row in rows:
@@ -228,17 +245,18 @@ class PageService:
             crumbs, seen, cursor = [], set(), page_id
             while cursor and cursor not in seen:
                 seen.add(cursor)
-                summary = self._summary(cursor, rows if cursor == page_id else None)
+                summary = self._summary(cursor, summary_rows if cursor == page_id else None)
                 crumbs.append({"id": cursor, "title": summary["title"]})
                 cursor = summary["sourcePageId"]
             if page_id != "home" and "home" not in seen:
                 crumbs.append({"id": "home", "title": "Home"})
             return {
-                "page": self._summary(page_id, rows), "messages": messages,
+                "page": self._summary(page_id, summary_rows), "messages": messages,
                 "references": refs,
                 "backlinks": [dict(r) for r in self._state["references"] if r["targetPageId"] == page_id],
                 "breadcrumbs": list(reversed(crumbs)), "provider": self.provider,
                 "hasMore": has_more,
+                "earlierSourceMessageId": earlier_source_id,
             }
 
     def _reference(self, source: str, target: str, message_id: str | None,

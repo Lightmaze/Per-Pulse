@@ -14,6 +14,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "localhost", "::1"], help="Local address to listen on.")
     parser.add_argument("--port", type=int, default=8000, help="Local HTTP port (default: 8000).")
     parser.add_argument("--example", action="store_true", help="Open a separate, clearly marked example workspace without a model.")
+    parser.add_argument("--posture", action="store_true", default=None,
+                        help="Use attributed experience before actions and delivery; learn from corrections in the current page.")
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535.")
@@ -29,7 +31,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Per Pulse: http://{address}:{args.port}")
     if args.example:
         print("Example workspace — authored sample notes, no model calls.")
-    uvicorn.run(create_app(data_dir, example=args.example), host=args.host, port=args.port, log_level="warning")
+    uvicorn.run(create_app(data_dir, example=args.example, posture=args.posture), host=args.host, port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

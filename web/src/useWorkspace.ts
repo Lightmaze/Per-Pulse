@@ -4,6 +4,8 @@ import { pageFromLocation, pageHref, savePosition } from './storage';
 import type { Bootstrap, NavigationOrigin, PageView } from './types';
 
 type Route = { id: string; serial: number; origin?: NavigationOrigin; targetMessageId?: string };
+const sameRoute = (left: Route, right: Route) => left.id === right.id && left.serial === right.serial
+  && left.targetMessageId === right.targetMessageId;
 export function useWorkspace() {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
   const bootstrapRef = useRef<Bootstrap | null>(null);
@@ -14,7 +16,11 @@ export function useWorkspace() {
   const [loading, setLoading] = useState(true);
   const versions = useRef<Record<string, number>>({});
   const routeRef = useRef(route);
-  routeRef.current = route;
+  const changeRoute = useCallback((next: Route) => {
+    // Invalidate old reads immediately, before React commits the navigation.
+    routeRef.current = next;
+    setRoute(next);
+  }, []);
 
   const applyView = useCallback((view: PageView) => {
     versions.current[view.page.id] = (versions.current[view.page.id] ?? 0) + 1;
@@ -24,8 +30,11 @@ export function useWorkspace() {
 
   const refreshPage = useCallback(async (id: string) => {
     const version = versions.current[id] ?? 0;
-    const view = await api.page(id);
-    if ((versions.current[id] ?? 0) === version) applyView(view);
+    const requestedRoute = routeRef.current;
+    const sourceMessageId = requestedRoute.id === id ? requestedRoute.targetMessageId : undefined;
+    const view = await api.page(id, undefined, sourceMessageId);
+    if ((versions.current[id] ?? 0) === version
+        && (routeRef.current.id !== id || sameRoute(requestedRoute, routeRef.current))) applyView(view);
     return view;
   }, [applyView]);
 
@@ -41,22 +50,22 @@ export function useWorkspace() {
     const state = { origin, targetMessageId, workspaceId };
     if (id !== routeRef.current.id) history.pushState(state, '', pageHref(id));
     else history.replaceState(state, '', pageHref(id));
-    setRoute(previous => ({ id, serial: previous.serial + 1, origin, targetMessageId }));
+    changeRoute({ id, serial: routeRef.current.serial + 1, origin, targetMessageId });
     setError('');
-  }, []);
+  }, [changeRoute]);
 
   useEffect(() => {
     const onPop = () => {
       const workspaceId = bootstrapRef.current?.workspaceId;
       if (workspaceId) savePosition(workspaceId, routeRef.current.id, document.querySelector('.workspace-main')?.scrollTop ?? 0);
       const sameWorkspace = workspaceId === history.state?.workspaceId;
-      setRoute(previous => ({ id: pageFromLocation(), serial: previous.serial + 1, origin: sameWorkspace ? history.state?.origin : undefined, targetMessageId: sameWorkspace ? history.state?.targetMessageId : undefined }));
+      changeRoute({ id: pageFromLocation(), serial: routeRef.current.serial + 1, origin: sameWorkspace ? history.state?.origin : undefined, targetMessageId: sameWorkspace ? history.state?.targetMessageId : undefined });
       setError('');
     };
     window.addEventListener('popstate', onPop);
     history.scrollRestoration = 'manual';
     return () => { window.removeEventListener('popstate', onPop); history.scrollRestoration = 'auto'; };
-  }, []);
+  }, [changeRoute]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,20 +78,22 @@ export function useWorkspace() {
   useEffect(() => {
     if (!bootstrap?.workspaceId) return;
     const sameWorkspace = history.state?.workspaceId === bootstrap.workspaceId;
-    setRoute(previous => ({ ...previous, origin: sameWorkspace ? history.state?.origin : undefined, targetMessageId: sameWorkspace ? history.state?.targetMessageId : undefined }));
-  }, [bootstrap?.workspaceId]);
+    changeRoute({ ...routeRef.current, serial: routeRef.current.serial + 1,
+      origin: sameWorkspace ? history.state?.origin : undefined, targetMessageId: sameWorkspace ? history.state?.targetMessageId : undefined });
+  }, [bootstrap?.workspaceId, changeRoute]);
 
   useEffect(() => {
     const controller = new AbortController();
     const version = versions.current[route.id] ?? 0;
     setLoading(true);
-    api.page(route.id, controller.signal).then(view => {
-      if ((versions.current[route.id] ?? 0) === version) applyView(view);
+    api.page(route.id, controller.signal, route.targetMessageId).then(view => {
+      if (!controller.signal.aborted && sameRoute(route, routeRef.current)
+          && (versions.current[route.id] ?? 0) === version) applyView(view);
     }).catch(problem => {
-      if (!controller.signal.aborted) setError(problem instanceof Error ? problem.message : 'This page could not be loaded.');
-    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      if (!controller.signal.aborted && sameRoute(route, routeRef.current)) setError(problem instanceof Error ? problem.message : 'This page could not be loaded.');
+    }).finally(() => { if (!controller.signal.aborted && sameRoute(route, routeRef.current)) setLoading(false); });
     return () => controller.abort();
-  }, [route.id, route.serial, applyView]);
+  }, [route.id, route.serial, route.targetMessageId, applyView]);
 
   const activeView = views[route.id];
   const shouldPoll = activeView?.provider.configured && ['queued', 'working'].includes(activeView.page.status);

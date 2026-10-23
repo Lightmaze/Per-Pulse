@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
@@ -62,6 +62,34 @@ class Rename(Input):
     title: Title
 
 
+class ExperienceShift(Input):
+    understanding: Content
+    candidates: Content
+    delivery: Content
+
+
+class NewExperience(Input):
+    sourceMessageId: Identifier
+    feedbackMessageId: Identifier
+    title: Title
+    lesson: Content
+    conditions: Any
+    counterexamples: list[Content] = Field(min_length=1, max_length=8)
+    shift: ExperienceShift
+    scope: Literal["context", "subject"] = "context"
+
+
+class ReviseExperience(Input):
+    expectedRevision: int = Field(ge=1, strict=True)
+    changes: dict[str, Any]
+
+
+class ExperienceFeedback(Input):
+    expectedRevision: int = Field(ge=1, strict=True)
+    verdict: Literal["useful", "not_useful", "harmful", "withdrawn"]
+    evidence: Content
+
+
 def _error(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
@@ -78,13 +106,14 @@ def create_app(
     data_dir: str | Path,
     *,
     example: bool = False,
+    posture: bool | None = None,
     web_dir: str | Path | None = None,
     model_factory: Any = _ENV_PROVIDER,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         pages = await asyncio.to_thread(
-            PageService, data_dir, example=example, model_factory=model_factory,
+            PageService, data_dir, example=example, posture=posture, model_factory=model_factory,
         )
         app.state.pages = pages
         try:
@@ -151,8 +180,8 @@ def create_app(
         return pages(request).bootstrap()
 
     @app.get("/api/pages/{page_id}")
-    def page(page_id: str, request: Request):
-        return pages(request).view(page_id)
+    def page(page_id: str, request: Request, sourceMessageId: Identifier | None = None):
+        return pages(request).view(page_id, source_message_id=sourceMessageId)
 
     @app.post("/api/pages", status_code=201)
     def create(body: NewPage, request: Request):
@@ -175,6 +204,24 @@ def create_app(
     @app.patch("/api/pages/{page_id}")
     def rename(page_id: str, body: Rename, request: Request):
         return pages(request).rename(page_id, body.title)
+
+    @app.get("/api/pages/{page_id}/posture")
+    def learning(page_id: str, request: Request):
+        return pages(request).learning.view(page_id)
+
+    @app.post("/api/pages/{page_id}/posture/experiences", status_code=201)
+    def learn(page_id: str, body: NewExperience, request: Request):
+        return pages(request).learning.create(page_id, body.model_dump())
+
+    @app.patch("/api/pages/{page_id}/posture/experiences/{experience_id}")
+    def revise_experience(page_id: str, experience_id: str, body: ReviseExperience, request: Request):
+        return pages(request).learning.revise(page_id, experience_id, body.expectedRevision, body.changes)
+
+    @app.post("/api/pages/{page_id}/posture/experiences/{experience_id}/feedback")
+    def experience_feedback(page_id: str, experience_id: str, body: ExperienceFeedback, request: Request):
+        return pages(request).learning.feedback(
+            page_id, experience_id, body.expectedRevision, body.verdict, body.evidence,
+        )
 
     # Mount only the compiled frontend. User data and workspace files are
     # never exposed as static content.

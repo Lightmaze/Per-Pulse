@@ -6101,6 +6101,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             self._native_local = NativeLocal(self)
             from .native_cognition_return import NativeCognitionReturn
             self._native_cognition_return = NativeCognitionReturn(self)
+            from .native_posture import NativePosture
+            self._native_posture = NativePosture(self) if self._harness.posture_enabled else None
             self._harness.bind_world(
                 self._world_id, self._require_runtime_owner, self._publication_permit,
                 history_lineage=lambda engram_id: self._causal_ledger.committed_history_lineage(
@@ -6108,6 +6110,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 context_for_turn=self._native_kernel_context_for_turn,
                 work=self._native_work, team=self._native_team, local=self._native_local,
                 input_for_turn=self._native_cognition_return.input_for_turn,
+                world_storage=self._storage, posture=self._native_posture,
             )
         self._purpose_governance = PurposeGovernance(
             c.db_path,
@@ -9250,6 +9253,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         unattributed: bool = False,
         session_admitted: bool = False,
         limit: int = 100,
+        event_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = [
             "world_id = ?",
@@ -9258,6 +9262,9 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             "'assistant_result', 'delegation_result')",
         ]
         params: list[Any] = [self._world_id]
+        if event_id is not None:
+            clauses.append("id = ?")
+            params.append(event_id)
         if center_id is not None:
             clauses.append("center_id = ?")
             params.append(center_id)
@@ -12110,6 +12117,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 self._native_work.drain()
                 self._native_team.drain()
                 self._native_cognition_return.drain()
+                if self._native_posture is not None:
+                    self._native_posture.drain()
             self.record_tuning()
             return result
 
