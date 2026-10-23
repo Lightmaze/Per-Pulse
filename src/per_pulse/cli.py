@@ -14,9 +14,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "localhost", "::1"], help="Local address to listen on.")
     parser.add_argument("--port", type=int, default=8000, help="Local HTTP port (default: 8000).")
     parser.add_argument("--example", action="store_true", help="Open a separate, clearly marked example workspace without a model.")
+    parser.add_argument("--pulse", action="store_true", help="Enable bounded local reentry and diffusion through explicit context connections.")
+    parser.add_argument("--pulse-budget", type=int, default=12, help="Maximum background pulse admissions per rolling hour (default: 12).")
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535.")
+    if args.pulse_budget < 0:
+        parser.error("--pulse-budget must be nonnegative.")
     data_dir = args.data_dir or Path.home() / ".local" / "share" / "per-pulse"
     # An explicit base directory is respected, with examples kept under their
     # own child directory so the ordinary user World is never seeded.
@@ -24,12 +28,18 @@ def main(argv: list[str] | None = None) -> None:
         data_dir = data_dir / "example"
     import uvicorn
     from .app import create_app
+    from .service import PulseSettings
 
     address = f"[{args.host}]" if ":" in args.host else args.host
     print(f"Per Pulse: http://{address}:{args.port}")
     if args.example:
         print("Example workspace — authored sample notes, no model calls.")
-    uvicorn.run(create_app(data_dir, example=args.example), host=args.host, port=args.port, log_level="warning")
+    if args.pulse and not args.example:
+        print(f"Pulse enabled — up to {args.pulse_budget} background pulse admissions per rolling hour when a model is connected.")
+    uvicorn.run(create_app(data_dir, example=args.example,
+                          pulse=PulseSettings(enabled=args.pulse,
+                                              max_background_pulses_per_hour=args.pulse_budget)),
+                host=args.host, port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

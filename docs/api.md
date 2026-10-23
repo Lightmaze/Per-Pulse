@@ -34,6 +34,7 @@ type Message = {
   sourcePageId: string | null;
   sourceMessageId: string | null;
   references: PageReference[];
+  activation: "propagation" | null;
 };
 type ProviderState = {
   configured: boolean;
@@ -66,6 +67,8 @@ type Bootstrap = {
 - `GET /api/bootstrap` -> `Bootstrap`.
 - `GET /api/pages/{id}` -> `PageView` (latest bounded messages).
 - `GET /api/health` -> `{status:"ok", providerConfigured:boolean}`.
+- `GET /api/pulse` -> local pulse settings, rolling admission budget, context
+  activity, directed connections, and the most recent 20 background activations.
 
 Scope browser drafts, scroll positions, and navigation history by `workspaceId`
 as well as page ID. Ordinary and example workspaces have distinct World IDs,
@@ -120,6 +123,38 @@ Response `201`: `{messageId:string, reference:PageReference, view:PageView}`. `v
 ## Rename
 
 `PATCH /api/pages/{id}` with `{"title":"New title"}` -> `PageView` (Work only).
+
+## Connect local pulse contexts
+
+`POST /api/pulse/connections`
+
+```json
+{"sourcePageId":"home","targetPageId":"existing-work-id","weight":0.6,"kind":"excitatory"}
+```
+
+Response `201`: `{connection, pulse}`. `weight` is finite and in `[0,1]`;
+`kind` is `excitatory` (default) or `inhibitory`. The endpoints must be distinct
+contexts of the same continuing subject. These computational connections are
+separate from navigation references. They act only on results settled after
+the connection was created; no prior conversation is replayed.
+
+`DELETE /api/pulse/connections` accepts
+`{"sourcePageId":"home","targetPageId":"existing-work-id"}` and returns
+`{removed:boolean, pulse}`. Deleting or changing an edge cancels its queued
+deliveries, including an unsent fused pulse that contains that edge. Running
+and settled turns retain their original causal evidence.
+
+Background computation is opt-in through `per-pulse --pulse`; it requires a
+configured provider. The budget counts native background admissions over a
+rolling hour, including failed or cancelled admissions. It is not a token or
+currency limit. Restart does not refill it. Foreground user requests bypass
+the background budget and local inhibition. Disabled pulse mode holds queued
+background deliveries for a later enabled run.
+
+Propagated result messages have `role:"system"`, `activation:"propagation"`,
+and the exact source page/message. Multiple sources can converge into one
+target turn while retaining separate source rows. See [pulse-core.md](pulse-core.md)
+for the causal, restart, inhibition, and convergence contracts.
 
 ## Errors
 

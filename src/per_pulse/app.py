@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
@@ -21,7 +21,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pulse_system.service.runtime import ServiceError
 
 from . import __version__
-from .service import PageError, PageService, _ENV_PROVIDER
+from .service import PageError, PageService, PulseSettings, _ENV_PROVIDER
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
 Content = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32_000)]
@@ -62,6 +62,16 @@ class Rename(Input):
     title: Title
 
 
+class ConnectionPages(Input):
+    sourcePageId: Identifier
+    targetPageId: Identifier
+
+
+class ContextConnectionInput(ConnectionPages):
+    weight: float = Field(default=0.6, ge=0, le=1, allow_inf_nan=False)
+    kind: Literal["excitatory", "inhibitory"] = "excitatory"
+
+
 def _error(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
@@ -80,11 +90,12 @@ def create_app(
     example: bool = False,
     web_dir: str | Path | None = None,
     model_factory: Any = _ENV_PROVIDER,
+    pulse: PulseSettings | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         pages = await asyncio.to_thread(
-            PageService, data_dir, example=example, model_factory=model_factory,
+            PageService, data_dir, example=example, model_factory=model_factory, pulse=pulse,
         )
         app.state.pages = pages
         try:
@@ -149,6 +160,18 @@ def create_app(
     @app.get("/api/bootstrap")
     def bootstrap(request: Request):
         return pages(request).bootstrap()
+
+    @app.get("/api/pulse")
+    def pulse_status(request: Request):
+        return pages(request).pulse_status()
+
+    @app.post("/api/pulse/connections", status_code=201)
+    def connect_contexts(body: ContextConnectionInput, request: Request):
+        return pages(request).connect_pages(body.sourcePageId, body.targetPageId, body.weight, body.kind)
+
+    @app.delete("/api/pulse/connections")
+    def disconnect_contexts(body: ConnectionPages, request: Request):
+        return pages(request).disconnect_pages(body.sourcePageId, body.targetPageId)
 
     @app.get("/api/pages/{page_id}")
     def page(page_id: str, request: Request):

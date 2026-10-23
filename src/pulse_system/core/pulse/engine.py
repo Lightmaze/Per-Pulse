@@ -309,6 +309,7 @@ class PulseEngine:
         scheduler: "DurableCenterScheduler | None" = None,
         runtime_fence: RuntimeFence | None = None,
         execution_context: Callable[[PulseEvent], str] | None = None,
+        admission_filter: Callable[[PulseEvent, datetime], bool] | None = None,
     ):
         self._storage = storage
         self._engram_mgr = engram_manager
@@ -316,6 +317,26 @@ class PulseEngine:
         self._dendrite = dendrite
         self._runtime = runtime
         self._config = config or PulseEngineConfig()
+        # Reject invalid dynamics before loading/publishing state or starting
+        # worker pools. Zero cadence is useful for explicitly driven tests;
+        # the coordinator sleep and decay half-life must remain positive.
+        from .inhibition_state import positive_number
+        for name in (
+            "propagation_threshold", "spontaneous_check_interval",
+            "decay_interval", "base_spontaneous_rate",
+            "inhibition_propagation_gate",
+        ):
+            positive_number(getattr(self._config, name), name, zero=True)
+        for name in ("tick_interval", "activity_halflife_seconds", "activity_window_seconds"):
+            positive_number(getattr(self._config, name), name)
+        for name in ("budget_per_tick", "max_pulse_retries"):
+            value = getattr(self._config, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        for name in ("succession_token_threshold", "topology_interval_ticks"):
+            value = getattr(self._config, name)
+            if value is not None and (type(value) is not int or value < 1):
+                raise ValueError(f"{name} must be a positive integer or None")
         self._metrics = metrics
         # This ledger is the source of truth.  ``_pending_events`` is
         # only rebuilt as a priority/parallelism cache from QUEUED rows.
@@ -362,6 +383,13 @@ class PulseEngine:
         # in. The callback returns a stable, non-content lane such as Home or
         # one Work ActivityCenter.
         self._execution_context = execution_context
+        if admission_filter is not None and not callable(admission_filter):
+            raise ValueError("admission_filter must be callable or null")
+        # A pure runtime-owned predicate may hold background opportunities for
+        # a local refractory/inhibition window. It does not spend a budget or
+        # claim a turn: rejected candidates remain durable and are reconsidered
+        # on the next coordinator observation.
+        self._admission_filter = admission_filter
         # Runtime-owned engines receive one permit-bearing lifecycle fence.
         # A reservation may confirm owner/epoch, but it must never be used to
         # reconstruct a weaker fence that drops the revocable publication
@@ -1396,7 +1424,11 @@ class PulseEngine:
                 active, total, self._spontaneous_modifier,
             )
         else:
-            self._spontaneous_modifier = max(1.0, self._spontaneous_modifier * 0.95)
+            # Relax toward neutrality from either side. A normal observation
+            # must not instantly erase earlier suppression of a hot field.
+            self._spontaneous_modifier = 1.0 + 0.95 * (
+                self._spontaneous_modifier - 1.0
+            )
 
         return results
 
@@ -1447,6 +1479,14 @@ class PulseEngine:
         excluded_keys = excluded_execution_keys or set()
         gate = self._config.inhibition_propagation_gate
 
+        def context_is_admitted(event: PulseEvent) -> bool:
+            if self._admission_filter is None:
+                return True
+            admitted = self._admission_filter(event, now)
+            if type(admitted) is not bool:
+                raise TypeError("admission_filter must return a bool")
+            return admitted
+
         def propagation_is_gated(event: PulseEvent) -> bool:
             if gate <= 0 or event.reason is not PulseReason.PROPAGATION:
                 return False
@@ -1467,6 +1507,9 @@ class PulseEngine:
             for event in self._pending_events:
                 execution_key = self._execution_key(event)
                 if event.engram_id in excluded or execution_key in excluded_keys:
+                    deferred.append(event)
+                    continue
+                if not context_is_admitted(event):
                     deferred.append(event)
                     continue
                 # Propagation rejected by the inhibition gate is dropped from
@@ -1493,6 +1536,8 @@ class PulseEngine:
                 event.engram_id in excluded
                 or self._execution_key(event) in excluded_keys
             ):
+                continue
+            if not context_is_admitted(event):
                 continue
             if propagation_is_gated(event):
                 gated_objects.add(id(event))
@@ -1726,7 +1771,7 @@ class PulseEngine:
         aggregate_ids: set[str] = set()
         for window in ready_windows:
             grouped: dict[
-                tuple[str | None, str],
+                tuple[str | None, str, bool],
                 list[tuple[CausalEvent, str]],
             ] = {}
             for event_id in window.event_ids:
@@ -1740,7 +1785,8 @@ class PulseEngine:
                     continue
                 delivery_class, source_identity = signature
                 grouped.setdefault(
-                    (event.center_id, delivery_class),
+                    (event.center_id, delivery_class,
+                     event.metadata.get("context_connection_id") is not None),
                     [],
                 ).append((event, source_identity))
 
@@ -3024,14 +3070,14 @@ class PulseEngine:
         """
         source_depth = self._pulse_depth.get(source_id, 0)
         max_depth = self._config.max_content_propagation_depth
-        if max_depth is not None and source_depth >= max_depth:
+        content_fenced = max_depth is not None and source_depth >= max_depth
+        if content_fenced:
             self._record(
                 "propagation_depth_fenced",
                 source=source_id,
                 depth=source_depth,
                 maximum=max_depth,
             )
-            return
 
         # claustrum spectrum stream: the source's propagation threshold is modulated
         # per-engram (factor 1.0 without a claustrum). A factor >1 raises the
@@ -3073,6 +3119,10 @@ class PulseEngine:
                 self._add_inhibition(conn.to_id, conn.weight, now)
                 inhibitory.append(conn.to_id)
                 continue
+            if content_fenced:
+                # A CONTENT hop limit bounds diffusion without disabling
+                # lateral inhibition from the very activation being bounded.
+                continue
             if self._causal_ledger is not None:
                 if (
                     source_event is None
@@ -3109,7 +3159,7 @@ class PulseEngine:
                     self._incoming_depth.get(conn.to_id, 0), source_depth + 1
                 )
             excitatory.append(conn.to_id)
-        if targets:
+        if excitatory or inhibitory:
             self._record(
                 "propagate",
                 source=source_id,
