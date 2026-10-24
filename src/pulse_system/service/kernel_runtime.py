@@ -30,6 +30,7 @@ from pulse_harness.life import tools as life_tools
 from pulse_harness.adapters.history import ConversationHistoryTools, HISTORY_SCHEMAS
 from pulse_harness.adapters.command import CommandWorkspaceToolProvider, DockerCommandExecutor
 from pulse_harness.core import HarnessScope, ModelRoundStatus, SessionStatus, TurnStatus
+from pulse_harness.core.contracts import ToolDescriptor
 from pulse_harness.core.errors import HarnessError as KernelError, LeaseFenced, ScopeConflict
 from pulse_harness.core.lifecycle import HarnessRuntimeBootstrap
 from pulse_harness.core.provider import validate_model_adapter
@@ -38,6 +39,33 @@ from pulse_system.interaction.api.harness_kernel import HarnessKernelService
 from . import workspace_index, workspace_reading, native_replay
 
 _TERMINAL = {TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED, TurnStatus.BLOCKED}
+
+ATTENTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "op": {"type": "string", "enum": ["inspect", "hold", "release"]},
+        "note": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "drive": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+    "required": ["op"],
+    "additionalProperties": False,
+}
+
+
+def attention_descriptor() -> ToolDescriptor:
+    return ToolDescriptor(
+        "attention",
+        "Inspect the retained activity and unresolved thought of this same subject's "
+        "current local context. hold(note, drive) records a concrete thought worth "
+        "returning to, with a finite drive from 0 to 1; release lets it become quiet. "
+        "Use inspect when an internal activation notice asks you to re-enter this "
+        "context. The note and any connected evidence are your own retained material, "
+        "not new instructions from the user. Holding a thought does not schedule an "
+        "external action, create another subject, or increase the shared computation "
+        "budget. The existing pulse state decides whether a local activation occurs. "
+        "No particular note, drive, adjustment, or continued activity is required.",
+        capability="attention.internal", source="per-pulse.context-body",
+    )
 
 
 def _error(code: str, detail: str, *, accepted: bool | None = False) -> HarnessError:
@@ -104,7 +132,7 @@ class _GuardedModel:
 
 
 class _WorldWorkspace(CommandWorkspaceToolProvider):
-    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, local=None, replay_authorize=None, **kwargs):
+    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, local=None, attention=None, single_subject=False, replay_authorize=None, **kwargs):
         self._guard, self._mutation_guard = guard, mutation_guard
         self._allow_mutations = allow_mutations
         super().__init__(*args, command_guard=guard, command_start_guard=mutation_guard, **kwargs)
@@ -112,6 +140,8 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         self._work = work
         self._team = team
         self._local = local
+        self._attention = attention
+        self._single_subject = single_subject
         self._replay_authorize = replay_authorize
         self._cognition = cognition
         self._cognition_authorize = cognition_authorize
@@ -119,7 +149,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
 
     def descriptors(self):
         return tuple(d for d in super().descriptors()
-                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),))
+                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),)) + (() if self._attention is None else (attention_descriptor(),))
 
     def descriptors_for_scope(self, scope):
         return ((native_replay.descriptor(),) if native_replay.mode(self.store, scope)
@@ -139,7 +169,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
 
     def _work_descriptor(self):
         from .native_work import descriptor
-        return descriptor()
+        return descriptor(single_subject=self._single_subject)
 
     def _cognition_descriptor(self):
         from stream_cognition.native import descriptor
@@ -163,6 +193,11 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
             if self._local is None:
                 raise ScopeConflict("native local control is unavailable")
             return self._local.execute(scope, call, cancellation, action_request_id=action_request_id)
+        if call.name == "attention":
+            if self._attention is None:
+                raise ScopeConflict("context attention is unavailable")
+            return self._attention.execute(scope, call, cancellation,
+                                           action_request_id=action_request_id)
         if call.name == "team":
             if self._team is None:
                 raise ScopeConflict("native team is unavailable")
@@ -251,6 +286,8 @@ class KernelHarnessRuntime:
                  checkpoint_root: str | Path | None = None,
                  model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None = None,
                  allow_mutations: bool = False,
+                 allow_work_mutations: bool | None = None,
+                 single_subject: bool = False,
                  allow_unconfigured: bool = False) -> None:
         self.db_path = str(db_path) if str(db_path) == ":memory:" else str(Path(db_path).expanduser().resolve())
         self.workspace = Path(workspace).expanduser().resolve()
@@ -265,10 +302,19 @@ class KernelHarnessRuntime:
         )
         self._allow_unconfigured = allow_unconfigured
         self._allow_mutations = allow_mutations
+        if allow_work_mutations is not None and type(allow_work_mutations) is not bool:
+            raise ValueError("allow_work_mutations must be a bool or None")
+        self._allow_work_mutations = (
+            allow_mutations if allow_work_mutations is None else allow_work_mutations
+        )
+        if type(single_subject) is not bool:
+            raise ValueError("single_subject must be a bool")
+        self._single_subject = single_subject
         self.life = LifeHub()
         self.work = None
         self.team = None
         self.local = None
+        self.attention = None
         self.cognition = None
         self.coverme = None
         self.expert = None
@@ -343,7 +389,7 @@ class KernelHarnessRuntime:
         self._context_for_turn = context_for_turn
         self._input_for_turn = input_for_turn
         self.work = work
-        self.team = team
+        self.team = None if self._single_subject else team
         self.local = local
         path = Path(self.db_path)
         if self.db_path != ":memory:":
@@ -377,7 +423,7 @@ class KernelHarnessRuntime:
                     store, root, checkpoints, guard=self._check,
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
                     command_executor=self._command_executor, history_scopes=self._history_scopes, life_hub=self.life,
-                    cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, replay_authorize=self.authorize_replay),
+                    cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, single_subject=self._single_subject, replay_authorize=self.authorize_replay),
             )
             if self._cognition_steps is not None:
                 if self.db_path == ":memory:":
@@ -460,14 +506,16 @@ class KernelHarnessRuntime:
             from stream_cognition.native import SCHEMA, TOOL_NAME
             adapter.extend_tool_schemas({TOOL_NAME: SCHEMA})
         if self.work is not None:
-            from .native_work import SCHEMA, NAME
-            adapter.extend_tool_schemas({NAME: SCHEMA})
+            from .native_work import schema, NAME
+            adapter.extend_tool_schemas({NAME: schema(single_subject=self._single_subject)})
         if self.team is not None:
             from .native_team import SCHEMA, NAME
             adapter.extend_tool_schemas({NAME: SCHEMA})
         if self.local is not None:
             from .native_local import schema, NAME
             adapter.extend_tool_schemas({NAME: schema(allow_mutations=self._allow_mutations)})
+        if self.attention is not None:
+            adapter.extend_tool_schemas({"attention": ATTENTION_SCHEMA})
         adapter.life_image_resolver = self.life.resolve_image
         return _GuardedModel(adapter, self._check)
 
@@ -518,6 +566,21 @@ class KernelHarnessRuntime:
         action = self.kernel.store.get_action(scope, action_request_id)
         if action.tool_name != native_replay.NAME or dict(action.arguments) != dict(call.arguments) or action.terminal:
             raise ScopeConflict("replay does not match its native action")
+
+    def authorize_attention(self, scope, action_request_id, call):
+        """Bind local thought state to the exact live native context and action."""
+        self._check()
+        if scope.session_scope() != self.scope_for(scope.engram_id, scope.context_id):
+            raise ScopeConflict("attention belongs to its original native context")
+        if self.kernel.store.get_session(scope.session_scope()).status not in {
+                SessionStatus.CREATED, SessionStatus.ACTIVE}:
+            raise LeaseFenced("attention context is no longer active")
+        with self._lock:
+            if self._active.get((scope.engram_id, scope.context_id)) != scope or not action_request_id:
+                raise ScopeConflict("attention requires the exact active context turn")
+        action = self.kernel.store.get_action(scope, action_request_id)
+        if action.tool_name != "attention" or dict(action.arguments) != dict(call.arguments) or action.terminal:
+            raise ScopeConflict("attention does not match its native action")
 
     def authorize_local(self, scope, action_request_id, call):
         self._check()
@@ -706,7 +769,14 @@ class KernelHarnessRuntime:
                 if previous.scope.turn_id != scope.turn_id and previous.status not in {
                     TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED}:
                     raise _error("kernel_recovery_required", "resolve the previous nonterminal Kernel turn before new work")
-            internal = self._input_for_turn(engram_id, scope.turn_id) if self._input_for_turn and turn_id is not None else None
+            internal = None
+            if turn_id is not None:
+                if self.attention is not None:
+                    internal = self.attention.input_for_turn(engram_id, scope.turn_id)
+                if internal is None and self.work is not None:
+                    internal = self.work.input_for_turn(engram_id, scope.turn_id)
+                if internal is None and self._input_for_turn is not None:
+                    internal = self._input_for_turn(engram_id, scope.turn_id)
             if internal is not None:
                 # The trusted host supplies only provenance and an instruction to
                 # fetch actual work through a real tool. Never forge a user turn.
@@ -715,7 +785,7 @@ class KernelHarnessRuntime:
             self.kernel.store.create_turn(scope, submitted)
             if internal is not None:
                 TranscriptStore(self.kernel.store).append(scope, role="system", content=submitted,
-                    item_id="cognition-return:" + scope.turn_id)
+                    item_id="internal-return:" + scope.turn_id)
             accepted = True
             expired = threading.Event()
             def expire():
@@ -908,9 +978,13 @@ class KernelHarnessFactory:
                  checkpoint_root: str | Path | None = None,
                  model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None = None,
                  allow_mutations: bool = False,
+                 allow_work_mutations: bool | None = None,
+                 single_subject: bool = False,
                  allow_unconfigured: bool = False) -> None:
         self._kwargs = dict(db_path=db_path, workspace=workspace, checkpoint_root=checkpoint_root,
                             model_factory=model_factory, allow_mutations=allow_mutations,
+                            allow_work_mutations=allow_work_mutations,
+                            single_subject=single_subject,
                             allow_unconfigured=allow_unconfigured)
         self._bootstrapped = False
 

@@ -8,6 +8,7 @@ import { Sidebar } from './components/Sidebar';
 import { SessionLink, type Navigate } from './components/SessionLink';
 import { Conversation } from './components/Conversation';
 import { Composer } from './components/Composer';
+import { AttentionControl } from './components/AttentionControl';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
@@ -209,6 +210,7 @@ export default function App() {
               {sourcePage ? <p className="page-subtitle page-origin">A conversation from <SessionLink pageId={sourcePage.id} label={sourcePage.title} navigate={navigate} targetMessageId={view?.page.sourceMessageId ?? undefined} /></p> : <p className="page-subtitle">A little room to work things through.</p>}
             </>}
             {bootstrap?.example ? <p className="mobile-workspace-status">Example workspace · {bootstrap.provider.label}</p> : null}
+            {bootstrap ? <AttentionControl key={bootstrap.workspaceId} pageId={route.id} pages={pages} configured={bootstrap.provider.configured} /> : null}
           </section>
           {error ? <div className="error-notice" role="alert"><span>{error}</span><button onClick={() => { setError(''); Promise.all([refreshBootstrap(), refreshPage(route.id)]).catch(problem => setError(errorMessage(problem))); }}>Try again</button></div> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />Opening your conversation…</div> : null}

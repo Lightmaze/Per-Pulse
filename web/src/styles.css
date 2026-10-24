@@ -213,3 +213,12 @@ button, a, input, textarea { outline-offset: 4px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+/* Local continuation controls share the conversation's existing visual tone. */
+.attention-control { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 16px; font-size: 13px; }
+.attention-status { color: var(--text-muted, #858178); font-size: 12px; }
+.attention-control select { display: block; width: 100%; border: 1px solid #dedbd4; background: #fffdf8; border-radius: 8px; padding: 10px 12px; font: inherit; color: inherit; }
+.attention-release, .attention-link { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; align-items: center; }
+.attention-links { margin-top: 24px; padding-top: 18px; border-top: 1px solid #e8e5df; }
+.attention-links summary { cursor: pointer; font-weight: 500; }
+.attention-links > button { margin-top: 14px; }
+.attention-links .attention-link { font-size: 13px; }

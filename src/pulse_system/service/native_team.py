@@ -204,6 +204,8 @@ class NativeTeam:
         r = self.runtime
         h = r.harness
         h._check()
+        if h._single_subject:
+            raise ScopeConflict('this profile keeps one subject and does not admit team operations')
         if scope.session_scope() != h.scope_for(scope.engram_id, scope.context_id):
             raise ScopeConflict('team caller is not a native context')
         if h.kernel.store.get_session(scope.session_scope()).status not in {SessionStatus.CREATED, SessionStatus.ACTIVE}:
@@ -386,6 +388,11 @@ class NativeTeam:
         r = self.runtime
         with self._lock:
             r._require_runtime_owner()
+            if r.harness._single_subject:
+                # A saved multi-subject world may contain prepared requests.
+                # This profile retains them without creating or dispatching
+                # participants through its otherwise hidden team surface.
+                return
             for rec in r.storage.native_team_requests(pending=True, limit=64):
                 scope = HarnessScope.from_dict(rec['source_scope'])
                 source = r.causal_ledger.get_turn_for_world(rec['source_turn_id'], r.world_id)

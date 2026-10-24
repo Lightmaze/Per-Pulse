@@ -1,4 +1,4 @@
-import type { Bootstrap, DraftReference, PageReference, PageSummary, PageView } from './types';
+import type { Bootstrap, DraftReference, PageReference, PageSummary, PageView, PulseState } from './types';
 
 export class ApiError extends Error {
   constructor(message: string, public readonly code: string, public readonly status: number) {
@@ -29,6 +29,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 const pagePath = (id: string) => `/pages/${encodeURIComponent(id)}`;
 
 export const api = {
+  pulse: (signal?: AbortSignal) => request<PulseState>('/pulse', { signal }),
+  holdThought: (id: string, note: string, drive: number) => request<PulseState>(`${pagePath(id)}/attention`, { method: 'PATCH', body: JSON.stringify({ note, drive }) }),
+  runPulses: (maxPulses: number) => request<PulseState>('/pulse/run', { method: 'POST', body: JSON.stringify({ maxPulses }) }),
+  pausePulses: () => request<PulseState>('/pulse/pause', { method: 'POST', body: '{}' }),
+  connectAttention: (sourcePageId: string, targetPageId: string, weight: number) => request<PulseState>('/pulse/connections', { method: 'POST', body: JSON.stringify({ sourcePageId, targetPageId, weight }) }),
   bootstrap: (signal?: AbortSignal) => request<Bootstrap>('/bootstrap', { signal }),
   page: (id: string, signal?: AbortSignal) => request<PageView>(pagePath(id), { signal }),
   createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null }) =>

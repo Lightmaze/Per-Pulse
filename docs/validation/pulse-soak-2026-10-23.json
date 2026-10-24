@@ -1,0 +1,228 @@
+{
+  "durationSeconds": 720.0,
+  "worldTicks": 6871,
+  "localActivations": 30,
+  "settledResults": 33,
+  "httpFixtureRequests": 99,
+  "quietSecondsAfterExhaustion": 499.84,
+  "contexts": 3,
+  "transport": "httpx.MockTransport; no external model",
+  "snapshots": [
+    {
+      "elapsed": 3.2,
+      "ticks": 30,
+      "requests": 9,
+      "pulses": 0,
+      "results": 3,
+      "remaining": 30,
+      "threads": 8
+    },
+    {
+      "elapsed": 33.3,
+      "ticks": 320,
+      "requests": 18,
+      "pulses": 3,
+      "results": 6,
+      "remaining": 27,
+      "threads": 8
+    },
+    {
+      "elapsed": 63.4,
+      "ticks": 603,
+      "requests": 33,
+      "pulses": 9,
+      "results": 9,
+      "remaining": 21,
+      "threads": 11
+    },
+    {
+      "elapsed": 93.4,
+      "ticks": 887,
+      "requests": 45,
+      "pulses": 12,
+      "results": 15,
+      "remaining": 18,
+      "threads": 8
+    },
+    {
+      "elapsed": 123.5,
+      "ticks": 1173,
+      "requests": 54,
+      "pulses": 18,
+      "results": 18,
+      "remaining": 12,
+      "threads": 8
+    },
+    {
+      "elapsed": 153.9,
+      "ticks": 1453,
+      "requests": 72,
+      "pulses": 21,
+      "results": 24,
+      "remaining": 9,
+      "threads": 8
+    },
+    {
+      "elapsed": 184.1,
+      "ticks": 1731,
+      "requests": 81,
+      "pulses": 24,
+      "results": 27,
+      "remaining": 6,
+      "threads": 8
+    },
+    {
+      "elapsed": 214.2,
+      "ticks": 2012,
+      "requests": 96,
+      "pulses": 30,
+      "results": 30,
+      "remaining": 0,
+      "threads": 11
+    },
+    {
+      "elapsed": 244.2,
+      "ticks": 2297,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 274.3,
+      "ticks": 2587,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 304.3,
+      "ticks": 2877,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 334.4,
+      "ticks": 3164,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 364.4,
+      "ticks": 3454,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 394.5,
+      "ticks": 3744,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 424.6,
+      "ticks": 4034,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 454.6,
+      "ticks": 4325,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 484.7,
+      "ticks": 4614,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 514.8,
+      "ticks": 4904,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 544.8,
+      "ticks": 5191,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 574.9,
+      "ticks": 5478,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 605.0,
+      "ticks": 5768,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 635.0,
+      "ticks": 6055,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 665.1,
+      "ticks": 6344,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    },
+    {
+      "elapsed": 695.2,
+      "ticks": 6632,
+      "requests": 99,
+      "pulses": 30,
+      "results": 33,
+      "remaining": 0,
+      "threads": 8
+    }
+  ]
+}
