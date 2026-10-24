@@ -49,6 +49,7 @@ type PageView = {
   breadcrumbs: { id: string; title: string }[];
   provider: ProviderState;
   hasMore: boolean;
+  attention: AttentionState | null;
 };
 type Bootstrap = {
   name: "Per Pulse";
@@ -58,6 +59,34 @@ type Bootstrap = {
   homeId: "home";
   provider: ProviderState;
   pages: PageSummary[];
+  pulse: PulseState;
+};
+type AttentionState = {
+  pageId: string;
+  title: string;
+  available: boolean;
+  note: string;
+  drive: number;
+  excitation: number;
+  inhibition: number;
+  readiness: number;
+  revision: number;
+  pulseCount: number;
+  resultCount: number;
+  lastPulseAt: string | null;
+  pendingEventId: string | null;
+  lastResultId: string | null;
+  evidence: { eventId: string; pageId: string }[];
+};
+type PulseState = {
+  enabled: boolean;
+  remaining: number;
+  configured: boolean;
+  contexts: AttentionState[];
+  connections: { sourcePageId: string; targetPageId: string; weight: number }[];
+  sequence: number;
+  derivedCount: number;
+  lastAdvancedAt: string;
 };
 ```
 
@@ -120,6 +149,22 @@ Response `201`: `{messageId:string, reference:PageReference, view:PageView}`. `v
 ## Rename
 
 `PATCH /api/pages/{id}` with `{"title":"New title"}` -> `PageView` (Work only).
+
+## Local attention and continuation
+
+All attention writes return `PulseState`. Unknown fields are rejected. Numeric inputs must be finite numbers, not strings or booleans.
+
+| Endpoint | JSON body | Effect |
+| --- | --- | --- |
+| `GET /api/pulse` | None | Read retained fields, connections, and remaining allowance without advancing them. |
+| `PATCH /api/pages/{id}/attention` | `{"note":"Explore the unresolved tradeoff.","drive":1}` | Retain a thought of 1–4096 characters; drive is in `[0,1]`. Drive `0` lets it rest while retaining the note. Cancels that page's queued local activation. |
+| `POST /api/pulse/run` | `{"maxPulses":6}` | Replace the remaining shared allowance with 1–100 continuation turns; default is 6. Requires a configured model outside example mode. |
+| `POST /api/pulse/pause` | `{}` | Set remaining allowance to zero and cancel queued local activations and their admitted native Work descendants. Running turns may finish. |
+| `POST /api/pulse/connections` | `{"sourcePageId":"home","targetPageId":"work-id","weight":1}` | Upsert a directed connection between two available, distinct pages. Weight is in `[-1,1]`; zero removes the connection. Maximum 256 connections. |
+
+The allowance counts native continuation admissions, including derived Work starts and reports, rather than HTTP requests or tokens. Ordinary user requests are not charged to it. A prepared native Work request without allowance stays deferred until an explicit new allowance permits delivery. Admission and debit are atomic; retries cannot charge the same request twice.
+
+Restart retains field state and pauses the allowance. Polling does not run a model. Saving a thought and editing connections work disconnected; `run` returns `409 provider_unconfigured`. Navigation references do not automatically become attention connections.
 
 ## Errors
 

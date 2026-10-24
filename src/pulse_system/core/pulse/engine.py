@@ -285,6 +285,13 @@ class PulseEngineConfig:
     # never changes event volume implicitly. RuntimeService enables a bounded
     # cadence explicitly.
     connectivity_interval_ticks: int | None = None
+    # A completed local pulse temporarily reduces its own spontaneous
+    # opportunities. The anchor is the existing durable last_pulse_at; a
+    # process restart cannot clear the refractory period. Explicit external
+    # input and admitted content deliveries remain available during it.
+    # This is Engram-scoped; shared-subject page contexts should leave it at
+    # zero and express their own local refractory state at their context seam.
+    spontaneous_refractory_seconds: float = 0.0
 
 
 class PulseEngine:
@@ -370,6 +377,11 @@ class PulseEngine:
 
         from .inhibition_state import InhibitionState, positive_number
         positive_number(self._config.inhibition_tau, "inhibition tau")
+        positive_number(
+            self._config.spontaneous_refractory_seconds,
+            "spontaneous refractory seconds",
+            zero=True,
+        )
         self._inhibition_state = InhibitionState(
             storage, world_id=world_id, ledger=causal_ledger, fence=runtime_fence)
         # Restore before starting worker pools. This is numeric state, not an
@@ -1647,6 +1659,7 @@ class PulseEngine:
             return active_ids, blocked_ids, dendrite_ids
 
         queued = self._causal_ledger.list_events(
+            world_id=self._world_id,
             status=CausalEventStatus.QUEUED,
             limit=500,
         )
@@ -1680,6 +1693,7 @@ class PulseEngine:
             # roots. Rebuild from SQLite immediately so this same tick can
             # schedule the already-closed window without a second wait.
             queued = self._causal_ledger.list_events(
+                world_id=self._world_id,
                 status=CausalEventStatus.QUEUED,
                 limit=500,
             )
@@ -3024,14 +3038,14 @@ class PulseEngine:
         """
         source_depth = self._pulse_depth.get(source_id, 0)
         max_depth = self._config.max_content_propagation_depth
-        if max_depth is not None and source_depth >= max_depth:
+        content_depth_fenced = max_depth is not None and source_depth >= max_depth
+        if content_depth_fenced:
             self._record(
                 "propagation_depth_fenced",
                 source=source_id,
                 depth=source_depth,
                 maximum=max_depth,
             )
-            return
 
         # claustrum spectrum stream: the source's propagation threshold is modulated
         # per-engram (factor 1.0 without a claustrum). A factor >1 raises the
@@ -3072,6 +3086,11 @@ class PulseEngine:
             if conn.conn_type == ConnectionType.INHIBITORY:
                 self._add_inhibition(conn.to_id, conn.weight, now)
                 inhibitory.append(conn.to_id)
+                continue
+            if content_depth_fenced:
+                # The CONTENT ceiling bounds text diffusion. Numeric
+                # inhibition remains an independent local state effect, so
+                # reaching that ceiling cannot silently remove damping.
                 continue
             if self._causal_ledger is not None:
                 if (
@@ -3226,6 +3245,11 @@ class PulseEngine:
         Based on self_excitability, recent_activity, connection density,
         and the engram's current inhibition level.
         """
+        now = _now()
+        if engram.last_pulse_at is not None:
+            elapsed = max(0.0, (now - engram.last_pulse_at).total_seconds())
+            if elapsed < self._config.spontaneous_refractory_seconds:
+                return 0.0
         conn_count = self._storage.count_connections(engram_id)
         conn_factor = min(1.0, conn_count / 10.0)
 
@@ -3243,7 +3267,7 @@ class PulseEngine:
                     "spontaneous_factor must return a finite non-negative number"
                 )
             prob *= factor
-        inhibition = self._inhibition_level(engram_id, _now())
+        inhibition = self._inhibition_level(engram_id, now)
         if inhibition > 0:
             prob *= 1.0 / (1.0 + inhibition)
         # Spectrum modulation (Claustrum modulator) composes multiplicatively with inhibition

@@ -56,6 +56,25 @@ export type Bootstrap = {
   homeId: 'home';
   provider: ProviderState;
   pages: PageSummary[];
+  pulse?: PulseState;
+};
+
+export type AttentionState = {
+  pageId: string;
+  title: string;
+  note: string;
+  drive: number;
+  pulseCount: number;
+  resultCount: number;
+  lastPulseAt: string | null;
+};
+
+export type PulseState = {
+  enabled: boolean;
+  remaining: number;
+  configured: boolean;
+  contexts: AttentionState[];
+  connections: { sourcePageId: string; targetPageId: string; weight: number }[];
 };
 
 export type DraftReference = { targetPageId: string; label: string };

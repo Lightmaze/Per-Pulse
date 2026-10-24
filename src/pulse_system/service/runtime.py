@@ -12096,6 +12096,12 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             # already found by its stable next-engagement key; it never
             # creates an event, changes its status, or replays uncertainty.
             self._repair_living_orientation_engagements()
+            # A product may attach page-local activation fields. They offer
+            # durable events to this same Engine; they own no model loop or
+            # session store, and advance only while this Runtime is alive.
+            context_body = getattr(self, "context_body", None)
+            if context_body is not None:
+                context_body.advance()
             try:
                 result = self._engine.tick()
             except RuntimeLeaseError as exc:

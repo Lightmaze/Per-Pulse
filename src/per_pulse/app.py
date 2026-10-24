@@ -22,6 +22,7 @@ from pulse_system.service.runtime import ServiceError
 
 from . import __version__
 from .service import PageError, PageService, _ENV_PROVIDER
+from .context_body import ContextBodyError
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
 Content = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32_000)]
@@ -60,6 +61,21 @@ class ReturnHome(Input):
 
 class Rename(Input):
     title: Title
+
+
+class AttentionInput(Input):
+    note: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4096)]
+    drive: float = Field(ge=0, le=1, allow_inf_nan=False, strict=True)
+
+
+class PulseRun(Input):
+    maxPulses: int = Field(default=6, ge=1, le=100, strict=True)
+
+
+class AttentionConnection(Input):
+    sourcePageId: Identifier
+    targetPageId: Identifier
+    weight: float = Field(ge=-1, le=1, allow_inf_nan=False, strict=True)
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
@@ -126,6 +142,10 @@ def create_app(
     async def page_error(_request: Request, error: PageError):
         return _error(error.code, error.message, error.status)
 
+    @app.exception_handler(ContextBodyError)
+    async def attention_error(_request: Request, error: ContextBodyError):
+        return _error(error.code, error.message, error.status)
+
     @app.exception_handler(ServiceError)
     async def service_error(_request: Request, error: ServiceError):
         return _error(error.error, error.detail, error.status)
@@ -149,6 +169,26 @@ def create_app(
     @app.get("/api/bootstrap")
     def bootstrap(request: Request):
         return pages(request).bootstrap()
+
+    @app.get("/api/pulse")
+    def pulse(request: Request):
+        return pages(request).context_body.view()
+
+    @app.post("/api/pulse/run")
+    def run_pulses(body: PulseRun, request: Request):
+        return pages(request).context_body.run(body.maxPulses)
+
+    @app.post("/api/pulse/pause")
+    def pause_pulses(body: Input, request: Request):
+        return pages(request).context_body.pause()
+
+    @app.patch("/api/pages/{page_id}/attention")
+    def hold_thought(page_id: str, body: AttentionInput, request: Request):
+        return pages(request).context_body.hold(page_id, body.note, body.drive)
+
+    @app.post("/api/pulse/connections")
+    def attention_connection(body: AttentionConnection, request: Request):
+        return pages(request).context_body.connect(body.sourcePageId, body.targetPageId, body.weight)
 
     @app.get("/api/pages/{page_id}")
     def page(page_id: str, request: Request):

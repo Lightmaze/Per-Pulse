@@ -15,6 +15,8 @@ This first release provides an English interface, a local Python service, and a 
 - Continue in the linked page and return to the source while retaining your unsent draft and reading position.
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
+- Retain an unfinished thought in a page and give it a bounded allowance to continue.
+- Connect pages with directed attention or settling effects while preserving each result's source.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
 
 The server stores pages, messages, and references in the existing Pulse persistence layer. Browser storage holds only local drafts and navigation positions, scoped to the persistent workspace and page. When no model is configured, the interface says **AI disconnected** and saves messages as queued input. It never substitutes a scripted answer for a model response.
@@ -67,6 +69,16 @@ If neither endpoint nor model is set, the workspace runs disconnected. Setting o
 
 Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. These describe adapter capabilities; compatibility with a specific remote model must be verified separately.
 
+### Let a thought continue
+
+Open **Keep thinking** on Home or a session page. Save an unfinished thought, choose a background allowance, then select **Continue thinking**. A live, page-local attention field can admit a continuation through the same World, Pulse Engine, and Kernel used by ordinary conversation. Home and Work remain contexts of one subject.
+
+The allowance is shared across pages and counts admitted continuation turns, including Work requests and reports derived from those turns. One turn can make several provider requests, so this is not a token or spending limit. Ordinary user messages have their own normal path. Starting another allowance replaces the remaining allowance; it does not add to it.
+
+**Pause** cancels queued background work; an already-running turn may finish. Restarting the server preserves thoughts, field state, and connections but pauses the allowance. There is no simulated thinking while the server is stopped. **Save thought** also works disconnected; example mode never runs a model.
+
+Under **Connect this thought**, a result in one page can draw another page's attention or help it settle. These directed connections are distinct from navigation links. Positive connections expose bounded, attributed evidence through a tool; they do not copy the other page's conversation or turn generated text into a human instruction.
+
 ## Develop
 
 Run the backend in one terminal:
@@ -104,13 +116,13 @@ Build the client before building a wheel. The wheel includes the compiled client
 
 Page IDs are native Work IDs, and message IDs are native causal-event IDs. Reference metadata lives in the same World's component state. Creating or following a reference does not copy another page's history or start an additional agent. Bringing text Home is an explicit user contribution with provenance; the source page remains open.
 
-See [the API contract](docs/api.md) and [source lineage](docs/source-lineage.md).
+See [the API contract](docs/api.md), [the local activation core](docs/pulse-core.md), and [source lineage](docs/source-lineage.md).
 
 ## Current scope
 
 This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The page view shows the latest 500 messages; older events remain in the durable store. The first UI does not expose the inherited runtime's full operational or approval console.
 
-The runtime is configured with workspace mutation disabled in this entry point. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality.
+Filesystem mutation remains disabled in this entry point. The same subject can use native internal Work and attention tools; team creation and dispatch are disabled. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality.
 
 ## License
 

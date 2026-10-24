@@ -23,6 +23,8 @@ from pulse_system.service.kernel_runtime import KernelHarnessFactory
 from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
 
 from . import __version__
+from .context_body import ContextBody
+from .provenance import project_origin
 
 MAX_MESSAGES = 500
 _ENV_PROVIDER = object()
@@ -83,6 +85,8 @@ class PageService:
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
             model_factory=factory, allow_unconfigured=True, allow_mutations=False,
+            allow_work_mutations=True,
+            single_subject=True,
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
         self._state_key = f"per-pulse-pages-v1:{self.runtime.world_id}"
@@ -100,6 +104,9 @@ class PageService:
                 "Use a separate data directory for the example workspace.", 409,
             )
         self.example = example
+        self.context_body = ContextBody(self.runtime, configured=self.configured, example=example)
+        self.runtime.context_body = self.context_body
+        self.runtime.harness.attention = self.context_body
         if example and not self._state.get("exampleSeeded"):
             self._seed_example()
 
@@ -207,6 +214,7 @@ class PageService:
                 "name": "Per Pulse", "version": __version__, "example": self.example,
                 "workspaceId": self.runtime.world_id,
                 "homeId": "home", "provider": self.provider, "pages": pages,
+                "pulse": self.context_body.view(),
             }
 
     def view(self, page_id: str) -> dict:
@@ -217,6 +225,9 @@ class PageService:
             refs = [dict(r) for r in self._state["references"] if r["sourcePageId"] == page_id]
             messages = []
             for row in rows:
+                overrides = project_origin(self.runtime, row)
+                if overrides is None:
+                    continue
                 origin = self._state["messageOrigins"].get(row["event_id"], {})
                 messages.append({
                     "id": row["event_id"], "role": row["role"], "content": row["content"],
@@ -224,6 +235,7 @@ class PageService:
                     "sourcePageId": origin.get("pageId"),
                     "sourceMessageId": origin.get("messageId"),
                     "references": [r for r in refs if r["sourceMessageId"] == row["event_id"]],
+                    **overrides,
                 })
             crumbs, seen, cursor = [], set(), page_id
             while cursor and cursor not in seen:
@@ -239,6 +251,8 @@ class PageService:
                 "backlinks": [dict(r) for r in self._state["references"] if r["targetPageId"] == page_id],
                 "breadcrumbs": list(reversed(crumbs)), "provider": self.provider,
                 "hasMore": has_more,
+                "attention": next((context for context in self.context_body.view()["contexts"]
+                                   if context["pageId"] == page_id), None),
             }
 
     def _reference(self, source: str, target: str, message_id: str | None,
