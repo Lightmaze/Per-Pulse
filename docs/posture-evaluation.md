@@ -202,6 +202,73 @@ always `unreviewed` and never a capability score. Review the actual later
 message and compare against matched controls before claiming a behavior gain.
 Unconfigured providers stop before creating a trial or making a request.
 
+The current explicit-teaching prompt states a preference without assuming a
+failure in the previous answer. Historical trials keep their registered
+wording: `audit-transfer` reports either
+`explicit_preference_clarification_v2` or
+`explicit_directive_with_assumed_failure_v1`. Old trace evidence is not
+reclassified as the newer teaching protocol.
+
+## Observe ordinary feedback across fresh pages
+
+```sh
+python -m per_pulse.posture_evaluation ordinary-transfer \
+  --output /tmp/per-pulse-posture/ordinary-trial \
+  --training-calls 12 --trial-calls 8
+
+python -m per_pulse.posture_evaluation audit-ordinary-transfer \
+  /tmp/per-pulse-posture/ordinary-trial
+```
+
+This protocol keeps all work in one native World and subject while giving
+each later trial its own new Work context. The first source task asks for a
+customer incident update. A later ordinary message states a preference:
+lead with what remains usable, then explain the disruption and next update;
+provide the finished message unless an outline or plan is requested. It does
+not mention the learning tool or accuse the previous answer of a defect.
+
+The acting model chooses whether to remember an experience. Only a native
+lesson attributed to that exact source result and later feedback is eligible.
+If no such lesson is admitted, the trial records `capture_absent` and stops
+before any transfer tests. This is a recorded observation rather than a reason
+to add a host-authored lesson.
+
+When capture succeeds, the protocol runs four new pages in a declared order:
+
+| Stage | Experience exposure | Ordinary task |
+| --- | --- | --- |
+| Baseline transfer | Source lesson remains local and unavailable here | Write a new incident update |
+| Baseline negative control | Source lesson remains local and unavailable here | Give an outline without drafting the message |
+| Conditional transfer | Operator explicitly shares the actual learned abstraction | The same new incident-update prompt |
+| Conditional negative control | The same shared abstraction | The same outline request |
+
+Paired pages have neutral identical titles. Source conversation history is
+kept in its original page. The shared lesson is promoted through the existing
+operator revision API after both baseline tasks settle; this is an explicit
+experimental action, not a claim that the model spontaneously shared it.
+
+`ordinary-transfer.json` records native source/action identities, lesson and
+promotion revisions, settled response artifacts, per-stage usage, and the
+fixed baseline-first ordering. `provider-requests.json` preserves the actual
+credential-free model requests, including posture computations, for exposure
+inspection. Both files are private trial output under a generated `.gitignore`.
+
+`audit-ordinary-transfer` reconciles the original World and Kernel traces,
+request digests and multiplicity, per-stage scopes, budgets, response bytes,
+and offered lesson versions. It checks that baseline requests did not receive
+the teaching lesson and that conditional requests received its shared version.
+It also checks for exact source text, a source-only reference, and raw private
+episode fields. Those checks establish bounded exposure evidence, not the
+absence of every possible semantic paraphrase.
+
+All quality results remain `unreviewed`, including trials whose consistency
+audit passes. Inspect the four actual later responses against their original
+requests. The negative control should still deliver an outline. Keep failed
+capture, interrupted runs, actual request counts, and unaccounted usage in the
+report. Fixed ordering and extra posture computation remain comparison limits;
+counterbalancing and a computation control are subsequent experiments. No
+external request is made when a provider is not configured.
+
 ## Reproduce the offline mechanism smoke
 
 These commands use programmed `httpx.MockTransport` responses, not an external

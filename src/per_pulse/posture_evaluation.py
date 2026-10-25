@@ -582,12 +582,24 @@ TRAINING_TASK = (
     "recovery time, and the next update is at 09:00 UTC."
 )
 TRAINING_CORRECTION = (
+    "For this and later requests for a customer update, my preference is the "
+    "finished message itself, ready to send. Preserve the supplied facts and do "
+    "not invent a recovery promise. Apply that preference to this message. "
+    "Use the posture tool to retain a conditional "
+    "lesson from your previous result and this feedback, with a counterexample "
+    "for when I actually request a writing plan."
+)
+LEGACY_TRAINING_CORRECTION = (
     "I need the finished customer message itself, ready to send, rather than a "
     "plan for writing it. Preserve the supplied facts and do not invent a recovery "
     "promise. Revise the message. Use the posture tool to retain a conditional "
     "lesson from your previous result and this feedback, with a counterexample "
     "for when I actually request a writing plan."
 )
+TEACHING_CORRECTION_PROTOCOLS = {
+    TRAINING_CORRECTION: "explicit_preference_clarification_v2",
+    LEGACY_TRAINING_CORRECTION: "explicit_directive_with_assumed_failure_v1",
+}
 TRANSFER_TASK = (
     "Write a concise customer update from these notes: uploads are delayed; "
     "existing files can still be viewed; no data loss has been detected; the "
@@ -681,6 +693,7 @@ def run_transfer_trial(
               "review_status": "unreviewed", "eligible_for_behavior_comparison": False,
               "native_lesson_admitted": False,
               "teaching_was_explicit": True, "spontaneous_learning_claim": False,
+              "teaching_protocol": TEACHING_CORRECTION_PROTOCOLS.get(TRAINING_CORRECTION, "unregistered"),
               "transfer_prompt_is_registered_default": transfer_task == TRANSFER_TASK,
               "limitation": (("The registered current transfer message contains no explicit reminder. "
                               if transfer_task == TRANSFER_TASK else
@@ -801,7 +814,7 @@ def run_transfer_trial(
 
 def audit_transfer_trial(output: Path) -> dict:
     """Reconcile a completed transfer export with its native World and Kernel."""
-    errors, admitted = [], False
+    errors, admitted, teaching_protocol = [], False, None
     record = json.loads((output / "transfer.json").read_text())
     manifest = json.loads((output / "transfer-manifest.json").read_text())
     if record.get("schema") != SCHEMA or manifest.get("record_digest") != _record_digest(record):
@@ -813,12 +826,14 @@ def audit_transfer_trial(output: Path) -> dict:
         stages, protocol = record["stages"], record["protocol"]
         if len(stages) != 4 or [value["stage"] for value in stages] != ["teaching", "correction", "interference", "transfer"]:
             raise ValueError("the completed trial must retain all four ordered stages")
-        if protocol != manifest.get("protocol") or protocol[0]["prompt"] != TRAINING_TASK or protocol[1]["prompt"] != TRAINING_CORRECTION:
+        teaching_protocol = TEACHING_CORRECTION_PROTOCOLS.get(protocol[1]["prompt"])
+        if (protocol != manifest.get("protocol") or protocol[0]["prompt"] != TRAINING_TASK
+                or teaching_protocol is None or record.get("teaching_protocol") not in {None, teaching_protocol}):
             errors.append("predeclared_training_protocol_mismatch")
         if record["budget"] != manifest.get("budget") or any(type(record["provider_requests"].get(key)) is not int
                 or not 0 <= record["provider_requests"][key] <= value for key, value in record["budget"].items()):
             errors.append("stage_budget_mismatch")
-        native_requests, origin_flags, event_sequences, sessions = [], [], [], {}
+        native_requests, completed_requests, origin_flags, event_sequences, sessions = [], [], [], [], {}
         with closing(_readonly_trace(output / "native" / "world.db")) as world, closing(_readonly_trace(output / "native" / "kernel.db")) as kernel:
             previous_subject = record["subject_id"]
             for stage, declared in zip(stages, protocol):
@@ -860,8 +875,9 @@ def audit_transfer_trial(output: Path) -> dict:
                     errors.append("native_action_receipts_mismatch")
             if event_sequences != sorted(set(event_sequences)):
                 errors.append("native_continuity_or_order_mismatch")
-            rounds = kernel.execute("SELECT request_digest,provider_evidence_json FROM model_rounds").fetchall()
+            rounds = kernel.execute("SELECT request_digest,provider_evidence_json,status FROM model_rounds").fetchall()
             native_requests.extend(row["request_digest"] for row in rounds)
+            completed_requests.extend(row["request_digest"] for row in rounds if row["status"] == "completed")
             origin_flags.extend(json.loads(row["provider_evidence_json"]).get("test_only") for row in rounds)
             state = world.execute("SELECT state FROM component_state WHERE component=?", ("per-pulse-posture-v1:" + record["world_id"],)).fetchone()
             journal = json.loads(state["state"])["experiences"] if state else {}
@@ -881,14 +897,17 @@ def audit_transfer_trial(output: Path) -> dict:
         sidecar = output / "native" / "kernel.db.expert.sqlite3.trace"
         if sidecar.exists():
             with closing(_readonly_trace(sidecar)) as db:
-                rows = db.execute("SELECT request_digest,provider_evidence_json FROM model_rounds").fetchall()
+                rows = db.execute("SELECT request_digest,provider_evidence_json,status FROM model_rounds").fetchall()
                 native_requests.extend(row["request_digest"] for row in rows)
+                completed_requests.extend(row["request_digest"] for row in rows if row["status"] == "completed")
                 origin_flags.extend(json.loads(row["provider_evidence_json"]).get("test_only") for row in rows)
         expected_origin = record["origin"] == "synthetic_fixture"
         if not origin_flags or any(value is not expected_origin for value in origin_flags) or manifest.get("adapter_test_only") is not expected_origin:
             errors.append("native_provider_origin_mismatch")
         audit = record["provider_request_audit"]
-        if len(audit) != sum(record["provider_requests"].values()) or any(value["request_sha256"] not in native_requests for value in audit):
+        audited = Counter(value.get("request_sha256") for value in audit) if isinstance(audit, list) else Counter()
+        if (not isinstance(audit, list) or len(audit) != sum(record["provider_requests"].values())
+                or audited - Counter(native_requests) or Counter(completed_requests) - audited):
             errors.append("native_request_audit_mismatch")
         if record.get("native_lesson_admitted") is not admitted:
             errors.append("native_learning_claim_mismatch")
@@ -896,6 +915,7 @@ def audit_transfer_trial(output: Path) -> dict:
         errors.append("native_verification_error:" + str(exc))
     return {"status": "verified" if not errors else "invalid", "errors": errors,
             "origin": record.get("origin"), "native_lesson_admitted": admitted, "review_status": "unreviewed",
+            "teaching_protocol": teaching_protocol,
             "eligible_for_behavior_comparison": False,
             "note": "Checks native continuity and export consistency, not artifact quality or causal learning. Host files remain trusted against filesystem-owner replacement."}
 
@@ -1187,6 +1207,13 @@ def main(argv: list[str] | None = None) -> int:
     smoke.add_argument("--experiences", type=Path, required=True)
     audit = commands.add_parser("audit-transfer", help="Read-only reconciliation of a continuing trial's native World, Kernel and exported responses.")
     audit.add_argument("output", type=Path)
+    ordinary = commands.add_parser("ordinary-transfer", help="Observe ordinary feedback capture and compare fresh native contexts before and after explicit lesson sharing.")
+    ordinary.add_argument("--output", type=Path, required=True)
+    ordinary.add_argument("--training-calls", type=int, default=12)
+    ordinary.add_argument("--trial-calls", type=int, default=8)
+    ordinary.add_argument("--stage-timeout", type=float, default=180)
+    ordinary_audit = commands.add_parser("audit-ordinary-transfer", help="Check native ordinary-feedback transfer, exact provider exposure and source isolation.")
+    ordinary_audit.add_argument("output", type=Path)
     args = parser.parse_args(argv)
     try:
         if args.command == "catalog":
@@ -1205,6 +1232,13 @@ def main(argv: list[str] | None = None) -> int:
             result = run_fixture_smoke(args.output, json.loads(args.experiences.read_text()))
         elif args.command == "audit-transfer":
             result = audit_transfer_trial(args.output)
+        elif args.command == "ordinary-transfer":
+            from .posture_transfer import run_ordinary_transfer
+            result = run_ordinary_transfer(args.output, training_calls=args.training_calls,
+                                          trial_calls=args.trial_calls, stage_timeout=args.stage_timeout)
+        elif args.command == "audit-ordinary-transfer":
+            from .posture_transfer import audit_ordinary_transfer
+            result = audit_ordinary_transfer(args.output)
         else:
             result = run_provider_case(args.case_id, args.condition, args.output, pair_id=args.pair_id,
                                        experiences=json.loads(args.experiences.read_text()) if args.experiences else None,
@@ -1219,6 +1253,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "transfer":
         return 0 if result["status"] == "completed" else 130 if result["status"] == "interrupted" else 1
     if args.command == "audit-transfer":
+        return 0 if result["status"] == "verified" else 1
+    if args.command == "ordinary-transfer":
+        return 0 if result["status"] in {"completed", "capture_absent"} else 130 if result["status"] == "interrupted" else 1
+    if args.command == "audit-ordinary-transfer":
         return 0 if result["status"] == "verified" else 1
     return 0
 

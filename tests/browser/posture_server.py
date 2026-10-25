@@ -16,6 +16,11 @@ from per_pulse.app import create_app
 from per_pulse.service import PageService
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 
+REVISION_FEEDBACK = (
+    "When a practice session needs an existing booking, confirm that booking before starting. "
+    "Keep optional profile questions after the first interaction."
+)
+
 
 def response(text=None, arguments=None):
     delta = {"content": text} if arguments is None else {"tool_calls": [{
@@ -38,6 +43,29 @@ def handler(request):
     if "WORK_MATERIAL_JSON" in json.dumps(messages):
         return response("PASS")
     current = max(index for index, message in enumerate(messages) if message["role"] == "user")
+    if REVISION_FEEDBACK in str(messages[current]["content"]):
+        results = [message for message in messages[current + 1:] if message["role"] == "tool"]
+        if not results:
+            return response(arguments={"op": "list"})
+        outcome = json.loads(results[-1]["content"])
+        if outcome["status"] != "succeeded":
+            return response("The revision browser fixture encountered a failed tool action.")
+        if len(results) > 1:
+            return response("I refined the existing lesson: required booking checks come first. [Explicit browser test fixture]")
+        record = outcome["output"]["experiences"][0]
+        feedback = next(item for item in reversed(outcome["output"]["recent_sources"]) if item["source"] == "user")
+        return response(arguments={
+            "op": "revise", "experience_id": record["id"], "expected_revision": record["revision"],
+            "feedback_message_id": feedback["message_id"],
+            "changes": {
+                "lesson": "Offer the practice interaction before optional setup, after any required booking check.",
+                "conditions": {"all": ["An exploratory practice experience is requested", {
+                    "not": "A required booking check must happen before participation",
+                }]},
+                "counterexamples": ["Confirm a required booking before participation.",
+                                    "A standard registration task needs a concise form."],
+            },
+        })
     if "Let me try the interaction before asking for a profile." not in str(messages[current]["content"]):
         return response("The first screen is a twelve-field intake form. [Explicit browser test fixture]")
     results = [message for message in messages[current + 1:] if message["role"] == "tool"]
