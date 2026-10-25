@@ -72,6 +72,10 @@ class ContextConnectionInput(ConnectionPages):
     kind: Literal["excitatory", "inhibitory"] = "excitatory"
 
 
+class PulseControlInput(Input):
+    paused: bool = Field(strict=True)
+
+
 def _error(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
@@ -164,6 +168,10 @@ def create_app(
     @app.get("/api/pulse")
     def pulse_status(request: Request):
         return pages(request).pulse_status()
+
+    @app.patch("/api/pulse")
+    def set_pulse_paused(body: PulseControlInput, request: Request):
+        return pages(request).set_pulse_paused(body.paused)
 
     @app.post("/api/pulse/connections", status_code=201)
     def connect_contexts(body: ContextConnectionInput, request: Request):

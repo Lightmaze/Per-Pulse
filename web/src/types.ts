@@ -87,6 +87,7 @@ export type PulseActivation = {
 
 export type PulseState = {
   enabled: boolean;
+  paused: boolean;
   running: boolean;
   providerConfigured: boolean;
   budget: { limit: number; used: number; remaining: number; windowSeconds: number; unit: string };

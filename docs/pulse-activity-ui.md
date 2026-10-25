@@ -49,3 +49,20 @@ cross-context evidence -> correction changes a later action -> an approved
 real tool effect and verifiable source-linked artifact -> return to the
 original reading position. This dialog supports inspection/control of one
 edge in that experience, but does not complete the entire scenario.
+
+## Native operator hold (next stacked increment)
+
+`PATCH /api/pulse` persists an operator pause on the **same**
+ContextPulseController. The Activity dialog shows the actual held state
+and provides Pause background / Resume background if Pulse mode is on.
+This is an admission gate, not process shutdown or a new scheduler.
+
+Both durable result cursors and queued causal events remain intact.
+Already-running turns can settle; their results begin cross-context
+influence only after release. The one-hour admission quota is neither
+reset nor replaced. The native test verifies foreground input during a
+hold, restart while held, one-time source-attributed delivery and quota.
+
+This is **global operator pause**, not PR #6's complete per-page
+attention inspect / hold / release tool. That still requires exact
+action settlement, user correction precedence and controller reuse.
