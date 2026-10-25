@@ -86,3 +86,26 @@ retained-thought store or Keep thinking activation. Model-originated changes
 must still be applied only after the original action and turn settle,
 must respect later user corrections, and must not introduce a second
 controller or authority. Monetary admission remains with Core Harness.
+
+
+## Reliable operator control while Activity is polling
+
+Activity periodically reads the authoritative native Pulse status. A GET may
+have started before an operator clicks Pause, Hold or Connect and only return
+*after* the PATCH/POST/DELETE response. Rendering that old GET would show the
+old control state even though the native write succeeded. Out-of-order GETs can
+also replace a newer Activity snapshot.
+
+The client now fences reads by a local request generation and accepts only
+the newest GET issued outside a pending mutation. The mutation response
+remains the visible authoritative state; duplicate commands are blocked
+before the next React render. When a mutation response is lost, the UI says
+the outcome is **unconfirmed** and re-reads the server after releasing the
+write fence. It does not invent a rollback, re-send a potentially committed
+operation, or create a second Pulse authority.
+
+The Node regression for request ordering covers stale polling across an
+operator write, overlapping GETs, duplicate clicks, and reading again after
+an uncertain response. Native persistence, browser interaction and actual
+model usefulness remain separate checks; this regression exercises only
+the client-side ordering rule.
