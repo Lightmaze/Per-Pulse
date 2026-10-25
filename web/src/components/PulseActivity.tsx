@@ -55,7 +55,7 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
       setPulse(result.pulse);
       setTarget('');
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'The connection could not be changed.');
+      setError(problem instanceof Error ? problem.message : 'The change could not be applied.');
     } finally {
       setBusy(false);
     }
@@ -84,8 +84,12 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
         <div className="pulse-activity-heading">
           <h3>Background activity</h3>
           <button className="text-button" type="button" onClick={() => void reload()}>Refresh</button>
+          <button className="text-button" type="button" disabled={busy || !pulse.enabled}
+            onClick={() => void act(() => api.setPulsePaused(!pulse.paused))}>
+            {pulse.paused ? 'Resume background' : 'Pause background'}
+          </button>
         </div>
-        <p className="pulse-activity-summary" role="status">{pulse.running ? 'Continuing' : pulse.enabled ? 'Enabled · not running' : 'Not enabled'} · {pulse.queue.queued} queued · {pulse.queue.running} running</p>
+        <p className="pulse-activity-summary" role="status">{pulse.paused && pulse.enabled ? 'Paused · pending influence retained' : pulse.running ? 'Continuing' : pulse.enabled ? 'Enabled · not running' : 'Not enabled'} · {pulse.queue.queued} queued · {pulse.queue.running} running</p>
         <p className="pulse-activity-detail">{pulse.budget.remaining} of {pulse.budget.limit} background admissions left in the rolling hour. This is a turn count, not a model token or money limit.</p>
         {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">Oldest queued: {eventTime(pulse.queue.oldestQueuedAt)}</p> : null}
         {!pulse.providerConfigured ? <p className="pulse-activity-detail">A model is not connected; no background response is generated.</p> : null}
