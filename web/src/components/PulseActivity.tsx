@@ -75,6 +75,7 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
 
   const edges = pulse?.connections.filter(edge => edge.sourcePageId === pageId) ?? [];
   const recent = pulse?.recentActivations ?? [];
+  const thisPageHeld = pulse?.heldContexts.some(held => held.pageId === pageId) ?? false;
 
   return <Dialog title="Activity" onClose={() => { if (!busy) onClose(); }} className="pulse-activity-dialog">
     <p className="dialog-description">Local activity and connections in this continuing workspace. These are native records, not a separate agent or a replay of another page.</p>
@@ -89,6 +90,17 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
             {pulse.paused ? 'Resume background' : 'Pause background'}
           </button>
         </div>
+        <div className="pulse-activity-heading">
+          <h3>Current page</h3>
+          <button className="text-button" type="button" disabled={busy || !pulse.enabled}
+            onClick={() => void act(() => api.setPulseContextPaused(pageId, !thisPageHeld))}>
+            {thisPageHeld ? 'Resume this page' : 'Hold this page'}
+          </button>
+        </div>
+        <p className="pulse-activity-detail">
+          {thisPageHeld ? 'This page is held: incoming influence waits, but you can still write here.' :
+            'Holding this page stops new local background turns without pausing other pages.'}
+        </p>
         <p className="pulse-activity-summary" role="status">{pulse.paused && pulse.enabled ? 'Paused · pending influence retained' : pulse.running ? 'Continuing' : pulse.enabled ? 'Enabled · not running' : 'Not enabled'} · {pulse.queue.queued} queued · {pulse.queue.running} running</p>
         <p className="pulse-activity-detail">{pulse.budget.remaining} of {pulse.budget.limit} background admissions left in the rolling hour. This is a turn count, not a model token or money limit.</p>
         {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">Oldest queued: {eventTime(pulse.queue.oldestQueuedAt)}</p> : null}
