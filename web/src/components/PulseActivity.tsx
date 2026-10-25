@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { PulseActivityRequestGate } from '../pulseActivityRequestGate';
 import type { PageSummary, PulseState } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
@@ -26,19 +27,27 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
   const [busy, setBusy] = useState(false);
   const [target, setTarget] = useState('');
   const [kind, setKind] = useState<'excitatory' | 'inhibitory'>('excitatory');
+  const gate = useRef(new PulseActivityRequestGate()).current;
   const options: PageOption[] = [{ id: 'home', title: 'Home' }, ...pages
     .filter(page => page.id !== 'home').map(page => ({ id: page.id, title: page.title }))];
   const validIds = new Set(options.map(page => page.id));
   const availableTargets = options.filter(page => page.id !== pageId);
 
-  const reload = useCallback(async (signal?: AbortSignal) => {
+  const reload = useCallback(async (signal?: AbortSignal, preserveError = false) => {
+    const ticket = gate.beginRead();
+    if (!ticket) return; // A PATCH owns the visible state until it settles.
     try {
       const status = await api.pulse(signal);
-      if (!signal?.aborted) { setPulse(status); setError(''); }
+      if (!signal?.aborted && gate.acceptsRead(ticket)) {
+        setPulse(status);
+        if (!preserveError) setError('');
+      }
     } catch (problem) {
-      if (!signal?.aborted) setError(problem instanceof Error ? problem.message : 'Could not read activity.');
+      if (!signal?.aborted && gate.acceptsRead(ticket) && !preserveError) {
+        setError(problem instanceof Error ? problem.message : 'Could not read activity.');
+      }
     }
-  }, []);
+  }, [gate]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -48,16 +57,24 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
   }, [reload]);
 
   const act = async (call: () => Promise<{ pulse: PulseState }>) => {
+    if (!gate.beginWrite()) return; // Also prevent duplicate clicks before React rerenders.
     setBusy(true);
     setError('');
+    let unconfirmed = false;
     try {
       const result = await call();
       setPulse(result.pulse);
       setTarget('');
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'The change could not be applied.');
+      // A network failure can hide an already-committed mutation. Re-read the
+      // native state rather than claiming it definitely failed or rolling back.
+      unconfirmed = true;
+      const detail = problem instanceof Error ? problem.message : 'The change could not be confirmed.';
+      setError(`Could not confirm the change. Refreshing activity. ${detail}`);
     } finally {
+      gate.finishWrite();
       setBusy(false);
+      if (unconfirmed) void reload(undefined, true);
     }
   };
 
