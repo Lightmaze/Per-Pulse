@@ -100,19 +100,35 @@ try {
   }
   await lesson.getByRole('button', { name: 'Go to correction', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  const initialLesson = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
+  const revisionFeedback = 'When a practice session needs an existing booking, confirm that booking before starting. Keep optional profile questions after the first interaction.';
+  await send(revisionFeedback, 3);
+  await wait(async () => {
+    const records = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences;
+    return records.length === 1 && records[0].id === initialLesson.id && records[0].revision === 2;
+  }, 'ordinary correction revises the original lesson');
   await openLessons();
+  await lesson.getByText('In use · v2', { exact: true }).waitFor();
+  await lesson.getByText('When it applies', { exact: true }).click();
+  await lesson.getByText('Confirm a required booking before participation.', { exact: true }).waitFor();
+  await lesson.getByText('Source experience', { exact: true }).click();
+  assert.match(await lesson.innerText(), /twelve-field intake form/);
+  await lesson.getByText('Later feedback (1)', { exact: true }).click();
+  await lesson.getByText(revisionFeedback, { exact: false }).waitFor();
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-revised.png') });
   await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).click();
-  await lesson.getByText('Paused · v2', { exact: true }).waitFor();
+  await lesson.getByText('Paused · v3', { exact: true }).waitFor();
   await stopServer(server);
   server = startServer();
   await wait(async () => { try { return (await fetch(base + '/api/health')).ok; } catch { return false; } }, 'server restarted');
   await page.reload();
   await openLessons();
-  await lesson.getByText('Paused · v2', { exact: true }).waitFor();
+  await lesson.getByText('Paused · v3', { exact: true }).waitFor();
+  await lesson.getByText('Offer the practice interaction before optional setup, after any required booking check.', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
-  await lesson.getByText('In use · v3', { exact: true }).waitFor();
-  await lesson.getByRole('button', { name: 'Use in other pages', exact: true }).click();
   await lesson.getByText('In use · v4', { exact: true }).waitFor();
+  await lesson.getByRole('button', { name: 'Use in other pages', exact: true }).click();
+  await lesson.getByText('In use · v5', { exact: true }).waitFor();
   await close();
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Registration tool');
@@ -122,6 +138,8 @@ try {
   await openLessons();
   await lesson.getByRole('button', { name: 'Open source page to edit', exact: true }).waitFor();
   assert.equal(await lesson.getByText('Source experience', { exact: true }).count(), 0);
+  assert.equal(await lesson.getByText('Later feedback (1)', { exact: true }).count(), 0);
+  await lesson.getByText('Offer the practice interaction before optional setup, after any required booking check.', { exact: true }).waitFor();
   assert.equal(await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).count(), 0);
   await lesson.getByRole('button', { name: 'Open source page to edit', exact: true }).click();
   await openLessons();
@@ -130,20 +148,20 @@ try {
   await other.getByRole('button', { name: 'Settings', exact: true }).click();
   await other.getByRole('button', { name: 'View this page’s lessons', exact: true }).click();
   await other.getByRole('button', { name: 'Pause lesson', exact: true }).click();
-  await other.getByText('Paused · v5', { exact: true }).waitFor();
+  await other.getByText('Paused · v6', { exact: true }).waitFor();
   await other.close();
   await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).click();
   await page.getByRole('alert').getByText('This lesson changed. Refresh it before saving.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Refresh lessons', exact: true }).click();
-  await lesson.getByText('Paused · v5', { exact: true }).waitFor();
+  await lesson.getByText('Paused · v6', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
-  await lesson.getByText('In use · v6', { exact: true }).waitFor();
+  await lesson.getByText('In use · v7', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
   assert.equal(await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).isEnabled(), false);
   await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill('A preview delayed the requested registration task.');
   await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).click();
-  await lesson.getByText('Paused · v7', { exact: true }).waitFor();
-  await lesson.getByText('Later feedback (1)', { exact: true }).click();
+  await lesson.getByText('Paused · v8', { exact: true }).waitFor();
+  await lesson.getByText('Later feedback (2)', { exact: true }).click();
   assert.match(await lesson.innerText(), /A preview delayed/);
   await page.setViewportSize({ width: 390, height: 844 });
   const bounds = await page.getByRole('dialog').boundingBox();
@@ -242,7 +260,7 @@ try {
   }
   await page.unroute('**/api/pages/home*');
   assert.deepEqual(errors, []);
-  console.log('PASS: browser learning, background admission refresh, provenance, service restart, sharing boundaries, concurrent revision recovery, feedback, mobile dialog, Escape, older source navigation/reload/linking, and delayed-read navigation races. Explicit synthetic transport only.');
+  console.log('PASS: browser learning, ordinary correction of one existing lesson, retained original source, revised lesson after restart, sharing without raw revision feedback, background admission refresh, concurrent revision recovery, feedback, mobile dialog, Escape, older source navigation/reload/linking, and delayed-read navigation races. Explicit synthetic transport only.');
 } finally {
   await browser?.close();
   await stopServer(server);

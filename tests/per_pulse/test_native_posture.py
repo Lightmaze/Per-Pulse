@@ -615,3 +615,173 @@ def test_credential_bearing_source_never_enters_learning_journal(native):
     assert "synthetic-sensitive-value" not in str(error.value)
     assert native.tool._requests() == []
     assert native.memory.list_experiences(subject_id=native.scope.engram_id) == []
+
+
+def revision_turn(env, *, paused_and_shared=False):
+    created = remember(env)
+    settle(env)
+    env.tool.drain()
+    saved = env.memory.get_experience(created["experience_id"])
+    if paused_and_shared:
+        saved = env.memory.revise_experience(
+            saved["id"], expected_revision=saved["revision"], changes={"active": False, "scope": "subject"},
+        )
+    correction = "Keep the experience lesson for practice products. A fixed attendance register needs its concise form."
+    feedback_id = env.runtime.inject(env.scope.engram_id, correction)
+    current = env.runtime.causal_ledger.begin_turn(
+        feedback_id, env.scope.engram_id, correction,
+        execution_context="", runtime_fence=env.runtime._current_runtime_fence(),
+    )
+    env.current, env.scope = current, env.scope.for_turn(current.id)
+    values = {
+        "op": "revise", "experience_id": saved["id"], "expected_revision": saved["revision"],
+        "feedback_message_id": feedback_id,
+        "changes": {
+            "conditions": {"all": ["The user needs an immediate practice experience",
+                                    {"not": "Collecting fixed attendance records is the requested outcome"}]},
+            "counterexamples": ["Use a concise form for a fixed attendance register."],
+            "shift": {"understanding": "Separate practice from collecting standard records.",
+                      "candidates": "Keep the concise registration form when the records are the product.",
+                      "delivery": "Check the first practice action or the requested record, as applicable."},
+        },
+    }
+    env.states.arguments = values
+    return saved, values, correction
+
+
+@pytest.mark.parametrize("paused_and_shared", [False, True])
+def test_native_revision_preserves_identity_source_controls_and_attributes_correction(native, paused_and_shared):
+    before, values, correction = revision_turn(native, paused_and_shared=paused_and_shared)
+    staged = remember(native, values, action="refine-lesson")
+    assert staged["status"] == "prepared"
+    native.tool.drain()
+    assert native.memory.get_experience(before["id"]) == before
+    settle(native)
+    native.tool.drain()
+    after = native.memory.get_experience(before["id"])
+    assert after["id"] == before["id"]
+    assert after["revision"] == before["revision"] + 1
+    assert after["source"] == before["source"] and after["encounter"] == before["encounter"]
+    assert after["active"] == before["active"] and after["scope"] == before["scope"]
+    assert all(after[key] == value for key, value in values["changes"].items())
+    assert after["history"][-1]["conditions"] == before["conditions"]
+    feedback = after["feedback"][-1]
+    assert feedback["verdict"] == "revised" and feedback["revision"] == before["revision"]
+    assert feedback["evidence"] == correction
+    assert feedback["source"]["kind"] == "model_interpreted_user_revision"
+    assert feedback["source"]["feedback_message_id"] == values["feedback_message_id"]
+    assert feedback["source"]["source_action_id"] == "refine-lesson"
+    receipt = native.runtime.storage.load_component_state(staged["request_id"])
+    assert receipt["status"] == "revised" and receipt["revision"] == after["revision"]
+    native.tool.drain()
+    assert native.memory.get_experience(before["id"]) == after
+    if not paused_and_shared:
+        material = native.memory.materials(subject_id=native.scope.engram_id, context_id="")["episodes"][0]
+        assert material["conditions"] == values["changes"]["conditions"]
+        assert material["revision"] == after["revision"]
+        assert material["feedback"][-1]["source"] == feedback["source"]
+
+
+@pytest.mark.parametrize("changes", [
+    {}, {"active": True}, {"scope": "subject"}, {"encounter": {}}, {"source": {}},
+    {"counterexamples": []}, {"shift": {"delivery": "Incomplete shift"}},
+])
+def test_native_revision_rejects_invalid_or_operator_control_changes(changes):
+    with pytest.raises(ValueError):
+        validate({"op": "revise", "experience_id": "lesson", "expected_revision": 1,
+                  "feedback_message_id": "actual-message", "changes": changes})
+
+
+@pytest.mark.parametrize("field,value", [
+    ("turn", TurnStatus.CANCELLED), ("turn", TurnStatus.FAILED),
+    ("action", ActionStatus.FAILED), ("name", "another_tool"),
+])
+def test_native_revision_requires_successful_exact_action_and_turn(native, field, value):
+    before, values, _ = revision_turn(native)
+    staged = remember(native, values, action="unsuccessful-revision")
+    settle(native)
+    setattr(native.states, field, value)
+    native.tool.drain()
+    assert native.memory.get_experience(before["id"]) == before
+    assert native.runtime.storage.load_component_state(staged["request_id"])["status"] == "cancelled"
+
+
+@pytest.mark.parametrize("operator_changes", [{"active": False}, {"title": "The operator's later wording"}])
+def test_native_revision_never_overwrites_intervening_operator_change(native, operator_changes):
+    before, values, _ = revision_turn(native)
+    staged = remember(native, values, action="stale-revision")
+    operator = native.memory.revise_experience(
+        before["id"], expected_revision=before["revision"], changes=operator_changes,
+    )
+    settle(native)
+    native.tool.drain()
+    assert native.memory.get_experience(before["id"]) == operator
+    receipt = native.runtime.storage.load_component_state(staged["request_id"])
+    assert receipt["status"] == "blocked" and receipt["error_code"] == "experience_not_admitted"
+
+
+def test_native_revision_rejects_old_future_or_other_context_feedback(native):
+    before, values, _ = revision_turn(native)
+    future = native.runtime.inject(native.scope.engram_id, "A later user message is not visible yet.")
+    for identity in (native.feedback, native.original.id, future):
+        with pytest.raises(ScopeConflict, match="later actual user message"):
+            remember(native, {**values, "feedback_message_id": identity}, action="invalid-revision")
+    newer = native.memory.revise_experience(before["id"], expected_revision=1, changes={"title": "Later operator edit"})
+    with pytest.raises(ScopeConflict, match="later actual user message"):
+        remember(native, {**values, "expected_revision": newer["revision"]}, action="outdated-feedback")
+    # Even a refreshed revision number cannot turn a pre-edit message into
+    # new evidence against that operator edit.
+    assert native.memory.get_experience(before["id"]) == newer
+    foreign = native.memory.add_experience(
+        subject_id=native.scope.engram_id, context_id="work:other-page",
+        **{key: before[key] for key in (
+            "title", "lesson", "encounter", "conditions", "counterexamples", "shift", "source", "record_type",
+        )},
+    )
+    with pytest.raises(ScopeConflict, match="this context's own"):
+        remember(native, {**values, "experience_id": foreign["id"]}, action="foreign-lesson")
+    assert native.tool._requests(pending=True) == []
+
+
+def test_native_revision_recovers_receipt_crash_without_reapplying_over_later_edit(native, monkeypatch):
+    before, values, _ = revision_turn(native)
+    staged = remember(native, values, action="revision-before-crash")
+    assert remember(native, values, action="revision-before-crash") == staged
+    settle(native)
+    monkeypatch.setattr(native.tool, "_finish", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("revision receipt crash")))
+    with pytest.raises(RuntimeError, match="receipt crash"):
+        native.tool.drain()
+    applied = native.memory.get_experience(before["id"])
+    assert applied["revision"] == 2 and len(applied["feedback"]) == 1
+    operator = native.memory.revise_experience(before["id"], expected_revision=2, changes={"active": False})
+    recovered = NativePosture(native.runtime)
+    recovered.drain()
+    recovered.drain()
+    assert native.memory.get_experience(before["id"]) == operator
+    receipt = native.runtime.storage.load_component_state(staged["request_id"])
+    assert receipt["status"] == "revised" and receipt["revision"] == 2
+
+
+def test_native_revision_journal_capacity_failure_is_atomic(native, monkeypatch):
+    import pulse_system.service.posture as posture_module
+
+    before, values, _ = revision_turn(native)
+    staged = remember(native, values, action="revision-at-capacity")
+    settle(native)
+    monkeypatch.setattr(posture_module, "MAX_STATE_BYTES", 1)
+    native.tool.drain()
+    assert native.memory.get_experience(before["id"]) == before
+    receipt = native.runtime.storage.load_component_state(staged["request_id"])
+    assert receipt["status"] == "blocked" and receipt["error_code"] == "experience_not_admitted"
+
+
+def test_native_revision_staged_content_cannot_differ_from_actual_action(native):
+    before, values, _ = revision_turn(native)
+    staged = remember(native, values, action="revision-exact-arguments")
+    stored = native.runtime.storage.load_component_state(staged["request_id"])
+    stored["revision_update"]["changes"]["lesson"] = "A different unrequested lesson."
+    native.runtime.storage.save_component_state(staged["request_id"], stored)
+    settle(native)
+    native.tool.drain()
+    assert native.memory.get_experience(before["id"]) == before
+    assert native.runtime.storage.load_component_state(staged["request_id"])["error_code"] == "revision_identity_conflict"

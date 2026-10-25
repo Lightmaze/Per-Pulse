@@ -34,11 +34,13 @@ _REMEMBER_FIELDS = {
     "conditions", "counterexamples", "shift",
 }
 _FEEDBACK_FIELDS = {"experience_id", "expected_revision", "verdict", "feedback_message_id"}
+_REVISION_FIELDS = {"experience_id", "expected_revision", "feedback_message_id", "changes"}
+_REVISION_CONTENT = {"title", "lesson", "conditions", "counterexamples", "shift"}
 _NATIVE_VERDICTS = {"not_useful", "harmful", "withdrawn"}
 SCHEMA = {
     "type": "object",
     "properties": {
-        "op": {"type": "string", "enum": ["list", "remember", "feedback"]},
+        "op": {"type": "string", "enum": ["list", "remember", "feedback", "revise"]},
         "experience_id": {"type": "string", "maxLength": 160},
         "expected_revision": {"type": "integer", "minimum": 1},
         "verdict": {"type": "string", "enum": sorted(_NATIVE_VERDICTS)},
@@ -59,6 +61,11 @@ SCHEMA = {
         }, "required": ["understanding", "candidates", "delivery"], "additionalProperties": False},
     },
     "required": ["op"], "additionalProperties": False,
+}
+SCHEMA["properties"]["changes"] = {
+    "type": "object", "minProperties": 1,
+    "properties": {key: deepcopy(SCHEMA["properties"][key]) for key in sorted(_REVISION_CONTENT)},
+    "additionalProperties": False,
 }
 
 
@@ -84,6 +91,13 @@ def descriptor() -> ToolDescriptor:
         "limited failure, harmful for a damaging lesson, or withdrawn when the "
         "lesson should stop. harmful and withdrawn disable it. This tool cannot "
         "award useful feedback from your own assessment. "
+        "If a later correction refines a still-useful local lesson, use "
+        "revise(experience_id, expected_revision, feedback_message_id, changes). "
+        "Change only title, lesson, conditions, counterexamples, or shift; keep "
+        "the same experience and preserve its original encounter. The feedback "
+        "must be an actual user message after the lesson's latest revision. "
+        "The revision and its attributed correction are saved together only "
+        "after this turn succeeds. It cannot change sharing or resume a paused lesson. "
         "Finish the current work instead of polling the pending record. Saving is "
         "not evidence of improved ability. This tool cannot promote experiences "
         "to other contexts, grant tools, change permissions, or schedule new work.",
@@ -102,17 +116,36 @@ def validate(arguments: Mapping[str, Any]) -> dict:
     values = deepcopy(dict(arguments))
     if values == {"op": "list"}:
         return values
-    if values.get("op") == "feedback":
-        if set(values) != _FEEDBACK_FIELDS | {"op"}:
-            raise ValueError("incorrect posture feedback fields")
+    if values.get("op") in ("feedback", "revise"):
+        fields = _FEEDBACK_FIELDS if values["op"] == "feedback" else _REVISION_FIELDS
+        if set(values) != fields | {"op"}:
+            raise ValueError("incorrect posture update fields")
         for name in ("experience_id", "feedback_message_id"):
             value = values[name]
             if not isinstance(value, str) or not value.strip() or len(value) > 160 or "\x00" in value:
                 raise ValueError(f"invalid {name}")
         if type(values["expected_revision"]) is not int or values["expected_revision"] < 1:
             raise ValueError("expected_revision must be a positive integer")
-        if values["verdict"] not in _NATIVE_VERDICTS:
-            raise ValueError("native feedback cannot award positive usefulness")
+        if values["op"] == "feedback":
+            if not isinstance(values["verdict"], str) or values["verdict"] not in _NATIVE_VERDICTS:
+                raise ValueError("native feedback cannot award positive usefulness")
+        else:
+            changes = values["changes"]
+            if not isinstance(changes, dict) or not changes or set(changes) - _REVISION_CONTENT:
+                raise ValueError("native revision contains unsupported fields")
+            # Content fields have independent bounds. Validate partial changes
+            # with the same validator used for original experience admission.
+            content = {
+                "title": "Validation only.", "lesson": "Validation only.",
+                "conditions": "Validation only.", "counterexamples": ["Validation only."],
+                "shift": {key: "Validation only." for key in ("understanding", "candidates", "delivery")},
+            }
+            content.update(changes)
+            PostureMemory.validate_experience(
+                subject_id="validation", context_id="", encounter={
+                    "situation": "Validation only.", "action": "Validation only.", "outcome": "Validation only.",
+                }, source={"kind": "validation_only"}, **content,
+            )
         return values
     if values.get("op") != "remember" or set(values) != _REMEMBER_FIELDS | {"op"}:
         raise ValueError("unknown posture operation or fields")
@@ -281,28 +314,33 @@ class NativePosture:
                 "record_type": capture["record_type"],
                 **{key: values[key] for key in _REMEMBER_FIELDS - {"source_message_id", "feedback_message_id"}}}
 
-    def _capture_feedback(self, scope, values, turn, request_id, action_id) -> dict:
+    def _capture_followup(self, scope, values, turn, request_id, action_id) -> dict:
         r, memory = self.runtime, self._memory()
         record = memory.get_experience(values["experience_id"])
         if (not memory.owns_subject(scope.engram_id, record["subject_id"])
                 or record["context_id"] != scope.context_id):
-            raise ScopeConflict("feedback can change only this context's own experience")
+            raise ScopeConflict("a posture update can change only this context's own experience")
         if record["revision"] != values["expected_revision"]:
             raise ValueError("posture revision conflict; read the latest experience")
         event = r.causal_ledger.get_event(values["feedback_message_id"])
         trigger = r.causal_ledger.get_event(turn.event_id)
         lineage = r.causal_ledger.committed_history_lineage(scope.world_id, scope.engram_id)
+        revision = values["op"] == "revise"
+        # Refinement must follow the current version, so an older correction
+        # cannot be replayed over a newer operator edit after refreshing its ID.
+        after = record["updated_at"] if revision else record["created_at"]
         if (event is None or event.world_id != scope.world_id or event.engram_id not in lineage
                 or event.center_id != self._center(scope) or not event.content
                 or event.kind is not CausalEventKind.STIMULUS or event.source is not CausalEventSource.USER
                 or trigger is None or event.seq is None or trigger.seq is None or event.seq > trigger.seq
-                or event.created_at <= datetime.fromisoformat(record["created_at"])):
+                or event.created_at <= datetime.fromisoformat(after)):
             raise ScopeConflict("experience feedback requires a later actual user message in this context")
         evidence, redacted, truncated = _source_text(event.content, 6000)
         return {
             "experience_id": record["id"], "expected_revision": values["expected_revision"],
-            "verdict": values["verdict"], "evidence": evidence,
-            "source": {"kind": "model_interpreted_user_feedback", "world_id": scope.world_id,
+            "evidence": evidence,
+            "source": {"kind": ("model_interpreted_user_revision" if revision
+                                else "model_interpreted_user_feedback"), "world_id": scope.world_id,
                        "experience_record_type": record["record_type"],
                        "feedback_evidence_class": "attributed_user_stimulus_not_independently_verified",
                        "subject_id": scope.engram_id, "context_id": scope.context_id,
@@ -374,9 +412,15 @@ class NativePosture:
                 experience = self._capture(scope, values, turn, key, action_request_id)
                 memory.validate_experience(**experience)
                 payload = {"experience": experience, "experience_id": experience["experience_id"]}
-            else:
-                feedback = self._capture_feedback(scope, values, turn, key, action_request_id)
+            elif values["op"] == "feedback":
+                feedback = self._capture_followup(scope, values, turn, key, action_request_id)
+                feedback["verdict"] = values["verdict"]
                 payload = {"feedback": feedback, "experience_id": feedback["experience_id"]}
+            else:
+                revision = self._capture_followup(scope, values, turn, key, action_request_id)
+                revision["changes"] = deepcopy(values["changes"])
+                revision["source"]["changes_digest"] = _digest(values["changes"])
+                payload = {"revision_update": revision, "experience_id": revision["experience_id"]}
             record = {"version": 1, "request_id": key, "arguments": values,
                       "arguments_digest": _digest(values), "world_id": r.world_id,
                       "subject": scope.engram_id, "source_turn_id": scope.turn_id,
@@ -468,7 +512,35 @@ class NativePosture:
                     self._finish(record, "cancelled", "subject_inactive")
                     continue
                 try:
-                    if record["arguments"]["op"] == "feedback":
+                    if record["arguments"]["op"] == "revise":
+                        saved = memory.get_experience(record["experience_id"])
+                        update = record["revision_update"]
+                        if (update["experience_id"] != record["arguments"]["experience_id"]
+                                or update["expected_revision"] != record["arguments"]["expected_revision"]
+                                or update["changes"] != record["arguments"]["changes"]
+                                or update["source"].get("arguments_digest") != record["arguments_digest"]
+                                or update["source"].get("changes_digest") != _digest(update["changes"])):
+                            self._finish(record, "blocked", "revision_identity_conflict")
+                            continue
+                        prior = [entry for entry in saved["feedback"]
+                                 if entry["source"].get("native_request_id") == record["request_id"]]
+                        if prior:
+                            if (len(prior) != 1 or prior[0]["verdict"] != "revised"
+                                    or prior[0]["revision"] != update["expected_revision"]
+                                    or prior[0]["source"] != update["source"]
+                                    or prior[0]["evidence"] != update["evidence"]):
+                                self._finish(record, "blocked", "revision_identity_conflict")
+                                continue
+                        else:
+                            if (not memory.owns_subject(record["subject"], saved["subject_id"])
+                                    or saved["context_id"] != scope.context_id):
+                                self._finish(record, "blocked", "experience_scope_changed")
+                                continue
+                            memory.revise_from_feedback(**update)
+                        # The receipt belongs to this revision, even if an
+                        # operator edited the lesson after a receipt-write crash.
+                        self._finish(record, "revised", revision=update["expected_revision"] + 1)
+                    elif record["arguments"]["op"] == "feedback":
                         saved = memory.get_experience(record["experience_id"])
                         prior = [entry for entry in saved["feedback"]
                                  if entry["source"].get("native_request_id") == record["request_id"]]

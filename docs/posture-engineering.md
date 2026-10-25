@@ -1,5 +1,7 @@
 # Posture engineering
 
+Current continuation plan: [ordinary correction, refinement, and transfer](posture-engineering-next.md).
+
 Posture engineering makes prior experience available at the decisions that shape
 the next piece of work: what the agent notices, which approaches it considers,
 what it actually does, and when it considers the result ready. The user should
@@ -65,6 +67,7 @@ lost ownership, and unavailable durable state still stop the affected work.
 | --- | --- | --- |
 | `list` | `op` | Return bounded current-scope experiences and recent original message IDs |
 | `remember` | Original assistant result ID, later user feedback ID, title, lesson, conditions, counterexamples, and understanding/candidates/delivery shifts | Stage one context-local experience |
+| `revise` | Experience ID, expected revision, later user feedback ID, and changed lesson fields | Refine the existing experience in place, with attributed correction evidence |
 | `feedback` | Experience ID, expected revision, later user feedback ID, and `not_useful`, `harmful`, or `withdrawn` | Stage attributed correction of an existing local experience |
 
 The host captures the source text and verifies the World, subject, context,
@@ -95,12 +98,27 @@ the model interpreted it correctly. The model must make that judgment from the
 conversation; the saved interpretation remains attributed and revisable. An
 unrelated later message is not a reason to change a lesson.
 
-To replace an incorrect lesson through ordinary conversation, the model can
-stage `feedback` to withdraw the old lesson and `remember` to retain a narrower
-one in the same turn. These are separate, idempotent actions, not an atomic
-replacement. Their receipts report any failed admission separately; source IDs
-and the originating turn remain available for inspection. Direct field changes
-to an existing record use the revision API below.
+To refine a lesson through ordinary conversation, the model can stage `revise`.
+For example, a later message can explain that a practice session must confirm
+an existing booking before it starts, while optional profile questions can
+still wait. The model can add that exception to the original lesson rather
+than leaving two conflicting versions active as separate records.
+
+The operation accepts changed `title`, `lesson`, `conditions`,
+`counterexamples`, and `shift` fields. It retains the experience ID, original
+encounter and source, and records the actual later user message alongside the
+new version. The lesson change and its correction evidence are committed in
+one journal write after the exact native action and turn succeed. Failed,
+cancelled, or conflicting updates do not partly revise a lesson. Replaying an
+already admitted update does not repeat it, even when another edit followed.
+
+The correction must be later than the version being revised. An older feedback
+message cannot be reused to override a newer operator edit. The model cannot
+change sharing scope or active state through `revise`; a paused lesson remains
+paused until the operator resumes it. `revised` is an attributed change record,
+not a usefulness award. When a lesson should stop, `feedback` with `harmful` or
+`withdrawn` retains that existing path. Operator field changes continue to use
+the revision API below.
 
 Pausing, revising, or disabling posture takes effect at the next activation
 eligibility check, including recovery of a saved contribution before native

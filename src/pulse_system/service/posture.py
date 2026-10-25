@@ -29,6 +29,7 @@ MAX_STATE_BYTES = 4 * 1024 * 1024
 # The source bound already includes its canonical JSON escaping.
 MAX_CONTROL_STATE_BYTES = 6 * 1024 * 1024
 _EDITABLE = frozenset({"title", "lesson", "conditions", "counterexamples", "shift", "scope", "active"})
+_LEARNED_EDITABLE = _EDITABLE - {"scope", "active"}
 _VERDICTS = frozenset({"useful", "not_useful", "harmful", "withdrawn"})
 
 
@@ -304,6 +305,34 @@ class PostureMemory:
             _validate_content(record)
             control = self._stop_control(record) if was_active and changes == {"active": False} else None
             self._save(state, stop_control=control)
+            return deepcopy(record)
+
+    def revise_from_feedback(self, experience_id: str, *, expected_revision: int,
+                             changes: dict, evidence: str, source: dict) -> dict:
+        """Refine a lesson and attribute its correction in one journal write.
+
+        The native host establishes the later user-message and action
+        provenance. A learned revision cannot share or reactivate a lesson;
+        those controls remain with the operator. ``revised`` records a change,
+        not a positive usefulness judgment.
+        """
+        if not isinstance(changes, dict) or not changes or set(changes) - _LEARNED_EDITABLE:
+            raise ValueError("learned revision contains unsupported fields")
+        _text(evidence, "revision evidence", 6000)
+        source = _source(source)
+        with self._locked():
+            state = self._load()
+            record = self._record(state, experience_id)
+            self._revision(record, expected_revision)
+            self._advance(record)
+            record.update(deepcopy(changes))
+            _validate_content(record)
+            record["feedback"].append({
+                "id": "feedback-" + uuid4().hex, "revision": expected_revision,
+                "verdict": "revised", "evidence": evidence, "source": source,
+                "created_at": record["updated_at"],
+            })
+            self._save(state)
             return deepcopy(record)
 
     def record_feedback(self, experience_id: str, *, expected_revision: int,

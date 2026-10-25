@@ -494,6 +494,18 @@ def test_continuing_transfer_uses_native_source_and_action_ids_without_fixture_p
     audit = audit_transfer_trial(output)
     assert audit["status"] == "verified", audit
     assert audit["native_lesson_admitted"]
+    # A duplicate request digest must not stand in for a different completed
+    # request, even if an exporter has consistently rebound its host manifest.
+    duplicated = deepcopy(result)
+    duplicated["provider_request_audit"][1]["request_sha256"] = duplicated["provider_request_audit"][0]["request_sha256"]
+    from per_pulse.posture_evaluation import _record_digest
+    manifest_path = output / "transfer-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    duplicate_manifest = {**manifest, "record_digest": _record_digest(duplicated)}
+    (output / "transfer.json").write_text(json.dumps(duplicated))
+    manifest_path.write_text(json.dumps(duplicate_manifest))
+    assert "native_request_audit_mismatch" in audit_transfer_trial(output)["errors"]
+    manifest_path.write_text(json.dumps(manifest))
     relabeled = deepcopy(result)
     relabeled["origin"] = "real_provider"
     (output / "transfer.json").write_text(json.dumps(relabeled))
@@ -526,6 +538,28 @@ def test_custom_transfer_prompt_with_explicit_reminder_never_gets_default_withdr
     assert result["review_status"] == "unreviewed"
     assert not result["eligible_for_behavior_comparison"]
     assert audit_transfer_trial(tmp_path / "trial")["status"] == "verified"
+
+
+def test_legacy_explicit_teaching_record_remains_auditable_after_preference_prompt_change(tmp_path, monkeypatch):
+    from per_pulse import posture_evaluation as evaluator
+    output = tmp_path / "legacy"
+    current = evaluator.TRAINING_CORRECTION
+    monkeypatch.setattr(evaluator, "TRAINING_CORRECTION", evaluator.LEGACY_TRAINING_CORRECTION)
+    record = evaluator.run_transfer_trial(output, model_factory=transfer_fixture_factory(monkeypatch, []), stage_timeout=10)
+    assert record["status"] == "completed", record
+    # The original exporter predates teaching_protocol. Preserve that old
+    # record shape while leaving the native historical prompt untouched.
+    record.pop("teaching_protocol")
+    (output / "transfer.json").write_text(json.dumps(record))
+    manifest_path = output / "transfer-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["record_digest"] = evaluator._record_digest(record)
+    manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(evaluator, "TRAINING_CORRECTION", current)
+    audited = evaluator.audit_transfer_trial(output)
+    assert audited["status"] == "verified", audited
+    assert audited["teaching_protocol"] == "explicit_directive_with_assumed_failure_v1"
+    assert not audited["eligible_for_behavior_comparison"]
 
 
 def test_offline_fixture_smoke_never_uses_configured_network_provider(tmp_path, monkeypatch, capsys):
