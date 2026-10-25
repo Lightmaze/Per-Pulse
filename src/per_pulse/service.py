@@ -162,9 +162,18 @@ class PageService:
                 else:
                     activation["sourceCenterId"] = None
                     activation["sourcePageId"] = None
-            state["running"] = self.runtime.running and state["enabled"]
+            state["running"] = self.runtime.running and state["enabled"] and not state["paused"]
             state["providerConfigured"] = self.configured
             return state
+
+    def set_pulse_paused(self, paused: bool) -> dict:
+        with self._lock:
+            self.runtime._require_runtime_owner()
+            controller = self.runtime.context_pulse
+            if not controller.config.enabled:
+                raise PageError("pulse_not_enabled", "Start Per Pulse with --pulse to control background activity.", 409)
+            controller.set_paused(paused)
+            return {"pulse": self.pulse_status()}
 
     def connect_pages(self, source_page_id: str, target_page_id: str,
                       weight: float = 0.6, kind: str = "excitatory") -> dict:
