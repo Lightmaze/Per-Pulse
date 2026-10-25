@@ -234,3 +234,78 @@ def test_activity_ui_uses_native_connection_and_status_contract(tmp_path):
         })
         assert invalid.status_code == 404
         assert client.get("/api/pulse").json()["connections"] == []
+
+
+def test_operator_pause_keeps_foreground_alive_and_delivers_once_after_restart(
+    tmp_path, monkeypatch,
+):
+    """An operator hold gates only native background work in the same World."""
+    fixture = TransportFixture(monkeypatch)
+    settings = PulseSettings(
+        enabled=True, spontaneous_rate=0, check_interval_seconds=0.01,
+        refractory_seconds=0, max_propagation_depth=1,
+        max_background_pulses_per_hour=1,
+    )
+    with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
+        source = page(client, "Live evidence", "A_LOCAL_HISTORY")
+        target = page(client, "Future synthesis", "B_LOCAL_HISTORY")
+        eventually(lambda: view(client, source), lambda v: assistant_count(v) == 1)
+        eventually(lambda: view(client, target), lambda v: assistant_count(v) == 1)
+        connect(client, source, target, weight=0.9)
+        hold = client.patch("/api/pulse", json={"paused": True})
+        assert hold.status_code == 200, hold.text
+        assert hold.json()["pulse"]["paused"] is True
+        assert hold.json()["pulse"]["running"] is False
+
+        sent = client.post(f"/api/pages/{source}/messages", json={"content": "A_NEW_INPUT"})
+        assert sent.status_code == 202
+        sent_id = sent.json()["messageId"]
+        eventually(lambda: view(client, source), lambda v: assistant_count(v) == 2)
+        runtime = client.app.state.pages.runtime
+        before = runtime.tick_count
+        eventually(lambda: runtime.tick_count, lambda tick: tick >= before + 3)
+        assert assistant_count(view(client, target)) == 1
+        assert len(fixture.requests) == 3, "Foreground work must run while paused."
+        status = client.get("/api/pulse").json()
+        assert status["paused"] is True
+        assert status["budget"]["used"] == 0
+        assert status["queue"]["running"] == 0
+
+    with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
+        assert client.get("/api/pulse").json()["paused"] is True
+        runtime = client.app.state.pages.runtime
+        before = runtime.tick_count
+        eventually(lambda: runtime.tick_count, lambda tick: tick >= before + 3)
+        assert assistant_count(view(client, target)) == 1
+        assert len(fixture.requests) == 3
+        release = client.patch("/api/pulse", json={"paused": False})
+        assert release.status_code == 200, release.text
+        assert release.json()["pulse"]["paused"] is False
+        final = eventually(lambda: view(client, target), lambda v: assistant_count(v) == 2)
+        assert len(fixture.requests) == 4
+        propagation = runtime.causal_ledger.list_events(
+            world_id=runtime.world_id, kind="propagation", limit=100,
+        )
+        assert len(propagation) == 1
+        source_result = runtime.causal_ledger.get_event(propagation[0].parent_event_id)
+        assert source_result.parent_event_id == sent_id
+        assert source_result.content == "A_FIXTURE_OUTPUT"
+        assert propagation[0].content == source_result.content
+        assert client.get("/api/pulse").json()["budget"]["used"] == 1
+        incoming = next(m for m in final["messages"] if m["id"] == propagation[0].id)
+        assert incoming["sourcePageId"] == source
+        assert incoming["sourceMessageId"] == source_result.id
+
+    with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
+        assert client.get("/api/pulse").json()["paused"] is False
+        assert len(fixture.requests) == 4
+        assert client.get("/api/pulse").json()["budget"]["used"] == 1
+
+
+def test_operator_pause_rejects_disabled_profile_and_nonboolean_value(tmp_path):
+    with client_for(tmp_path, pulse=PulseSettings(enabled=False), model_factory=None) as client:
+        status = client.get("/api/pulse").json()
+        assert status["paused"] is False
+        assert client.patch("/api/pulse", json={"paused": True}).status_code == 409
+        assert client.patch("/api/pulse", json={"paused": "true"}).status_code == 422
+        assert client.get("/api/pulse").json()["paused"] is False
