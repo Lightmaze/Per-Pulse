@@ -138,6 +138,22 @@ Response `201`: `{messageId:string, reference:PageReference, view:PageView}`. `v
 
 `PATCH /api/pages/{id}` with `{"title":"New title"}` -> `PageView` (Work only).
 
+## Pause or resume native background activity
+
+`PATCH /api/pulse` with `{"paused":true}` holds background admission;
+`{"paused":false}` resumes it. This only applies when `--pulse` is enabled
+(otherwise 409) and the field must be an actual JSON boolean. The response
+is `{pulse:PulseState}`. Its `paused` flag is persisted in the existing
+ContextPulse checkpoint. Queued native background events report
+`operator_paused` as their `deferredReason` during a hold. Foreground
+messages and already-running model turns are unaffected.
+
+The hold does not discard results, move the observation cursors or reset
+the rolling allowance. A restart of a held World remains held until
+released; the same causal graph, per-page histories and queued influence
+then resume. This is not PR #6's full per-page attention/held-thought tool
+nor a token or currency budget.
+
 ## Connect local pulse contexts
 
 `POST /api/pulse/connections`
