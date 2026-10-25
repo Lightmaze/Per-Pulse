@@ -8,6 +8,7 @@ import { Sidebar } from './components/Sidebar';
 import { SessionLink, type Navigate } from './components/SessionLink';
 import { Conversation } from './components/Conversation';
 import { Composer } from './components/Composer';
+import { PulseActivity } from './components/PulseActivity';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
@@ -16,6 +17,7 @@ export default function App() {
   const workspace = useWorkspace();
   const { bootstrap, route, view, loading, error, setError, applyView, refreshBootstrap, refreshPage } = workspace;
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pulseOpen, setPulseOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
   const [modalError, setModalError] = useState('');
@@ -42,7 +44,7 @@ export default function App() {
     workspace.navigate(id, origin, targetMessageId);
   }, [workspace.navigate, route.id, workspaceId]);
 
-  const openModal = (next: Modal) => { setModalError(''); setModal(next); setSidebarOpen(false); };
+  const openModal = (next: Modal) => { setModalError(''); setModal(next); setPulseOpen(false); setSidebarOpen(false); };
   const closeModal = () => { if (!busy) { setModal(null); setModalError(''); } };
   const changeDraft = useCallback((next: Draft) => {
     if (!workspaceId) return;
@@ -193,6 +195,7 @@ export default function App() {
             {crumb.id === route.id && crumb.id !== 'home' ? <span className="current-crumb" aria-current="page" title={crumb.title}>{crumb.title}</span> : <button className="crumb-ancestor" onClick={() => navigate(crumb.id)} title={crumb.title}>{crumb.id === 'home' ? <Icon name="home" size={18} /> : null}<span>{crumb.title}</span></button>}
           </Fragment>)}
         </nav>
+        <button className="text-button pulse-activity-trigger" onClick={() => { setModal(null); setSidebarOpen(false); setPulseOpen(true); }}>Activity</button>
         {route.id !== 'home' ? <button className="text-button return-to-thread" onClick={goBack}><Icon name="back" size={16} /><span>Back to conversation</span></button> : null}
       </header>
       <main className="workspace-main" ref={main} onScroll={() => {
@@ -216,6 +219,7 @@ export default function App() {
         </div>
       </main>
     </div>
+    {pulseOpen ? <PulseActivity pageId={route.id} pages={pages} navigate={navigate} onClose={() => setPulseOpen(false)} /> : null}
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
     {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
