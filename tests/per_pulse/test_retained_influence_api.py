@@ -69,6 +69,8 @@ def test_paused_influence_survives_restart_then_executes_once_in_original_histor
         assert delivery.content == source_result.content == "A_FIXTURE_OUTPUT"
         assert delivery.metadata["context_connection_id"] == edge_id
         assert activation["sourceEventId"] == source_result_id
+        assert activation["sourcePageId"] == source
+        assert activation["sourceCenterId"] == runtime.world.get_task_front(source).center_id
         assert state["queue"]["queued"] == 1
         assert state["queue"]["running"] == 0
         assert state["budget"]["used"] == 1
