@@ -41,6 +41,8 @@ export const api = {
     request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/return`, { method: 'POST', body: JSON.stringify({ content, messageId }) }),
   pulse: (signal?: AbortSignal) => request<PulseState>('/pulse', { signal }),
   setPulsePaused: (paused: boolean) => request<{ pulse: PulseState }>('/pulse', { method: 'PATCH', body: JSON.stringify({ paused }) }),
+  setPulseContextPaused: (pageId: string, paused: boolean) =>
+    request<{ pulse: PulseState }>(`/pulse/contexts/${encodeURIComponent(pageId)}`, { method: 'PATCH', body: JSON.stringify({ paused }) }),
   connectPulse: (sourcePageId: string, targetPageId: string, kind: 'excitatory' | 'inhibitory') =>
     request<{ pulse: PulseState }>('/pulse/connections', { method: 'POST', body: JSON.stringify({ sourcePageId, targetPageId, kind, weight: 0.6 }) }),
   disconnectPulse: (sourcePageId: string, targetPageId: string) =>
