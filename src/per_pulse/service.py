@@ -139,13 +139,19 @@ class PageService:
             controller = self.runtime.context_pulse
             state = controller.snapshot()
             centers = {front["center_id"]: front["id"] for front in self.runtime.list_task_fronts()}
+
+            def page_id_for(center_id: str | None) -> str | None:
+                # Only the native null center means Home. A historical/hidden
+                # Work center must not acquire a fabricated Home provenance.
+                return "home" if center_id is None else centers.get(center_id)
+
             for connection in state["connections"]:
-                connection["sourcePageId"] = centers.get(connection["source_center_id"], "home")
-                connection["targetPageId"] = centers.get(connection["target_center_id"], "home")
+                connection["sourcePageId"] = page_id_for(connection["source_center_id"])
+                connection["targetPageId"] = page_id_for(connection["target_center_id"])
             for context in state["contexts"]:
-                context["pageId"] = centers.get(context["center_id"], "home")
+                context["pageId"] = page_id_for(context["center_id"])
             for activation in state["recentActivations"]:
-                activation["pageId"] = centers.get(activation["centerId"], "home")
+                activation["pageId"] = page_id_for(activation["centerId"])
             state["running"] = self.runtime.running and state["enabled"]
             state["providerConfigured"] = self.configured
             return state

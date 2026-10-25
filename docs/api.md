@@ -73,6 +73,11 @@ type Bootstrap = {
   `oldestQueuedAt` (null when empty). Queued recent activations include
   `deferredReason` from the real context admission gate; null does not promise
   an immediately available worker. See [pulse-core.md](pulse-core.md#inspect-retained-work).
+  Contexts, directed connections and activations retain their native center
+  identifiers. A `pageId`, `sourcePageId` or `targetPageId` is `"home"`
+  **only** for the actual null (Home) center; when a historical Work center
+  has no current page projection, its page ID is `null`. Consumers must not
+  navigate such an entry to Home or silently assign it Home provenance.
 
 Scope browser drafts, scroll positions, and navigation history by `workspaceId`
 as well as page ID. Ordinary and example workspaces have distinct World IDs,

@@ -136,3 +136,44 @@ def test_paused_influence_survives_restart_then_executes_once_in_original_histor
         activation = next(item for item in state["recentActivations"] if item["eventId"] == delivery_id)
         assert activation["status"] == "settled"
         assert activation["deferredReason"] is None
+
+
+def test_pulse_status_preserves_missing_work_identity_instead_of_faking_home(
+    tmp_path, monkeypatch,
+):
+    """An unresolved Work projection remains an unresolved Work, not Home.
+
+    The actual causal center ID stays in the response, even if a front is
+    temporarily absent from the current page list during a future UI merge.
+    The only center mapped to Home is the native null center.
+    """
+    with client_for(tmp_path, pulse=PulseSettings(enabled=False), model_factory=None) as client:
+        source = page(client, "Earlier evidence", "Source history")
+        target = page(client, "Current synthesis", "Target history")
+        connect(client, source, target)
+        connect(client, "home", target)
+
+        runtime = client.app.state.pages.runtime
+        source_center = runtime.world.get_task_front(source).center_id
+        target_center = runtime.world.get_task_front(target).center_id
+        fronts = runtime.list_task_fronts()
+        assert {front["id"] for front in fronts} >= {source, target}
+
+        # Simulate the target UI having only a partial Work listing. Pulse's
+        # graph is still authoritative and must retain the original centers.
+        with monkeypatch.context() as patch:
+            patch.setattr(runtime, "list_task_fronts", lambda: [
+                front for front in fronts if front["id"] != source
+            ])
+            response = client.get("/api/pulse")
+        assert response.status_code == 200, response.text
+        connections = response.json()["connections"]
+        unresolved = next(edge for edge in connections
+                          if edge["source_center_id"] == source_center)
+        assert unresolved["sourcePageId"] is None
+        assert unresolved["target_center_id"] == target_center
+        assert unresolved["targetPageId"] == target
+        actual_home = next(edge for edge in connections
+                           if edge["source_center_id"] is None)
+        assert actual_home["sourcePageId"] == "home"
+        assert actual_home["targetPageId"] == target
