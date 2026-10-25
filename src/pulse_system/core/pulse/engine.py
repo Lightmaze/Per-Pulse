@@ -28,6 +28,7 @@ from pulse_system.core.causality.flow_contract import (
 from pulse_system.core.causality.ledger import (
     DendriticWindowConflictError,
     MAX_DENDRITIC_INTEGRATION_MEMBERS,
+    MAX_DENDRITIC_WINDOW_EVENTS,
     RuntimeFence,
 )
 from pulse_system.core.dendrite.processor import (
@@ -72,6 +73,13 @@ if TYPE_CHECKING:
     from pulse_system.interaction.metrics import MetricsRecorder
 
 _logger = logging.getLogger("pulse_system.engine")
+
+# Discovery and execution caches are bounded independently. A held context
+# must not pin the first SQL page forever, and user input gets its own small
+# discovery lane even while the background scan crosses a large backlog.
+_DURABLE_SCAN_PAGE = 500
+_FOREGROUND_DISCOVERY_LIMIT = 64
+_PENDING_PER_CONTEXT = 64
 
 
 def _now() -> datetime:
@@ -342,6 +350,11 @@ class PulseEngine:
         # only rebuilt as a priority/parallelism cache from QUEUED rows.
         self._causal_ledger = causal_ledger
         self._world_id = world_id
+        # Reconstructible read cursors, not acknowledgements. Losing them on
+        # restart only starts another scan of the same authoritative ledger.
+        self._durable_scan_after_seq = 0
+        self._durable_scan_through_seq = 0
+        self._durable_waiting_event_ids: tuple[str, ...] = ()
         # Optional ClaustrumModulator (spectrum stream). Detached, the
         # engine keeps neutral factors and its default threshold behavior.
         self._claustrum = claustrum
@@ -1611,6 +1624,117 @@ class PulseEngine:
         )
         return to_execute, reservations
 
+    def _discover_durable_events(self) -> list[CausalEvent]:
+        """Read one rotating page, foreground inputs and retained cohorts.
+
+        At most 500 + 64 + 500 raw events are read into this cache. The cursor
+        advances over deferred and invalid rows as well as runnable rows, so
+        old held work cannot hide a later context. No ledger status is changed
+        by discovery, and all retained IDs are re-read before they are used.
+        """
+        ledger = self._causal_ledger
+        assert ledger is not None
+        if not self._durable_scan_after_seq:
+            with self._storage._lock:
+                self._durable_scan_through_seq = self._storage._conn.execute(
+                    "SELECT COALESCE(MAX(seq), 0) FROM causal_events "
+                    "WHERE world_id = ? AND status = 'queued'", (self._world_id,),
+                ).fetchone()[0]
+        queued = ledger.list_events(
+            after_seq=self._durable_scan_after_seq, world_id=self._world_id,
+            status=CausalEventStatus.QUEUED, limit=_DURABLE_SCAN_PAGE,
+        )
+        if not queued and self._durable_scan_after_seq:
+            with self._storage._lock:
+                self._durable_scan_through_seq = self._storage._conn.execute(
+                    "SELECT COALESCE(MAX(seq), 0) FROM causal_events "
+                    "WHERE world_id = ? AND status = 'queued'", (self._world_id,),
+                ).fetchone()[0]
+            queued = ledger.list_events(
+                world_id=self._world_id, status=CausalEventStatus.QUEUED,
+                limit=_DURABLE_SCAN_PAGE,
+            )
+        self._durable_scan_after_seq = (
+            queued[-1].seq if len(queued) == _DURABLE_SCAN_PAGE
+            and queued[-1].seq < self._durable_scan_through_seq else 0
+        )
+        # Finish each pass at its original head. A busy producer cannot keep
+        # extending the pass and prevent a resumed older context being seen.
+        queued = [event for event in queued if event.seq <= self._durable_scan_through_seq]
+        foreground = ledger.list_events(
+            world_id=self._world_id, status=CausalEventStatus.QUEUED,
+            kind=CausalEventKind.STIMULUS, limit=_FOREGROUND_DISCOVERY_LIMIT,
+        )
+        retained = [ledger.get_event(event_id) for event_id in self._durable_waiting_event_ids]
+        by_id = {
+            event.id: event for event in (*retained, *queued, *foreground)
+            if event is not None and event.world_id == self._world_id
+            and event.status is CausalEventStatus.QUEUED
+        }
+        return sorted(by_id.values(), key=lambda event: event.seq)
+
+    def _remember_unsealed_cohorts(
+        self,
+        queued: list[CausalEvent],
+        sealed_ids: set[str],
+        windows: tuple[DendriticReadyWindow, ...],
+    ) -> None:
+        """Keep whole unfinished cohorts while the discovery page advances.
+
+        A closed cohort rejected because its next member was beyond the page
+        edge is retained too. Native validation, frozen policies and original
+        arrival times remain authoritative when the next page completes it.
+        A cohort is never truncated to fill the cache.
+        """
+        unsealed = {
+            event.id: event for event in queued
+            if event.id not in sealed_ids
+            and self._causal_ledger._is_dendritic_window_shape(event)
+        }
+        groups: list[tuple[str, ...]] = []
+        grouped: set[str] = set()
+        for window in windows:
+            group = tuple(event_id for event_id in window.event_ids if event_id in unsealed)
+            if group:
+                groups.append(group)
+                grouped.update(group)
+        open_by_engram: dict[str, list[str]] = {}
+        for event_id, event in unsealed.items():
+            if event_id not in grouped and event.engram_id is not None:
+                open_by_engram.setdefault(event.engram_id, []).append(event_id)
+        groups.extend(tuple(group) for group in open_by_engram.values())
+        groups.sort(key=lambda group: min(unsealed[event_id].seq for event_id in group))
+        retained: list[str] = []
+        for group in groups:
+            if len(retained) + len(group) <= MAX_DENDRITIC_WINDOW_EVENTS:
+                retained.extend(group)
+        self._durable_waiting_event_ids = tuple(retained)
+        self._dendrite.retain_event_ids(set(retained))
+
+    def _fair_pending_events(self, events: list[PulseEvent]) -> list[PulseEvent]:
+        """Allocate cache slots across local contexts after cohorts are sealed.
+
+        This changes only the scheduling projection. It never splits a raw
+        Dendrite cohort or grants a context an additional execution permit.
+        """
+        groups: dict[tuple[str, str | None], list[PulseEvent]] = {}
+        # Reserve projection space for foreground (including an external
+        # aggregate) even when held background events have equal or higher
+        # priority. The scheduler still applies actual priority and admission
+        # after this bounded cache has been built.
+        for event in sorted(events, key=lambda item: (
+            item.reason is not PulseReason.EXTERNAL, -item.priority, item.created_at,
+        )):
+            groups.setdefault((event.engram_id, event.center_id), []).append(event)
+        pending: list[PulseEvent] = []
+        for offset in range(_PENDING_PER_CONTEXT):
+            for group in groups.values():
+                if offset < len(group):
+                    pending.append(group[offset])
+                    if len(pending) == _DURABLE_SCAN_PAGE:
+                        return pending
+        return pending
+
     def _refresh_durable_event_cache(self) -> None:
         """Rebuild scheduling state from durable QUEUED events."""
 
@@ -1691,10 +1815,7 @@ class PulseEngine:
                 dendrite_ids.add(event.id)
             return active_ids, blocked_ids, dendrite_ids
 
-        queued = self._causal_ledger.list_events(
-            status=CausalEventStatus.QUEUED,
-            limit=500,
-        )
+        queued = self._discover_durable_events()
         sealed_ids = self._causal_ledger.dendritic_window_event_ids(
             event.id for event in queued
         )
@@ -1704,18 +1825,6 @@ class PulseEngine:
         )
         self._dendrite.retain_event_ids(dendrite_ids)
         ready_windows = self._dendrite.get_ready_event_windows(observed_at)
-        ready_ids = {
-            event_id
-            for window in ready_windows
-            for event_id in window.event_ids
-        }
-        ready_ids.update(sealed_ids)
-        ready_ids.update(
-            event.id
-            for event in queued
-            if event.id in active_queued_ids
-            and event.metadata.get("dendritic_integration_version") == 1
-        )
         materialized_ids = self._materialize_ready_dendritic_integrations(
             queued,
             ready_windows,
@@ -1724,9 +1833,17 @@ class PulseEngine:
             # The transaction reconciled member roots and created new queued
             # roots. Rebuild from SQLite immediately so this same tick can
             # schedule the already-closed window without a second wait.
-            queued = self._causal_ledger.list_events(
-                status=CausalEventStatus.QUEUED,
-                limit=500,
+            # Stay with this discovery batch. Advancing the cursor here can
+            # hide the just-created aggregate behind an unrelated backlog.
+            reread = [self._causal_ledger.get_event(event_id)
+                      for event_id in dict.fromkeys(
+                          [event.id for event in queued] + sorted(materialized_ids)
+                      )]
+            queued = sorted(
+                (event for event in reread if event is not None
+                 and event.world_id == self._world_id
+                 and event.status is CausalEventStatus.QUEUED),
+                key=lambda event: event.seq,
             )
             sealed_ids = self._causal_ledger.dendritic_window_event_ids(
                 event.id for event in queued
@@ -1737,25 +1854,24 @@ class PulseEngine:
             )
             self._dendrite.retain_event_ids(dendrite_ids)
             ready_windows = self._dendrite.get_ready_event_windows(observed_at)
-            ready_ids = {
-                event_id
-                for window in ready_windows
-                for event_id in window.event_ids
-            }
-            ready_ids.update(sealed_ids)
-            ready_ids.update(
-                event.id
-                for event in queued
-                if event.id in active_queued_ids
-                and event.metadata.get("dendritic_integration_version") == 1
-            )
-        self._pending_events = [
+        # Only sealed native windows and their aggregate roots are runnable.
+        # A partial discovery page must never dispatch members independently
+        # when exact-cohort validation has deferred their formation.
+        sealed_ids = self._causal_ledger.dendritic_window_event_ids(
+            event.id for event in queued
+        )
+        ready_ids = sealed_ids | {
+            event.id for event in queued
+            if event.metadata.get("dendritic_integration_version") == 1
+        }
+        self._pending_events = self._fair_pending_events([
             PulseEvent.from_causal_event(event)
             for event in queued
             if event.engram_id is not None
             and event.id in ready_ids
             and event.id in active_queued_ids
-        ]
+        ])
+        self._remember_unsealed_cohorts(queued, sealed_ids, ready_windows)
         self._flow_blocked_event_ids = currently_blocked
 
     def _materialize_ready_dendritic_integrations(
@@ -1770,6 +1886,14 @@ class PulseEngine:
         by_id = {event.id: event for event in queued}
         aggregate_ids: set[str] = set()
         for window in ready_windows:
+            if len(window.event_ids) > MAX_DENDRITIC_WINDOW_EVENTS:
+                self._record(
+                    "dendritic_window_conflict",
+                    formation_engram=window.engram_id,
+                    members=len(window.event_ids),
+                    reason="cohort exceeds the native 500-event formation bound",
+                )
+                continue
             grouped: dict[
                 tuple[str | None, str, bool],
                 list[tuple[CausalEvent, str]],

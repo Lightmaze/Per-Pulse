@@ -19,7 +19,7 @@ from typing import Callable, Iterable, Iterator
 
 _logger = logging.getLogger("pulse_system.storage.migrations")
 
-TARGET_SCHEMA_VERSION = 8
+TARGET_SCHEMA_VERSION = 9
 _MIGRATION_NAME = re.compile(r"(?P<version>[0-9]{4})_(?P<name>[a-z][a-z0-9_]*)\.sql\Z")
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 

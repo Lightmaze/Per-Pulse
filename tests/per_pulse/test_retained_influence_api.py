@@ -1,0 +1,138 @@
+"""Paused influence survives the real HTTP adapter and Kernel lifecycle.
+
+The model transport is an explicit synthetic fixture. These checks exercise
+native persistence and provider requests, not external model usefulness.
+Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
+"""
+from __future__ import annotations
+
+import json
+
+from per_pulse.service import PulseSettings
+from test_pulse_integration import (
+    TransportFixture,
+    assistant_count,
+    client_for,
+    connect,
+    eventually,
+    page,
+    view,
+)
+
+
+def test_paused_influence_survives_restart_then_executes_once_in_original_history(
+    tmp_path, monkeypatch,
+):
+    fixture = TransportFixture(monkeypatch)
+    settings = PulseSettings(
+        enabled=True, spontaneous_rate=0, check_interval_seconds=0.01,
+        refractory_seconds=0, max_propagation_depth=1,
+        max_background_pulses_per_hour=1,
+    )
+
+    with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
+        source = page(client, "Evidence source", "A_LOCAL_HISTORY")
+        eventually(lambda: view(client, source), lambda v: assistant_count(v) == 1)
+        target = page(client, "Paused synthesis", "B_LOCAL_HISTORY")
+        eventually(lambda: view(client, target), lambda v: assistant_count(v) == 1)
+        assert len(fixture.requests) == 2
+        original_target_session = fixture.scopes[-1].session_id
+
+        edge_id = connect(client, source, target, weight=0.9)["connection"]["id"]
+        runtime = client.app.state.pages.runtime
+        subject_id = runtime.continuity_engram_id
+        target_center = runtime.world.get_task_front(target).center_id
+        runtime.world.update_activity_center(target_center, status="paused")
+        sent = client.post(f"/api/pages/{source}/messages", json={
+            "content": "A_NEW_INPUT: preserve this finding while synthesis is paused.",
+        })
+        assert sent.status_code == 202, sent.text
+        input_id = sent.json()["messageId"]
+        eventually(lambda: view(client, source), lambda v: assistant_count(v) == 2)
+
+        state = eventually(
+            lambda: client.get("/api/pulse").json(),
+            lambda value: any(
+                item["pageId"] == target
+                and item["status"] == "queued"
+                and item["deferredReason"] == "context_paused"
+                for item in value["recentActivations"]
+            ),
+        )
+        activation = next(item for item in state["recentActivations"] if item["pageId"] == target)
+        delivery_id = activation["eventId"]
+        delivery = runtime.causal_ledger.get_event(delivery_id)
+        source_result_id = delivery.parent_event_id
+        source_result = runtime.causal_ledger.get_event(source_result_id)
+        assert source_result.parent_event_id == input_id
+        assert source_result.status.value == "settled"
+        assert delivery.content == source_result.content == "A_FIXTURE_OUTPUT"
+        assert delivery.metadata["context_connection_id"] == edge_id
+        assert activation["sourceEventId"] == source_result_id
+        assert state["queue"]["queued"] == 1
+        assert state["queue"]["running"] == 0
+        assert state["budget"]["used"] == 1
+        assert state["budget"]["remaining"] == 0
+
+        # Allow more native coordinator passes to prove that a retained input
+        # does not start a request while its local context remains paused.
+        observed_tick = runtime.tick_count
+        eventually(lambda: runtime.tick_count, lambda tick: tick >= observed_tick + 3)
+        assert len(fixture.requests) == 3
+        assert assistant_count(view(client, target)) == 1
+        assert runtime.causal_ledger.get_event(delivery_id).status.value == "queued"
+
+    with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
+        runtime = client.app.state.pages.runtime
+        assert runtime.continuity_engram_id == subject_id
+        assert runtime.world.get_task_front(target).center_id == target_center
+        assert runtime.world.get_activity_center(target_center).status.value == "paused"
+        observed_tick = runtime.tick_count
+        eventually(lambda: runtime.tick_count, lambda tick: tick >= observed_tick + 3)
+        assert len(fixture.requests) == 3
+        assert assistant_count(view(client, target)) == 1
+
+        state = client.get("/api/pulse").json()
+        activation = next(item for item in state["recentActivations"] if item["eventId"] == delivery_id)
+        assert activation["status"] == "queued"
+        assert activation["deferredReason"] == "context_paused"
+        assert state["budget"]["used"] == 1
+        assert state["budget"]["remaining"] == 0
+
+        runtime.world.update_activity_center(target_center, status="active")
+        final = eventually(lambda: view(client, target), lambda v: assistant_count(v) == 2)
+        observed_tick = runtime.tick_count
+        eventually(lambda: runtime.tick_count, lambda tick: tick >= observed_tick + 3)
+        assert len(fixture.requests) == 4
+        assert fixture.scopes[-1].session_id == original_target_session
+        assert {scope.engram_id for scope in fixture.scopes} == {subject_id}
+
+        target_history = json.dumps(fixture.requests[-1]["messages"])
+        assert all(marker in target_history for marker in (
+            "B_LOCAL_HISTORY", "B_FIXTURE_OUTPUT", "A_FIXTURE_OUTPUT",
+        ))
+        assert "A_LOCAL_HISTORY" not in target_history
+        assert "A_NEW_INPUT" not in target_history
+        delivery = runtime.causal_ledger.get_event(delivery_id)
+        assert delivery.status.value == "settled"
+        assert delivery.attempts == 1
+        assert delivery.parent_event_id == source_result_id
+        assert delivery.metadata["context_connection_id"] == edge_id
+        assert runtime.causal_ledger.get_event(source_result_id).parent_event_id == input_id
+        assert [event.id for event in runtime.causal_ledger.list_events(
+            world_id=runtime.world_id, kind="propagation", limit=100,
+        )] == [delivery_id]
+
+        incoming = next(message for message in final["messages"] if message["id"] == delivery_id)
+        assert incoming["role"] == "system"
+        assert incoming["activation"] == "propagation"
+        assert incoming["sourcePageId"] == source
+        assert incoming["sourceMessageId"] == source_result_id
+        state = client.get("/api/pulse").json()
+        assert state["budget"]["used"] == 1
+        assert state["budget"]["remaining"] == 0
+        assert state["queue"]["queued"] == 0
+        assert state["queue"]["running"] == 0
+        activation = next(item for item in state["recentActivations"] if item["eventId"] == delivery_id)
+        assert activation["status"] == "settled"
+        assert activation["deferredReason"] is None

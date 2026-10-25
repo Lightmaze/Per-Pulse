@@ -68,7 +68,11 @@ type Bootstrap = {
 - `GET /api/pages/{id}` -> `PageView` (latest bounded messages).
 - `GET /api/health` -> `{status:"ok", providerConfigured:boolean}`.
 - `GET /api/pulse` -> local pulse settings, rolling admission budget, context
-  activity, directed connections, and the most recent 20 background activations.
+  activity, directed connections, full durable `queue` totals, and the most
+  recent 20 background activations. `queue` contains `queued`, `running` and
+  `oldestQueuedAt` (null when empty). Queued recent activations include
+  `deferredReason` from the real context admission gate; null does not promise
+  an immediately available worker. See [pulse-core.md](pulse-core.md#inspect-retained-work).
 
 Scope browser drafts, scroll positions, and navigation history by `workspaceId`
 as well as page ID. Ordinary and example workspaces have distinct World IDs,
