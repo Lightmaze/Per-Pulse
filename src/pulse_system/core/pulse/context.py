@@ -80,6 +80,7 @@ class ContextPulseController:
             self._state = self._validate_checkpoint(checkpoint) if checkpoint is not None else {
                 "version": 1, "world_id": world_id, "cursor": 0,
                 "observed_cursor": 0, "last_check_at": None, "contexts": {},
+                "paused": False,
             }
 
     @staticmethod
@@ -101,9 +102,11 @@ class ContextPulseController:
         archival. The immutable causal receipt, rather than current admission
         eligibility, proves their identity and original activity time.
         """
-        fields = {"version", "world_id", "cursor", "observed_cursor", "last_check_at", "contexts"}
+        required = {"version", "world_id", "cursor", "last_check_at", "contexts"}
+        optional = {"observed_cursor", "paused"}
         if (not isinstance(checkpoint, dict)
-                or set(checkpoint) not in (fields, fields - {"observed_cursor"})
+                or set(checkpoint) - optional != required
+                or type(checkpoint.get("paused", False)) is not bool
                 or type(checkpoint.get("version")) is not int
                 or checkpoint["version"] != 1
                 or checkpoint["world_id"] != self.world_id
@@ -112,6 +115,7 @@ class ContextPulseController:
         state = deepcopy(checkpoint)
         # The first checkpoint revision used one cursor for both passes.
         state.setdefault("observed_cursor", state["cursor"])
+        state.setdefault("paused", False)
         cursors = (state["cursor"], state["observed_cursor"])
         maximum = self.storage._conn.execute(
             "SELECT COALESCE(MAX(seq), 0) FROM causal_events WHERE world_id = ?",
@@ -165,6 +169,26 @@ class ContextPulseController:
             self.key, self._state, runtime_owner_id=fence.owner_id,
             runtime_lease_epoch=fence.epoch, now=now,
         )
+
+    def set_paused(self, paused: bool) -> None:
+        """Atomically hold native background admission without erasing influence.
+
+        Foreground user turns and already-running Kernel calls are not
+        cancelled. Pending observations and queued events keep their causal
+        identities so the next permitted tick can continue from them.
+        """
+        if type(paused) is not bool:
+            raise ValueError("paused must be a boolean")
+        with self.storage._lock:
+            previous = self._state["paused"]
+            if previous == paused:
+                return
+            self._state["paused"] = paused
+            try:
+                self._save(_now())
+            except BaseException:
+                self._state["paused"] = previous
+                raise
 
     def _current_context(self, center_id: str | None, *, retain_paused: bool = False) -> bool:
         """Check body membership separately from permission to execute.
@@ -351,6 +375,8 @@ class ContextPulseController:
         if not self.config.enabled:
             return "profile_paused"
         with self.storage._lock:
+            if self._state["paused"]:
+                return "operator_paused"
             if event.depth > self.config.max_propagation_depth:
                 return "depth_limit"
             fused_ids = fact.metadata.get("context_connection_ids", [])
@@ -383,7 +409,9 @@ class ContextPulseController:
             # traversing local contexts instead of reloading every edge list.
             graph = self.connections.snapshot(now=now)
             self._repair_revocations(graph)
-            if not self.config.enabled:
+            if not self.config.enabled or self._state["paused"]:
+                # Retain both observation cursors, including settled results
+                # from in-flight turns, until the operator resumes activity.
                 return
             outgoing = {}
             for edge in graph["connections"]:
@@ -550,6 +578,7 @@ class ContextPulseController:
                 activations.append(item)
             return {
                 "enabled": self.config.enabled,
+                "paused": self._state["paused"],
                 "budget": {"limit": self.config.max_background_pulses_per_hour,
                            "used": used, "remaining": max(0, self.config.max_background_pulses_per_hour - used),
                            "windowSeconds": 3600, "unit": "background pulse admissions"},
