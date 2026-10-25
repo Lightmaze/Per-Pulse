@@ -133,6 +133,44 @@ evidence. Normal user messages continue through the existing foreground path.
 `recentActivations` in `/api/pulse` exposes queued, settled, failed, uncertain
 and cancelled background events, including reentries that contain no new text.
 
+### Paused local contexts retain completed influence
+
+A local pause stops new background execution in that context. It does not
+remove that context from the continuing body. Results completed in a connected
+source are retained as canonical queued deliveries even when the source or
+target is paused when the coordinator observes them. The target must become
+active before its existing delivery can be claimed. The claim transaction
+rechecks active status, subject ownership and membership.
+
+Retention uses the same result/edge identity and rolling admission quota as an
+ordinary delivery. It spends one admission when the input is saved; restart,
+resume and repeated observation do not spend another. Removing or revising its
+edge cancels an unstarted retained delivery, including a formed aggregate.
+Inhibitory influence also survives a pause and decays from the original result
+time, so resuming does not turn an old impulse into a fresh one.
+
+This policy applies to active and paused contexts. Archived, completed and
+dormant contexts retain their existing exclusion policy. The change prevents
+future observation from losing paused influence; it does not rewind old
+checkpoints to invent previously skipped deliveries. A long pause can accumulate
+queued inputs across rolling hours: the hourly admission quota limits growth
+per hour, not the total retained backlog.
+
+### Inspect retained work
+
+`GET /api/pulse` includes `queue.queued`, `queue.running` and
+`queue.oldestQueuedAt` for all durable background roots in this World. These
+counts are independent of both the engine's working set and the last twenty
+entries in `recentActivations`. Reconciled Dendrite members are not counted as
+new executions; their queued aggregate is counted once.
+
+Queued recent activations expose `deferredReason` from the same read-only gate
+used by the engine: `profile_paused`, `context_paused`, `context_inactive`,
+`refractory`, `inhibited`, `depth_limit` or `connection_revoked`. A null reason
+means that this context gate is clear. Dendrite formation, worker availability,
+other turns in the same execution context and final claim checks can still
+delay execution. Running and terminal events have no current deferral reason.
+
 Committed subject succession retains local context IDs, connection identities,
 numeric inhibition and the rolling quota. Prior settled results remain
 immutable evidence in the predecessor's identity; new eligible work belongs
@@ -197,3 +235,6 @@ used the new indexes. Schema version 8 adds indexes only; the upgrade smoke
 test verifies retained causal rows, the version 7 backup and idempotent reopen.
 These synthetic timings describe the coordinator on this host, not provider
 latency, model quality or a service-level guarantee.
+
+The [continuity follow-up](pulse-continuity-next.md) records the queue-liveness
+work, current validation and the next integration boundaries.

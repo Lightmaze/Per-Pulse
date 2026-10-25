@@ -691,8 +691,10 @@ class CausalLedger:
         Ordinary child events still inherit their parent's Center. This is the
         explicit exception for a configured context connection: it proves a
         successful source turn, preserves its causal lineage and exact text,
-        and only addresses an active context of that subject (or a committed
-        successor). The result/connection pair is a durable delivery identity;
+        and only addresses an active or paused context of that subject (or a
+        committed successor). Paused contexts retain the input; the separate
+        turn-claim transaction still requires an active target to execute it.
+        The result/connection pair is a durable delivery identity;
         a coordinator restart can discover and return it without redelivery.
 
         ``admission_guard`` runs in the insertion transaction, after the
@@ -824,13 +826,13 @@ class CausalLedger:
                 eligible = conn.execute(
                     "SELECT 1 FROM activity_centers AS center "
                     "JOIN center_memberships AS member ON member.center_id = center.id "
-                    "WHERE center.id = ? AND center.status = 'active' "
+                    "WHERE center.id = ? AND center.status IN ('active', 'paused') "
                     "AND center.focal_engram_id = ? AND member.engram_id = ?",
                     (center_id, subject_id, subject_id),
                 ).fetchone()
                 if eligible is None:
                     raise CausalTransitionError(
-                        "context propagation centers must be active subject memberships"
+                        "context propagation centers must be retained subject memberships"
                     )
             if admission_guard is not None:
                 admission_guard(conn)
@@ -1633,12 +1635,25 @@ class CausalLedger:
         rows = conn.execute(
             f"SELECT {_EVENT_COLUMNS} FROM causal_events e "
             "WHERE e.world_id = ? AND e.engram_id = ? AND e.status = 'queued' "
-            "AND e.created_at <= ? AND NOT EXISTS ("
+            "AND e.created_at <= ? "
+            "AND COALESCE(json_extract(e.metadata, '$.dendritic_integration_version'), 0) <> 1 "
+            "AND NOT (COALESCE(json_type(e.metadata, '$.generation_id'), '') = 'text' "
+            "AND COALESCE(json_extract(e.metadata, '$.generation_stage'), '') = 'summary') "
+            "AND NOT EXISTS ("
             "SELECT 1 FROM dendritic_window_members member "
             "WHERE member.event_id = e.id"
-            ") ORDER BY e.created_at ASC, e.seq ASC",
-            (world_id, ready.engram_id, _ts(ready.observed_at)),
+            ") ORDER BY e.created_at ASC, e.seq ASC LIMIT ?",
+            (world_id, ready.engram_id, _ts(ready.closed_at),
+             MAX_DENDRITIC_WINDOW_EVENTS + 1),
         ).fetchall()
+        # Later arrivals cannot change a window already closed before them.
+        # Validate a bounded prefix through this exact boundary; earlier
+        # unfinished cohorts are sealed first instead of scanning the entire
+        # backlog or depending on policies of unrelated future inputs.
+        if len(rows) > MAX_DENDRITIC_WINDOW_EVENTS:
+            raise DendriticWindowConflictError(
+                "earlier dendritic cohorts must be materialized before this window"
+            )
         eligible = tuple(
             event
             for event in (self._row_to_event(row) for row in rows)

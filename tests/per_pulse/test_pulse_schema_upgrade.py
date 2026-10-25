@@ -1,8 +1,10 @@
-"""Version-seven bodies retain causal evidence during the index-only upgrade.
+"""Earlier bodies retain causal evidence during the index-only upgrades.
 
 Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 import sqlite3
+
+import pytest
 
 from pulse_system.core.causality.ledger import CausalLedger
 from pulse_system.substrate.storage.store import Storage
@@ -12,9 +14,12 @@ NEW_INDEXES = (
     "idx_harness_turns_result_event", "idx_causal_events_world_kind_status_seq",
     "idx_context_pulse_budget", "idx_context_pulse_recent",
 )
+WINDOW_INDEX = "idx_causal_events_world_subject_queue_time"
+QUEUE_INDEX = "idx_causal_events_world_status_seq"
 
 
-def test_version_seven_upgrade_preserves_history_and_uses_bounded_query_paths(tmp_path):
+@pytest.mark.parametrize("old_version", [7, 8])
+def test_upgrade_preserves_history_and_uses_bounded_query_paths(tmp_path, old_version):
     path = tmp_path / "world.db"
     original = Storage(path)
     original.create_engram(engram_id="subject")
@@ -29,22 +34,22 @@ def test_version_seven_upgrade_preserves_history_and_uses_bounded_query_paths(tm
     before_events = original._conn.execute("SELECT * FROM causal_events ORDER BY seq").fetchall()
     before_turns = original._conn.execute("SELECT * FROM harness_turns ORDER BY id").fetchall()
     original.close()
-    # Version eight is index-only. Removing precisely that delta reconstructs
-    # a populated version-seven body without changing its native causal rows.
+    # Both upgrades are index-only. Reconstruct the earlier populated body
+    # without changing its native causal rows or turn receipts.
     with sqlite3.connect(path) as previous:
-        for name in NEW_INDEXES:
+        for name in ((NEW_INDEXES if old_version == 7 else ()) + (WINDOW_INDEX, QUEUE_INDEX)):
             previous.execute(f"DROP INDEX {name}")
-        previous.execute("DELETE FROM schema_migrations WHERE version = 8")
-        previous.execute("PRAGMA user_version = 7")
+        previous.execute("DELETE FROM schema_migrations WHERE version > ?", (old_version,))
+        previous.execute(f"PRAGMA user_version = {old_version}")
     reopened = Storage(path)
     try:
         migration = reopened.schema_migration_result
-        assert migration.from_version == 7
-        assert migration.to_version == 8
-        assert migration.applied_versions == (8,)
+        assert migration.from_version == old_version
+        assert migration.to_version == 9
+        assert migration.applied_versions == tuple(range(old_version + 1, 10))
         assert migration.backup_path is not None
         with sqlite3.connect(migration.backup_path) as backup:
-            assert backup.execute("PRAGMA user_version").fetchone()[0] == 7
+            assert backup.execute("PRAGMA user_version").fetchone()[0] == old_version
             assert backup.execute("SELECT * FROM causal_events ORDER BY seq").fetchall() == before_events
         assert reopened._conn.execute("SELECT * FROM causal_events ORDER BY seq").fetchall() == before_events
         assert reopened._conn.execute("SELECT * FROM harness_turns ORDER BY id").fetchall() == before_turns
@@ -63,6 +68,19 @@ def test_version_seven_upgrade_preserves_history_and_uses_bounded_query_paths(tm
             "FROM harness_turns WHERE result_event_id = ?", (result.id,),
         ).fetchall()
         assert any("idx_harness_turns_result_event" in row[-1] for row in proof_plan)
+        window_plan = reopened._conn.execute(
+            "EXPLAIN QUERY PLAN SELECT id FROM causal_events "
+            "WHERE world_id = ? AND engram_id = ? AND status = 'queued' "
+            "AND created_at <= ? ORDER BY created_at, seq LIMIT 501",
+            ("world", "subject", background.created_at.isoformat()),
+        ).fetchall()
+        assert any(WINDOW_INDEX in row[-1] for row in window_plan)
+        queue_plan = reopened._conn.execute(
+            "EXPLAIN QUERY PLAN SELECT id FROM causal_events "
+            "WHERE world_id = ? AND status = 'queued' AND seq > ? ORDER BY seq LIMIT 500",
+            ("world", 0),
+        ).fetchall()
+        assert any(QUEUE_INDEX in row[-1] for row in queue_plan)
         assert CausalLedger(reopened).get_event(background.id).status.value == "queued"
     finally:
         reopened.close()

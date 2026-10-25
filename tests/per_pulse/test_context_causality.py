@@ -185,24 +185,26 @@ def test_guard_rolls_back_delivery_and_is_not_spent_on_idempotent_retry(body):
     assert attempts == ["rejected"]
 
 
-def test_inactive_or_unrelated_context_cannot_receive_or_emit(body):
+def test_closed_or_unrelated_context_cannot_receive_or_emit(body):
     storage, ledger, subject, first, second = body
     _root, result = settled_result(ledger, subject, first)
     args = dict(source_result_id=result.id, target_center_id=second,
                 connection_id="active-edge", depth=1)
-    storage.update_activity_center(second, status=ActivityCenterStatus.PAUSED)
-    with pytest.raises(CausalTransitionError, match="active subject memberships"):
-        ledger.enqueue_context_propagation(**args)
+    for status in (ActivityCenterStatus.ARCHIVED, ActivityCenterStatus.COMPLETED,
+                   ActivityCenterStatus.DORMANT):
+        storage.update_activity_center(second, status=status)
+        with pytest.raises(CausalTransitionError, match="retained subject memberships"):
+            ledger.enqueue_context_propagation(**args)
     storage.update_activity_center(second, status=ActivityCenterStatus.ACTIVE)
     storage.update_activity_center(first, status=ActivityCenterStatus.ARCHIVED)
-    with pytest.raises(CausalTransitionError, match="active subject memberships"):
+    with pytest.raises(CausalTransitionError, match="retained subject memberships"):
         ledger.enqueue_context_propagation(**args)
     storage.update_activity_center(first, status=ActivityCenterStatus.ACTIVE)
     other = storage.create_engram("unrelated-subject")
     with pytest.raises(CausalTransitionError, match="switch subjects"):
         ledger.enqueue_context_propagation(**args, engram_id=other.id)
     unrelated = WorldRegistry(storage).create_task_bundle_for_existing_engram("Other", other.id)
-    with pytest.raises(CausalTransitionError, match="active subject memberships"):
+    with pytest.raises(CausalTransitionError, match="retained subject memberships"):
         ledger.enqueue_context_propagation(**{**args, "target_center_id": unrelated.center.id})
     assert ledger.get_children(result.id) == []
 

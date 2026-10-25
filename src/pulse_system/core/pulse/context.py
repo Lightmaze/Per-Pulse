@@ -166,14 +166,23 @@ class ContextPulseController:
             runtime_lease_epoch=fence.epoch, now=now,
         )
 
-    def _current_context(self, center_id: str | None) -> bool:
+    def _current_context(self, center_id: str | None, *, retain_paused: bool = False) -> bool:
+        """Check body membership separately from permission to execute.
+
+        A paused local context still retains completed incoming influence.
+        Only the observation/delivery pass opts into that state; spontaneous
+        reentry and the engine's admission gate continue to require ACTIVE.
+        """
         engram = self.storage.get_engram(self.subject())
         if engram is None or engram.status is not EngramStatus.ACTIVE:
             return False
         if center_id is None:
             return True
         center = self.world.get_activity_center(center_id)
-        if center is None or center.status is not ActivityCenterStatus.ACTIVE:
+        statuses = {ActivityCenterStatus.ACTIVE}
+        if retain_paused:
+            statuses.add(ActivityCenterStatus.PAUSED)
+        if center is None or center.status not in statuses:
             return False
         if center.focal_engram_id != self.subject():
             return False
@@ -214,8 +223,16 @@ class ContextPulseController:
         ).fetchone() is not None
 
     def _ready(self, center_id: str | None, now: datetime, *, inhibition: float | None = None) -> bool:
+        return self._context_deferred_reason(center_id, now, inhibition=inhibition) is None
+
+    def _context_deferred_reason(self, center_id: str | None, now: datetime, *,
+                                 inhibition: float | None = None) -> str | None:
         if not self._current_context(center_id):
-            return False
+            center = self.world.get_activity_center(center_id) if center_id is not None else None
+            if (center is not None and center.status is ActivityCenterStatus.PAUSED
+                    and self._current_context(center_id, retain_paused=True)):
+                return "context_paused"
+            return "context_inactive"
         entry = self._state["contexts"].get(self._key(center_id))
         settled_at = datetime.fromisoformat(entry["settled_at"]) if entry else None
         # Workers may settle after the observation pass and before this tick's
@@ -245,10 +262,10 @@ class ContextPulseController:
         if settled_at:
             elapsed = (now - settled_at).total_seconds()
             if elapsed < self.config.refractory_seconds:
-                return False
+                return "refractory"
         if inhibition is None:
             inhibition = self.connections.inhibition_level(center_id, now=now)
-        return inhibition < 1.0
+        return "inhibited" if inhibition >= 1.0 else None
 
     def _source_root(self, result):
         """Only ordinary accepted turns may seed future autonomous work."""
@@ -317,28 +334,36 @@ class ContextPulseController:
 
     def admits(self, event, observed_at: datetime) -> bool:
         """Pure engine filter; never spends budget during candidate scans."""
+        return self.deferred_reason(event, observed_at) is None
+
+    def deferred_reason(self, event, observed_at: datetime) -> str | None:
+        """Explain the same context gate used by admission, without mutating it.
+
+        A clear gate is not a scheduling promise: Dendrite readiness, worker
+        capacity, execution-context exclusion and claim checks still apply.
+        """
         if event.event_id is None:
-            return True
+            return None
         fact = self.ledger.get_event(event.event_id)
         if fact is None or not (fact.metadata.get("context_pulse") in {"reentry", "convergence"}
                                 or fact.metadata.get("context_connection_id")):
-            return True
+            return None
         if not self.config.enabled:
-            return False
+            return "profile_paused"
         with self.storage._lock:
             if event.depth > self.config.max_propagation_depth:
-                return False
+                return "depth_limit"
             fused_ids = fact.metadata.get("context_connection_ids", [])
             if fused_ids:
                 available = {edge["id"] for edge in self.connections.snapshot()["connections"]
                              if edge["kind"] == "excitatory" and edge["target_center_id"] == event.center_id}
                 if not set(fused_ids).issubset(available):
-                    return False
+                    return "connection_revoked"
             edge_id = fact.metadata.get("context_connection_id")
             if edge_id and not any(edge.id == edge_id and edge.kind == "excitatory"
                                    for edge in self.connections.outgoing(fact.metadata.get("source_center_id"))):
-                return False
-            return self._ready(event.center_id, observed_at)
+                return "connection_revoked"
+            return self._context_deferred_reason(event.center_id, observed_at)
 
     def tick(self, *, now: datetime | None = None) -> None:
         now = now or _now()
@@ -363,12 +388,12 @@ class ContextPulseController:
             outgoing = {}
             for edge in graph["connections"]:
                 outgoing.setdefault(edge["source_center_id"], []).append(edge)
-            current_contexts = {}
+            retained_contexts = {}
 
-            def current(center_id):
-                if center_id not in current_contexts:
-                    current_contexts[center_id] = self._current_context(center_id)
-                return current_contexts[center_id]
+            def retained(center_id):
+                if center_id not in retained_contexts:
+                    retained_contexts[center_id] = self._current_context(center_id, retain_paused=True)
+                return retained_contexts[center_id]
 
             inhibition_changed = False
             lineage = self._subject_lineage()
@@ -384,11 +409,11 @@ class ContextPulseController:
                     }
                     # Numeric inhibition is independent of the content quota.
                     # Observe all local brakes before considering new content.
-                    if current(result.center_id):
+                    if retained(result.center_id):
                         for edge in outgoing.get(result.center_id, ()):
                             if (edge["kind"] == "inhibitory" and result.seq > edge["created_after_seq"]
                                     and edge["weight"] >= self.config.propagation_threshold
-                                    and current(edge["target_center_id"])):
+                                    and retained(edge["target_center_id"])):
                                 self.connections.apply_inhibition(
                                     edge["target_center_id"], edge["weight"],
                                     now=result.settled_at or result.created_at,
@@ -408,11 +433,11 @@ class ContextPulseController:
                 center_id = result.center_id
                 depth = root.metadata.get("depth", 0) if root else 0
                 depth = depth if type(depth) is int and depth >= 0 else 0
-                if current(center_id):
+                if retained(center_id):
                     for edge in outgoing.get(center_id, ()):
                         if (result.seq <= edge["created_after_seq"]
                                 or edge["weight"] < self.config.propagation_threshold
-                                or not current(edge["target_center_id"])):
+                                or not retained(edge["target_center_id"])):
                             continue
                         if edge["kind"] == "excitatory" and depth < self.config.max_propagation_depth and result.content:
                             try:
@@ -499,6 +524,30 @@ class ContextPulseController:
                 "OR json_extract(metadata, '$.context_connection_id') IS NOT NULL) "
                 "ORDER BY seq DESC LIMIT 20", (self.world_id,),
             ).fetchall()
+            # Count the entire durable backlog, independently of the engine's
+            # bounded working set and the twenty-row recent activity display.
+            queue = self.storage._conn.execute(
+                "SELECT COUNT(CASE WHEN status = 'queued' THEN 1 END), "
+                "COUNT(CASE WHEN status = 'running' THEN 1 END), "
+                "MIN(CASE WHEN status = 'queued' THEN created_at END) "
+                "FROM causal_events WHERE world_id = ? AND status IN ('queued', 'running') "
+                "AND kind IN ('spontaneous', 'propagation', 'pulse') "
+                "AND (json_extract(metadata, '$.context_pulse') IN ('reentry', 'convergence') "
+                "OR json_extract(metadata, '$.context_connection_id') IS NOT NULL)",
+                (self.world_id,),
+            ).fetchone()
+            activations = []
+            # Import only at observation time to avoid a context/engine module
+            # dependency during construction. The sample stays bounded at 20.
+            from pulse_system.core.pulse.engine import PulseEvent
+            for row in recent:
+                item = dict(zip(("eventId", "centerId", "kind", "status", "createdAt", "sourceEventId"), row))
+                if item["status"] == "queued":
+                    event = self.ledger.get_event(item["eventId"])
+                    item["deferredReason"] = self.deferred_reason(PulseEvent.from_causal_event(event), now)
+                else:
+                    item["deferredReason"] = None
+                activations.append(item)
             return {
                 "enabled": self.config.enabled,
                 "budget": {"limit": self.config.max_background_pulses_per_hour,
@@ -509,6 +558,6 @@ class ContextPulseController:
                 "contexts": [dict(item, inhibition=inhibition_by_center.get(item["center_id"], 0.0))
                              for item in self._state["contexts"].values()],
                 "connections": graph.get("connections", []),
-                "recentActivations": [dict(zip(("eventId", "centerId", "kind", "status", "createdAt", "sourceEventId"), row))
-                                      for row in recent],
+                "queue": {"queued": queue[0], "running": queue[1], "oldestQueuedAt": queue[2]},
+                "recentActivations": activations,
             }
