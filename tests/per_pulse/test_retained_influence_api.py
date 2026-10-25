@@ -328,7 +328,6 @@ def test_scoped_page_hold_persists_and_does_not_block_foreground(tmp_path, monke
         target = page(client, "Synthesis", "B_LOCAL_HISTORY")
         eventually(lambda: view(client, source), lambda v: assistant_count(v) == 1)
         eventually(lambda: view(client, target), lambda v: assistant_count(v) == 1)
-        target_session = fixture.scopes[-1].session_id
         connect(client, source, target, weight=0.9)
 
         held = client.patch(f"/api/pulse/contexts/{target}", json={"paused": True})
@@ -360,6 +359,9 @@ def test_scoped_page_hold_persists_and_does_not_block_foreground(tmp_path, monke
         assert direct.status_code == 202
         eventually(lambda: view(client, target), lambda v: assistant_count(v) == 2)
         assert len(fixture.requests) == 4
+        # Capture the target's actual foreground Kernel session, not whichever
+        # of the two initial page requests happened to settle last.
+        target_session = fixture.scopes[-1].session_id
         assert client.get("/api/pulse").json()["paused"] is False
 
     with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
