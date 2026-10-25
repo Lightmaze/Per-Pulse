@@ -61,3 +61,35 @@ export type Bootstrap = {
 export type DraftReference = { targetPageId: string; label: string };
 export type Draft = { text: string; references: DraftReference[] };
 export type NavigationOrigin = { pageId: string; messageId?: string; referenceId?: string };
+
+export type PulseConnection = {
+  id: string;
+  source_center_id: string | null;
+  target_center_id: string | null;
+  sourcePageId: string | null;
+  targetPageId: string | null;
+  weight: number;
+  kind: 'excitatory' | 'inhibitory';
+};
+
+export type PulseActivation = {
+  eventId: string;
+  centerId: string | null;
+  pageId: string | null;
+  kind: string;
+  status: string;
+  createdAt: string;
+  sourceEventId: string | null;
+  deferredReason: string | null;
+};
+
+export type PulseState = {
+  enabled: boolean;
+  running: boolean;
+  providerConfigured: boolean;
+  budget: { limit: number; used: number; remaining: number; windowSeconds: number; unit: string };
+  queue: { queued: number; running: number; oldestQueuedAt: string | null };
+  contexts: { center_id: string | null; pageId: string | null; inhibition: number }[];
+  connections: PulseConnection[];
+  recentActivations: PulseActivation[];
+};
