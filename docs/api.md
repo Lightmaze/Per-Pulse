@@ -1,4 +1,4 @@
-# Per Pulse API contract (English v0.1)
+# Per Pulse API contract
 
 All endpoints are same-origin JSON under `/api`. No client-supplied model credentials. Poll page views while their status is `queued` or `working`; no fake/model output is generated offline. Session data is the inherited Pulse World/Kernel state, with lightweight page-reference metadata in the same World store.
 
@@ -41,6 +41,9 @@ type ProviderState = {
   label: "AI connected" | "AI disconnected";
   detail: string;
 };
+type WorkspaceSettings = {
+  responseLanguage: "auto" | "en" | "zh-CN";
+};
 type PageView = {
   page: PageSummary;
   messages: Message[];
@@ -58,6 +61,7 @@ type Bootstrap = {
   homeId: "home";
   provider: ProviderState;
   pages: PageSummary[];
+  settings: WorkspaceSettings;
 };
 ```
 
@@ -66,10 +70,31 @@ type Bootstrap = {
 - `GET /api/bootstrap` -> `Bootstrap`.
 - `GET /api/pages/{id}` -> `PageView` (latest bounded messages).
 - `GET /api/health` -> `{status:"ok", providerConfigured:boolean}`.
+- `GET /api/settings` -> `WorkspaceSettings`.
 
 Scope browser drafts, scroll positions, and navigation history by `workspaceId`
 as well as page ID. Ordinary and example workspaces have distinct World IDs,
 even when they use the same server origin and the shared page ID `home`.
+
+## Language settings
+
+`GET /api/settings` returns the current workspace preference:
+
+```json
+{"responseLanguage":"auto"}
+```
+
+`PATCH /api/settings` accepts an explicit response-language preference and returns the saved `WorkspaceSettings`:
+
+```json
+{"responseLanguage":"zh-CN"}
+```
+
+Allowed values are `auto`, `en`, and `zh-CN`; new and existing workspaces without a saved choice default to `auto`. PATCH requires exactly the `responseLanguage` field. Missing or unknown fields, `null`, non-string values and unsupported values return `422` with error code `invalid_request`. The setting lives in the existing World component state and survives service restarts. It is scoped to the workspace, including a separate preference for the example workspace. `GET /api/bootstrap` includes the same value as `settings.responseLanguage`.
+
+An explicit language instruction in the current task takes priority. Otherwise `en` requests English responses, `zh-CN` requests Simplified Chinese responses, and `auto` leaves language to the task and conversation. The preference is sampled at the first model boundary of each new turn. That turn's later tool rounds and approval continuation keep the same preference; changing settings applies to the next new turn. It does not restart an active request, queue a new conversational message, translate old history, or authorize an action. Changing the preference is valid while AI is disconnected and makes no provider request itself.
+
+The interface preference (`system`, `en`, or `zh-CN`) is browser-local and is not an API setting. The browser localizes product labels using stable IDs, status values and error codes. API IDs, field names, status values, user-authored titles, message content and reference labels retain their original values. See [language support](language-support.md).
 
 ## Create a page from the current conversation
 
@@ -123,7 +148,7 @@ Response `201`: `{messageId:string, reference:PageReference, view:PageView}`. `v
 
 ## Errors
 
-Errors use `{error:{code:string,message:string}}` with 400/404/409/422/503. Show the message in English. Never silently switch to an example or fabricated assistant response after an error.
+Errors use `{error:{code:string,message:string}}` with 400/404/409/422/503. Keep `code` stable across languages. The browser translates recognized error codes into the selected interface language and preserves the server message for unknown diagnostics. Never silently switch to an example or fabricated assistant response after an error.
 
 ## Explicit example mode
 

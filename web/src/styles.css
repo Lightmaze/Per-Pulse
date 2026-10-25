@@ -1,5 +1,5 @@
 :root {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   color: #252923;
   background: #ffffff;
   font-synthesis: none;
@@ -15,13 +15,13 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; }
-button, input, textarea { font: inherit; color: inherit; }
-button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }
 button:disabled { cursor: default; }
 button { border: 0; background: none; }
 a { color: inherit; text-decoration: none; }
-button, a, input, textarea { outline-offset: 4px; }
+button, a, input, textarea, select { outline-offset: 4px; }
 :focus-visible { outline: 2px solid #446d59; }
 .icon { flex-shrink: 0; vertical-align: middle; }
 .app-shell { display: flex; width: 100%; height: 100dvh; min-height: 400px; overflow: hidden; }
@@ -116,7 +116,7 @@ button, a, input, textarea { outline-offset: 4px; }
 .toast { position: fixed; left: calc(50% + 120px); bottom: 23px; transform: translateX(-50%); display: flex; align-items: center; gap: 9px; padding: 11px 16px; background: #f0f4ed; color: #315447; border: 1px solid #dce5d9; border-radius: 7px; font-size: 12px; z-index: 20; max-width: calc(100vw - 40px); }
 .dialog { padding: 28px; width: calc(100vw - 40px); max-width: 510px; max-height: calc(100dvh - 60px); overflow-y: auto; border: 1px solid var(--border); border-radius: 14px; background: #fff; color: var(--text); box-shadow: 0 12px 80px #202a2012; }
 .dialog::backdrop { background: #20281f39; backdrop-filter: blur(2px); }
-.dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 15px; }
+.dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 15px; position: sticky; top: 0; z-index: 1; background: white; }
 .dialog h2 { font-family: Georgia, "Times New Roman", serif; font-size: 28px; font-weight: 400; letter-spacing: -.6px; margin: 1px 0 0; line-height: 1.2; }
 .dialog-heading .icon-button { margin: -3px -5px 0 0; }
 .dialog-description { font-size: 13px; line-height: 1.7; color: var(--muted); margin: 0 0 24px; }
@@ -149,6 +149,12 @@ button, a, input, textarea { outline-offset: 4px; }
 .settings-section p { font-size: 12px; line-height: 1.75; color: var(--muted); margin: 8px 0 13px; }
 .settings-section .connection-label { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .settings-section .settings-detail { font-size: 11px; color: #81897b; }
+.language-setting .field-label { margin-top: 18px; }
+.language-setting select { width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid #d9ded5; border-radius: 6px; background: white; font-size: 14px; }
+.language-setting select:disabled { opacity: .65; }
+.settings-section .settings-language-status { min-height: 21px; margin: 4px 0 0; color: var(--accent); }
+:lang(zh-CN) .page-heading h1, :lang(zh-CN) .dialog h2 { font-family: "Noto Serif CJK SC", "Songti SC", SimSun, serif; letter-spacing: 0; line-height: 1.3; }
+.return-to-thread { min-width: 30px; }
 .sidebar-scrim { display: none; }
 
 @keyframes pulse { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
@@ -205,7 +211,7 @@ button, a, input, textarea { outline-offset: 4px; }
   .toast { left: 50%; bottom: 16px; width: max-content; font-size: 11px; }
   .dialog { width: calc(100vw - 28px); padding: 23px; max-height: calc(100dvh - 32px); border-radius: 12px; }
   .dialog h2 { font-size: 26px; }
-  .dialog input, .dialog textarea { font-size: 16px; }
+  .dialog input, .dialog textarea, .language-setting select { font-size: 16px; }
   .dialog-actions .primary-button, .dialog-actions .secondary-button { min-height: 41px; }
   .picker-result { min-height: 55px; }
   .picker-result strong { font-size: 14px; }

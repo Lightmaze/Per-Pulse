@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Message, PageReference, PageSummary, PageView } from '../types';
+import { useLanguage } from '../i18n';
 import { Icon } from './Icon';
 import { SessionLink, type Navigate } from './SessionLink';
 
@@ -34,29 +35,30 @@ function MessageContent({ message, pageId, navigate }: { message: Message; pageI
 export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn }: {
   view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string) => void;
 }) {
+  const { t, pageTitle } = useLanguage();
   const pageMap = new Map(pages.map(page => [page.id, page]));
   const pageReferences = view.references.filter(reference => !reference.sourceMessageId);
-  return <div className="conversation" aria-label="Conversation">
-    {view.hasMore ? <p className="conversation-note">Showing the most recent messages.</p> : null}
+  return <div className="conversation" aria-label={t('conversation.label')}>
+    {view.hasMore ? <p className="conversation-note">{t('conversation.recentMessages')}</p> : null}
     {view.messages.map(message => <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id} key={message.id}>
-      <div className="message-label">{message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Per Pulse' : 'Workspace'}</div>
-      {message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">From <SessionLink pageId={message.sourcePageId} label={pageMap.get(message.sourcePageId)?.title ?? 'Source page'} targetMessageId={message.sourceMessageId ?? undefined} navigate={navigate} /></div> : null}
+      <div className="message-label">{message.role === 'user' ? t('conversation.you') : message.role === 'assistant' ? 'Per Pulse' : t('conversation.workspace')}</div>
+      {message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">{t('conversation.from')} <SessionLink pageId={message.sourcePageId} label={pageTitle({ id: message.sourcePageId, title: pageMap.get(message.sourcePageId)?.title ?? t('conversation.sourcePage') })} targetMessageId={message.sourceMessageId ?? undefined} navigate={navigate} /></div> : null}
       <MessageContent message={message} pageId={view.page.id} navigate={navigate} />
       <div className="message-footer">
-        {['queued', 'running', 'working', 'failed', 'error'].includes(message.status) ? <span className={`message-status status-${message.status}`}>{message.status === 'queued' ? view.provider.configured ? 'Queued' : 'Saved · awaiting AI connection' : ['running', 'working'].includes(message.status) ? 'Working…' : 'Could not complete this turn'}</span> : null}
+        {['queued', 'running', 'working', 'failed', 'error'].includes(message.status) ? <span className={`message-status status-${message.status}`}>{t(message.status === 'queued' ? view.provider.configured ? 'conversation.queued' : 'conversation.savedAwaitingConnection' : ['running', 'working'].includes(message.status) ? 'conversation.working' : 'conversation.turnFailed')}</span> : null}
         <div className="message-actions">
-          <button onClick={() => onCreate(message)} title="Continue this in a new page"><Icon name="plus" size={14} />New page</button>
-          <button onClick={() => onReference(message)} title="Link an existing page here"><Icon name="link" size={14} />Link page</button>
+          <button onClick={() => onCreate(message)} title={t('conversation.newPageTitle')}><Icon name="plus" size={14} />{t('conversation.newPage')}</button>
+          <button onClick={() => onReference(message)} title={t('conversation.linkPageTitle')}><Icon name="link" size={14} />{t('conversation.linkPage')}</button>
           {view.page.kind === 'work' ? <button onClick={() => {
             const selected = window.getSelection();
             const node = document.getElementById(`message-${message.id}`);
             const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString().trim() : '';
             onReturn(message, text || message.content);
-          }} title="Bring selected text or this message to Home"><Icon name="return" size={14} />Bring to Home</button> : null}
+          }} title={t('conversation.bringHomeTitle')}><Icon name="return" size={14} />{t('conversation.bringHome')}</button> : null}
         </div>
       </div>
     </article>)}
     {pageReferences.length ? <div className="page-references">{pageReferences.map(reference => <SessionLink key={reference.id} pageId={reference.targetPageId} label={reference.label} referenceId={reference.id} origin={{ pageId: view.page.id, referenceId: reference.id }} navigate={navigate} />)}</div> : null}
-    {!view.messages.length && !pageReferences.length ? <p className="empty-conversation">{view.page.kind === 'home' ? 'Start a conversation, and give each idea a place of its own.' : 'This is a space to work things through. Pick up the conversation below.'}</p> : null}
+    {!view.messages.length && !pageReferences.length ? <p className="empty-conversation">{t(view.page.kind === 'home' ? 'conversation.emptyHome' : 'conversation.emptyPage')}</p> : null}
   </div>;
 }
