@@ -309,3 +309,86 @@ def test_operator_pause_rejects_disabled_profile_and_nonboolean_value(tmp_path):
         assert client.patch("/api/pulse", json={"paused": True}).status_code == 409
         assert client.patch("/api/pulse", json={"paused": "true"}).status_code == 422
         assert client.get("/api/pulse").json()["paused"] is False
+
+
+def test_scoped_page_hold_persists_and_does_not_block_foreground(tmp_path, monkeypatch):
+    """An original Work's inbound background stays queued across restart.
+
+    A user can still interact with *that very Work* and sibling Works.
+    Releasing only its local hold resumes the same native causal delivery.
+    """
+    fixture = TransportFixture(monkeypatch)
+    settings = PulseSettings(
+        enabled=True, spontaneous_rate=0, check_interval_seconds=0.01,
+        refractory_seconds=0, max_propagation_depth=1,
+        max_background_pulses_per_hour=2,
+    )
+    with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
+        source = page(client, "Evidence", "A_LOCAL_HISTORY")
+        target = page(client, "Synthesis", "B_LOCAL_HISTORY")
+        eventually(lambda: view(client, source), lambda v: assistant_count(v) == 1)
+        eventually(lambda: view(client, target), lambda v: assistant_count(v) == 1)
+        connect(client, source, target, weight=0.9)
+
+        held = client.patch(f"/api/pulse/contexts/{target}", json={"paused": True})
+        assert held.status_code == 200, held.text
+        assert held.json()["pulse"]["paused"] is False
+        assert held.json()["pulse"]["heldContexts"] == [{
+            "center_id": client.app.state.pages.runtime.world.get_task_front(target).center_id,
+            "pageId": target,
+        }]
+        assert client.patch(f"/api/pulse/contexts/{target}", json={"paused": "yes"}).status_code == 422
+        assert client.patch("/api/pulse/contexts/missing-work", json={"paused": True}).status_code == 404
+
+        sent = client.post(f"/api/pages/{source}/messages", json={"content": "A_NEW_INPUT"})
+        assert sent.status_code == 202
+        eventually(lambda: view(client, source), lambda v: assistant_count(v) == 2)
+        status = eventually(
+            lambda: client.get("/api/pulse").json(),
+            lambda data: any(item["pageId"] == target and item["status"] == "queued"
+                             and item["deferredReason"] == "attention_held"
+                             for item in data["recentActivations"]),
+        )
+        delivery_id = next(item["eventId"] for item in status["recentActivations"]
+                           if item["pageId"] == target and item["status"] == "queued")
+        assert status["budget"]["used"] == 1
+        assert status["budget"]["remaining"] == 1
+
+        # Holding the local background cannot freeze its ordinary conversation.
+        direct = client.post(f"/api/pages/{target}/messages", json={"content": "B_FOREGROUND_EDIT"})
+        assert direct.status_code == 202
+        eventually(lambda: view(client, target), lambda v: assistant_count(v) == 2)
+        assert len(fixture.requests) == 4
+        # Capture the target's actual foreground Kernel session, not whichever
+        # of the two initial page requests happened to settle last.
+        target_session = fixture.scopes[-1].session_id
+        assert client.get("/api/pulse").json()["paused"] is False
+
+    with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
+        status = client.get("/api/pulse").json()
+        assert status["heldContexts"][0]["pageId"] == target
+        assert status["paused"] is False
+        before = client.app.state.pages.runtime.tick_count
+        eventually(lambda: client.app.state.pages.runtime.tick_count,
+                   lambda tick: tick >= before + 3)
+        assert assistant_count(view(client, target)) == 2
+        assert len(fixture.requests) == 4
+        event = next(item for item in client.get("/api/pulse").json()["recentActivations"]
+                     if item["eventId"] == delivery_id)
+        assert event["deferredReason"] == "attention_held"
+        resume = client.patch(f"/api/pulse/contexts/{target}", json={"paused": False})
+        assert resume.status_code == 200, resume.text
+        assert resume.json()["pulse"]["heldContexts"] == []
+        eventually(lambda: view(client, target), lambda v: assistant_count(v) == 3)
+        assert len(fixture.requests) == 5
+        assert fixture.scopes[-1].session_id == target_session
+        delivery = client.app.state.pages.runtime.causal_ledger.get_event(delivery_id)
+        assert delivery.status.value == "settled"
+        assert delivery.attempts == 1
+        assert client.get("/api/pulse").json()["budget"]["used"] == 1
+
+
+def test_scoped_page_hold_rejected_when_native_pulse_disabled(tmp_path):
+    with client_for(tmp_path, pulse=PulseSettings(enabled=False), model_factory=None) as client:
+        assert client.patch("/api/pulse/contexts/home", json={"paused": True}).status_code == 409
+        assert client.get("/api/pulse").json()["heldContexts"] == []

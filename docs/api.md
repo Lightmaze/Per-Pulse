@@ -154,6 +154,27 @@ released; the same causal graph, per-page histories and queued influence
 then resume. This is not PR #6's full per-page attention/held-thought tool
 nor a token or currency budget.
 
+## Hold or resume one page's background admission
+
+`PATCH /api/pulse/contexts/{page_id}` with `{"paused":true}` holds
+new *background* turns for only the selected Home or Work context;
+`{"paused":false}` resumes them. The page must belong to the current
+continuing subject, and Pulse must be enabled. Only JSON booleans are
+accepted. The response is `{pulse:PulseState}`.
+
+The existing Pulse controller stores `held_contexts` alongside the
+global pause, and `GET /api/pulse` projects `heldContexts` with exact
+`center_id` and `pageId` identities (no missing Work is renamed Home).
+Queued inbound activity reports `attention_held`. Ordinary foreground
+input, settled outward influence, the admission quota, and other local
+contexts remain unaffected. Holds survive restart; releasing a hold
+continues the original queue without creating a new engine.
+
+This **operator** control does not pretend to implement the model's
+action/turn-gated attention tool or retained-thought store. Those still
+require settlement and correction ordering, and monetary budgets remain
+the Harness line's responsibility.
+
 ## Connect local pulse contexts
 
 `POST /api/pulse/connections`

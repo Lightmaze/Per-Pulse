@@ -150,6 +150,8 @@ class PageService:
                 connection["targetPageId"] = page_id_for(connection["target_center_id"])
             for context in state["contexts"]:
                 context["pageId"] = page_id_for(context["center_id"])
+            for held in state["heldContexts"]:
+                held["pageId"] = page_id_for(held["center_id"])
             for activation in state["recentActivations"]:
                 activation["pageId"] = page_id_for(activation["centerId"])
                 # A delivery is displayed at its receiver; show the causal
@@ -173,6 +175,19 @@ class PageService:
             if not controller.config.enabled:
                 raise PageError("pulse_not_enabled", "Start Per Pulse with --pulse to control background activity.", 409)
             controller.set_paused(paused)
+            return {"pulse": self.pulse_status()}
+
+    def set_context_paused(self, page_id: str, paused: bool) -> dict:
+        with self._lock:
+            self.runtime._require_runtime_owner()
+            controller = self.runtime.context_pulse
+            if not controller.config.enabled:
+                raise PageError("pulse_not_enabled", "Start Per Pulse with --pulse to control background activity.", 409)
+            front = self._front(page_id)
+            try:
+                controller.set_context_paused(front.center_id if front else None, paused)
+            except ValueError as exc:
+                raise PageError("context_unavailable", str(exc), 409) from exc
             return {"pulse": self.pulse_status()}
 
     def connect_pages(self, source_page_id: str, target_page_id: str,

@@ -88,6 +88,7 @@ export type PulseActivation = {
 export type PulseState = {
   enabled: boolean;
   paused: boolean;
+  heldContexts: { center_id: string | null; pageId: string | null }[];
   running: boolean;
   providerConfigured: boolean;
   budget: { limit: number; used: number; remaining: number; windowSeconds: number; unit: string };
