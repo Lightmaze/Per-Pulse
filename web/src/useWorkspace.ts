@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from './api';
+import { api, ApiError } from './api';
 import { pageFromLocation, pageHref, savePosition } from './storage';
-import type { Bootstrap, NavigationOrigin, PageView } from './types';
+import type { Bootstrap, NavigationOrigin, PageView, WorkspaceSettings } from './types';
 
 type Route = { id: string; serial: number; origin?: NavigationOrigin; targetMessageId?: string };
 export function useWorkspace() {
@@ -10,9 +10,10 @@ export function useWorkspace() {
   bootstrapRef.current = bootstrap;
   const [views, setViews] = useState<Record<string, PageView>>({});
   const [route, setRoute] = useState<Route>(() => ({ id: pageFromLocation(), serial: 0 }));
-  const [error, setError] = useState('');
+  const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const versions = useRef<Record<string, number>>({});
+  const settingsVersion = useRef(0);
   const routeRef = useRef(route);
   routeRef.current = route;
 
@@ -30,10 +31,22 @@ export function useWorkspace() {
   }, [applyView]);
 
   const refreshBootstrap = useCallback(async () => {
+    const version = settingsVersion.current;
     const next = await api.bootstrap();
-    setBootstrap(next);
+    setBootstrap(previous => previous && version !== settingsVersion.current ? { ...next, settings: previous.settings } : next);
     return next;
   }, []);
+
+  const applySettings = useCallback((settings: WorkspaceSettings) => {
+    settingsVersion.current += 1;
+    setBootstrap(previous => previous ? { ...previous, settings } : previous);
+  }, []);
+
+  const refreshSettings = useCallback(async () => {
+    const version = settingsVersion.current;
+    const next = await api.settings();
+    if (version === settingsVersion.current) applySettings(next);
+  }, [applySettings]);
 
   const navigate = useCallback((id: string, origin?: NavigationOrigin, targetMessageId?: string) => {
     const workspaceId = bootstrapRef.current?.workspaceId;
@@ -61,7 +74,7 @@ export function useWorkspace() {
   useEffect(() => {
     const controller = new AbortController();
     api.bootstrap(controller.signal).then(setBootstrap).catch(problem => {
-      if (!controller.signal.aborted) setError(problem instanceof Error ? problem.message : 'The workspace could not be loaded.');
+      if (!controller.signal.aborted) setError(problem instanceof Error ? problem : new ApiError('The workspace could not be loaded.', 'workspace_load_failed', 0));
     });
     return () => controller.abort();
   }, []);
@@ -79,7 +92,7 @@ export function useWorkspace() {
     api.page(route.id, controller.signal).then(view => {
       if ((versions.current[route.id] ?? 0) === version) applyView(view);
     }).catch(problem => {
-      if (!controller.signal.aborted) setError(problem instanceof Error ? problem.message : 'This page could not be loaded.');
+      if (!controller.signal.aborted) setError(problem instanceof Error ? problem : new ApiError('This page could not be loaded.', 'page_load_failed', 0));
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [route.id, route.serial, applyView]);
@@ -92,5 +105,5 @@ export function useWorkspace() {
     return () => window.clearInterval(timer);
   }, [route.id, shouldPoll, refreshPage]);
 
-  return { bootstrap, route, view: activeView, loading, error, setError, navigate, applyView, refreshPage, refreshBootstrap };
+  return { bootstrap, route, view: activeView, loading, error, setError, navigate, applyView, refreshPage, refreshBootstrap, applySettings, refreshSettings };
 }

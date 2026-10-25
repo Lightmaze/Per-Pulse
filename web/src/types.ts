@@ -56,7 +56,11 @@ export type Bootstrap = {
   homeId: 'home';
   provider: ProviderState;
   pages: PageSummary[];
+  settings: WorkspaceSettings;
 };
+
+export type ResponseLanguage = 'auto' | 'en' | 'zh-CN';
+export type WorkspaceSettings = { responseLanguage: ResponseLanguage };
 
 export type DraftReference = { targetPageId: string; label: string };
 export type Draft = { text: string; references: DraftReference[] };

@@ -6,7 +6,7 @@ Per Pulse is an open-source workspace for connected, persistent conversations. S
 
 Home and session pages are contexts of the same continuing subject. Each session has its own conversation history; a link opens that existing context without copying the entire Home conversation into it.
 
-This first release provides an English interface, a local Python service, and a React client. It continues the existing Pulse Home/Work and Harness Kernel implementation.
+This implementation provides English and Simplified Chinese interfaces, a local Python service, and a React client. It continues the existing Pulse Home/Work and Harness Kernel implementation.
 
 ## What you can do
 
@@ -16,8 +16,17 @@ This first release provides an English interface, a local Python service, and a 
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
+- Choose English or Simplified Chinese interface text, and set an independent response-language preference.
 
-The server stores pages, messages, and references in the existing Pulse persistence layer. Browser storage holds only local drafts and navigation positions, scoped to the persistent workspace and page. When no model is configured, the interface says **AI disconnected** and saves messages as queued input. It never substitutes a scripted answer for a model response.
+The server stores pages, messages, references, and the response-language preference in the existing Pulse persistence layer. Browser storage holds local drafts and navigation positions, scoped to the persistent workspace and page, plus the interface-language preference for this browser. When no model is configured, the interface says **AI disconnected** and saves messages as queued input. It never substitutes a scripted answer for a model response.
+
+### Languages
+
+Open **Settings → Language** to choose **System language**, **English**, or **简体中文** for the interface. The choice takes effect without reloading the workspace and is remembered in the current browser. System follows the first supported language in the browser's preferences, using Simplified Chinese for Chinese and falling back to English when neither language is present.
+
+**Reply language** is separate: **Follow conversation**, **English**, or **简体中文**. It is saved with the current workspace, survives a server restart, and applies to the next new reply. A reply already in progress keeps its chosen language through tool use and approval continuation. Follow conversation leaves language to the task and conversation; an explicit language instruction in a task takes priority over a saved preference. Changing interface language does not change this preference.
+
+Language settings preserve existing messages, page names, reference labels, drafts, and source material. The authored example notes remain in English. See [language support and maintenance](docs/language-support.md) for the contract and integration checklist.
 
 ## Run from source
 
@@ -97,7 +106,7 @@ Build the client before building a wheel. The wheel includes the compiled client
 
 | Layer | Responsibility |
 | --- | --- |
-| `web/` | English conversation UI, inline references, page navigation, local drafts |
+| `web/` | English/Chinese conversation UI, interface-language preference, inline references, page navigation, local drafts |
 | `src/per_pulse/` | Local HTTP API, page projection, explicit example mode, CLI |
 | `src/pulse_system/` | Existing World, native Home/Work, causal events, runtime service |
 | `src/pulse_harness/` | Existing Kernel, model transport, turn history, tool and approval machinery |

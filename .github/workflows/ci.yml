@@ -21,10 +21,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install and build the English client
+      - name: Verify and build the bilingual client
         run: |
           npm --prefix web ci
           npm --prefix web run typecheck
+          npm --prefix web test
           npm --prefix web run build
       - name: Install the local service
         run: python -m pip install -e '.[dev]'
