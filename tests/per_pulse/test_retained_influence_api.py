@@ -177,3 +177,58 @@ def test_pulse_status_preserves_missing_work_identity_instead_of_faking_home(
                            if edge["source_center_id"] is None)
         assert actual_home["sourcePageId"] == "home"
         assert actual_home["targetPageId"] == target
+
+
+
+def test_activity_ui_uses_native_connection_and_status_contract(tmp_path):
+    """The UI's connection controls act on the existing durable Pulse graph.
+
+    Reading remains useful without a provider or an enabled background loop:
+    the interface never invents continuing turns to fill an empty activity list.
+    """
+    with client_for(tmp_path, pulse=PulseSettings(enabled=False), model_factory=None) as client:
+        source = page(client, "Evidence", "READ_EVIDENCE")
+        target = page(client, "Synthesis", "WRITE_SYNTHESIS")
+        before = client.get("/api/pulse")
+        assert before.status_code == 200
+        assert before.json()["enabled"] is False
+        assert before.json()["providerConfigured"] is False
+        assert before.json()["queue"]["queued"] == 0
+        assert before.json()["recentActivations"] == []
+
+        create = client.post("/api/pulse/connections", json={
+            "sourcePageId": source, "targetPageId": target,
+            "kind": "inhibitory", "weight": 0.6,
+        })
+        assert create.status_code == 201, create.text
+        edge = create.json()["connection"]
+        assert edge["sourcePageId"] == source
+        assert edge["targetPageId"] == target
+        assert edge["kind"] == "inhibitory"
+        assert edge["weight"] == 0.6
+        snapshot = create.json()["pulse"]
+        assert snapshot["running"] is False
+        assert len(snapshot["connections"]) == 1
+        assert snapshot["connections"][0]["id"] == edge["id"]
+        assert snapshot["connections"][0]["sourcePageId"] == source
+        assert snapshot["connections"][0]["targetPageId"] == target
+
+        # A second read does not create activity or change the edge identity.
+        status = client.get("/api/pulse").json()
+        assert status["connections"] == snapshot["connections"]
+        assert status["recentActivations"] == []
+
+        remove = client.request("DELETE", "/api/pulse/connections", json={
+            "sourcePageId": source, "targetPageId": target,
+        })
+        assert remove.status_code == 200, remove.text
+        assert remove.json()["removed"] is True
+        assert remove.json()["pulse"]["connections"] == []
+        assert client.get("/api/pulse").json()["connections"] == []
+
+        invalid = client.post("/api/pulse/connections", json={
+            "sourcePageId": source, "targetPageId": "missing-work",
+            "kind": "excitatory", "weight": 0.6,
+        })
+        assert invalid.status_code == 404
+        assert client.get("/api/pulse").json()["connections"] == []
