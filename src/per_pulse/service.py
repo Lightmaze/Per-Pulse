@@ -152,6 +152,16 @@ class PageService:
                 context["pageId"] = page_id_for(context["center_id"])
             for activation in state["recentActivations"]:
                 activation["pageId"] = page_id_for(activation["centerId"])
+                # A delivery is displayed at its receiver; show the causal
+                # source separately rather than guessing from that receiver.
+                source_id = activation["sourceEventId"]
+                source = self.runtime.causal_ledger.get_event(source_id) if source_id else None
+                if source is not None and source.world_id == self.runtime.world_id:
+                    activation["sourceCenterId"] = source.center_id
+                    activation["sourcePageId"] = page_id_for(source.center_id)
+                else:
+                    activation["sourceCenterId"] = None
+                    activation["sourcePageId"] = None
             state["running"] = self.runtime.running and state["enabled"]
             state["providerConfigured"] = self.configured
             return state

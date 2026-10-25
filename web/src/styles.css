@@ -152,6 +152,32 @@ button, a, input, textarea { outline-offset: 4px; }
 .sidebar-scrim { display: none; }
 
 @keyframes pulse { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
+.pulse-activity-trigger { margin-left: auto; min-height: 34px; padding: 3px 8px; }
+.pulse-activity-dialog { max-width: 590px; }
+.pulse-activity-section { margin-top: 21px; padding-top: 20px; border-top: 1px solid var(--border); }
+.pulse-activity-section h3 { font-size: 13px; font-weight: 600; margin: 0 0 11px; }
+.pulse-activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.pulse-activity-summary { font-size: 13px; color: var(--text); margin-bottom: 7px; }
+.pulse-activity-detail { display: block; font-size: 11px; line-height: 1.7; color: var(--muted); margin: 5px 0; }
+.pulse-activity-empty { font-size: 12px; color: var(--muted); margin: 11px 0; }
+.pulse-activity-list { list-style: none; padding: 0; margin: 5px 0 0; }
+.pulse-activity-list li { border-bottom: 1px solid var(--border); padding: 10px 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.pulse-activity-list li:last-child { border-bottom: 0; }
+.pulse-activity-list .text-button { float: right; }
+.pulse-activity-link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.pulse-activity-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.pulse-activity-event { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pulse-activity-state { color: var(--muted); text-transform: capitalize; }
+.pulse-activity-identity { display: block; color: #92998b; font-size: 10px; }
+.pulse-activity-add { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 17px; align-items: end; }
+.pulse-activity-add label { font-size: 11px; color: var(--muted); }
+.pulse-activity-add select { width: 100%; min-width: 0; padding: 9px 6px; border: 1px solid var(--border); border-radius: 6px; background: white; }
+.pulse-activity-add button { grid-column: 1 / -1; justify-self: start; }
+@media (max-width: 760px) {
+  .pulse-activity-trigger { font-size: 11px; min-height: 40px; margin-left: auto; }
+  .pulse-activity-dialog { max-height: calc(100dvh - 20px); }
+}
+
 @media (min-width: 761px) {
   .is-sidebar-collapsed .sidebar { display: none; }
   .is-sidebar-collapsed .toast { left: 50%; }

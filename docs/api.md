@@ -73,6 +73,11 @@ type Bootstrap = {
   `oldestQueuedAt` (null when empty). Queued recent activations include
   `deferredReason` from the real context admission gate; null does not promise
   an immediately available worker. See [pulse-core.md](pulse-core.md#inspect-retained-work).
+  Each recent activation now also includes sourceEventId, sourceCenterId
+  and sourcePageId derived from its actual parent causal event (when present).
+  A missing source has null identity fields; a real null Home source resolves
+  to "home". The source and receiver are different fields and must not be
+  conflated in UI, memory or provenance reports.
   Contexts, directed connections and activations retain their native center
   identifiers. A `pageId`, `sourcePageId` or `targetPageId` is `"home"`
   **only** for the actual null (Home) center; when a historical Work center
