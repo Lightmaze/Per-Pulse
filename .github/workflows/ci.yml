@@ -25,6 +25,7 @@ jobs:
         run: |
           npm --prefix web ci
           npm --prefix web run typecheck
+          node --experimental-strip-types --test web/tests/pulse-activity-request-gate.test.mjs
           npm --prefix web run build
       - name: Install the local service
         run: python -m pip install -e '.[dev]'
