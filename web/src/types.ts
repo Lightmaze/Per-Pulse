@@ -80,6 +80,8 @@ export type PulseActivation = {
   status: string;
   createdAt: string;
   sourceEventId: string | null;
+  sourceCenterId: string | null;
+  sourcePageId: string | null;
   deferredReason: string | null;
 };
 
