@@ -132,6 +132,11 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
             </div>
             <span className="pulse-activity-detail">{eventTime(activity.createdAt)} · {activity.kind}</span>
             {activity.deferredReason ? <span className="pulse-activity-detail">Waiting: {activity.deferredReason}</span> : null}
+            {activity.sourceEventId ? <span className="pulse-activity-detail">From: {activity.sourcePageId && validIds.has(activity.sourcePageId)
+              ? <button className="pulse-activity-link" onClick={() => jump(activity.sourcePageId)}>{nameFor(activity.sourcePageId)}</button>
+              : <span>{nameFor(activity.sourcePageId, activity.sourceCenterId)}</span>}
+              <span className="pulse-activity-identity" title={activity.sourceEventId}>Source event: {shortId(activity.sourceEventId)}</span>
+            </span> : null}
             <span className="pulse-activity-identity" title={activity.eventId}>Event: {shortId(activity.eventId)}</span>
           </li>)}
         </ol>}
