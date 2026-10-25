@@ -80,7 +80,7 @@ class ContextPulseController:
             self._state = self._validate_checkpoint(checkpoint) if checkpoint is not None else {
                 "version": 1, "world_id": world_id, "cursor": 0,
                 "observed_cursor": 0, "last_check_at": None, "contexts": {},
-                "paused": False,
+                "paused": False, "held_contexts": [],
             }
 
     @staticmethod
@@ -103,7 +103,7 @@ class ContextPulseController:
         eligibility, proves their identity and original activity time.
         """
         required = {"version", "world_id", "cursor", "last_check_at", "contexts"}
-        optional = {"observed_cursor", "paused"}
+        optional = {"observed_cursor", "paused", "held_contexts"}
         if (not isinstance(checkpoint, dict)
                 or set(checkpoint) - optional != required
                 or type(checkpoint.get("paused", False)) is not bool
@@ -116,6 +116,14 @@ class ContextPulseController:
         # The first checkpoint revision used one cursor for both passes.
         state.setdefault("observed_cursor", state["cursor"])
         state.setdefault("paused", False)
+        state.setdefault("held_contexts", [])
+        holds = state["held_contexts"]
+        if (not isinstance(holds, list) or len(holds) > 4096
+                or any(not isinstance(key, str)
+                       or (key != "home" and (not key.startswith("center:") or len(key) <= 7))
+                       for key in holds)
+                or len(set(holds)) != len(holds)):
+            raise ValueError("invalid context pulse checkpoint holds")
         cursors = (state["cursor"], state["observed_cursor"])
         maximum = self.storage._conn.execute(
             "SELECT COALESCE(MAX(seq), 0) FROM causal_events WHERE world_id = ?",
@@ -190,6 +198,34 @@ class ContextPulseController:
                 self._state["paused"] = previous
                 raise
 
+    def set_context_paused(self, center_id: str | None, paused: bool) -> None:
+        """Hold only this local context's *new* background admission.
+
+        Its foreground messages and already-settled outward influence remain
+        intact. The same native center can later resume without a new Engram
+        or model loop. Operator global pause has independent precedence.
+        """
+        if type(paused) is not bool:
+            raise ValueError("paused must be a boolean")
+        with self.storage._lock:
+            if not self._current_context(center_id, retain_paused=True):
+                raise ValueError("context is not an active part of this subject")
+            previous = list(self._state["held_contexts"])
+            holds = set(previous)
+            key = self._key(center_id)
+            if paused:
+                holds.add(key)
+            else:
+                holds.discard(key)
+            if holds == set(previous):
+                return
+            self._state["held_contexts"] = sorted(holds)
+            try:
+                self._save(_now())
+            except BaseException:
+                self._state["held_contexts"] = previous
+                raise
+
     def _current_context(self, center_id: str | None, *, retain_paused: bool = False) -> bool:
         """Check body membership separately from permission to execute.
 
@@ -257,6 +293,8 @@ class ContextPulseController:
                     and self._current_context(center_id, retain_paused=True)):
                 return "context_paused"
             return "context_inactive"
+        if self._key(center_id) in self._state["held_contexts"]:
+            return "attention_held"
         entry = self._state["contexts"].get(self._key(center_id))
         settled_at = datetime.fromisoformat(entry["settled_at"]) if entry else None
         # Workers may settle after the observation pass and before this tick's
@@ -579,6 +617,10 @@ class ContextPulseController:
             return {
                 "enabled": self.config.enabled,
                 "paused": self._state["paused"],
+                "heldContexts": [
+                    {"center_id": None if key == "home" else key[len("center:"):]}
+                    for key in self._state["held_contexts"]
+                ],
                 "budget": {"limit": self.config.max_background_pulses_per_hour,
                            "used": used, "remaining": max(0, self.config.max_background_pulses_per_hour - used),
                            "windowSeconds": 3600, "unit": "background pulse admissions"},
