@@ -63,6 +63,26 @@ influence only after release. The one-hour admission quota is neither
 reset nor replaced. The native test verifies foreground input during a
 hold, restart while held, one-time source-attributed delivery and quota.
 
-This is **global operator pause**, not PR #6's complete per-page
-attention inspect / hold / release tool. That still requires exact
-action settlement, user correction precedence and controller reuse.
+Global operator pause remains distinct from page-scoped control.
+
+## Scoped operator hold on the same ContextPulseController
+
+`PATCH /api/pulse/contexts/{page_id}` accepts only `{"paused": true|false}`.
+A page must belong to the active continuing subject. The existing native
+checkpoint persists the `held_contexts` set and projects `heldContexts`
+in `GET /api/pulse`. Older checkpoints without the field still load.
+
+The Activity panel can hold or resume the current Home/Work page separately
+from the global pause. The native engine admits ordinary foreground messages
+as before. Inbound background work reports `attention_held`; it retains
+source event identity, queue position and admission quota. Already-running
+turns may finish and their settled effects can still influence other local
+contexts, but a held target does not start a new background turn. Restart
+preserves the hold and release resumes the original queue in place.
+
+This is the **operator** subset of PR #6's page-local attention work,
+not the model's action/turn-gated inspect/hold/release tool, free-form
+retained-thought store or Keep thinking activation. Model-originated changes
+must still be applied only after the original action and turn settle,
+must respect later user corrections, and must not introduce a second
+controller or authority. Monetary admission remains with Core Harness.
