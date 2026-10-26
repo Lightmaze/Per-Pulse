@@ -66,5 +66,16 @@ jobs:
           path: ${{ runner.temp }}/per-pulse-attention-screenshots
           if-no-files-found: ignore
           retention-days: 7
+      - name: Verify a single correction-to-artifact user journey in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_JOURNEY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-journey-screenshots" node tests/browser/learning_artifact_flow.mjs
+      - name: Keep journey browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: learning-artifact-journey-screenshots
+          path: ${{ runner.temp }}/per-pulse-journey-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build the distributable package
         run: python -m build --no-isolation
