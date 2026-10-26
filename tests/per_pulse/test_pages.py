@@ -157,6 +157,28 @@ def test_json_validation_and_local_browser_boundary(tmp_path):
         assert client.get("/api/pages/missing").status_code == 404
 
 
+def test_local_workspace_cannot_be_embedded_for_clickjacking(tmp_path):
+    # A hostile site can attempt to iframe the loopback UI and trick a user
+    # into clicking a native Harness approval even though it cannot read API
+    # responses. Defend the page and rejected API responses alike.
+    with client_for(tmp_path, model_factory=None) as client:
+        attempts = (
+            client.get("/"),
+            client.get("/api/bootstrap"),
+            client.get("/api/pages/missing"),
+            client.post("/api/pages/home/messages", json={"content": "No."},
+                        headers={"Origin": "https://untrusted.example"}),
+            client.post("/api/pages/home/messages", data={"content": "No."}),
+        )
+        assert attempts[3].status_code == 403
+        assert attempts[4].status_code == 415
+        for response in attempts:
+            assert response.headers["x-frame-options"] == "DENY"
+            assert response.headers["content-security-policy"] == "frame-ancestors 'none'"
+            assert response.headers["x-content-type-options"] == "nosniff"
+        assert not client.get("/api/pages/home").json()["messages"]
+
+
 def test_explicit_example_ignores_ambient_provider_and_never_invents_ai(tmp_path, monkeypatch):
     monkeypatch.setenv("P_PULSE_CHAT_ENDPOINT", "https://configured.invalid/chat/completions")
     monkeypatch.setenv("P_PULSE_CHAT_MODEL", "ambient-model")
