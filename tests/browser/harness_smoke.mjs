@@ -93,7 +93,7 @@ try {
   check('interface language switches independently of reply language',
     await page.evaluate(()=>document.documentElement.lang)==='zh-CN'
     && await page.locator('#response-language').inputValue()==='auto');
-  await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+  await page.getByRole('button',{name:'关闭对话框',exact:true}).click();
   await page.getByRole('button',{name:'仅允许本次',exact:true}).waitFor();
   check('pending native approval and unsent Work draft survive Chinese switch',
     await slowDraft.inputValue()==='Unsent draft: keep this context and approval.');
@@ -101,8 +101,8 @@ try {
   await page.getByRole('dialog',{name:'活动',exact:true}).waitFor();
   await page.getByRole('heading',{name:'后台活动',exact:true}).waitFor();
   check('same Pulse activity route is reachable in Chinese',true);
-  await page.getByRole('button',{name:'Close dialog',exact:true}).click();
-  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('button',{name:'关闭对话框',exact:true}).click();
+  await page.getByRole('button',{name:'设置',exact:true}).click();
   await page.locator('#interface-language').selectOption('en');
   await page.getByRole('button',{name:'Close dialog',exact:true}).click();
   check('original approval identity and draft persist after returning to English',
