@@ -1,5 +1,5 @@
 /** Source-safe projection for one local Context Body, never a global feed of Work notes. */
-import type { PulseRetainedAttention, PulseState } from './types';
+import type { PulseActivation, PulseRetainedAttention, PulseState } from './types';
 
 export function localRetainedAttention(
   pulse: PulseState | null,
@@ -23,4 +23,19 @@ export function attentionSourceTarget(
     return { pageId: entry.sourcePageId, messageId: entry.sourceMessageId };
   }
   return { pageId: entry.sourcePageId };
+}
+
+/** Navigate a live Pulse activation without inventing message ownership. */
+export function activationMessageTarget(
+  entry: PulseActivation,
+  validPageIds: ReadonlySet<string>,
+  side: 'receiver' | 'source',
+): { pageId: string; messageId?: string } | null {
+  const pageId = side === 'receiver' ? entry.pageId : entry.sourcePageId;
+  if (!pageId || !validPageIds.has(pageId)) return null;
+  const eventId = side === 'receiver' ? entry.eventId : entry.sourceEventId;
+  const messageId = side === 'receiver' ? entry.messageId : entry.sourceMessageId;
+  // The backend checks original World, center and engram lineage; the UI
+  // additionally refuses an ID that does not match its claimed event.
+  return messageId && messageId === eventId ? { pageId, messageId } : { pageId };
 }
