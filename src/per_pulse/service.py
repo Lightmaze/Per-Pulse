@@ -215,14 +215,34 @@ class PageService:
                         else:
                             retained["sourceMessageId"] = source.id
             for activation in state["recentActivations"]:
-                activation["pageId"] = page_id_for(activation["centerId"])
-                # A delivery is displayed at its receiver; show the causal
-                # source separately rather than guessing from that receiver.
+                # Activation IDs are native causal events, not automatically
+                # displayable messages. Verify both the local event and its
+                # causal parent against the *full* page lineage before the UI
+                # may deep-link them. No fallback to Home for missing Works.
+                receiver_page = page_id_for(activation["centerId"])
+                activation["pageId"] = receiver_page
+                activation["messageId"] = None
+                if receiver_page is not None:
+                    try:
+                        self._check_message(receiver_page, activation["eventId"])
+                    except PageError:
+                        pass
+                    else:
+                        activation["messageId"] = activation["eventId"]
                 source_id = activation["sourceEventId"]
                 source = self.runtime.causal_ledger.get_event(source_id) if source_id else None
+                activation["sourceMessageId"] = None
                 if source is not None and source.world_id == self.runtime.world_id:
+                    source_page = page_id_for(source.center_id)
                     activation["sourceCenterId"] = source.center_id
-                    activation["sourcePageId"] = page_id_for(source.center_id)
+                    activation["sourcePageId"] = source_page
+                    if source_page is not None:
+                        try:
+                            self._check_message(source_page, source.id)
+                        except PageError:
+                            pass
+                        else:
+                            activation["sourceMessageId"] = source.id
                 else:
                     activation["sourceCenterId"] = None
                     activation["sourcePageId"] = None
