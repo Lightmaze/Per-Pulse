@@ -37,7 +37,17 @@ def fixture_factory(monkeypatch, requests):
         current = messages[last_user:]
         task = json.dumps(current, ensure_ascii=False)
         model_view = json.dumps(messages, ensure_ascii=False)
-        if "BUILD_PRACTICE_ARTIFACT" in task and not any(m["role"] == "tool" for m in current):
+        if "WORK_MATERIAL_JSON" in model_view:
+            # Native posture uses a separate no-tools semantic computation.
+            # A saved experience is NOT spliced directly into the main turn:
+            # this fixture must actually issue a contribution before the
+            # next main action can change. Delivery review gets PASS.
+            if LESSON in model_view and '"candidate_response"' not in model_view:
+                response = "For the visitor's immediate experience: " + LESSON
+            else:
+                response = "PASS"
+            delta, finish = {"content": response}, "stop"
+        elif "BUILD_PRACTICE_ARTIFACT" in task and not any(m["role"] == "tool" for m in current):
             learned = LESSON in model_view
             arguments = {"path": "practice.txt" if learned else "intake.txt",
                          "expected_digest": None, "content": EXPERIENCE if learned else INTAKE}
