@@ -527,7 +527,9 @@ def test_completed_effect_is_not_reported_as_rejected_when_continuation_is_redac
         assert receipt["actionStatus"] == "succeeded"
         assert receipt["continuationError"]["code"] == "redaction_required"
         assert "action completed" in receipt["continuationError"]["message"].lower()
-        assert "abc" not in json.dumps(receipt)
+        # Check the actual private value, not a three-letter substring that
+        # can occur by chance inside unrelated generated UUIDs and IDs.
+        assert "password=abc" not in json.dumps(receipt)
         assert path.read_text() == after
         assert pages.artifacts.read(page_id, action_id)["state"] == "current"
         round_count = len(requests)
