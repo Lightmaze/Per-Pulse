@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import math
 import json
+import hashlib
 import random
 from typing import Callable
 
@@ -70,10 +71,12 @@ class ContextPulseController:
 
     def __init__(self, storage, ledger, world, *, world_id: str,
                  subject: Callable[[], str], fence: Callable,
-                 config: ContextPulseConfig):
+                 config: ContextPulseConfig,
+                 attention_outcome: Callable[[dict], dict] | None = None):
         self.storage, self.ledger, self.world = storage, ledger, world
         self.world_id, self.subject, self.fence, self.config = world_id, subject, fence, config
         self.connections = ContextConnectionNetwork(storage, world_id)
+        self.attention_outcome = attention_outcome
         self.key = f"pulse-context-dynamics-v1:{world_id}"
         with storage._lock:
             checkpoint = storage.load_component_state(self.key)
@@ -81,6 +84,7 @@ class ContextPulseController:
                 "version": 1, "world_id": world_id, "cursor": 0,
                 "observed_cursor": 0, "last_check_at": None, "contexts": {},
                 "paused": False, "held_contexts": [],
+                "retained_attention": {}, "pending_attention": {},
             }
 
     @staticmethod
@@ -103,7 +107,8 @@ class ContextPulseController:
         eligibility, proves their identity and original activity time.
         """
         required = {"version", "world_id", "cursor", "last_check_at", "contexts"}
-        optional = {"observed_cursor", "paused", "held_contexts"}
+        optional = {"observed_cursor", "paused", "held_contexts",
+                    "retained_attention", "pending_attention"}
         if (not isinstance(checkpoint, dict)
                 or set(checkpoint) - optional != required
                 or type(checkpoint.get("paused", False)) is not bool
@@ -117,6 +122,31 @@ class ContextPulseController:
         state.setdefault("observed_cursor", state["cursor"])
         state.setdefault("paused", False)
         state.setdefault("held_contexts", [])
+        state.setdefault("retained_attention", {})
+        state.setdefault("pending_attention", {})
+        if (not isinstance(state["retained_attention"], dict)
+                or not isinstance(state["pending_attention"], dict)
+                or len(state["retained_attention"]) > 4096
+                or len(state["pending_attention"]) > 256):
+            raise ValueError("invalid context pulse attention checkpoint")
+        for key, entry in state["retained_attention"].items():
+            if (not isinstance(key, str) or not isinstance(entry, dict)
+                    or not isinstance(entry.get("note"), str)
+                    or len(entry["note"]) > 4096
+                    or type(entry.get("drive")) not in (int, float)
+                    or not math.isfinite(entry["drive"])
+                    or not 0 <= entry["drive"] <= 1
+                    or type(entry.get("revision")) is not int
+                    or entry["revision"] < 0):
+                raise ValueError("invalid retained attention entry")
+        for request, pending in state["pending_attention"].items():
+            if (not isinstance(request, str) or not isinstance(pending, dict)
+                    or not isinstance(pending.get("scope"), dict)
+                    or not isinstance(pending.get("actionId"), str)
+                    or not isinstance(pending.get("arguments"), dict)
+                    or not isinstance(pending.get("key"), str)
+                    or type(pending.get("revision")) is not int):
+                raise ValueError("invalid pending attention entry")
         holds = state["held_contexts"]
         if (not isinstance(holds, list) or len(holds) > 4096
                 or any(not isinstance(key, str)
@@ -220,10 +250,142 @@ class ContextPulseController:
             if holds == set(previous):
                 return
             self._state["held_contexts"] = sorted(holds)
+            attention_previous = deepcopy(self._state["retained_attention"])
+            entry = self._state["retained_attention"].setdefault(
+                key, self._empty_attention(),
+            )
+            entry["revision"] += 1
+            entry["operatorEditedAt"] = _now().isoformat()
             try:
                 self._save(_now())
             except BaseException:
                 self._state["held_contexts"] = previous
+                self._state["retained_attention"] = attention_previous
+                raise
+
+
+    @staticmethod
+    def _empty_attention() -> dict:
+        return {
+            "note": "", "drive": 0.0, "revision": 0,
+            "sourceTurnId": None, "sourceActionId": None,
+            "sourceEventId": None, "operatorEditedAt": None,
+        }
+
+    def inspect_attention(self, center_id: str | None) -> dict:
+        """Observe only one's current local thought; no other Work text leaks."""
+        with self.storage._lock:
+            if not self._current_context(center_id, retain_paused=True):
+                raise ValueError("attention context is not part of this subject")
+            key = self._key(center_id)
+            state = deepcopy(self._state["retained_attention"].get(key, self._empty_attention()))
+            return {
+                "centerId": center_id,
+                "retained": state,
+                "operatorPaused": self._state["paused"],
+                "contextPaused": key in self._state["held_contexts"],
+                "backgroundEnabled": self.config.enabled,
+                "remainingAdmissions": max(
+                    0, self.config.max_background_pulses_per_hour - self._used(_now()),
+                ),
+                "meaning": "A retained local thought is not a new human instruction.",
+            }
+
+    def stage_attention(self, center_id: str | None, scope: dict,
+                        action_id: str, arguments: dict) -> dict:
+        """Persist one source-bound *intent*, never apply on a tool reply.
+
+        The native Kernel action and the World result must both reach success;
+        a human input/control after the turn's source prevents stale adoption.
+        """
+        with self.storage._lock:
+            if (not self.config.enabled or not self._current_context(center_id, retain_paused=True)
+                    or not isinstance(action_id, str) or not action_id):
+                raise ValueError("attention requires a current local context and native action")
+            turn = self.ledger.get_turn_for_world(scope.get("turn_id"), self.world_id)
+            if (turn is None or turn.engram_id != self.subject()
+                    or turn.state.value != "running"):
+                raise ValueError("attention intent requires its current World turn")
+            source = self.ledger.get_event(turn.event_id)
+            if (source is None or source.world_id != self.world_id
+                    or source.center_id != center_id):
+                raise ValueError("attention intent has no matching local source")
+            request_id = "attention:" + hashlib.sha256(
+                json.dumps([scope, action_id], sort_keys=True, separators=(",", ":")).encode(),
+            ).hexdigest()
+            key = self._key(center_id)
+            revision = self._state["retained_attention"].get(key, self._empty_attention())["revision"]
+            pending = {
+                "scope": scope, "actionId": action_id,
+                "arguments": arguments, "centerId": center_id, "key": key,
+                "revision": revision, "sourceEventId": source.id,
+            }
+            earlier = self._state["pending_attention"].get(request_id)
+            if earlier is not None:
+                if earlier != pending:
+                    raise ValueError("attention action identity changed")
+            else:
+                if len(self._state["pending_attention"]) >= 256:
+                    raise ValueError("too many unsettled attention intents")
+                self._state["pending_attention"][request_id] = pending
+                try:
+                    self._save(_now())
+                except BaseException:
+                    del self._state["pending_attention"][request_id]
+                    raise
+            return {"status": "staged", "centerId": center_id,
+                    "sourceEventId": source.id,
+                    "effect": "Only an original succeeded World turn can apply this local thought."}
+
+    def _reconcile_attention(self, now: datetime) -> None:
+        """Settle model intent inside this same durable Context Body checkpoint."""
+        if self.attention_outcome is None or not self._state["pending_attention"]:
+            return
+        before = deepcopy(self._state)
+        winners: dict[str, tuple[dict, dict]] = {}
+        for request_id, pending in list(self._state["pending_attention"].items()):
+            outcome = self.attention_outcome(pending)
+            if outcome["state"] == "pending":
+                continue
+            del self._state["pending_attention"][request_id]
+            if outcome["state"] == "succeeded":
+                # Ordered successful actions from one turn: the last hold or
+                # release wins, without being suppressed by its own revision.
+                winners[pending["key"]] = (pending, outcome)
+        for key, (pending, outcome) in winners.items():
+            entry = self._state["retained_attention"].get(key, self._empty_attention())
+            if entry["revision"] != pending["revision"]:
+                continue
+            source = self.ledger.get_event(pending["sourceEventId"])
+            if source is None or source.id != outcome["sourceEventId"]:
+                continue
+            # A later ordinary user input may be queued while the earlier turn
+            # is working. That newer input wins, even if the tool was emitted
+            # *after* the input arrived. Operator pauses have the same priority.
+            latest_user = self.storage._conn.execute(
+                "SELECT MAX(seq) FROM causal_events WHERE world_id=? AND engram_id=? "
+                "AND center_id IS ? AND kind='stimulus' AND source='user'",
+                (self.world_id, source.engram_id, pending["centerId"]),
+            ).fetchone()[0]
+            edited = entry.get("operatorEditedAt")
+            if ((latest_user is not None and latest_user > source.seq)
+                    or (edited and self._checkpoint_time(edited) > source.created_at)):
+                continue
+            args = pending["arguments"]
+            entry.update(
+                note=args["note"] if args["op"] == "hold" else "",
+                drive=args["drive"] if args["op"] == "hold" else 0.0,
+                revision=entry["revision"] + 1,
+                sourceTurnId=pending["scope"]["turn_id"],
+                sourceActionId=pending["actionId"],
+                sourceEventId=source.id,
+            )
+            self._state["retained_attention"][key] = entry
+        if self._state != before:
+            try:
+                self._save(now)
+            except BaseException:
+                self._state = before
                 raise
 
     def _current_context(self, center_id: str | None, *, retain_paused: bool = False) -> bool:
@@ -447,6 +609,9 @@ class ContextPulseController:
             # traversing local contexts instead of reloading every edge list.
             graph = self.connections.snapshot(now=now)
             self._repair_revocations(graph)
+            # Commit/discard staged model intents even when autonomous
+            # admission is held. No background model is started here.
+            self._reconcile_attention(now)
             if not self.config.enabled or self._state["paused"]:
                 # Retain both observation cursors, including settled results
                 # from in-flight turns, until the operator resumes activity.
@@ -554,7 +719,15 @@ class ContextPulseController:
                     continue
                 age = max(0.0, (now - datetime.fromisoformat(entry["settled_at"])).total_seconds())
                 activity = math.exp(-math.log(2) * age / self.config.activity_halflife_seconds)
-                probability = self.config.spontaneous_rate * activity / (1.0 + inhibition)
+                # A bounded retained local concern can keep an old useful
+                # result in consideration, but never bypass the original
+                # admission rate, inhibition, quota, pause or ownership.
+                drive = self._state["retained_attention"].get(
+                    self._key(center_id), {},
+                ).get("drive", 0.0)
+                probability = min(
+                    1.0, self.config.spontaneous_rate * (activity + 0.5 * drive),
+                ) / (1.0 + inhibition)
                 if random.random() >= probability:
                     continue
                 result = self.ledger.get_event(entry["result_event_id"])
@@ -620,6 +793,11 @@ class ContextPulseController:
                 "heldContexts": [
                     {"center_id": None if key == "home" else key[len("center:"):]}
                     for key in self._state["held_contexts"]
+                ],
+                "retainedAttention": [
+                    {"center_id": None if key == "home" else key[len("center:"):],
+                     **deepcopy(entry)}
+                    for key, entry in self._state["retained_attention"].items()
                 ],
                 "budget": {"limit": self.config.max_background_pulses_per_hour,
                            "used": used, "remaining": max(0, self.config.max_background_pulses_per_hour - used),
