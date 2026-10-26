@@ -1,6 +1,11 @@
 /** Interface text only: original work, events and filenames remain verbatim. */
 export const continuityEnglish = {
   "pulse.title": "Activity",
+  "pulse.home.title": "Recent local work",
+  "pulse.home.info": "Finished local activations in your existing Works. Open the original message to inspect what happened; nothing is copied into Home.",
+  "pulse.home.open": "Return to {title}",
+  "pulse.home.source": "Original source: {title}",
+  "pulse.home.provenance": "Verified World event",
   "pulse.description": "Local activity and connections in this continuing workspace. These are native records, not a separate agent or a replay of another page.",
   "pulse.retry": "Try again",
   "pulse.reading": "Reading activity…",
@@ -138,6 +143,11 @@ export const continuityEnglish = {
 } as const;
 export const continuityChinese: Record<keyof typeof continuityEnglish, string> = {
   "pulse.title": "活动",
+  "pulse.home.title": "近期局部工作",
+  "pulse.home.info": "这些活动在原有 Work 中完成。可返回原始消息核查经过；内容不会自动复制到 Home。",
+  "pulse.home.open": "返回 {title}",
+  "pulse.home.source": "原始来源：{title}",
+  "pulse.home.provenance": "可追溯的 World 事件",
   "pulse.description": "持续工作区内部的局部活动与连接。这里显示原生记录，而非独立 Agent 或其他页面的重放。",
   "pulse.retry": "重试",
   "pulse.reading": "正在读取活动…",
