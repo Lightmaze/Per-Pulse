@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react';
-import type { Bootstrap, Message, PageSummary } from '../types';
+import { api } from '../api';
+import type { Bootstrap, Message, PageSummary, ResponseLanguage } from '../types';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 
@@ -71,8 +72,37 @@ export function ReturnDialog({ initial, busy, error, close, send, sourceTitle }:
 }
 
 export function SettingsDialog({ bootstrap, close, refresh }: { bootstrap: Bootstrap | null; close: () => void; refresh: () => void }) {
+  const [language, setLanguage] = useState<ResponseLanguage>(bootstrap?.settings?.responseLanguage ?? 'auto');
+  const [saving, setSaving] = useState(false);
+  const [languageError, setLanguageError] = useState('');
+  const changeLanguage = async (next: ResponseLanguage) => {
+    if (saving || next === language) return;
+    setSaving(true);
+    setLanguageError('');
+    try {
+      const saved = await api.updateSettings(next);
+      setLanguage(saved.responseLanguage);
+      refresh();
+    } catch (problem) {
+      setLanguageError(problem instanceof Error ? problem.message : 'The language setting could not be saved.');
+    } finally {
+      setSaving(false);
+    }
+  };
   return <Dialog title="Your workspace" onClose={close}>
     <div className="settings-section"><h3>AI connection</h3><p className="connection-label"><span className={`connection-dot ${bootstrap?.provider.configured ? 'connected' : ''}`} />{bootstrap?.provider.label ?? 'Checking connection…'}</p><p>{bootstrap?.provider.configured ? `Connected to ${bootstrap.provider.model ?? 'your configured model'}.` : 'Your conversations and page links are saved. AI replies will be available when a provider is connected.'}</p>{bootstrap?.provider.detail ? <p className="settings-detail">{bootstrap.provider.detail}</p> : null}<button className="secondary-button" onClick={refresh}>Check connection</button></div>
+    <div className="settings-section">
+      <h3>Reply language</h3>
+      <label className="field-label" htmlFor="response-language">Language for future replies</label>
+      <select id="response-language" value={language} disabled={saving} onChange={event => void changeLanguage(event.target.value as ResponseLanguage)}>
+        <option value="auto">Follow the conversation</option>
+        <option value="en">English</option>
+        <option value="zh-CN">简体中文</option>
+      </select>
+      <p className="settings-detail">A preference for new model turns. Explicit language instructions take precedence. This does not translate previous messages or change an ongoing turn.</p>
+      {saving ? <p role="status">Saving preference…</p> : null}
+      {languageError ? <p className="form-error" role="alert">{languageError}</p> : null}
+    </div>
     <div className="settings-section"><h3>{bootstrap?.example ? 'Example workspace' : 'Your conversations'}</h3><p>{bootstrap?.example ? 'These are authored example conversations in a separate workspace. They show how pages connect; they are not live AI replies.' : 'Conversations are saved in this workspace. Each page keeps its own conversation, and links always return to the same page.'}</p><p>Your unsent drafts and reading position stay in this browser.</p></div>
   </Dialog>;
 }

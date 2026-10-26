@@ -25,6 +25,7 @@ from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
 from pulse_system.core.pulse.context import ContextPulseConfig as PulseSettings
 
 from . import __version__
+from .language import RESPONSE_LANGUAGES, ResponseLanguage, install_language_advisor
 
 MAX_MESSAGES = 500
 _ENV_PROVIDER = object()
@@ -104,8 +105,35 @@ class PageService:
                 "Use a separate data directory for the example workspace.", 409,
             )
         self.example = example
+        # Reuse the native TurnAdvisor seam, never a second model loop.
+        # Bind before running a session so each new turn snapshots its language.
+        install_language_advisor(self.runtime.kernel_service, self._response_language)
         if example and not self._state.get("exampleSeeded"):
             self._seed_example()
+
+    def _response_language(self) -> ResponseLanguage:
+        with self._lock:
+            value = self._state.get("settings", {}).get("responseLanguage", "auto")
+            return value if value in RESPONSE_LANGUAGES else "auto"
+
+    def settings(self) -> dict[str, ResponseLanguage]:
+        return {"responseLanguage": self._response_language()}
+
+    def update_settings(self, response_language: ResponseLanguage) -> dict[str, ResponseLanguage]:
+        if response_language not in RESPONSE_LANGUAGES:
+            raise PageError("invalid_request", "Choose a supported response language.", 422)
+        with self._lock:
+            previous = self._state.get("settings")
+            self._state["settings"] = {"responseLanguage": response_language}
+            try:
+                self._save()
+            except BaseException:
+                if previous is None:
+                    self._state.pop("settings", None)
+                else:
+                    self._state["settings"] = previous
+                raise
+            return self.settings()
 
     @property
     def provider(self) -> dict[str, Any]:
@@ -292,6 +320,7 @@ class PageService:
                 "name": "Per Pulse", "version": __version__, "example": self.example,
                 "workspaceId": self.runtime.world_id,
                 "homeId": "home", "provider": self.provider, "pages": pages,
+                "settings": self.settings(),
             }
 
     def view(self, page_id: str, *, source_message_id: str | None = None) -> dict:
