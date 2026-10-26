@@ -136,8 +136,12 @@ def run_workspace(root: Path, *, example: bool, fake_provider: bool,
                     "content": "A chosen result, with its source.",
                     "messageId": followup["messageId"],
                 }, status=201)
-                assert returned["reference"]["sourcePageId"] == work_id
-                assert returned["reference"]["sourceMessageId"] == followup["messageId"]
+                # The navigation backlink originates in Home; the selected
+                # Work evidence is separately attributed on the returned
+                # native Home message, not transposed into reference direction.
+                assert returned["reference"]["sourcePageId"] == "home"
+                assert returned["reference"]["targetPageId"] == work_id
+                assert returned["reference"]["sourceMessageId"] == returned["messageId"]
                 assert returned["view"]["page"]["id"] == "home"
                 work = json_response(port, f"/api/pages/{work_id}")
                 assert any(row["id"] == followup["messageId"] for row in work["messages"])
