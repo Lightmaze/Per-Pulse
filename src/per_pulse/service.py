@@ -191,6 +191,8 @@ class PageService:
                 context["pageId"] = page_id_for(context["center_id"])
             for held in state["heldContexts"]:
                 held["pageId"] = page_id_for(held["center_id"])
+            for retained in state.get("retainedAttention", []):
+                retained["pageId"] = page_id_for(retained["center_id"])
             for activation in state["recentActivations"]:
                 activation["pageId"] = page_id_for(activation["centerId"])
                 # A delivery is displayed at its receiver; show the causal
