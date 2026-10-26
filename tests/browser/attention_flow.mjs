@@ -207,7 +207,7 @@ try {
   await page.getByRole('button', { name: '活动', exact: true }).click();
   await page.getByRole('button', { name: 'Actual receiving Work · 打开局部消息', exact: true }).click();
   await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
-    '#message-' + propagated.messageId, 'receiver's exact native propagation event');
+    '#message-' + propagated.messageId, 'exact original native receiver event');
   await page.locator('#message-' + propagated.messageId).waitFor();
   checks.push('local activation opens its exact receiving Work message');
 
