@@ -161,7 +161,21 @@ def create_app(
 
     @app.middleware("http")
     async def local_browser_boundary(request: Request, call_next):
-        if request.url.path.startswith("/api/"):
+        is_api = request.url.path.startswith("/api/")
+
+        def secure_response(response):
+            # The local workspace exposes approval controls. A remote page
+            # must not frame them and trick a user into approving an action.
+            # Apply this even to rejected requests, not only successful ones.
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["Referrer-Policy"] = "same-origin"
+            if is_api:
+                response.headers["Cache-Control"] = "no-store"
+            return response
+
+        if is_api:
             origin = request.headers.get("origin")
             if origin:
                 parsed = urlparse(origin)
@@ -169,18 +183,13 @@ def create_app(
                 same_origin = parsed.netloc == host and parsed.scheme in {"http", "https"}
                 dev_origin = origin in {"http://localhost:5173", "http://127.0.0.1:5173"}
                 if not same_origin and not dev_origin:
-                    return _error("origin_not_allowed", "Open Per Pulse from its local address.", 403)
+                    return secure_response(_error("origin_not_allowed", "Open Per Pulse from its local address.", 403))
             if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
                 if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json":
-                    return _error("json_required", "Send this request as JSON.", 415)
+                    return secure_response(_error("json_required", "Send this request as JSON.", 415))
                 if len(await request.body()) > 128 * 1024:
-                    return _error("request_too_large", "This request is too large.", 413)
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "same-origin"
-        if request.url.path.startswith("/api/"):
-            response.headers["Cache-Control"] = "no-store"
-        return response
+                    return secure_response(_error("request_too_large", "This request is too large.", 413))
+        return secure_response(await call_next(request))
 
     @app.exception_handler(PageError)
     async def page_error(_request: Request, error: PageError):
