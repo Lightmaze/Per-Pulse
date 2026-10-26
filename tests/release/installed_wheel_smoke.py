@@ -198,7 +198,7 @@ def main() -> None:
         example_after = run_workspace(root, example=True, fake_provider=True)
         assert example_before == example_after, "Native example history changed across restart"
         assert ordinary["workspaceId"] != example_before["workspaceId"], "Examples share an ordinary World"
-        assert not ordinary["homeMessageIds"]
+        assert len(ordinary["homeMessageIds"]) == 2, "Ordinary user input and sourced return must persist"
         print(json.dumps({
             "passed": 8,
             "checks": [
