@@ -104,6 +104,7 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
       {saving ? <p role="status">Saving preference…</p> : null}
       {languageError ? <p className="form-error" role="alert">{languageError}</p> : null}
     </div>
+    <div className="settings-section"><h3>Workspace actions</h3><p>{bootstrap?.provider.workspaceActions ? 'Enabled. File changes and commands are subject to action-specific approvals in their original page.' : 'Read-only. Enable workspace actions explicitly at startup; Example mode remains read-only.'}</p></div>
     <div className="settings-section"><h3>Learning from experience</h3><p>{bootstrap?.postureEnabled ? 'On. Relevant lessons can guide the next action and the decision to deliver. Keep, pause, or share a lesson across your pages.' : 'Off. Your conversations are saved; they are not automatically treated as lessons.'}</p><button className="secondary-button" onClick={learning}>View this page’s lessons</button></div>
     <div className="settings-section"><h3>{bootstrap?.example ? 'Example workspace' : 'Your conversations'}</h3><p>{bootstrap?.example ? 'These are authored example conversations in a separate workspace. They show how pages connect; they are not live AI replies.' : 'Conversations are saved in this workspace. Each page keeps its own conversation, and links always return to the same page.'}</p><p>Your unsent drafts and reading position stay in this browser.</p></div>
   </Dialog>;

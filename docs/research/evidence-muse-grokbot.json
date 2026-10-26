@@ -1,0 +1,463 @@
+{
+  "schema_version": 1,
+  "project": "Lightmaze/Per-Pulse",
+  "research_date": "2026-10-23",
+  "base_commit": "bde8aa888ed4415b33e3f1f9414cd8ac99e7440b",
+  "scope": "Public official sources and authorized repository code only.",
+  "limitations": [
+    "No proprietary source code was recovered.",
+    "Product behavior does not establish a particular queue, prompt, memory algorithm, database schema, or exactly-once execution mechanism.",
+    "The absence of a feature from a public UI or document does not establish that an internal component is absent.",
+    "Per Pulse's globally continuous, locally activated, multi-timescale Context Body is a design requirement, not an inference that these reference products implement the same model."
+  ],
+  "sources": [
+    {
+      "id": "M01",
+      "title": "How We Designed Muse",
+      "url": "https://introducing.muse.ai/",
+      "source_date": "2026-09",
+      "source_date_kind": "publication_month",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn0view0",
+        "turn5search0"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "one long conversation",
+      "finding": "Main and side chats, interruption, editable memory, background work, goals, approvals, and artifacts are public product behaviors."
+    },
+    {
+      "id": "M02",
+      "title": "How We Built Safety Into Muse",
+      "url": "https://research.meta.ai/blog/security-and-safety-for-ai-agents-our-approach-with-muse",
+      "source_date": "2026-09-08",
+      "source_date_kind": "publication_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn0view1",
+        "turn7view7",
+        "turn8view10",
+        "turn18view3",
+        "turn5search2"
+      ],
+      "evidence_class": "disclosed_implementation",
+      "short_excerpt": "sole permission authority",
+      "finding": "The disclosed stack separates the agent runtime from host authorization, credential mediation, durable storage, and a browser broker; human takeover pauses agent control."
+    },
+    {
+      "id": "G01",
+      "title": "Grok Bot overview",
+      "url": "https://docs.x.ai/grok-bot/overview",
+      "source_date": "2026-10-07",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn0view2",
+        "turn5search1"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "context that compounds over time",
+      "finding": "Named Bots retain their own conversations and working context while using shared account computer resources and cloud execution."
+    },
+    {
+      "id": "G02",
+      "title": "Create and manage Bots",
+      "url": "https://docs.x.ai/grok-bot/bots",
+      "source_date": "2026-10-12",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn5view0",
+        "turn5search8"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "working context that develops over time",
+      "finding": "Role instructions persist; duplication copies configuration without copying learned memory or history; hiding and pausing have different effects."
+    },
+    {
+      "id": "G03",
+      "title": "Message and collaborate",
+      "url": "https://docs.x.ai/grok-bot/chat-and-collaboration",
+      "source_date": "2026-10-17",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn5view1",
+        "turn7view0",
+        "turn8view0",
+        "turn8view1"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "takes priority over background work",
+      "finding": "Direct user messages redirect ongoing work and receive priority. Asynchronous Bot messages can wake recipients; stopping does not undo completed effects."
+    },
+    {
+      "id": "G04",
+      "title": "Use the computer and apps",
+      "url": "https://docs.x.ai/grok-bot/computer-and-apps",
+      "source_date": "2026-10-12",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn5view3",
+        "turn7view2",
+        "turn8view3",
+        "turn14view4"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "not separate security boundaries",
+      "finding": "Bots share files, authentication state, and plugins. Individual screens coordinate computer use without providing account isolation; durable and temporary environments differ."
+    },
+    {
+      "id": "G05",
+      "title": "Skills and routines",
+      "url": "https://docs.x.ai/grok-bot/skills-routines-and-automations",
+      "source_date": "2026-10-12",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn5view4",
+        "turn7view3",
+        "turn8view4",
+        "turn8view5"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "The learned skill is a draft",
+      "finding": "Skills encode method, routines bind an owner and trigger, and demonstrations yield draft skills. Event integrations are distinct from ordinary plugins."
+    },
+    {
+      "id": "G06",
+      "title": "Approvals, security, and privacy",
+      "url": "https://docs.x.ai/grok-bot/approvals-security-and-privacy",
+      "source_date": "2026-10-20",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn5view6",
+        "turn7view5",
+        "turn8view6",
+        "turn8view7",
+        "turn18view5"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "Ask first wins",
+      "finding": "Unattended approvals expire without execution after about ten minutes. Updating a future allow rule does not execute the expired action."
+    },
+    {
+      "id": "G07",
+      "title": "Files and results",
+      "url": "https://docs.x.ai/grok-bot/files-and-results",
+      "source_date": "2026-10-03",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn5view2",
+        "turn8view2",
+        "turn18view4"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "revise the existing artifact",
+      "finding": "Artifact cards support inspection and revision; delegated results need a return path into the computer and conversation, not only intermediate shared files."
+    },
+    {
+      "id": "G08",
+      "title": "Settings and notifications",
+      "url": "https://docs.x.ai/grok-bot/settings-and-notifications",
+      "source_date": "2026-10-17",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn5view5",
+        "turn13view1"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "Needs attention",
+      "finding": "Working, unread activity, and needs-attention states differ. Notification preferences and active device influence delivery and input-needed escalation."
+    },
+    {
+      "id": "G09",
+      "title": "Grok Bot security",
+      "url": "https://docs.x.ai/grok-bot/security",
+      "source_date": "2026-10-12",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn5view7",
+        "turn13view0",
+        "turn8view8",
+        "turn8view9"
+      ],
+      "evidence_class": "disclosed_implementation",
+      "short_excerpt": "independent review model",
+      "finding": "The documentation describes separate action review, backend-held connector tokens, and distinct admin audit and action recordings. Network restrictions and plugin restrictions differ."
+    },
+    {
+      "id": "G10",
+      "title": "Manage Grok Bot computers",
+      "url": "https://docs.x.ai/grok-bot/computers",
+      "source_date": "2026-10-16",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn13view4",
+        "turn14view2",
+        "turn18view8"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "pauses at a safe point",
+      "finding": "Recreation moves work at a safe point while retaining durable disk. Termination stops current work, and repeated administrative starts avoid duplicate operations."
+    },
+    {
+      "id": "G11",
+      "title": "Security FAQ",
+      "url": "https://docs.x.ai/grok-bot/security-faq",
+      "source_date": "2026-10-18",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn13view5",
+        "turn14view3",
+        "turn18view9"
+      ],
+      "evidence_class": "disclosed_implementation",
+      "short_excerpt": "dedicated Firecracker microVM",
+      "finding": "The documented isolation unit is the user microVM, shared by that user's Bots. Persistent disk does not guarantee preserved or unexpired authentication sessions."
+    },
+    {
+      "id": "G12",
+      "title": "Troubleshooting",
+      "url": "https://docs.x.ai/grok-bot/troubleshooting",
+      "source_date": "2026-10-12",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn13view2",
+        "turn14view0",
+        "turn18view2",
+        "turn18view6"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "cloud work can continue",
+      "finding": "Client disconnection does not necessarily stop cloud work. Input, approvals, login, quota, or unavailable screens can block progress; update and reset differ."
+    },
+    {
+      "id": "G13",
+      "title": "Team Bots",
+      "url": "https://docs.x.ai/grok-bot/team-bots",
+      "source_date": "2026-10-16",
+      "source_date_kind": "displayed_update_date",
+      "retrieved_on": "2026-10-23",
+      "web_refs": [
+        "turn13view3",
+        "turn14view1",
+        "turn18view0",
+        "turn18view1",
+        "turn18view7"
+      ],
+      "evidence_class": "documented_behavior",
+      "short_excerpt": "Every conversation stays private",
+      "finding": "Team memory and private conversations coexist. Computer and credential placement depends on the conversation: individual member context or a separate shared context."
+    }
+  ],
+  "contracts": [
+    {
+      "id": "H01",
+      "module": "Persistent causal input",
+      "priority": "P0",
+      "source_ids": [
+        "G03",
+        "G12"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Acknowledge only durable input and retain its target context and admission result."
+    },
+    {
+      "id": "H02",
+      "module": "Run steering",
+      "priority": "P0",
+      "source_ids": [
+        "M01",
+        "G03"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Persist a new intent revision, deliver it at a supported boundary, and preserve prior effects."
+    },
+    {
+      "id": "H03",
+      "module": "Operational attention",
+      "priority": "P0",
+      "source_ids": [
+        "M01",
+        "G08",
+        "G12"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Project running and typed waiting reasons from authoritative execution records."
+    },
+    {
+      "id": "H04",
+      "module": "Action gateway and receipt",
+      "priority": "P0",
+      "source_ids": [
+        "M02",
+        "G06",
+        "G09"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Bind dispatch to exact action, scope, authority, and canonical arguments; reconcile uncertain effects."
+    },
+    {
+      "id": "H05",
+      "module": "Artifact delivery",
+      "priority": "P0",
+      "source_ids": [
+        "M01",
+        "G07"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Return immutable source-linked versions through validated artifact handles."
+    },
+    {
+      "id": "H06",
+      "module": "Shared resource admission",
+      "priority": "P0",
+      "source_ids": [
+        "G04",
+        "G10"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Separate logical context ownership from physical resource exclusion and security isolation."
+    },
+    {
+      "id": "H07",
+      "module": "Resume and recovery",
+      "priority": "P0",
+      "source_ids": [
+        "G10",
+        "G11",
+        "G12"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Recover durable state without treating missing effect receipts as safe replay."
+    },
+    {
+      "id": "H08",
+      "module": "Context and memory revision",
+      "priority": "P1",
+      "source_ids": [
+        "M01",
+        "G02",
+        "G13"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Track evidence provenance and versions across observations, preferences, and derived summaries."
+    },
+    {
+      "id": "H09",
+      "module": "Worker coordination",
+      "priority": "P1",
+      "source_ids": [
+        "G01",
+        "G03",
+        "G07"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Carry parent ownership, acceptance criteria, stable delivery identity, and a return destination."
+    },
+    {
+      "id": "H10",
+      "module": "Trigger adapters",
+      "priority": "P1",
+      "source_ids": [
+        "M01",
+        "G05"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Turn bounded deduplicated triggers into ordinary native causal inputs."
+    },
+    {
+      "id": "H11",
+      "module": "Skill lifecycle",
+      "priority": "P1",
+      "source_ids": [
+        "G05"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Review, version, test, and activate a procedure independently of its recurrence."
+    },
+    {
+      "id": "H12",
+      "module": "Attention routing",
+      "priority": "P1",
+      "source_ids": [
+        "M01",
+        "G08"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Notify on meaningful results or needed input, with deduplication and acknowledgement."
+    },
+    {
+      "id": "H13",
+      "module": "Environment broker",
+      "priority": "P1",
+      "source_ids": [
+        "M02",
+        "G04",
+        "G10",
+        "G11",
+        "G13"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Track generation, readiness, credentials, resource lease, human takeover, and safe migration."
+    },
+    {
+      "id": "H14",
+      "module": "Durable budget",
+      "priority": "P1",
+      "source_ids": [
+        "G05",
+        "G12"
+      ],
+      "evidence_class": "per_pulse_design_judgment",
+      "contract": "Reserve before admission, settle usage idempotently, and retain unknown usage across restart."
+    }
+  ],
+  "code_findings": [
+    {
+      "id": "R1",
+      "title": "Shared workspace exclusion",
+      "baseline": "Physical replace validation and effect are separate; publication guard admits and drains without mutual exclusion.",
+      "sprint_status": "Process-local shared writer lane implemented for structured mutation, restore, and command execution; see final tests and implementation notes.",
+      "paths": [
+        "src/pulse_harness/adapters/workspace.py",
+        "src/pulse_harness/adapters/resources.py",
+        "src/pulse_harness/adapters/command.py"
+      ],
+      "caveat": "Cooperating writers in one process only; no OS exclusion for external writers."
+    },
+    {
+      "id": "R2",
+      "title": "Artifact delivery",
+      "status": "Recommended next",
+      "contract_id": "H05"
+    },
+    {
+      "id": "R3",
+      "title": "Durable admission budgets",
+      "status": "Recommended before unattended recurring work",
+      "contract_id": "H14"
+    },
+    {
+      "id": "R4",
+      "title": "Environment broker",
+      "status": "Add one useful broker-backed provider through existing Kernel authority",
+      "contract_id": "H13"
+    },
+    {
+      "id": "R5",
+      "title": "Routine input adapter",
+      "status": "Reuse native causal admission instead of adding another runtime",
+      "contract_id": "H10"
+    }
+  ]
+}

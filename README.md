@@ -89,6 +89,10 @@ explains configuration, connection semantics, recovery and verification.
 The default command leaves automatic pulses disabled. The quota counts
 background admissions, not individual provider requests, tokens or money.
 
+### Native workspace actions and sourced file results
+
+Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. The example workspace is always read-only. See [Core Harness](docs/harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
+
 ## Develop
 
 Run the backend in one terminal:

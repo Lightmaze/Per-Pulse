@@ -25,6 +25,8 @@ from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
 from pulse_system.core.pulse.context import ContextPulseConfig as PulseSettings
 
 from . import __version__
+from .execution import PageExecution
+from .artifacts import PageArtifacts
 from .language import RESPONSE_LANGUAGES, ResponseLanguage, install_language_advisor
 
 MAX_MESSAGES = 500
@@ -49,6 +51,7 @@ class PageService:
         data_dir: str | Path,
         *,
         example: bool = False,
+        allow_workspace_actions: bool = False,
         pulse: PulseSettings | None = None,
         posture: bool | None = None,
         model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None | object = _ENV_PROVIDER,
@@ -58,6 +61,7 @@ class PageService:
         workspace = self.data_dir / "workspace"
         workspace.mkdir(exist_ok=True)
         self._lock = threading.RLock()
+        self.allow_workspace_actions = bool(allow_workspace_actions and not example)
         # Explicit example data must remain usable with no credentials and
         # must never consume a user's model budget, even if the shell has keys.
         factory = None if example else (
@@ -78,7 +82,7 @@ class PageService:
             harness_kind="kernel",
             kernel_db_path=self.data_dir / "kernel.db",
             kernel_workspace_root=workspace,
-            kernel_allow_mutations=False,
+            kernel_allow_mutations=self.allow_workspace_actions,
             base_spontaneous_rate=0.0,
             silence_threshold=0.15,
             default_max_wait=0.3,
@@ -88,10 +92,12 @@ class PageService:
         )
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
-            model_factory=factory, allow_unconfigured=True, allow_mutations=False,
+            model_factory=factory, allow_unconfigured=True, allow_mutations=self.allow_workspace_actions,
             enable_posture=False if example else posture,
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
+        self.execution = PageExecution(self.runtime)
+        self.artifacts = PageArtifacts(self.runtime, execution=self.execution)
         from .learning import PageLearning
         self.learning = PageLearning(self)
         self._state_key = f"per-pulse-pages-v1:{self.runtime.world_id}"
@@ -144,6 +150,7 @@ class PageService:
         return {
             "configured": self.configured,
             "model": self.model,
+            "workspaceActions": self.allow_workspace_actions,
             "label": "AI connected" if self.configured else "AI disconnected",
             "detail": (
                 "Your configured model handles messages in each page's own context."
@@ -307,10 +314,18 @@ class PageService:
         updated = front.updated_at.isoformat() if front else created
         if rows:
             updated = max(updated, rows[-1]["timestamp"])
+        execution = self.execution.snapshot(page_id)
+        status = self._status(rows)
+        if execution["pendingActions"]:
+            status = "needs_attention"
+        elif execution["status"] == "working":
+            status = "working"
+        elif (execution["recoveryRequired"] or execution["status"] == "needs_attention") and status != "error":
+            status = "needs_attention"
         return {
             "id": page_id, "kind": "work" if front else "home",
             "title": front.title if front else "Home",
-            "status": self._status(rows), "createdAt": created, "updatedAt": updated,
+            "status": status, "createdAt": created, "updatedAt": updated,
             "sourcePageId": origin.get("pageId"),
             "sourceMessageId": origin.get("messageId"),
             "description": origin.get("description", "Your ongoing conversation." if front is None else ""),
@@ -331,6 +346,7 @@ class PageService:
     def view(self, page_id: str, *, source_message_id: str | None = None) -> dict:
         with self._lock:
             self._check_message(page_id, source_message_id)
+            artifacts = self.artifacts.snapshot(page_id)
             rows = self._rows(page_id)
             has_more = len(rows) > MAX_MESSAGES
             rows = rows[-MAX_MESSAGES:]
@@ -376,6 +392,8 @@ class PageService:
                 "references": refs,
                 "backlinks": [dict(r) for r in self._state["references"] if r["targetPageId"] == page_id],
                 "breadcrumbs": list(reversed(crumbs)), "provider": self.provider,
+                "execution": self.execution.snapshot(page_id),
+                "artifacts": artifacts["artifacts"], "artifactsTruncated": artifacts["truncated"],
                 "hasMore": has_more,
                 "earlierSourceMessageId": earlier_source_id,
             }
