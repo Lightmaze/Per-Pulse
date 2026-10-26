@@ -255,3 +255,12 @@ def test_real_kernel_tool_lane_stages_and_settles_attention_with_synthetic_http(
         advertised = {tool["function"]["name"] for tool in requests[0]["tools"]}
         assert "attention" in advertised
         assert r.context_pulse.snapshot()["budget"]["used"] == 0
+        public = client.get("/api/pulse")
+        assert public.status_code == 200
+        retained_rows = [
+            row for row in public.json()["retainedAttention"]
+            if row["sourceTurnId"] == final["turnId"]
+        ]
+        assert len(retained_rows) == 1
+        assert retained_rows[0]["pageId"] == "home"
+        assert retained_rows[0]["sourceEventId"]
