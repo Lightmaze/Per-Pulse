@@ -277,3 +277,35 @@ def test_provider_failure_stays_visible_without_fabricated_answer(tmp_path, monk
         assert view["messages"][0]["role"] == "user"
         assert view["messages"][0]["status"] in {"failed", "uncertain"}
         assert len(requests) == 1
+
+
+def test_old_source_link_resolves_in_own_page_without_exposing_other_context(tmp_path):
+    """Deep links can open one older native event without loading all history."""
+    with client_for(tmp_path, model_factory=None) as client:
+        initial = send(client, "home", "Keep this old home source reachable.")
+        source = initial["messageId"]
+        original = next(row for row in client.get("/api/pages/home").json()["messages"] if row["id"] == source)
+        work_id = new_page(client)["page"]["id"]
+
+    with client_for(tmp_path, model_factory=None) as client:
+        runtime = client.app.state.pages.runtime
+        for index in range(505):
+            runtime.inject(runtime.continuity_engram_id, f"Later home message {index}", source="user")
+        recent = client.get("/api/pages/home").json()
+        assert len(recent["messages"]) == 500 and recent["hasMore"]
+        assert source not in {item["id"] for item in recent["messages"]}
+
+        anchored = client.get("/api/pages/home", params={"sourceMessageId": source})
+        assert anchored.status_code == 200, anchored.text
+        view = anchored.json()
+        assert view["earlierSourceMessageId"] == source
+        assert view["messages"][0] == original
+        assert view["messages"][1:] == recent["messages"]
+        assert view["page"] == recent["page"]
+
+        latest_id = recent["messages"][-1]["id"]
+        within_window = client.get("/api/pages/home", params={"sourceMessageId": latest_id}).json()
+        assert within_window["earlierSourceMessageId"] is None
+        assert len(within_window["messages"]) == 500
+        assert client.get(f"/api/pages/{work_id}", params={"sourceMessageId": source}).status_code == 404
+        assert client.get("/api/pages/home", params={"sourceMessageId": "nonexistent-id"}).status_code == 404
