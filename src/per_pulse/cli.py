@@ -14,6 +14,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "localhost", "::1"], help="Local address to listen on.")
     parser.add_argument("--port", type=int, default=8000, help="Local HTTP port (default: 8000).")
     parser.add_argument("--example", action="store_true", help="Open a separate, clearly marked example workspace without a model.")
+    parser.add_argument("--allow-workspace-actions", action="store_true", help="Enable workspace effects with exact-action approvals (off by default).")
     parser.add_argument("--pulse", action="store_true", help="Enable bounded local reentry and diffusion through explicit context connections.")
     parser.add_argument("--pulse-budget", type=int, default=12, help="Maximum background pulse admissions per rolling hour (default: 12).")
     parser.add_argument("--posture", action="store_true", default=None,
@@ -39,6 +40,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.pulse and not args.example:
         print(f"Pulse enabled — up to {args.pulse_budget} background pulse admissions per rolling hour when a model is connected.")
     uvicorn.run(create_app(data_dir, example=args.example, posture=args.posture,
+                           allow_workspace_actions=args.allow_workspace_actions,
                           pulse=PulseSettings(enabled=args.pulse,
                                               max_background_pulses_per_hour=args.pulse_budget)),
                 host=args.host, port=args.port, log_level="warning")

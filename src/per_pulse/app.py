@@ -22,6 +22,7 @@ from pulse_system.service.runtime import ServiceError
 
 from . import __version__
 from .language import ResponseLanguage
+from .execution import ExecutionError
 from .service import PageError, PageService, PulseSettings, _ENV_PROVIDER
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
@@ -61,6 +62,14 @@ class ReturnHome(Input):
 
 class Rename(Input):
     title: Title
+
+
+class StopTurn(Input):
+    turnId: Identifier
+
+
+class DecideAction(Input):
+    decision: Literal["allow_once", "deny", "cancel"]
 
 
 class SettingsInput(Input):
@@ -125,6 +134,7 @@ def create_app(
     data_dir: str | Path,
     *,
     example: bool = False,
+    allow_workspace_actions: bool = False,
     web_dir: str | Path | None = None,
     model_factory: Any = _ENV_PROVIDER,
     pulse: PulseSettings | None = None,
@@ -134,7 +144,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         pages = await asyncio.to_thread(
             PageService, data_dir, example=example, model_factory=model_factory, pulse=pulse,
-            posture=posture,
+            posture=posture, allow_workspace_actions=allow_workspace_actions,
         )
         app.state.pages = pages
         try:
@@ -174,6 +184,10 @@ def create_app(
 
     @app.exception_handler(PageError)
     async def page_error(_request: Request, error: PageError):
+        return _error(error.code, error.message, error.status)
+
+    @app.exception_handler(ExecutionError)
+    async def execution_error(_request: Request, error: ExecutionError):
         return _error(error.code, error.message, error.status)
 
     @app.exception_handler(ServiceError)
@@ -271,6 +285,28 @@ def create_app(
         return pages(request).learning.feedback(
             page_id, experience_id, body.expectedRevision, body.verdict, body.evidence,
         )
+
+    @app.get("/api/pages/{page_id}/execution")
+    def execution(page_id: str, request: Request):
+        return pages(request).execution.snapshot(page_id)
+
+    @app.get("/api/pages/{page_id}/artifacts")
+    def artifacts(page_id: str, request: Request):
+        return pages(request).artifacts.snapshot(page_id)
+
+    @app.get("/api/pages/{page_id}/artifacts/{artifact_id}")
+    def artifact(page_id: str, artifact_id: str, request: Request):
+        return pages(request).artifacts.read(page_id, artifact_id)
+
+    @app.post("/api/pages/{page_id}/execution/stop")
+    def stop(page_id: str, body: StopTurn, request: Request):
+        svc = pages(request)
+        return {**svc.execution.cancel(page_id, body.turnId), "view": svc.view(page_id)}
+
+    @app.post("/api/pages/{page_id}/execution/actions/{action_id}")
+    def decide(page_id: str, action_id: str, body: DecideAction, request: Request):
+        svc = pages(request)
+        return {**svc.execution.resolve_approval(page_id, action_id, body.decision), "view": svc.view(page_id)}
 
     # Mount only the compiled frontend. User data and workspace files are
     # never exposed as static content.

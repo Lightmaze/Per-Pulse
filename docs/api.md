@@ -223,3 +223,9 @@ Errors use `{error:{code:string,message:string}}` with 400/404/409/422/503. Show
 ## Explicit example mode
 
 `per-pulse --example` uses a separate example data directory and visibly returns `example:true`. Sample content is authored example material, not AI output. Ordinary startup begins with the user's own data directory and does not seed examples.
+
+## Native execution and file results (opt-in)
+
+`GET /api/pages/{id}/execution` observes a native turn with exact-action approvals. `POST /api/pages/{id}/execution/stop` takes `{turnId}`; `POST /api/pages/{id}/execution/actions/{actionId}` takes `{decision: 'allow_once'|'deny'|'cancel'}`. Each returns a source-bound receipt and current page view. Scope is derived from the page server-side. Completed effects are preserved separately from a failed continuation.
+
+`GET /api/pages/{id}/artifacts` projects bounded successful native `mutate_file` receipts; `GET /api/pages/{id}/artifacts/{artifactId}` verifies original action/page, regular text file and content SHA-256 before presenting a bounded redacted preview. A changed or missing file has no substitute preview. Page view includes `execution`, `artifacts`, `artifactsTruncated`; provider includes `workspaceActions`. See [Harness foundation](harness-foundation.md) for exact contracts.

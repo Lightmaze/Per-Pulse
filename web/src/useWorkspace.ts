@@ -116,7 +116,7 @@ export function useWorkspace() {
 
   const cachedView = views[route.id];
   const activeView = cachedView && bootstrap ? { ...cachedView, provider: bootstrap.provider } : cachedView;
-  const shouldPoll = activeView?.provider.configured && ['queued', 'working'].includes(activeView.page.status);
+  const shouldPoll = activeView?.provider.configured && ['queued', 'working', 'needs_attention'].includes(activeView.page.status);
   useEffect(() => {
     if (!shouldPoll) return;
     let pending = false;

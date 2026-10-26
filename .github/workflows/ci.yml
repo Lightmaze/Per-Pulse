@@ -44,5 +44,16 @@ jobs:
           path: ${{ runner.temp }}/per-pulse-posture-screenshots
           if-no-files-found: ignore
           retention-days: 7
+      - name: Verify native Harness approvals and artifacts in Chromium
+        run: |
+          PER_PULSE_PLAYWRIGHT_PATH="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_TEST_PYTHON=python PER_PULSE_QA_OUTPUT="$RUNNER_TEMP/per-pulse-harness-screenshots" node tests/browser/harness_smoke.mjs
+      - name: Keep Harness browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-harness-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build the distributable package
         run: python -m build --no-isolation

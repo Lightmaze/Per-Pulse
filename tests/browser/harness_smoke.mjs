@@ -1,0 +1,124 @@
+import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+import fs from 'node:fs/promises';
+const require = createRequire(import.meta.url);
+const { chromium } = require(process.env.PER_PULSE_PLAYWRIGHT_PATH || 'playwright');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const output = process.env.PER_PULSE_QA_OUTPUT || await fs.mkdtemp(path.join(os.tmpdir(), 'per-pulse-qa-'));
+await fs.mkdir(output, {recursive:true});
+const server = spawn(process.env.PER_PULSE_TEST_PYTHON || 'python3', [root+'/tests/browser/fixture_server.py'], {cwd:root, env:{...process.env,PYTHONPATH:root+'/src'}, stdio:['ignore','pipe','pipe']});
+let serverLog = '';
+server.stderr.on('data', d=>serverLog += d.toString());
+const checks = [];
+let browser;
+const base = 'http://127.0.0.1:'+(process.env.PER_PULSE_QA_PORT || '8146');
+const wait = async (f, label, timeout=15000) => {
+  const end=Date.now()+timeout;
+  while (Date.now()<end) { try { if(await f()) return; } catch {} await new Promise(r=>setTimeout(r,100)); }
+  throw new Error('Timed out: '+label);
+};
+const check = (name, condition) => { if (!condition) throw new Error(name); checks.push(name); };
+try {
+  await wait(async()=> (await fetch(base+'/api/health')).ok,'server ready');
+  browser = await chromium.launch({executablePath:process.env.PER_PULSE_CHROMIUM_PATH || undefined,headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+  const page=await browser.newPage({viewport:{width:1440,height:1000}});
+  const errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  page.on('console',m=>{ if(m.type()==='error') errors.push(m.text()); });
+  await page.goto(base);
+  await page.getByRole('heading',{level:1}).waitFor();
+  check('identity and nonblank Home',await page.title()==='Per Pulse');
+  const create = async (title,instruction) => {
+    await page.getByRole('button',{name:'Create a page',exact:true}).click();
+    await page.getByLabel('Page name',{exact:true}).fill(title);
+    await page.getByLabel('Where should we begin?',{exact:true}).fill(instruction);
+    await page.getByRole('button',{name:'Create page',exact:true}).click();
+    await page.getByRole('heading',{name:title,exact:true}).waitFor();
+    await page.getByText('Your approval is needed',{exact:true}).waitFor({timeout:15000});
+  };
+  await create('Approved note','WRITE_ONE');
+  const approvedId=new URL(page.url()).pathname.split('/').pop();
+  await page.screenshot({path:output+'/qa-approval-desktop.png',fullPage:false});
+  check('approval prevents premature file effect',!(await (await fetch(base+'/__fixture/status')).json()).files.includes('approved.txt'));
+  await page.getByRole('button',{name:'Allow once',exact:true}).click();
+  await page.getByRole('button',{name:/approved.txt/}).waitFor({timeout:15000});
+  await page.getByRole('button',{name:/approved.txt/}).click();
+  await page.getByText('A real file from a synthetic model fixture.',{exact:true}).waitFor();
+  check('approved effect has a readable source-linked artifact',true);
+  await page.screenshot({path:output+'/qa-artifact-desktop.png',fullPage:false});
+  // The native file action and the Work's completed message must return to Home
+  // with a usable source link, not as an unattributed copied conversation.
+  const approvedResult = page.locator('.message-assistant').filter({hasText:'Synthetic model fixture: this page has finished its turn.'}).last();
+  await approvedResult.getByRole('button',{name:'Bring to Home',exact:true}).click();
+  const returnDialog = page.getByRole('dialog',{name:'Bring this back to Home.',exact:true});
+  await returnDialog.waitFor();
+  await returnDialog.getByRole('button',{name:'Bring to Home',exact:true}).click();
+  await page.getByRole('heading',{name:'A place to keep going.',exact:true}).waitFor();
+  const sourcedReturn = page.locator('.message-user').filter({hasText:'Synthetic model fixture: this page has finished its turn.'}).last();
+  // A return contains both its precise originating message link and a separate
+  // page reference. Follow the provenance link, not the generic page shortcut.
+  const sourceLink = sourcedReturn.locator('.source-line a.session-link');
+  await sourceLink.waitFor();
+  check('selected Work result returns to Home with its original message source',
+        (await sourceLink.getAttribute('href')).includes('#message-'));
+  await sourceLink.click();
+  await page.getByRole('heading',{name:'Approved note',exact:true}).waitFor();
+  check('Home source link returns to the original Work',new URL(page.url()).pathname.endsWith('/'+approvedId));
+  await create('Declined note','WRITE_DECLINE');
+  const declinedId = new URL(page.url()).pathname.split('/').pop();
+  // One Work's pending approval must not hold the whole continuing subject.
+  await page.getByRole('link',{name:'Home',exact:true}).click();
+  await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home can answer while another Work awaits approval.');
+  const repliesBeforeApproval = await page.locator('.message-assistant').count();
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await wait(async()=>await page.locator('.message-assistant').count()>repliesBeforeApproval,
+             'foreground Home response while sibling approval is pending');
+  check('foreground Home stays usable while a sibling Work awaits approval',true);
+  await page.goto(base+'/page/'+declinedId);
+  await page.getByRole('button',{name:'Decline',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Decline',exact:true}).click();
+  await wait(async()=>!(await page.getByRole('button',{name:'Allow once',exact:true}).count()),'declined approval clears');
+  check('declined effect did not create a file',!(await (await fetch(base+'/__fixture/status')).json()).files.includes('declined.txt'));
+  await create('Slow continuation','WRITE_SLOW SLOW_AFTER_APPROVAL');
+  await page.getByRole('button',{name:'Allow once',exact:true}).click();
+  await wait(async()=>(await (await fetch(base+'/__fixture/status')).json()).entered,'slow continuation entered');
+  check('stop stays enabled while approval response is pending',await page.getByRole('button',{name:'Stop this turn',exact:true}).isEnabled());
+  await page.getByRole('button',{name:'Stop this turn',exact:true}).click();
+  await page.getByText('This turn was stopped',{exact:true}).waitFor({timeout:10000});
+  await fetch(base+'/__fixture/release');
+  check('UI cancels the exact continuing turn',true);
+  await page.getByRole('link',{name:'Home',exact:true}).click();
+  await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home keeps working.');
+  const repliesBeforeCancellation = await page.locator('.message-assistant').count();
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await wait(async()=>await page.locator('.message-assistant').count()>repliesBeforeCancellation,
+             'foreground Home response after sibling cancellation');
+  check('Home remains usable after sibling cancellation',true);
+  await create('Completed effect with response failure','WRITE_REDACTED');
+  await page.getByRole('button',{name:'Allow once',exact:true}).click();
+  await page.getByText('The action completed, but the follow-up response could not finish. Do not repeat the action.',{exact:true}).waitFor();
+  await page.getByRole('button',{name:/redacted.txt/}).click();
+  await page.getByText('Sensitive values have been hidden.',{exact:true}).waitFor();
+  check('completed effect survives continuation failure with truthful UI and redacted preview',!(await page.textContent('body')).includes('password=abc'));
+  const mobile=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1,isMobile:true,hasTouch:true});
+  await mobile.goto(base+'/page/'+approvedId);
+  await mobile.getByRole('heading',{name:'Approved note',exact:true}).waitFor();
+  await mobile.getByRole('button',{name:/approved.txt/}).click();
+  await mobile.getByText('A real file from a synthetic model fixture.',{exact:true}).waitFor();
+  check('mobile has no horizontal clipping',await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await mobile.screenshot({path:output+'/qa-artifact-mobile.png',fullPage:false});
+  check('no relevant console errors or framework overlays',errors.length===0);
+  await fs.writeFile(output+'/qa-browser-results.json',JSON.stringify({checks,errors,viewports:['1440x1000','390x844'],provider:'explicit synthetic HTTP transport; real World, Kernel, approval and file effects',browser:await browser.version()},null,2));
+  console.log(JSON.stringify({passed:checks.length,checks,output}));
+} catch (error) {
+  console.error(error.stack,serverLog);
+  process.exitCode=1;
+} finally {
+  if(browser) await browser.close();
+  server.kill('SIGTERM');
+  await Promise.race([new Promise(r=>server.on('exit',r)),new Promise(r=>setTimeout(r,5000))]);
+  if(server.exitCode===null) server.kill('SIGKILL');
+}
