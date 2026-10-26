@@ -201,6 +201,28 @@ try {
   }, 'native causal result with both original message anchors', 20000);
   assert.notEqual(propagated.eventId, propagated.sourceEventId);
 
+  // The original Home now offers a quiet, attributable return to completed
+  // local work. The API-created pages need a fresh bootstrap to be visible.
+  await page.reload();
+  const continued = page.getByRole('region', { name: '近期局部工作', exact: true });
+  await continued.getByRole('button', { name: '返回 Actual receiving Work', exact: true })
+    .waitFor({ timeout: 20000 });
+  await continued.getByRole('button', { name: '原始来源：Actual source Work', exact: true }).click();
+  await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
+    '#message-' + propagated.sourceMessageId, 'Home card original causal source');
+  await page.locator('#message-' + propagated.sourceMessageId).waitFor();
+  await page.locator('.return-to-thread').click();
+  await wait(async () => new URL(page.url()).pathname === '/', 'Home return after original source');
+  checks.push('Home surfaces completed local influence with the actual causal source');
+
+  await continued.getByRole('button', { name: '返回 Actual receiving Work', exact: true }).click();
+  await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
+    '#message-' + propagated.messageId, 'Home card original receiving event');
+  await page.locator('#message-' + propagated.messageId).waitFor();
+  await page.locator('.return-to-thread').click();
+  await wait(async () => new URL(page.url()).pathname === '/', 'Home return after receiving Work');
+  checks.push('Home opens verified local result and returns without fabricating a Home message');
+
   await page.goto(base + '/page/' + encodeURIComponent(localReceiver));
   await page.getByRole('heading', { name: 'Actual receiving Work', exact: true }).waitFor();
   await page.locator('.composer textarea').fill('Still composing after exploring causal sources.');
