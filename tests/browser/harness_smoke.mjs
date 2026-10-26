@@ -62,7 +62,7 @@ try {
   await fetch(base+'/__fixture/release');
   check('UI cancels the exact continuing turn',true);
   await page.getByRole('link',{name:'Home',exact:true}).click();
-  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Home keeps working.');
+  await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home keeps working.');
   await page.getByRole('button',{name:'Send message',exact:true}).click();
   await page.getByText('Synthetic model fixture: this page has finished its turn.',{exact:true}).waitFor({timeout:15000});
   check('Home remains usable after sibling cancellation',true);
