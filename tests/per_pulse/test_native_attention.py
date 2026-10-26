@@ -229,7 +229,8 @@ def test_real_kernel_tool_lane_stages_and_settles_attention_with_synthetic_http(
         enabled=True, check_interval_seconds=0.01, spontaneous_rate=0,
         refractory_seconds=0, max_background_pulses_per_hour=2,
     )
-    with TestClient(create_app(tmp_path, pulse=pulse, model_factory=factory)) as client:
+    with TestClient(create_app(tmp_path, pulse=pulse, model_factory=factory),
+                    base_url="http://localhost") as client:
         response = client.post(
             "/api/pages/home/messages",
             json={"content": "Think about a useful first-time visitor experience."},
