@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
+import { useLanguage } from '../i18n';
 import type { Bootstrap, Message, PageSummary, ResponseLanguage } from '../types';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
@@ -73,6 +74,7 @@ export function ReturnDialog({ initial, busy, error, close, send, sourceTitle }:
 }
 
 export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootstrap: Bootstrap | null; close: () => void; refresh: () => void; learning: () => void }) {
+  const { t, preference, preferenceSaved, setPreference } = useLanguage();
   const [language, setLanguage] = useState<ResponseLanguage>(bootstrap?.settings?.responseLanguage ?? 'auto');
   const [saving, setSaving] = useState(false);
   const [languageError, setLanguageError] = useState('');
@@ -85,28 +87,39 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
       setLanguage(saved.responseLanguage);
       refresh();
     } catch (problem) {
-      setLanguageError(problem instanceof Error ? problem.message : 'The language setting could not be saved.');
+      setLanguageError(problem instanceof Error ? problem.message : t('settings.replyError'));
     } finally {
       setSaving(false);
     }
   };
-  return <Dialog title="Your workspace" onClose={close}>
-    <div className="settings-section"><h3>AI connection</h3><p className="connection-label"><span className={`connection-dot ${bootstrap?.provider.configured ? 'connected' : ''}`} />{bootstrap?.provider.label ?? 'Checking connection…'}</p><p>{bootstrap?.provider.configured ? `Connected to ${bootstrap.provider.model ?? 'your configured model'}.` : 'Your conversations and page links are saved. AI replies will be available when a provider is connected.'}</p>{bootstrap?.provider.detail ? <p className="settings-detail">{bootstrap.provider.detail}</p> : null}<button className="secondary-button" onClick={refresh}>Check connection</button></div>
+  return <Dialog title={t('settings.title')} onClose={close}>
+    <div className="settings-section"><h3>{t('settings.aiConnection')}</h3><p className="connection-label"><span className={`connection-dot ${bootstrap?.provider.configured ? 'connected' : ''}`} />{bootstrap?.provider.label ?? t('settings.checkingConnection')}</p><p>{bootstrap?.provider.configured ? t('settings.connectedTo', { model: bootstrap.provider.model ?? t('settings.configuredModel') }) : t('settings.disconnected')}</p>{bootstrap?.provider.detail ? <p className="settings-detail">{bootstrap.provider.detail}</p> : null}<button className="secondary-button" onClick={refresh}>{t('settings.checkConnection')}</button></div>
     <div className="settings-section">
-      <h3>Reply language</h3>
-      <label className="field-label" htmlFor="response-language">Language for future replies</label>
-      <select id="response-language" value={language} disabled={saving} onChange={event => void changeLanguage(event.target.value as ResponseLanguage)}>
-        <option value="auto">Follow the conversation</option>
-        <option value="en">English</option>
-        <option value="zh-CN">简体中文</option>
+      <h3>{t('settings.languageHeading')}</h3>
+      <label className="field-label" htmlFor="interface-language">{t('settings.interfaceLanguage')}</label>
+      <select id="interface-language" value={preference} onChange={event => setPreference(event.target.value as 'system' | 'en' | 'zh-CN')}>
+        <option value="system">{t('settings.followSystem')}</option>
+        <option value="en">{t('settings.english')}</option>
+        <option value="zh-CN">{t('settings.chinese')}</option>
       </select>
-      <p className="settings-detail">A preference for new model turns. Explicit language instructions take precedence. This does not translate previous messages or change an ongoing turn.</p>
-      {saving ? <p role="status">Saving preference…</p> : null}
+      <p className="settings-detail">{t('settings.interfaceHint')}</p>
+      {!preferenceSaved ? <p role="status">{t('settings.interfaceNotSaved')}</p> : null}
+    </div>
+    <div className="settings-section">
+      <h3>{t('settings.responseLanguage')}</h3>
+      <label className="field-label" htmlFor="response-language">{t('settings.replyLabel')}</label>
+      <select id="response-language" value={language} disabled={saving} onChange={event => void changeLanguage(event.target.value as ResponseLanguage)}>
+        <option value="auto">{t('settings.auto')}</option>
+        <option value="en">{t('settings.english')}</option>
+        <option value="zh-CN">{t('settings.chinese')}</option>
+      </select>
+      <p className="settings-detail">{t('settings.replyHint')}</p>
+      {saving ? <p role="status">{t('settings.saving')}</p> : null}
       {languageError ? <p className="form-error" role="alert">{languageError}</p> : null}
     </div>
-    <div className="settings-section"><h3>Workspace actions</h3><p>{bootstrap?.provider.workspaceActions ? 'Enabled. File changes and commands are subject to action-specific approvals in their original page.' : 'Read-only. Enable workspace actions explicitly at startup; Example mode remains read-only.'}</p></div>
-    <div className="settings-section"><h3>Learning from experience</h3><p>{bootstrap?.postureEnabled ? 'On. Relevant lessons can guide the next action and the decision to deliver. Keep, pause, or share a lesson across your pages.' : 'Off. Your conversations are saved; they are not automatically treated as lessons.'}</p><button className="secondary-button" onClick={learning}>View this page’s lessons</button></div>
-    <div className="settings-section"><h3>{bootstrap?.example ? 'Example workspace' : 'Your conversations'}</h3><p>{bootstrap?.example ? 'These are authored example conversations in a separate workspace. They show how pages connect; they are not live AI replies.' : 'Conversations are saved in this workspace. Each page keeps its own conversation, and links always return to the same page.'}</p><p>Your unsent drafts and reading position stay in this browser.</p></div>
+    <div className="settings-section"><h3>{t('settings.actions')}</h3><p>{bootstrap?.provider.workspaceActions ? t('settings.actionsOn') : t('settings.actionsOff')}</p></div>
+    <div className="settings-section"><h3>{t('settings.learning')}</h3><p>{bootstrap?.postureEnabled ? t('settings.learningOn') : t('settings.learningOff')}</p><button className="secondary-button" onClick={learning}>{t('settings.lessons')}</button></div>
+    <div className="settings-section"><h3>{bootstrap?.example ? t('settings.exampleWorkspace') : t('settings.yourConversations')}</h3><p>{bootstrap?.example ? t('settings.exampleDescription') : t('settings.conversationDescription')}</p><p>{t('settings.savedDraft')}</p></div>
   </Dialog>;
 }
 

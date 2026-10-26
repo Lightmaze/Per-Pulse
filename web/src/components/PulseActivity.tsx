@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { useLanguage } from '../i18n';
 import { PulseActivityRequestGate } from '../pulseActivityRequestGate';
 import type { PageSummary, PulseState } from '../types';
 import { Dialog } from './Dialog';
@@ -22,14 +23,15 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
   navigate: Navigate;
   onClose: () => void;
 }) {
+  const { t, pageTitle } = useLanguage();
   const [pulse, setPulse] = useState<PulseState | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [target, setTarget] = useState('');
   const [kind, setKind] = useState<'excitatory' | 'inhibitory'>('excitatory');
   const gate = useRef(new PulseActivityRequestGate()).current;
-  const options: PageOption[] = [{ id: 'home', title: 'Home' }, ...pages
-    .filter(page => page.id !== 'home').map(page => ({ id: page.id, title: page.title }))];
+  const options: PageOption[] = [{ id: 'home', title: t('app.home') }, ...pages
+    .filter(page => page.id !== 'home').map(page => ({ id: page.id, title: pageTitle(page) }))];
   const validIds = new Set(options.map(page => page.id));
   const availableTargets = options.filter(page => page.id !== pageId);
 
@@ -44,7 +46,7 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
       }
     } catch (problem) {
       if (!signal?.aborted && gate.acceptsRead(ticket) && !preserveError) {
-        setError(problem instanceof Error ? problem.message : 'Could not read activity.');
+        setError(problem instanceof Error ? problem.message : t('pulse.readError'));
       }
     }
   }, [gate]);
@@ -69,8 +71,8 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
       // A network failure can hide an already-committed mutation. Re-read the
       // native state rather than claiming it definitely failed or rolling back.
       unconfirmed = true;
-      const detail = problem instanceof Error ? problem.message : 'The change could not be confirmed.';
-      setError(`Could not confirm the change. Refreshing activity. ${detail}`);
+      const detail = problem instanceof Error ? problem.message : t('pulse.confirmUnknown');
+      setError(t('pulse.confirm', { detail }));
     } finally {
       gate.finishWrite();
       setBusy(false);
@@ -80,8 +82,8 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
 
   const nameFor = (id: string | null, centerId?: string | null) => {
     if (id && validIds.has(id)) return options.find(page => page.id === id)?.title ?? id;
-    if (id === null && centerId !== null && centerId !== undefined) return 'Earlier Work · ' + shortId(centerId);
-    return 'Work not in the current page list';
+    if (id === null && centerId !== null && centerId !== undefined) return t('pulse.earlier', { id: shortId(centerId) });
+    return t('pulse.unknown');
   };
 
   const jump = (id: string | null) => {
@@ -94,68 +96,67 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
   const recent = pulse?.recentActivations ?? [];
   const thisPageHeld = pulse?.heldContexts.some(held => held.pageId === pageId) ?? false;
 
-  return <Dialog title="Activity" onClose={() => { if (!busy) onClose(); }} className="pulse-activity-dialog">
-    <p className="dialog-description">Local activity and connections in this continuing workspace. These are native records, not a separate agent or a replay of another page.</p>
-    {error ? <p className="form-error" role="alert">{error} <button className="text-button" type="button" onClick={() => void reload()}>Try again</button></p> : null}
-    {!pulse ? <p role="status" className="pulse-activity-empty">Reading activity…</p> : <>
-      <section className="pulse-activity-section" aria-label="Background activity">
+  return <Dialog title={t('pulse.title')} onClose={() => { if (!busy) onClose(); }} className="pulse-activity-dialog">
+    <p className="dialog-description">{t('pulse.description')}</p>
+    {error ? <p className="form-error" role="alert">{error} <button className="text-button" type="button" onClick={() => void reload()}>{t('pulse.retry')}</button></p> : null}
+    {!pulse ? <p role="status" className="pulse-activity-empty">{t('pulse.reading')}</p> : <>
+      <section className="pulse-activity-section" aria-label={t('pulse.background')}>
         <div className="pulse-activity-heading">
-          <h3>Background activity</h3>
-          <button className="text-button" type="button" onClick={() => void reload()}>Refresh</button>
+          <h3>{t('pulse.background')}</h3>
+          <button className="text-button" type="button" onClick={() => void reload()}>{t('pulse.refresh')}</button>
           <button className="text-button" type="button" disabled={busy || !pulse.enabled}
             onClick={() => void act(() => api.setPulsePaused(!pulse.paused))}>
-            {pulse.paused ? 'Resume background' : 'Pause background'}
+            {pulse.paused ? t('pulse.resumeBg') : t('pulse.pauseBg')}
           </button>
         </div>
         <div className="pulse-activity-heading">
-          <h3>Current page</h3>
+          <h3>{t('pulse.current')}</h3>
           <button className="text-button" type="button" disabled={busy || !pulse.enabled}
             onClick={() => void act(() => api.setPulseContextPaused(pageId, !thisPageHeld))}>
-            {thisPageHeld ? 'Resume this page' : 'Hold this page'}
+            {thisPageHeld ? t('pulse.resumePage') : t('pulse.holdPage')}
           </button>
         </div>
         <p className="pulse-activity-detail">
-          {thisPageHeld ? 'This page is held: incoming influence waits, but you can still write here.' :
-            'Holding this page stops new local background turns without pausing other pages.'}
+          {thisPageHeld ? t('pulse.held') : t('pulse.holdInfo')}
         </p>
-        <p className="pulse-activity-summary" role="status">{pulse.paused && pulse.enabled ? 'Paused · pending influence retained' : pulse.running ? 'Continuing' : pulse.enabled ? 'Enabled · not running' : 'Not enabled'} · {pulse.queue.queued} queued · {pulse.queue.running} running</p>
-        <p className="pulse-activity-detail">{pulse.budget.remaining} of {pulse.budget.limit} background admissions left in the rolling hour. This is a turn count, not a model token or money limit.</p>
-        {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">Oldest queued: {eventTime(pulse.queue.oldestQueuedAt)}</p> : null}
-        {!pulse.providerConfigured ? <p className="pulse-activity-detail">A model is not connected; no background response is generated.</p> : null}
+        <p className="pulse-activity-summary" role="status">{pulse.paused && pulse.enabled ? t('pulse.paused') : pulse.running ? t('pulse.continuing') : pulse.enabled ? t('pulse.enabled') : t('pulse.disabled')} · {t('pulse.queue', { queued: pulse.queue.queued, running: pulse.queue.running })}</p>
+        <p className="pulse-activity-detail">{t('pulse.budget', { remaining: pulse.budget.remaining, limit: pulse.budget.limit })}</p>
+        {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">{t('pulse.oldest', { time: eventTime(pulse.queue.oldestQueuedAt) })}</p> : null}
+        {!pulse.providerConfigured ? <p className="pulse-activity-detail">{t('pulse.noProvider')}</p> : null}
       </section>
-      <section className="pulse-activity-section" aria-label="Context connections">
-        <h3>Connections from this page</h3>
-        <p className="pulse-activity-detail">These links carry influence after a result settles. Opening a page link does not itself trigger background work.</p>
-        {!edges.length ? <p className="pulse-activity-empty">No outgoing computation connections.</p> : <ul className="pulse-activity-list">
+      <section className="pulse-activity-section" aria-label={t('pulse.connections')}>
+        <h3>{t('pulse.connections')}</h3>
+        <p className="pulse-activity-detail">{t('pulse.connectionsInfo')}</p>
+        {!edges.length ? <p className="pulse-activity-empty">{t('pulse.noEdges')}</p> : <ul className="pulse-activity-list">
           {edges.map(edge => <li key={edge.id}>
-            <span>{edge.kind === 'inhibitory' ? 'Settles' : 'Excites'} → </span>
+            <span>{edge.kind === 'inhibitory' ? t('pulse.settles') : t('pulse.excites')} → </span>
             {edge.targetPageId && validIds.has(edge.targetPageId)
               ? <button className="pulse-activity-link" onClick={() => jump(edge.targetPageId)}>{nameFor(edge.targetPageId)}</button>
               : <span>{nameFor(edge.targetPageId, edge.target_center_id)}</span>}
             {edge.targetPageId && validIds.has(edge.targetPageId) ?
-              <button className="text-button" type="button" disabled={busy} onClick={() => void act(() => api.disconnectPulse(pageId, edge.targetPageId!))}>Remove</button> : null}
+              <button className="text-button" type="button" disabled={busy} onClick={() => void act(() => api.disconnectPulse(pageId, edge.targetPageId!))}>{t('pulse.remove')}</button> : null}
           </li>)}
         </ul>}
         {availableTargets.length ? <form className="pulse-activity-add" onSubmit={event => {
           event.preventDefault();
           if (!busy && target && validIds.has(target)) void act(() => api.connectPulse(pageId, target, kind));
         }}>
-          <label htmlFor="pulse-target">Connect to</label>
+          <label htmlFor="pulse-target">{t('pulse.connectTo')}</label>
           <select id="pulse-target" value={target} onChange={event => setTarget(event.target.value)}>
-            <option value="">Choose a page</option>
+            <option value="">{t('pulse.choose')}</option>
             {availableTargets.map(page => <option key={page.id} value={page.id}>{page.title}</option>)}
           </select>
-          <label htmlFor="pulse-kind">Influence</label>
+          <label htmlFor="pulse-kind">{t('pulse.influence')}</label>
           <select id="pulse-kind" value={kind} onChange={event => setKind(event.target.value as 'excitatory' | 'inhibitory')}>
-            <option value="excitatory">Excite</option>
-            <option value="inhibitory">Inhibit</option>
+            <option value="excitatory">{t('pulse.excite')}</option>
+            <option value="inhibitory">{t('pulse.inhibit')}</option>
           </select>
-          <button className="secondary-button" type="submit" disabled={busy || !target}>Connect</button>
+          <button className="secondary-button" type="submit" disabled={busy || !target}>{t('pulse.connect')}</button>
         </form> : null}
       </section>
-      <section className="pulse-activity-section" aria-label="Recent activity">
-        <h3>Recent activity</h3>
-        {!recent.length ? <p className="pulse-activity-empty">No local background activity recorded yet.</p> : <ol className="pulse-activity-list">
+      <section className="pulse-activity-section" aria-label={t('pulse.recent')}>
+        <h3>{t('pulse.recent')}</h3>
+        {!recent.length ? <p className="pulse-activity-empty">{t('pulse.none')}</p> : <ol className="pulse-activity-list">
           {recent.slice(0, 12).map(activity => <li key={activity.eventId}>
             <div className="pulse-activity-event">
               {activity.pageId && validIds.has(activity.pageId)
@@ -164,13 +165,13 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
               <span className="pulse-activity-state">{activity.status}</span>
             </div>
             <span className="pulse-activity-detail">{eventTime(activity.createdAt)} · {activity.kind}</span>
-            {activity.deferredReason ? <span className="pulse-activity-detail">Waiting: {activity.deferredReason}</span> : null}
-            {activity.sourceEventId ? <span className="pulse-activity-detail">From: {activity.sourcePageId && validIds.has(activity.sourcePageId)
+            {activity.deferredReason ? <span className="pulse-activity-detail">{t('pulse.waiting', { reason: activity.deferredReason })}</span> : null}
+            {activity.sourceEventId ? <span className="pulse-activity-detail">{t('pulse.from')} {activity.sourcePageId && validIds.has(activity.sourcePageId)
               ? <button className="pulse-activity-link" onClick={() => jump(activity.sourcePageId)}>{nameFor(activity.sourcePageId)}</button>
               : <span>{nameFor(activity.sourcePageId, activity.sourceCenterId)}</span>}
-              <span className="pulse-activity-identity" title={activity.sourceEventId}>Source event: {shortId(activity.sourceEventId)}</span>
+              <span className="pulse-activity-identity" title={activity.sourceEventId}>{t('pulse.source', { id: shortId(activity.sourceEventId) })}</span>
             </span> : null}
-            <span className="pulse-activity-identity" title={activity.eventId}>Event: {shortId(activity.eventId)}</span>
+            <span className="pulse-activity-identity" title={activity.eventId}>{t('pulse.event', { id: shortId(activity.eventId) })}</span>
           </li>)}
         </ol>}
       </section>

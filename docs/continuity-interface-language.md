@@ -1,0 +1,7 @@
+# Bilingual continuity controls on the integrated PerPulse candidate
+
+This slice follows [#20](https://github.com/Lightmaze/Per-Pulse/pull/20) with one native World, Kernel and ContextPulseController. Reuses the typed i18n preference/catalogues already developed in [#9](https://github.com/Lightmaze/Per-Pulse/pull/9), not a parallel locale mechanism.
+
+The independent **interface language** setting follows the browser or an explicit English/简体中文 choice, syncs across tabs and updates document.lang without remounting Home/Work. **Reply language** remains a separate World-owned next-turn setting. Switching controls never approves tools or touches history. The translated vertical slice includes the Home heading/navigation, Activity including holds/connections and original causal event labels, Settings, exact Harness approvals and digest-checked file result status. Work titles, human messages, filenames, trace/event IDs, and raw runtime failure details remain verbatim. Other conversations, Learning and auxiliary dialogs still have English copy: this is not a claim of complete UI translation.
+
+Verification: `npm --prefix web ci && npm --prefix web run test && npm --prefix web run typecheck && npm --prefix web run build`, the unified Python/Chromium CI, then a browser flow that switches locale while preserving an unsent Work draft, original-source anchor, pending approval and file digest. Synthetic HTTP transport does not establish provider performance.

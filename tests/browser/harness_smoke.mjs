@@ -83,6 +83,31 @@ try {
   await wait(async()=>!(await page.getByRole('button',{name:'Allow once',exact:true}).count()),'declined approval clears');
   check('declined effect did not create a file',!(await (await fetch(base+'/__fixture/status')).json()).files.includes('declined.txt'));
   await create('Slow continuation','WRITE_SLOW SLOW_AFTER_APPROVAL');
+  // Locale is presentation state. A Work draft and exact pending approval must
+  // survive changing language without remounting its continuing context.
+  const slowDraft = page.getByRole('textbox',{name:'Message Slow continuation',exact:true});
+  await slowDraft.fill('Unsent draft: keep this context and approval.');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.locator('#interface-language').selectOption('zh-CN');
+  await page.getByRole('dialog',{name:'你的工作区',exact:true}).waitFor();
+  check('interface language switches independently of reply language',
+    await page.evaluate(()=>document.documentElement.lang)==='zh-CN'
+    && await page.locator('#response-language').inputValue()==='auto');
+  await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+  await page.getByRole('button',{name:'仅允许本次',exact:true}).waitFor();
+  check('pending native approval and unsent Work draft survive Chinese switch',
+    await slowDraft.inputValue()==='Unsent draft: keep this context and approval.');
+  await page.getByRole('button',{name:'活动',exact:true}).click();
+  await page.getByRole('dialog',{name:'活动',exact:true}).waitFor();
+  await page.getByRole('heading',{name:'后台活动',exact:true}).waitFor();
+  check('same Pulse activity route is reachable in Chinese',true);
+  await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.locator('#interface-language').selectOption('en');
+  await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+  check('original approval identity and draft persist after returning to English',
+    await page.getByRole('button',{name:'Allow once',exact:true}).count()===1
+    && await slowDraft.inputValue()==='Unsent draft: keep this context and approval.');
   await page.getByRole('button',{name:'Allow once',exact:true}).click();
   await wait(async()=>(await (await fetch(base+'/__fixture/status')).json()).entered,'slow continuation entered');
   check('stop stays enabled while approval response is pending',await page.getByRole('button',{name:'Stop this turn',exact:true}).isEnabled());
