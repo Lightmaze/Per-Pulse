@@ -5,7 +5,7 @@
  * Original World message identity is required for an exact Work return.
  * Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
  */
-import { activationMessageTarget } from './pulseAttention';
+import { activationMessageTarget } from './pulseAttention.ts';
 import type { PageSummary, PulseActivation, PulseState } from './types';
 
 export type HomeContinuation = {
