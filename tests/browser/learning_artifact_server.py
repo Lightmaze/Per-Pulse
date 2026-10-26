@@ -27,7 +27,7 @@ requests = []
 
 def streamed(*, text=None, tool=None, arguments=None):
     if tool:
-        delta = {"tool_calls": [{"index": 0, "id": "journey-" + tool,
+        delta = {"tool_calls": [{"index": 0, "id": "journey-" + (arguments["op"] if tool == "posture" else tool),
                  "type": "function", "function": {
                      "name": tool, "arguments": json.dumps(arguments)}}]}
     else:
