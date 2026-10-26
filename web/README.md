@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Vite proxies `/api` to the Python application. For a production build:
+Vite binds only to `127.0.0.1` and proxies `/api` to the local Python application. Do **not** expose this development server to your network: the proxy provides access to an unauthenticated, single-user workspace API. The preview server also binds to loopback. For a production build:
 
 ```sh
 npm run build
