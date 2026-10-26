@@ -328,3 +328,15 @@ button, a, input, textarea { outline-offset: 4px; }
 .artifact-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow-y: auto; margin: 0; }
 .artifact-preview p { color: #66705f; }
 .artifact-provenance { font-size: 10px; }
+
+/* Home opens existing local computation, without making it another feed. */
+.home-continuations { margin: 18px 0 13px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 13px 0 11px; }
+.home-continuations h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.home-continuations-intro { color: var(--muted); line-height: 1.5; font-size: 12px; margin: 5px 0 10px; }
+.home-continuations-list { list-style: none; margin: 0; padding: 0; }
+.home-continuations-list li { display: flex; align-items: baseline; gap: 7px 13px; flex-wrap: wrap; padding: 7px 0; font-size: 12px; }
+.home-continuation-open, .home-continuation-source { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+.home-continuation-open { font-weight: 600; }
+.home-continuation-open:focus-visible, .home-continuation-source:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.home-continuation-detail, .home-continuation-event { color: var(--muted); font-size: 11px; }
+.home-continuation-event { margin-left: auto; }
