@@ -69,7 +69,7 @@ try {
   const setup = page.locator('details.provider-setup');
   assert.equal(await setup.count(), 1, 'Disconnected ordinary user must be able to find setup');
   await setup.locator('summary').click();
-  await setup.getByText('Terminal setup example').waitFor({ state: 'visible' }).catch(() => {});
+  await setup.locator('pre').waitFor({ state: 'visible' });
   const instructions = await setup.locator('code').innerText();
   for (const variable of ['P_PULSE_CHAT_ENDPOINT', 'P_PULSE_CHAT_MODEL', 'P_PULSE_API_KEY']) {
     assert.ok(instructions.includes(variable), variable + ' missing from first-use guidance');
