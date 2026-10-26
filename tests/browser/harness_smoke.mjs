@@ -58,9 +58,13 @@ try {
   await returnDialog.getByRole('button',{name:'Bring to Home',exact:true}).click();
   await page.getByRole('heading',{name:'A place to keep going.',exact:true}).waitFor();
   const sourcedReturn = page.locator('.message-user').filter({hasText:'Synthetic model fixture: this page has finished its turn.'}).last();
-  await sourcedReturn.getByRole('link',{name:'Approved note',exact:true}).waitFor();
-  check('selected Work result returns to Home with its original source',true);
-  await sourcedReturn.getByRole('link',{name:'Approved note',exact:true}).click();
+  // A return contains both its precise originating message link and a separate
+  // page reference. Follow the provenance link, not the generic page shortcut.
+  const sourceLink = sourcedReturn.locator('.source-line a.session-link');
+  await sourceLink.waitFor();
+  check('selected Work result returns to Home with its original message source',
+        (await sourceLink.getAttribute('href')).includes('#message-'));
+  await sourceLink.click();
   await page.getByRole('heading',{name:'Approved note',exact:true}).waitFor();
   check('Home source link returns to the original Work',new URL(page.url()).pathname.endsWith('/'+approvedId));
   await create('Declined note','WRITE_DECLINE');
