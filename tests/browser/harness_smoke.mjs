@@ -85,7 +85,8 @@ try {
   await create('Slow continuation','WRITE_SLOW SLOW_AFTER_APPROVAL');
   // Locale is presentation state. A Work draft and exact pending approval must
   // survive changing language without remounting its continuing context.
-  const slowDraft = page.getByRole('textbox',{name:'Message Slow continuation',exact:true});
+  // The label changes with the locale; the exact underlying Work draft must not.
+  const slowDraft = page.locator('.composer textarea');
   await slowDraft.fill('Unsent draft: keep this context and approval.');
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.locator('#interface-language').selectOption('zh-CN');
