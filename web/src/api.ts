@@ -30,7 +30,8 @@ const pagePath = (id: string) => `/pages/${encodeURIComponent(id)}`;
 
 export const api = {
   bootstrap: (signal?: AbortSignal) => request<Bootstrap>('/bootstrap', { signal }),
-  page: (id: string, signal?: AbortSignal) => request<PageView>(pagePath(id), { signal }),
+  page: (id: string, signal?: AbortSignal, sourceMessageId?: string) =>
+    request<PageView>(pagePath(id) + (sourceMessageId ? `?sourceMessageId=${encodeURIComponent(sourceMessageId)}` : ''), { signal }),
   createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null }) =>
     request<{ page: PageSummary; reference: PageReference; initialMessageId: string; view: PageView }>('/pages', { method: 'POST', body: JSON.stringify(data) }),
   send: (id: string, content: string, references: DraftReference[]) =>

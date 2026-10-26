@@ -9268,6 +9268,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         unattributed: bool = False,
         session_admitted: bool = False,
         limit: int = 100,
+        event_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = [
             "world_id = ?",
@@ -9308,6 +9309,11 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 "WHERE admitted_turn.event_id = causal_events.id "
                 "AND admitted_turn.input_message_id IS NOT NULL))"
             )
+        if event_id is not None:
+            # One native event within the same World/Center/Engram scope;
+            # never replace the scoped predicate with an unguarded ID lookup.
+            clauses.append("id = ?")
+            params.append(event_id)
         params.append(limit)
         with self._storage._lock:
             rows = self._storage._conn.execute(

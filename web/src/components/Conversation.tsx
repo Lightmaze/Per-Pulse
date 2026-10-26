@@ -38,7 +38,7 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
   const pageMap = new Map(pages.map(page => [page.id, page]));
   const pageReferences = view.references.filter(reference => !reference.sourceMessageId);
   return <div className="conversation" aria-label="Conversation">
-    {view.hasMore ? <p className="conversation-note">Showing the most recent messages.</p> : null}
+    {view.hasMore ? <p className="conversation-note">{view.earlierSourceMessageId ? 'Showing the selected earlier source, then the most recent messages. Intervening messages are not loaded.' : 'Showing the most recent messages.'}</p> : null}
     {view.messages.map(message => { const activity = getMessageActivity(message.status, view.provider.configured, stale); return <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id} key={message.id} tabIndex={-1} aria-label={`${message.role === 'user' ? 'Your' : 'Per Pulse'} message`}>
       <div className="message-label">{message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Per Pulse' : 'Workspace'}</div>
       {message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">From <SessionLink pageId={message.sourcePageId} label={pageMap.get(message.sourcePageId)?.title ?? 'Source page'} targetMessageId={message.sourceMessageId ?? undefined} navigate={navigate} /></div> : null}

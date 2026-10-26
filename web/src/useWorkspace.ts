@@ -31,7 +31,9 @@ export function useWorkspace() {
     const version = versions.current[id] ?? 0;
     const request = (requests.current[id] ?? 0) + 1;
     requests.current[id] = request;
-    const view = await api.page(id, signal);
+    // Preserve the selected source during route changes and subsequent polls.
+    const sourceMessageId = id === routeRef.current.id ? routeRef.current.targetMessageId : undefined;
+    const view = await api.page(id, signal, sourceMessageId);
     if (!signal?.aborted && requests.current[id] === request && (versions.current[id] ?? 0) === version) applyView(view);
     return view;
   }, [applyView]);
