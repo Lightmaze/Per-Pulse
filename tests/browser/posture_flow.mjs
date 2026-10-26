@@ -58,7 +58,7 @@ try {
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(base);
-  await page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();
+  await page.getByRole('textbox', { name: /^Message / }).waitFor();
   const openLessons = async () => {
     if (!(await page.getByRole('button', { name: 'Settings', exact: true }).isVisible())) {
       await page.getByRole('button', { name: 'Toggle navigation', exact: true }).click();
@@ -69,7 +69,7 @@ try {
   };
   const close = () => page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   const send = async (text, count) => {
-    await page.getByRole('textbox', { name: 'Message', exact: true }).fill(text);
+    await page.getByRole('textbox', { name: /^Message / }).fill(text);
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await wait(async () => await page.locator('.message-assistant').count() === count, 'assistant fixture response');
   };
@@ -81,7 +81,7 @@ try {
   await page.getByText('No saved lessons in this page yet.', { exact: true }).waitFor();
   const learningTab = await context.newPage();
   await learningTab.goto(base);
-  await learningTab.getByRole('textbox', { name: 'Message', exact: true }).fill('Let me try the interaction before asking for a profile.');
+  await learningTab.getByRole('textbox', { name: /^Message / }).fill('Let me try the interaction before asking for a profile.');
   await learningTab.getByRole('button', { name: 'Send message', exact: true }).click();
   await wait(async () => await learningTab.locator('.message-assistant').count() === 2, 'background correction result');
   await learningTab.close();
