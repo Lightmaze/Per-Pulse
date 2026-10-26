@@ -185,6 +185,12 @@ expressions. `counterexamples` contains one to eight concrete boundaries.
 They identify how experience can affect work, rather than an obligatory set of
 steps for every task. `scope` defaults to `context`; an explicit `subject`
 setting makes the abstraction available in other pages of the same subject.
+A shared experience includes `sourcePageId` and, when native source identities
+are present, `sourceAnchor` with `resultMessageId` and `feedbackMessageId`.
+These are navigation-only IDs for opening the exact original result or correction.
+The original encounter, raw source record and feedback history are not copied
+into another Work. Source deep links use the existing page history window and
+return navigation; they are not an additional experience store.
 
 For example, pausing an experience at revision 1 sends:
 

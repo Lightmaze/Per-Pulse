@@ -67,6 +67,13 @@ class PageLearning:
             source_page = next((front["id"] for front in self.pages.runtime.list_task_fronts()
                                 if front["center_id"] == source_context.removeprefix("work:")), None)
         result.update(canEdit=local, sourcePageId=source_page)
+        # Shared experiences expose only the original message anchors so the
+        # reader can inspect their provenance without copying the raw episode.
+        source = record.get("source", {})
+        if source_page is not None and isinstance(source, dict):
+            original, correction = source.get("source_message_id"), source.get("feedback_message_id")
+            if all(isinstance(value, str) and value for value in (original, correction)):
+                result["sourceAnchor"] = {"resultMessageId": original, "feedbackMessageId": correction}
         # Cross-page transfer contains the abstraction only. The original
         # encounter and raw feedback stay behind navigation to its source.
         if local:

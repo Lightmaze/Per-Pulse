@@ -93,6 +93,7 @@ def test_cross_page_transfer_is_explicit_and_raw_encounter_stays_at_source(tmp_p
         shared = client.get(f"/api/pages/{page}/posture").json()["experiences"][0]
         assert not shared["canEdit"] and shared["sourcePageId"] == "home"
         assert "encounter" not in shared and "feedback" not in shared and "source" not in shared
+        assert shared["sourceAnchor"] == {"resultMessageId": source, "feedbackMessageId": feedback}
         assert "Transport fixture response." not in json.dumps(shared)
         denied = client.patch(f"/api/pages/{page}/posture/experiences/{saved['id']}",
                               json={"expectedRevision": 2, "changes": {"active": False}})
@@ -136,6 +137,7 @@ def test_work_origin_remains_editable_at_its_source_and_locatable_from_home(tmp_
         assert shared.status_code == 200
         at_home = client.get("/api/pages/home/posture").json()["experiences"][0]
         assert at_home["sourcePageId"] == page and not at_home["canEdit"]
+        assert at_home["sourceAnchor"] == {"resultMessageId": source, "feedbackMessageId": feedback}
         assert "encounter" not in at_home and "source" not in at_home
         retract = client.patch(endpoint + "/" + saved["id"], json={
             "expectedRevision": 2, "changes": {"scope": "context"},
