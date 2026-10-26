@@ -40,7 +40,8 @@ _NATIVE_VERDICTS = {"not_useful", "harmful", "withdrawn"}
 SCHEMA = {
     "type": "object",
     "properties": {
-        "op": {"type": "string", "enum": ["list", "remember", "feedback", "revise"]},
+        "op": {"type": "string", "enum": ["list", "find", "get", "remember", "feedback", "revise"]},
+        "query": {"type": "string", "minLength": 2, "maxLength": 160},
         "experience_id": {"type": "string", "maxLength": 160},
         "expected_revision": {"type": "integer", "minimum": 1},
         "verdict": {"type": "string", "enum": sorted(_NATIVE_VERDICTS)},
@@ -73,7 +74,12 @@ def descriptor() -> ToolDescriptor:
     return ToolDescriptor(
         NAME,
         "Keep useful experience from this context's actual work and later user feedback. "
-        "list returns applicable-scope memories and recent original message IDs. "
+        "list returns a bounded newest-first view and recent original message IDs. "
+        "find(query) searches only the title, lesson, conditions, boundaries and "
+        "decision shifts of eligible active experiences by literal text (not semantic "
+        "relevance); get(experience_id) retrieves one eligible experience even when "
+        "the newest-first list omitted it. Neither operation crosses context privacy "
+        "or treats a match as applicable to the task. "
         "remember requires an earlier assistant result ID and a later user feedback "
         "message ID from this same context. Interpret what that feedback changes in "
         "understanding, candidate actions, and delivery, and state the conditions and "
@@ -115,6 +121,18 @@ def validate(arguments: Mapping[str, Any]) -> dict:
         raise ValueError("posture arguments must be an object")
     values = deepcopy(dict(arguments))
     if values == {"op": "list"}:
+        return values
+    if values.get("op") == "find" and set(values) == {"op", "query"}:
+        query = values["query"]
+        if (not isinstance(query, str) or not 2 <= len(query.strip()) <= 160
+                or any(ord(character) < 32 for character in query)):
+            raise ValueError("find query must be 2..160 printable characters")
+        return {"op": "find", "query": query.strip()}
+    if values.get("op") == "get" and set(values) == {"op", "experience_id"}:
+        identity = values["experience_id"]
+        if (not isinstance(identity, str) or not identity.strip()
+                or len(identity) > 160 or any(ord(character) < 32 for character in identity)):
+            raise ValueError("invalid experience_id")
         return values
     if values.get("op") in ("feedback", "revise"):
         fields = _FEEDBACK_FIELDS if values["op"] == "feedback" else _REVISION_FIELDS
@@ -387,9 +405,36 @@ class NativePosture:
                 raise ScopeConflict("posture operation cancelled before admission")
             memory = self._memory()
             turn = self._live_turn(scope)
-            if values["op"] == "list":
+            if values["op"] in {"list", "find", "get"}:
                 from pulse_harness.plugins.posture import pack_posture_materials
                 materials = memory.materials(subject_id=scope.engram_id, context_id=scope.context_id)
+                if values["op"] == "get":
+                    eligible = [item for item in materials["episodes"]
+                                if item["id"] == values["experience_id"]]
+                    if not eligible:
+                        # Same error for nonexistent, inactive and private IDs.
+                        raise ScopeConflict("experience is not active or accessible from this context")
+                    packed = pack_posture_materials({"episodes": eligible}, byte_budget=16000)
+                    return {"experience": packed["episodes"][0] if packed["episodes"] else None,
+                            "material_too_large": not bool(packed["episodes"]),
+                            "scope": "current_context_and_explicit_subject_transfers",
+                            "semantic_applicability": "not_yet_assessed"}
+                if values["op"] == "find":
+                    needle = values["query"].casefold()
+                    eligible = [item for item in materials["episodes"] if needle in (
+                        item["title"] + "\n" + item["lesson"] + "\n" +
+                        json.dumps(item["conditions"], ensure_ascii=False) + "\n" +
+                        json.dumps(item["counterexamples"], ensure_ascii=False) + "\n" +
+                        json.dumps(item["shift"], ensure_ascii=False)
+                    ).casefold()]
+                    packed = pack_posture_materials({"episodes": eligible}, byte_budget=16000)
+                    visible = packed["episodes"][:8]
+                    return {"experiences": visible, "matching_count": len(eligible),
+                            "more_experiences": len(eligible) > len(visible),
+                            "omitted_experience_count": len(eligible) - len(visible),
+                            "retrieval": "literal_casefold_on_eligible_abstractions_only",
+                            "scope": "current_context_and_explicit_subject_transfers",
+                            "semantic_applicability": "not_yet_assessed"}
                 packed = pack_posture_materials(materials, byte_budget=16000)
                 visible = packed["episodes"][:8]
                 return {"experiences": visible,
