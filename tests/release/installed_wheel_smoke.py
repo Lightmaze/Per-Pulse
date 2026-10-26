@@ -9,6 +9,7 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -123,6 +124,19 @@ def run_workspace(root: Path, *, example: bool, fake_provider: bool) -> dict:
 
 
 def main() -> None:
+    # The CI runner also has an editable source install. Reject any accidental
+    # reliance on it: all three shipped Python packages must resolve *inside*
+    # the new isolated wheel environment, never from the checkout or system site.
+    assert sys.prefix != sys.base_prefix, "Wheel smoke must use a virtual environment"
+    prefix = Path(sys.prefix).resolve()
+    for package in ("per_pulse", "pulse_system", "pulse_harness"):
+        spec = importlib.util.find_spec(package)
+        assert spec and spec.origin, f"Installed wheel is missing {package}"
+        origin = Path(spec.origin).resolve()
+        assert origin.is_relative_to(prefix), (
+            f"{package} imported outside the isolated wheel environment: {origin}"
+        )
+
     with tempfile.TemporaryDirectory(prefix="per-pulse-installed-wheel-") as temp:
         root = Path(temp)
         example_before = run_workspace(root, example=True, fake_provider=True)
@@ -132,8 +146,9 @@ def main() -> None:
         assert ordinary["workspaceId"] != example_before["workspaceId"], "Examples share an ordinary World"
         assert not ordinary["homeMessageIds"]
         print(json.dumps({
-            "passed": 6,
+            "passed": 7,
             "checks": [
+                "all three packages resolved from isolated virtualenv, not editable source",
                 "installed wheel CLI started from outside source checkout",
                 "compiled web entry and JS assets served from wheel",
                 "example mode refused provider access even with fake credentials",
