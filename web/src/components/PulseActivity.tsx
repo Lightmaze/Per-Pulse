@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useLanguage } from '../i18n';
 import { PulseActivityRequestGate } from '../pulseActivityRequestGate';
 import { activationMessageTarget, attentionSourceTarget, localRetainedAttention } from '../pulseAttention';
+import { pulseActivityLabel } from '../pulseActivityLabels';
 import type { PageSummary, PulseState } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
@@ -203,10 +204,10 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
                     if (location) jump(location.pageId, location.messageId);
                   }}>{nameFor(activity.pageId)} · {t(activity.messageId === activity.eventId ? 'pulse.openActivityMessage' : 'pulse.openActivityPage')}</button>
                 : <span>{nameFor(activity.pageId, activity.centerId)}</span>}
-              <span className="pulse-activity-state">{activity.status}</span>
+              <span className="pulse-activity-state" title={activity.status}>{pulseActivityLabel(t, "status", activity.status)}</span>
             </div>
-            <span className="pulse-activity-detail">{eventTime(activity.createdAt)} · {activity.kind}</span>
-            {activity.deferredReason ? <span className="pulse-activity-detail">{t('pulse.waiting', { reason: activity.deferredReason })}</span> : null}
+            <span className="pulse-activity-detail">{eventTime(activity.createdAt)} · <span title={activity.kind}>{pulseActivityLabel(t, "kind", activity.kind)}</span></span>
+            {activity.deferredReason ? <span className="pulse-activity-detail">{t('pulse.waiting', { reason: pulseActivityLabel(t, 'reason', activity.deferredReason) })}</span> : null}
             {activity.sourceEventId ? <span className="pulse-activity-detail">{t('pulse.from')} {activity.sourcePageId && validIds.has(activity.sourcePageId)
               ? <button className="pulse-activity-link" type="button" onClick={() => {
                   const location = activationMessageTarget(activity, validIds, 'source');
