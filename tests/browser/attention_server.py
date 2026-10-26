@@ -68,6 +68,8 @@ if __name__ == "__main__":
         create_app(args.data_dir, pulse=PulseSettings(
             enabled=True, spontaneous_rate=0, max_background_pulses_per_hour=2,
             check_interval_seconds=0.01, refractory_seconds=0,
+            max_background_provider_tokens_per_hour=128,
+            background_provider_token_reservation=64,
         ), model_factory=factory),
         host="127.0.0.1", port=args.port, log_level="warning",
     )
