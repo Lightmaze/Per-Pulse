@@ -264,4 +264,12 @@ def test_real_kernel_tool_lane_stages_and_settles_attention_with_synthetic_http(
         ]
         assert len(retained_rows) == 1
         assert retained_rows[0]["pageId"] == "home"
-        assert retained_rows[0]["sourceEventId"]
+        assert retained_rows[0]["sourceEventId"] == response.json()["messageId"]
+        assert retained_rows[0]["sourcePageId"] == "home"
+        assert retained_rows[0]["sourceMessageId"] == response.json()["messageId"]
+        original = client.get("/api/pages/home", params={
+            "sourceMessageId": retained_rows[0]["sourceMessageId"],
+        })
+        assert original.status_code == 200, original.text
+        assert any(message["id"] == response.json()["messageId"]
+                   for message in original.json()["messages"])
