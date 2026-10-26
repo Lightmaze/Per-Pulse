@@ -198,6 +198,5 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         assert original.status_code == 200
         assert any(m["id"] == result_message["id"] for m in original.json()["messages"])
         assert client.get(f"/api/pages/{work}/posture").json()["experiences"][0]["id"] == record["id"]
-        from per_pulse.artifacts import PageArtifacts
         assert PageArtifacts(client.app.state.pages.runtime).read(work, action["actionId"])["content"] == EXPERIENCE
         assert not (tmp_path / "workspace" / "intake.txt").exists()
