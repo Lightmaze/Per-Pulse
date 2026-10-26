@@ -66,9 +66,13 @@ lost ownership, and unavailable durable state still stop the affected work.
 | Operation | Input | Effect |
 | --- | --- | --- |
 | `list` | `op` | Return bounded current-scope experiences and recent original message IDs |
+| `find` | `query` (2–160 printable characters) | Case-insensitive literal search through eligible active experience abstractions, including records outside the newest-eight tool window; not a semantic relevance judgment |
+| `get` | `experience_id` | Retrieve one eligible active experience by its stable identity even if an earlier listing omitted it; inaccessible and unknown IDs are indistinguishable |
 | `remember` | Original assistant result ID, later user feedback ID, title, lesson, conditions, counterexamples, and understanding/candidates/delivery shifts | Stage one context-local experience |
 | `revise` | Experience ID, expected revision, later user feedback ID, and changed lesson fields | Refine the existing experience in place, with attributed correction evidence |
 | `feedback` | Experience ID, expected revision, later user feedback ID, and `not_useful`, `harmful`, or `withdrawn` | Stage attributed correction of an existing local experience |
+
+Native `list` remains bounded, so an older experience may no longer appear among the first eight. `find` searches only the already-eligible, active records' title, lesson, conditions, counterexamples and decision shifts, with a literal Unicode case-folded substring. Its matching count is not a confidence or applicability score. `get` looks up an exact ID; neither operation searches unrelated Work encounters, grants sharing, changes eligibility, or copies raw evidence from a shared source Work. For a shared lesson the model receives only the same abstracted material already available through normal posture contribution. Both are read-only Kernel tool actions with no extra provider request or journal mutation of their own. Search and retrieval do not make posture intervention automatic; the model must still decide when an older conditional lesson matters. A full journal remains capacity-bounded as described below.
 
 The host captures the source text and verifies the World, subject, context,
 ordering, and settled original turn. Sources from a committed predecessor
