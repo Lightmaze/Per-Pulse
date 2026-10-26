@@ -128,10 +128,14 @@ export type PulseActivation = {
   eventId: string;
   centerId: string | null;
   pageId: string | null;
+  /** PageService-validated local message, not an inferred Kernel event. */
+  messageId: string | null;
   kind: string;
   status: string;
   createdAt: string;
   sourceEventId: string | null;
+  /** Original source message only when it belongs to the verified source page. */
+  sourceMessageId: string | null;
   sourceCenterId: string | null;
   sourcePageId: string | null;
   deferredReason: string | null;

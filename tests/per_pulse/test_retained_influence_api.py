@@ -71,6 +71,8 @@ def test_paused_influence_survives_restart_then_executes_once_in_original_histor
         assert activation["sourceEventId"] == source_result_id
         assert activation["sourcePageId"] == source
         assert activation["sourceCenterId"] == runtime.world.get_task_front(source).center_id
+        assert activation["sourceMessageId"] == source_result_id
+        assert activation["messageId"] == delivery_id
         assert state["queue"]["queued"] == 1
         assert state["queue"]["running"] == 0
         assert state["budget"]["used"] == 1
@@ -138,6 +140,29 @@ def test_paused_influence_survives_restart_then_executes_once_in_original_histor
         activation = next(item for item in state["recentActivations"] if item["eventId"] == delivery_id)
         assert activation["status"] == "settled"
         assert activation["deferredReason"] is None
+        assert activation["messageId"] == delivery_id
+        assert activation["sourceMessageId"] == source_result_id
+        receiver = client.get(f"/api/pages/{target}", params={"sourceMessageId": activation["messageId"]})
+        assert receiver.status_code == 200, receiver.text
+        assert any(item["id"] == delivery_id for item in receiver.json()["messages"])
+        original = client.get(f"/api/pages/{source}", params={"sourceMessageId": activation["sourceMessageId"]})
+        assert original.status_code == 200, original.text
+        assert any(item["id"] == source_result_id for item in original.json()["messages"])
+
+        # Losing a source page projection never turns its old causal identity
+        # into a Home link (or a link into the receiving Work).
+        fronts = runtime.list_task_fronts()
+        with monkeypatch.context() as patch:
+            patch.setattr(runtime, "list_task_fronts", lambda: [
+                front for front in fronts if front["id"] != source
+            ])
+            projected = client.get("/api/pulse").json()
+        hidden = next(item for item in projected["recentActivations"]
+                      if item["eventId"] == delivery_id)
+        assert hidden["sourceCenterId"] == runtime.world.get_task_front(source).center_id
+        assert hidden["sourcePageId"] is None
+        assert hidden["sourceMessageId"] is None
+        assert hidden["pageId"] == target and hidden["messageId"] == delivery_id
 
 
 def test_pulse_status_preserves_missing_work_identity_instead_of_faking_home(

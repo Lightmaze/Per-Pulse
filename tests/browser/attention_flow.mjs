@@ -156,6 +156,78 @@ try {
   await page.getByRole('button', { name: '活动', exact: true }).click();
   await page.getByText('模型已释放先前保留的思考。', { exact: true }).waitFor();
   checks.push('successful native model release clears only the retained local thought');
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+
+  // Two *real* local Works and their original causal relationship. A scripted
+  // HTTP model generates text, but the World/Kernel performs the propagation.
+  // Verify the rendered Activity opens each actual message, not merely its
+  // page, and the user's draft still belongs to the receiving Work.
+  const createLocal = async (title, instruction) => {
+    const response = await fetch(base + '/api/pages', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title, instruction }),
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 201, JSON.stringify(payload));
+    return payload.page.id;
+  };
+  const localSource = await createLocal('Actual source Work', 'Keep original evidence in this Work.');
+  const localReceiver = await createLocal('Actual receiving Work', 'Continue in this distinct local Work.');
+  for (const id of [localSource, localReceiver]) {
+    await wait(async () => (await (await fetch(base + '/api/pages/' + id)).json())
+      .messages.some(message => message.role === 'assistant'),
+    'original local Work model turn settles: ' + id);
+  }
+  const connection = await fetch(base + '/api/pulse/connections', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sourcePageId: localSource, targetPageId: localReceiver,
+      kind: 'excitatory', weight: 0.9,
+    }),
+  });
+  assert.equal(connection.status, 201, await connection.text());
+  const newInput = await fetch(base + '/api/pages/' + localSource + '/messages', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: 'A new source finding to propagate.' }),
+  });
+  assert.equal(newInput.status, 202, await newInput.text());
+  let propagated;
+  await wait(async () => {
+    const current = (await (await fetch(base + '/api/pulse')).json()).recentActivations;
+    propagated = current.find(item => item.pageId === localReceiver && item.sourcePageId === localSource
+      && item.status === 'settled' && item.messageId === item.eventId
+      && item.sourceMessageId === item.sourceEventId);
+    return Boolean(propagated);
+  }, 'native causal result with both original message anchors', 20000);
+  assert.notEqual(propagated.eventId, propagated.sourceEventId);
+
+  await page.goto(base + '/page/' + encodeURIComponent(localReceiver));
+  await page.getByRole('heading', { name: 'Actual receiving Work', exact: true }).waitFor();
+  await page.locator('.composer textarea').fill('Still composing after exploring causal sources.');
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByRole('button', { name: 'Actual receiving Work · 打开局部消息', exact: true }).click();
+  await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
+    '#message-' + propagated.messageId, 'exact original native receiver event');
+  await page.locator('#message-' + propagated.messageId).waitFor();
+  checks.push('local activation opens its exact receiving Work message');
+
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByRole('button', { name: 'Actual source Work · 打开原始消息', exact: true }).click();
+  await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
+    '#message-' + propagated.sourceMessageId, 'original source result, not another Work');
+  await page.locator('#message-' + propagated.sourceMessageId).waitFor();
+  checks.push('native source event opens original Work with validated causal identity');
+
+  // Follow the product's actual Back/return route, not a manual URL reset.
+  // It should recover the receiver's exact local event and unsent draft.
+  await page.locator('.return-to-thread').click();
+  await wait(async () => decodeURIComponent(new URL(page.url()).pathname) ===
+    '/page/' + localReceiver && decodeURIComponent(new URL(page.url()).hash) ===
+    '#message-' + propagated.messageId, 'return to original receiver event and position');
+  await page.locator('.composer textarea').waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(),
+    'Still composing after exploring causal sources.');
+  checks.push('Back returns to original local message without losing receiving Work draft');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks,

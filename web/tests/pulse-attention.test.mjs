@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { attentionSourceTarget, localRetainedAttention } from '../src/pulseAttention.ts';
+import { activationMessageTarget, attentionSourceTarget, localRetainedAttention } from '../src/pulseAttention.ts';
 
 const entry = (overrides = {}) => ({
   center_id: 'origin-center', pageId: 'work-source', note: 'Check the actual interaction',
@@ -40,4 +40,32 @@ test('only the original validated event can be a source message deep link', () =
   assert.equal(attentionSourceTarget(entry({
     sourcePageId: 'home', sourceMessageId: null,
   }), new Set(['work-source'])), null);
+});
+
+test('native activation links only verified matching local and original source events', () => {
+  const available = new Set(['home', 'receiver-work', 'source-work']);
+  const delivery = {
+    pageId: 'receiver-work', centerId: 'receiver-center',
+    eventId: 'local-delivery', messageId: 'local-delivery', kind: 'propagation',
+    status: 'settled', createdAt: '2026-10-26T12:00:00Z',
+    sourceEventId: 'original-result', sourceMessageId: 'original-result',
+    sourceCenterId: 'source-center', sourcePageId: 'source-work', deferredReason: null,
+  };
+  assert.deepEqual(activationMessageTarget(delivery, available, 'receiver'),
+    { pageId: 'receiver-work', messageId: 'local-delivery' });
+  assert.deepEqual(activationMessageTarget(delivery, available, 'source'),
+    { pageId: 'source-work', messageId: 'original-result' });
+
+  // Never trust a projected message identifier that differs from its actual
+  // World event; retain the real page without manufacturing an anchor.
+  assert.deepEqual(activationMessageTarget({ ...delivery, messageId: 'other-event' }, available, 'receiver'),
+    { pageId: 'receiver-work' });
+  assert.deepEqual(activationMessageTarget({ ...delivery, sourceMessageId: null }, available, 'source'),
+    { pageId: 'source-work' });
+  assert.deepEqual(activationMessageTarget({
+    ...delivery, sourcePageId: null, sourceMessageId: null, sourceCenterId: 'hidden-work',
+  }, available, 'source'), null);
+  assert.equal(activationMessageTarget({
+    ...delivery, sourcePageId: 'home', sourceMessageId: null,
+  }, new Set(['receiver-work', 'source-work']), 'source'), null);
 });
