@@ -136,14 +136,14 @@ try {
   checks.push('attention and original message persist across restart');
 
   await page.goto(base + '/page/' + encodeURIComponent(workId));
-  await page.getByRole('textbox', { name: /^消息/ }).waitFor();
+  await page.locator('.composer textarea').waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(),
     'Unsent Work draft, keep me here.');
   checks.push('Work draft survives source navigation, language change and restart');
 
   // A second original model tool action releases the note, not a synthetic UI toggle.
   await page.getByRole('link', { name: '主页', exact: true }).click();
-  await page.getByRole('textbox', { name: /^消息/ }).fill('RELEASE_LOCAL_THOUGHT: that observation is complete.');
+  await page.locator('.composer textarea').fill('RELEASE_LOCAL_THOUGHT: that observation is complete.');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await wait(async () => (await (await fetch(base + '/api/pulse')).json())
     .retainedAttention.some(item => item.pageId === 'home' && item.note === '' && item.drive === 0
