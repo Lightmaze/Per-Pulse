@@ -187,24 +187,24 @@ try {
   await openLessons();
   await lesson.getByText('Source experience', { exact: true }).click();
   await lesson.getByRole('button', { name: 'Go to original result', exact: true }).click();
-  await page.getByText('Earlier source message', { exact: true }).waitFor();
+  await page.getByText('Showing the selected earlier source, then the most recent messages. Intervening messages are not loaded.', { exact: true }).waitFor();
   assert.equal(await page.locator('.message').count(), 501);
   await page.locator('.message').first().getByText('The first screen is a twelve-field intake form. [Explicit browser test fixture]', { exact: true }).waitFor();
-  await page.getByText('Recent conversation · Some messages after the source are not shown.', { exact: true }).waitFor();
+  // The same bounded projection labels the selected source and the recent tail.
   const sourceIsInViewport = () => {
     const bounds = document.querySelector('.message')?.getBoundingClientRect();
     return bounds && bounds.top >= 0 && bounds.bottom <= window.innerHeight;
   };
   await page.waitForFunction(sourceIsInViewport);
   await page.reload();
-  await page.getByText('Earlier source message', { exact: true }).waitFor();
+  await page.getByText('Showing the selected earlier source, then the most recent messages. Intervening messages are not loaded.', { exact: true }).waitFor();
   assert.equal(await page.locator('.message').count(), 501);
   await page.waitForFunction(sourceIsInViewport);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-earlier-source.png') });
   await page.locator('.message').first().getByRole('button', { name: 'Link page', exact: true }).click();
   await page.getByRole('dialog').getByRole('option', { name: 'Registration tool', exact: false }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  await page.getByText('Earlier source message', { exact: true }).waitFor();
+  await page.getByText('Showing the selected earlier source, then the most recent messages. Intervening messages are not loaded.', { exact: true }).waitFor();
   assert.equal(await page.locator('.message').count(), 501);
 
   // A retry uses the same refresh path as polling. Deliver its stale response
