@@ -109,12 +109,39 @@ try {
   check('original approval identity and draft persist after returning to English',
     await page.getByRole('button',{name:'Allow once',exact:true}).count()===1
     && await slowDraft.inputValue()==='Unsent draft: keep this context and approval.');
+  // Deliver a deliberately obsolete (but structurally valid) approval snapshot
+  // only after Stop wins. The backend still executes the original native action;
+  // the browser route changes only response timing and the stale projection.
+  const slowId = new URL(page.url()).pathname.split('/').pop();
+  const preStopSnapshot = await (await fetch(base+'/api/pages/'+slowId)).json();
+  let releaseOldApproval;
+  const holdOldApproval = new Promise(resolve => { releaseOldApproval = resolve; });
+  let oldApprovalIntercepted = false;
+  const approvalRoute = `**/api/pages/${slowId}/execution/actions/*`;
+  await page.route(approvalRoute, async route => {
+    const upstream = await route.fetch();
+    const receipt = await upstream.json();
+    oldApprovalIntercepted = true;
+    await holdOldApproval;
+    await route.fulfill({response: upstream, json: {...receipt, view: preStopSnapshot}});
+  });
   await page.getByRole('button',{name:'Allow once',exact:true}).click();
   await wait(async()=>(await (await fetch(base+'/__fixture/status')).json()).entered,'slow continuation entered');
   check('stop stays enabled while approval response is pending',await page.getByRole('button',{name:'Stop this turn',exact:true}).isEnabled());
   await page.getByRole('button',{name:'Stop this turn',exact:true}).click();
   await page.getByText('This turn was stopped',{exact:true}).waitFor({timeout:10000});
   await fetch(base+'/__fixture/release');
+  await wait(async()=>oldApprovalIntercepted,'late approval response captured',20000);
+  const lateApproval = page.waitForResponse(response => response.url().includes('/api/pages/'+slowId+'/execution/actions/'));
+  releaseOldApproval();
+  await lateApproval;
+  // Let the fulfilled request resolve through fetch/React before checking the view.
+  await page.waitForTimeout(350);
+  check('late Allow receipt cannot resurrect stopped approval',
+    await page.getByText('This turn was stopped',{exact:true}).isVisible()
+    && await page.getByRole('button',{name:'Allow once',exact:true}).count()===0
+    && await slowDraft.inputValue()==='Unsent draft: keep this context and approval.');
+  await page.unroute(approvalRoute);
   check('UI cancels the exact continuing turn',true);
   await page.getByRole('link',{name:'Home',exact:true}).click();
   await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home keeps working.');
