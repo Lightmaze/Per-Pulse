@@ -259,6 +259,86 @@ def test_native_lookup_finds_older_lesson_without_cross_context_or_raw_transfer(
     assert native.tool._requests() == []  # Read-only: no staged journal write.
 
 
+
+def test_native_find_pages_all_old_matching_records_without_exposing_private_cursors(native):
+    """Broad lexical matches must not become trapped behind an 8-item or byte window."""
+    from pulse_system.service.native_posture import validate
+
+    def add(identity, title, *, context="", conditions="A specific ordinary task",
+            counterexamples=None):
+        return native.memory.add_experience(
+            experience_id=identity, subject_id=native.scope.engram_id,
+            context_id=context, scope="context", record_type="constructed_fixture",
+            title=title, lesson="Fit the actual task, not the label.",
+            conditions=conditions,
+            counterexamples=counterexamples or ["A fixed form is fine when records are requested."],
+            shift={"understanding": "Check task intent.", "candidates": "Compare actions.",
+                   "delivery": "Complete the useful result."},
+            encounter={"situation": "Situation", "action": "Original approach",
+                       "outcome": "Attributable feedback"},
+            source={"kind": "test_page_bound_retrieval"},
+        )
+
+    # Twelve ordinary records all match the same query, including entries
+    # which never fit in the previous non-paginated find's visible window.
+    ordinary = [add(f"routine-{index:02d}", f"Routine practice {index:02d}")
+                for index in range(12)]
+    private = add("routine-private", "Routine private notes", context="work:other-center")
+    # Newest match: individual complete conditions + boundaries legitimately
+    # exceed the 16KB tool-response budget. A partial lesson is not actionable.
+    huge = add(
+        "routine-huge", "Routine oversized conditions",
+        conditions={"all": ["Condition " + "C" * 850 for _ in range(8)]},
+        counterexamples=["Exception " + "E" * 1850 for _ in range(8)],
+    )
+
+    def read(args):
+        return native.tool.execute(
+            native.scope, ToolCall("lookup-paged", "posture", args),
+            CancellationToken(), action_request_id="lookup-paged-action",
+        )
+
+    first = read({"op": "find", "query": "Routine"})
+    assert first["matching_count"] == 13
+    assert first["experiences"] == [{
+        "id": huge["id"], "revision": 1, "title": "Routine oversized conditions",
+        "material_too_large": True,
+    }]
+    assert first["next_after_experience_id"] == huge["id"]
+    assert first["more_experiences"]
+    assert read({"op": "get", "experience_id": huge["id"]})["material_too_large"]
+
+    second = read({"op": "find", "query": "Routine",
+                   "after_experience_id": first["next_after_experience_id"]})
+    assert len(second["experiences"]) == 8
+    assert second["more_experiences"]
+    assert second["omitted_experience_count"] == 4
+    third = read({"op": "find", "query": "Routine",
+                  "after_experience_id": second["next_after_experience_id"]})
+    assert len(third["experiences"]) == 4
+    assert not third["more_experiences"]
+    assert third["next_after_experience_id"] is None
+    identities = [item["id"] for response in (first, second, third)
+                  for item in response["experiences"]]
+    assert len(identities) == len(set(identities)) == 13
+    assert set(identities) == {huge["id"], *(item["id"] for item in ordinary)}
+    assert private["id"] not in identities
+
+    # A cursor must be both accessible and a member of *this* query, not an
+    # oracle for another Work or a way to skip arbitrary records.
+    for invalid in (private["id"], "nonexistent-id"):
+        with pytest.raises(ScopeConflict, match="not active or accessible"):
+            read({"op": "find", "query": "Routine", "after_experience_id": invalid})
+    with pytest.raises(ScopeConflict, match="not active or accessible"):
+        read({"op": "find", "query": "oversized",
+              "after_experience_id": ordinary[-1]["id"]})
+    for after in ("", "line\\nbreak", "another/work", 123):
+        with pytest.raises(ValueError):
+            validate({"op": "find", "query": "Routine",
+                      "after_experience_id": after})
+    assert native.tool._requests() == []  # Pure reads do not stage learning.
+
+
 def test_model_cannot_supply_a_scope_or_fabricated_encounter(native):
     for extra in ({"scope": "subject"}, {"encounter": {"action": "Invented success"}},
                   {"source": {"kind": "verified"}}):
