@@ -127,7 +127,11 @@ if __name__ == "__main__":
         return {"files": sorted(p.name for p in (state / "workspace").glob("*.txt")),
                 "tasks": [{"hasLesson": LESSON in t, "leaksCorrection": CORRECTION in t,
                            "leaksOriginal": "The first screen is a twelve-field intake form." in t}
-                          for t in tasks]}
+                          for t in tasks],
+                "fixtureTrace": [{"tools": r["tools"], "hasCorrection": CORRECTION in r["material"],
+                                  "hasLesson": LESSON in r["material"],
+                                  "end": r["material"][-700:]}
+                                 for r in requests[-16:]]}
 
     # Ensure the introspection fixture route precedes the React catch-all.
     route = app.router.routes.pop()
