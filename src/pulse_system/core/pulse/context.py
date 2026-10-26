@@ -38,6 +38,12 @@ class ContextPulseConfig:
     max_propagation_depth: int = 2
     propagation_threshold: float = 0.3
     activity_halflife_seconds: float = 600.0
+    # Optional persistent *admission* envelope. A reservation is charged when
+    # background work is queued; settled trustworthy World/Kernel usage replaces
+    # it. This is not a hard provider billing limit: one turn can exceed its
+    # reservation, and failed/uncertain turns may have unreported provider use.
+    max_background_provider_tokens_per_hour: int | None = None
+    background_provider_token_reservation: int = 8192
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
@@ -55,6 +61,12 @@ class ContextPulseConfig:
         for name in ("max_background_pulses_per_hour", "max_propagation_depth"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 0:
                 raise ValueError(f"{name} must be a nonnegative integer")
+        limit = self.max_background_provider_tokens_per_hour
+        if limit is not None and (type(limit) is not int or limit < 0):
+            raise ValueError("max_background_provider_tokens_per_hour must be a nonnegative integer or None")
+        if (type(self.background_provider_token_reservation) is not int
+                or self.background_provider_token_reservation <= 0):
+            raise ValueError("background_provider_token_reservation must be a positive integer")
 
 
 class _QuotaReached(Exception):
@@ -433,8 +445,74 @@ class ContextPulseController:
             (self.world_id, (now - timedelta(hours=1)).isoformat()),
         ).fetchone()[0]
 
+    def _token_window(self, now: datetime, conn=None) -> dict | None:
+        """Read the same durable World evidence used to admit background roots.
+
+        Missing, cancelled and unaccounted outcomes retain their reservation;
+        a successful World/Kernel turn with an attributable provider usage
+        receipt replaces its reservation. Never infer zero spending from a
+        failed/uncertain turn or from a missing receipt.
+        """
+        limit = self.config.max_background_provider_tokens_per_hour
+        if limit is None:
+            return None
+        conn = conn if conn is not None else self.storage._conn
+        rows = conn.execute(
+            "SELECT root.id, result.metadata FROM causal_events root "
+            "LEFT JOIN harness_turns turn ON turn.event_id = root.id "
+            "AND turn.state = 'settled' AND turn.prompt_accepted = 1 "
+            "LEFT JOIN causal_events result ON result.id = turn.result_event_id "
+            "AND result.parent_event_id = root.id AND result.world_id = root.world_id "
+            "AND result.kind = 'assistant_result' AND result.status = 'settled' "
+            "WHERE root.world_id = ? "
+            "AND root.kind IN ('spontaneous', 'propagation') "
+            "AND (json_extract(root.metadata, '$.context_pulse') = 'reentry' "
+            "OR json_extract(root.metadata, '$.context_connection_id') IS NOT NULL) "
+            "AND julianday(root.created_at) >= julianday(?)",
+            (self.world_id, (now - timedelta(hours=1)).isoformat()),
+        ).fetchall()
+        reservation = self.config.background_provider_token_reservation
+        accounted = unaccounted = synthetic = overrun = 0
+        for _event_id, raw_metadata in rows:
+            tokens = None
+            if isinstance(raw_metadata, str):
+                try:
+                    detail = json.loads(raw_metadata)
+                except (ValueError, TypeError):
+                    detail = None
+                if isinstance(detail, dict) and detail.get("evidence_class") in {
+                    "KERNEL_PROVIDER_USAGE_DURABLE", "TEST_DOUBLE",
+                }:
+                    usage = detail.get("usage")
+                    if isinstance(usage, dict):
+                        in_count, out_count = usage.get("input_count"), usage.get("output_count")
+                        if (type(in_count) is int and in_count >= 0
+                                and type(out_count) is int and out_count >= 0):
+                            tokens = in_count + out_count
+                            if detail["evidence_class"] == "TEST_DOUBLE":
+                                synthetic += tokens
+            if tokens is None:
+                unaccounted += reservation
+            else:
+                accounted += tokens
+                overrun += max(0, tokens - reservation)
+        charged = accounted + unaccounted
+        return {
+            "limit": limit, "charged": charged, "remaining": max(0, limit - charged),
+            "accountedTokens": accounted, "unaccountedReservations": unaccounted,
+            "syntheticTokens": synthetic, "overrunTokens": overrun,
+            "trackedAdmissions": len(rows), "reservationPerAdmission": reservation,
+            "windowSeconds": 3600, "unit": "nominal input + output tokens",
+            "hardProviderSpendingCap": False,
+        }
+
     def _guard(self, conn) -> None:
-        if self._used(_now(), conn) >= self.config.max_background_pulses_per_hour:
+        now = _now()
+        if self._used(now, conn) >= self.config.max_background_pulses_per_hour:
+            raise _QuotaReached()
+        tokens = self._token_window(now, conn)
+        if (tokens is not None
+                and tokens["remaining"] < self.config.background_provider_token_reservation):
             raise _QuotaReached()
 
     def _open(self, center_id: str | None) -> bool:
@@ -702,8 +780,11 @@ class ContextPulseController:
                 if elapsed < self.config.check_interval_seconds:
                     return
             self._state["last_check_at"] = now.isoformat()
+            token_window = self._token_window(now)
             if (self.config.spontaneous_rate == 0
-                    or self._used(now) >= self.config.max_background_pulses_per_hour):
+                    or self._used(now) >= self.config.max_background_pulses_per_hour
+                    or (token_window is not None
+                        and token_window["remaining"] < self.config.background_provider_token_reservation)):
                 self._save(now)
                 return
             if inhibition_changed:
@@ -802,6 +883,7 @@ class ContextPulseController:
                 "budget": {"limit": self.config.max_background_pulses_per_hour,
                            "used": used, "remaining": max(0, self.config.max_background_pulses_per_hour - used),
                            "windowSeconds": 3600, "unit": "background pulse admissions"},
+                "providerTokenBudget": self._token_window(now),
                 "cursor": self._state["cursor"],
                 "observedCursor": self._state["observed_cursor"],
                 "contexts": [dict(item, inhibition=inhibition_by_center.get(item["center_id"], 0.0))
