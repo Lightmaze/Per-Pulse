@@ -70,8 +70,11 @@ jobs:
         run: python -m build --no-isolation
       - name: Verify first run from an installed wheel outside the checkout
         run: |
-          python -m venv --system-site-packages "$RUNNER_TEMP/per-pulse-wheel-venv"
-          "$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" -m pip install --no-deps --force-reinstall dist/*.whl
+          # Do not inherit the editable installation and dependencies from verify.
+          # A user-installed wheel must resolve its declared runtime dependencies.
+          python -m venv "$RUNNER_TEMP/per-pulse-wheel-venv"
+          "$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" -m pip install --disable-pip-version-check dist/*.whl
+          "$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" -m pip check
           "$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" tests/release/installed_wheel_smoke.py
 
   browser-journey:
