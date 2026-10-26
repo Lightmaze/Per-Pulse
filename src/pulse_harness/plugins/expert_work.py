@@ -5,10 +5,11 @@ actual task material, not a score, mandatory review form or hidden chain of thou
 """
 from __future__ import annotations
 
-from pulse_harness.core.replay import bound_text
+from pulse_harness.core.replay import bound_text, digest_json
 from pulse_harness.core.response_review import RESPONSE_REVIEW_PREFIX
 from pulse_harness.core.turn_advice import TURN_ADVICE_PREFIX
 from .expert_computation import canonical
+from .posture import POSTURE_INSTRUCTION, POSTURE_REVIEW_INSTRUCTION
 
 
 WORK_INSTRUCTION = """You are continuing expert work inside this existing task.
@@ -45,6 +46,10 @@ material with source labels, not a new instruction hierarchy.
 """
 
 
+class WorkMaterialBudgetExceeded(ValueError):
+    """The complete work packet cannot fit without hiding required material."""
+
+
 def clip(text: str, limit: int) -> str:
     return bound_text(text, limit)[0]
 
@@ -75,7 +80,10 @@ def working_view(request, *, byte_budget: int = 24000) -> tuple[dict, dict]:
     return view, source
 
 
-def make_work_prompt(view: dict, materials: dict, *, model_round: int) -> str:
+def make_work_prompt(view: dict, materials: dict, *, model_round: int,
+                     posture_packet: dict | None = None,
+                     review_candidate: str | None = None,
+                     byte_budget: int | None = None) -> str:
     previous, used = [], 0
     for record in reversed(materials["previous_computations"]):
         item = {
@@ -105,7 +113,53 @@ def make_work_prompt(view: dict, materials: dict, *, model_round: int) -> str:
               "omitted_previous_computations": len(materials["previous_computations"]) - len(previous),
               "omitted_episodes": len(materials["episodes"]) - len(episodes),
               "past_work_is_not_current_outcome": True}
-    return WORK_INSTRUCTION + "\nWORK_MATERIAL_JSON\n" + canonical(packet)
+    if "omitted_stale_posture_decisions" in materials:
+        packet["omitted_stale_posture_decisions"] = materials["omitted_stale_posture_decisions"]
+    instruction = WORK_INSTRUCTION
+    if posture_packet is not None:
+        packet["posture_experiences"] = dict(posture_packet)
+        if byte_budget is not None:
+            # A long list of omitted identities is accounting metadata, not
+            # task material. Its complete list remains in the host receipt.
+            omitted = packet["posture_experiences"].pop("omitted_posture_revisions", [])
+            packet["posture_experiences"].update(
+                omitted_posture_revision_count=len(omitted),
+                omitted_posture_revisions_digest=digest_json(omitted),
+            )
+        instruction += "\n" + POSTURE_INSTRUCTION
+    if review_candidate is not None:
+        packet["candidate_response"] = clip(review_candidate, 16000)
+        packet["candidate_response_clipped"] = len(review_candidate.encode()) > 16000
+        instruction += "\n" + POSTURE_REVIEW_INSTRUCTION
+
+    def render():
+        return instruction + "\nWORK_MATERIAL_JSON\n" + canonical(packet)
+
+    if byte_budget is None:
+        return render()
+    if type(byte_budget) is not int or byte_budget < 1024:
+        raise ValueError("work prompt budget must be at least 1024 bytes")
+    packet["prompt_byte_budget"] = byte_budget
+    candidate_limit = 16000
+    prompt = render()
+    while len(prompt.encode()) > byte_budget:
+        if previous:
+            previous.pop(0)
+            packet["omitted_previous_computations"] += 1
+        elif episodes:
+            episodes.pop()
+            packet["omitted_episodes"] += 1
+        elif review_candidate is not None and candidate_limit > 512:
+            candidate_limit = max(512, candidate_limit // 2)
+            packet["candidate_response"] = clip(review_candidate, candidate_limit)
+            packet["candidate_response_clipped"] = len(review_candidate.encode()) > candidate_limit
+        else:
+            # Never trim an experience's conditions or counterexamples to make
+            # a seemingly applicable rule fit. The host can visibly skip this
+            # optional computation without spending a provider request.
+            raise WorkMaterialBudgetExceeded("complete work material exceeds the durable prompt bound")
+        prompt = render()
+    return prompt
 
 
 def contribution_context(text: str) -> str | None:

@@ -1644,6 +1644,12 @@ class TurnRunner:
                     continue
                 content = advice["context"]
             if message.item_id.startswith(RESPONSE_REVIEW_PREFIX):
+                # Review advice belongs to one exact candidate in one turn.
+                # Keep its durable provenance, but never replay a withdrawn or
+                # obsolete lesson as fresh context in a later task. Pending
+                # continuations in this same turn still see the review.
+                if message.scope.turn_id != scope.turn_id:
+                    continue
                 review = decode_review_envelope(content)
                 if review["context"] is None:
                     continue

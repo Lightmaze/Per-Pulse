@@ -656,6 +656,7 @@ class EngramManager:
                     "tool_calls": harness_result.tool_calls,
                     "provider_requests": harness_result.provider_requests,
                     "execution_regime": getattr(harness_result, "execution_regime", "ordinary"),
+                    "evidence_class": getattr(harness_result, "evidence_class", "UNKNOWN"),
                 },
                 runtime_fence=runtime_fence,
                 engram_activity=EngramPulseActivity(
