@@ -167,8 +167,9 @@ try {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title, instruction }),
     });
-    assert.equal(response.status, 201, await response.text());
-    return (await response.json()).page.id;
+    const payload = await response.json();
+    assert.equal(response.status, 201, JSON.stringify(payload));
+    return payload.page.id;
   };
   const localSource = await createLocal('Actual source Work', 'Keep original evidence in this Work.');
   const localReceiver = await createLocal('Actual receiving Work', 'Continue in this distinct local Work.');
