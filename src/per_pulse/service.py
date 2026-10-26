@@ -434,7 +434,9 @@ class PageService:
         with self._lock:
             ref = self._reference(page_id, target_page_id, source_message_id, label)
             self._save()
-            return {"reference": ref, "view": self.view(page_id)}
+            # Keep a selected old source in the mutation response; otherwise
+            # linking an earlier message collapses the UI to the last 500 rows.
+            return {"reference": ref, "view": self.view(page_id, source_message_id=source_message_id)}
 
     def return_home(self, page_id: str, content: str, message_id: str | None = None) -> dict:
         with self._lock:
