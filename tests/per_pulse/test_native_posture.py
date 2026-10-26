@@ -195,6 +195,70 @@ def test_list_returns_current_message_ids_and_scoped_material(native):
     assert native.tool._requests() == []
 
 
+
+def test_native_lookup_finds_older_lesson_without_cross_context_or_raw_transfer(native):
+    """A long-lived subject can revisit an old lesson after the 8-item tool window."""
+    from pulse_system.service.native_posture import validate
+
+    def add(identity, title, *, context="", scope="context"):
+        return native.memory.add_experience(
+            experience_id=identity, subject_id=native.scope.engram_id,
+            context_id=context, scope=scope, record_type="constructed_fixture",
+            title=title, lesson="Use concrete results when an experience is requested.",
+            conditions={"all": ["The task needs an actual usable experience"]},
+            counterexamples=["A fixed record-keeping form can be sufficient."],
+            shift={"understanding": "Identify the purpose.",
+                   "candidates": "Consider an immediate demo.",
+                   "delivery": "Check the result."},
+            encounter={"situation": "A specific request", "action": "A first attempt",
+                       "outcome": "The user responded"},
+            source={"kind": "fixture_for_lookup_privacy"},
+        )
+
+    old = add("old-wintergarden", "Wintergarden interactive experience")
+    for index in range(12):
+        add(f"later-{index:02d}", f"Routine record {index:02d}")
+    private = add("private-other-work", "Wintergarden private notebook",
+                  context="work:other-center")
+    shared = add("explicitly-shared", "Wintergarden shared boundary",
+                 context="work:other-center", scope="subject")
+    paused = add("paused-wintergarden", "Wintergarden withdrawn guidance")
+    native.memory.revise_experience(paused["id"], expected_revision=1,
+                                    changes={"active": False})
+
+    def read(args):
+        return native.tool.execute(
+            native.scope, ToolCall("lookup", "posture", args),
+            CancellationToken(), action_request_id="lookup-action",
+        )
+
+    newest = read({"op": "list"})
+    assert len(newest["experiences"]) <= 8
+    assert newest["more_experiences"]
+    assert old["id"] not in {item["id"] for item in newest["experiences"]}
+
+    found = read({"op": "find", "query": "WiNtErGaRdEn"})
+    identities = {item["id"] for item in found["experiences"]}
+    assert identities == {old["id"], shared["id"]}
+    assert found["matching_count"] == 2
+    assert found["retrieval"] == "literal_casefold_on_eligible_abstractions_only"
+    assert "encounter" not in next(item for item in found["experiences"]
+                                   if item["id"] == shared["id"])
+    assert "evidence" not in next(item for item in found["experiences"]
+                                  if item["id"] == shared["id"])["source"]
+    assert read({"op": "get", "experience_id": old["id"]})["experience"]["id"] == old["id"]
+    assert read({"op": "get", "experience_id": shared["id"]})["experience"]["encounter_available"] is False
+    for inaccessible in (private["id"], paused["id"], "missing-id"):
+        with pytest.raises(ScopeConflict, match="not active or accessible"):
+            read({"op": "get", "experience_id": inaccessible})
+    for malformed in ({"op": "find", "query": "a"}, {"op": "find", "query": "line\\nbreak"},
+                      {"op": "get", "experience_id": ""}, {"op": "get", "experience_id": old["id"],
+                                                         "context_id": "work:other-center"}):
+        with pytest.raises(ValueError):
+            validate(malformed)
+    assert native.tool._requests() == []  # Read-only: no staged journal write.
+
+
 def test_model_cannot_supply_a_scope_or_fabricated_encounter(native):
     for extra in ({"scope": "subject"}, {"encounter": {"action": "Invented success"}},
                   {"source": {"kind": "verified"}}):
