@@ -1,0 +1,56 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { homeContinuations } from '../src/homeContinuations.ts';
+
+const work = (id) => ({ id, kind: 'work', title: id });
+const pages = [{ id: 'home', kind: 'home', title: 'Home' }, work('source'), work('receiver'), work('another')];
+const event = (eventId, pageId, changes = {}) => ({
+  eventId, pageId, centerId: pageId, messageId: eventId,
+  kind: 'propagation', status: 'settled', createdAt: '2026-10-26T16:00:00Z',
+  sourceEventId: 'original-' + eventId, sourceMessageId: 'original-' + eventId,
+  sourceCenterId: 'source', sourcePageId: 'source', deferredReason: null,
+  ...changes,
+});
+const state = (...items) => ({ enabled: true, recentActivations: items });
+
+test('Home projects settled original Work messages, latest one per context', () => {
+  const rows = homeContinuations(state(
+    event('new-receiver', 'receiver'),
+    event('old-receiver', 'receiver'),
+    event('other', 'another', { kind: 'spontaneous', sourcePageId: 'another' }),
+    event('source-event', 'source'),
+  ), pages, 2);
+  assert.deepEqual(rows.map(row => row.event.eventId), ['new-receiver', 'other']);
+  assert.deepEqual(rows[0].receiver, { pageId: 'receiver', messageId: 'new-receiver' });
+  assert.deepEqual(rows[0].source, { pageId: 'source', messageId: 'original-new-receiver' });
+  assert.equal(rows[0].page.kind, 'work');
+});
+
+test('Home never promotes pending, uncertain, failed or fabricated source events', () => {
+  const rows = homeContinuations(state(
+    event('pending', 'receiver', { status: 'queued' }),
+    event('uncertain', 'receiver', { status: 'uncertain' }),
+    event('cancelled', 'receiver', { status: 'cancelled' }),
+    event('wrong-message', 'receiver', { messageId: 'different-world-event' }),
+    event('home-event', 'home'),
+    event('unknown-page', 'lost-work'),
+    event('fake-kind', 'receiver', { kind: 'external' }),
+    event('valid', 'receiver', { sourcePageId: 'missing-private-work', sourceMessageId: 'private-message' }),
+  ), pages);
+  assert.deepEqual(rows.map(row => row.event.eventId), ['valid']);
+  assert.equal(rows[0].source, null, 'a hidden source cannot gain a Home deep link');
+});
+
+test('Home fails closed when disabled or no traceable settled Work has appeared', () => {
+  assert.deepEqual(homeContinuations(null, pages), []);
+  assert.deepEqual(homeContinuations({ ...state(event('a', 'receiver')), enabled: false }, pages), []);
+  assert.deepEqual(homeContinuations(state(event('a', 'receiver')), pages, 0), []);
+  assert.deepEqual(homeContinuations(state(event('a', 'receiver', { messageId: null })), pages), []);
+});
+
+test('An unreadable source identity never becomes an invented message anchor', () => {
+  const [row] = homeContinuations(state(event('a', 'receiver', {
+    sourceEventId: 'original-a', sourceMessageId: 'unrelated-message',
+  })), pages);
+  assert.deepEqual(row.source, { pageId: 'source' });
+});
