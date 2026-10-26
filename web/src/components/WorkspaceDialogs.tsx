@@ -14,22 +14,24 @@ export type Modal =
   | { kind: 'rename' };
 
 export function CreatePageDialog({ initial, busy, error, close, create }: { initial?: Message; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string) => void }) {
+  const { t } = useLanguage();
   const [title, setTitle] = useState('');
   const [instruction, setInstruction] = useState(initial?.content ?? '');
-  return <Dialog title="Give this a little room." onClose={close}>
-    <p className="dialog-description">Start a focused conversation. Its link will stay here, so you can come back to it.</p>
+  return <Dialog title={t("dialogs.createTitle")} onClose={close}>
+    <p className="dialog-description">{t('dialogs.createDescription')}</p>
     <form onSubmit={event => { event.preventDefault(); if (title.trim() && instruction.trim() && !busy) create(title.trim(), instruction.trim()); }}>
-      <label className="field-label" htmlFor="new-page-title">Page name</label>
-      <input id="new-page-title" autoFocus value={title} onChange={event => setTitle(event.target.value)} placeholder="A name for this thought" maxLength={160} required />
-      <label className="field-label" htmlFor="new-page-focus">Where should we begin?</label>
-      <textarea id="new-page-focus" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder="The question, idea, or work you want to continue…" rows={5} required />
+      <label className="field-label" htmlFor="new-page-title">{t('dialogs.pageName')}</label>
+      <input id="new-page-title" autoFocus value={title} onChange={event => setTitle(event.target.value)} placeholder={t('dialogs.namePlaceholder')} maxLength={160} required />
+      <label className="field-label" htmlFor="new-page-focus">{t('dialogs.focusLabel')}</label>
+      <textarea id="new-page-focus" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder={t('dialogs.focusPlaceholder')} rows={5} required />
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>Cancel</button><button type="submit" className="primary-button" disabled={busy || !title.trim() || !instruction.trim()}>{busy ? 'Creating…' : 'Create page'}</button></div>
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button type="submit" className="primary-button" disabled={busy || !title.trim() || !instruction.trim()}>{busy ? t('dialogs.creating') : t('dialogs.createPage')}</button></div>
     </form>
   </Dialog>;
 }
 
 export function PagePickerDialog({ pages, mode, busy, error, close, select, create }: { pages: PageSummary[]; mode: 'search' | 'compose' | 'reference'; busy: boolean; error: string; close: () => void; select: (page: PageSummary) => void; create: () => void }) {
+  const { t } = useLanguage();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const pickerId = useId();
@@ -37,8 +39,8 @@ export function PagePickerDialog({ pages, mode, busy, error, close, select, crea
   const selectedIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
   const activeId = matches[selectedIndex] ? `${pickerId}-${matches[selectedIndex].id}` : undefined;
   useEffect(() => { if (activeId) document.getElementById(activeId)?.scrollIntoView({ block: 'nearest' }); }, [activeId]);
-  return <Dialog title={mode === 'search' ? 'Find your place.' : 'Link a page'} onClose={close} className="picker-dialog">
-    <div className="search-field"><Icon name="search" size={19} /><input aria-label="Search pages" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${pickerId}-results`} aria-activedescendant={activeId} aria-describedby={`${pickerId}-hint`} placeholder="Search your pages…" value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} onKeyDown={event => {
+  return <Dialog title={mode === 'search' ? t('dialogs.findTitle') : t('dialogs.linkTitle')} onClose={close} className="picker-dialog">
+    <div className="search-field"><Icon name="search" size={19} /><input aria-label={t("dialogs.searchLabel")} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${pickerId}-results`} aria-activedescendant={activeId} aria-describedby={`${pickerId}-hint`} placeholder={t('dialogs.searchPlaceholder')} value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} onKeyDown={event => {
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
@@ -48,27 +50,28 @@ export function PagePickerDialog({ pages, mode, busy, error, close, select, crea
         if (!busy && matches[selectedIndex]) select(matches[selectedIndex]);
       }
     }} autoFocus /></div>
-    <p className="picker-results-meta" role="status">{matches.length} {matches.length === 1 ? 'page' : 'pages'} {query.trim() ? 'found' : 'available'}</p>
-    <div className="picker-results" id={`${pickerId}-results`} role="listbox" aria-label="Pages">
+    <p className="picker-results-meta" role="status">{t(query.trim() ? (matches.length === 1 ? 'dialogs.oneFound' : 'dialogs.manyFound') : (matches.length === 1 ? 'dialogs.oneAvailable' : 'dialogs.manyAvailable'), { count: matches.length })}</p>
+    <div className="picker-results" id={`${pickerId}-results`} role="listbox" aria-label={t('sidebar.pages')}>
       {matches.map((page, index) => <button key={page.id} id={`${pickerId}-${page.id}`} type="button" role="option" aria-selected={index === selectedIndex} tabIndex={-1} className="picker-result" disabled={busy} onMouseEnter={() => setActiveIndex(index)} onClick={() => select(page)}><Icon name={page.kind === 'home' ? 'home' : 'page'} /><span><strong>{page.title}</strong>{page.description ? <small>{page.description}</small> : null}</span><Icon name="chevron" size={16} /></button>)}
     </div>
-    {!matches.length ? <p className="picker-empty">{pages.length ? 'No matching pages. Try another name.' : 'No pages yet. Create one to begin.'}</p> : null}
-    <p id={`${pickerId}-hint`} className="picker-keyboard-hint">↑ ↓ to choose · Enter to {mode === 'search' ? 'open' : 'link'} · Esc to close</p>
+    {!matches.length ? <p className="picker-empty">{pages.length ? t('dialogs.noMatching') : t('dialogs.noPagesYet')}</p> : null}
+    <p id={`${pickerId}-hint`} className="picker-keyboard-hint">{t('dialogs.chooseHint', { action: mode === 'search' ? t('dialogs.openAction') : t('dialogs.linkAction') })}</p>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
-    <button className="create-from-picker" disabled={busy} onClick={create}><Icon name="plus" size={18} />Create a new page</button>
+    <button className="create-from-picker" disabled={busy} onClick={create}><Icon name="plus" size={18} />{t('dialogs.createNewPage')}</button>
   </Dialog>;
 }
 
 export function ReturnDialog({ initial, busy, error, close, send, sourceTitle }: { initial: string; busy: boolean; error: string; close: () => void; send: (content: string) => void; sourceTitle?: string }) {
+  const { t } = useLanguage();
   const [content, setContent] = useState(initial);
-  return <Dialog title="Bring this back to Home." onClose={close}>
-    <p className="dialog-description">Choose what belongs in the main conversation. A link will lead back to this source.</p>
-    <div className="return-preview"><span className="return-preview-source">From <strong>{sourceTitle || 'this page'}</strong></span><span aria-hidden="true">→</span><span className="return-preview-destination">Home</span></div>
+  return <Dialog title={t("dialogs.returnTitle")} onClose={close}>
+    <p className="dialog-description">{t('dialogs.returnDescription')}</p>
+    <div className="return-preview"><span className="return-preview-source">{t('dialogs.from')} <strong>{sourceTitle || t('dialogs.thisPage')}</strong></span><span aria-hidden="true">→</span><span className="return-preview-destination">{t('sidebar.home')}</span></div>
     <form onSubmit={event => { event.preventDefault(); if (content.trim() && !busy) send(content.trim()); }}>
-      <label className="field-label" htmlFor="return-content">What would you like to bring back?</label>
+      <label className="field-label" htmlFor="return-content">{t('dialogs.returnContent')}</label>
       <textarea id="return-content" autoFocus value={content} onChange={event => setContent(event.target.value)} rows={7} required />
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>Cancel</button><button className="primary-button" type="submit" disabled={busy || !content.trim()}>{busy ? 'Saving…' : 'Bring to Home'}</button></div>
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button className="primary-button" type="submit" disabled={busy || !content.trim()}>{busy ? t('dialogs.saving') : t('dialogs.bringHome')}</button></div>
     </form>
   </Dialog>;
 }
@@ -124,6 +127,7 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
 }
 
 export function RenameDialog({ initial, busy, error, close, rename }: { initial: string; busy: boolean; error: string; close: () => void; rename: (title: string) => void }) {
+  const { t } = useLanguage();
   const [title, setTitle] = useState(initial);
-  return <Dialog title="Rename this page" onClose={close}><form onSubmit={event => { event.preventDefault(); if (title.trim() && !busy) rename(title.trim()); }}><label className="field-label" htmlFor="rename-title">Page name</label><input id="rename-title" autoFocus value={title} onChange={event => setTitle(event.target.value)} maxLength={160} required />{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>Cancel</button><button className="primary-button" type="submit" disabled={busy || !title.trim()}>{busy ? 'Saving…' : 'Save name'}</button></div></form></Dialog>;
+  return <Dialog title={t("dialogs.renameTitle")} onClose={close}><form onSubmit={event => { event.preventDefault(); if (title.trim() && !busy) rename(title.trim()); }}><label className="field-label" htmlFor="rename-title">{t('dialogs.pageName')}</label><input id="rename-title" autoFocus value={title} onChange={event => setTitle(event.target.value)} maxLength={160} required />{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button className="primary-button" type="submit" disabled={busy || !title.trim()}>{busy ? t('dialogs.saving') : t('dialogs.saveName')}</button></div></form></Dialog>;
 }
