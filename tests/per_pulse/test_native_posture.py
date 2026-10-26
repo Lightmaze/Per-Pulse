@@ -251,7 +251,7 @@ def test_native_lookup_finds_older_lesson_without_cross_context_or_raw_transfer(
     for inaccessible in (private["id"], paused["id"], "missing-id"):
         with pytest.raises(ScopeConflict, match="not active or accessible"):
             read({"op": "get", "experience_id": inaccessible})
-    for malformed in ({"op": "find", "query": "a"}, {"op": "find", "query": "line\\nbreak"},
+    for malformed in ({"op": "find", "query": "a"}, {"op": "find", "query": "line\nbreak"},
                       {"op": "get", "experience_id": ""}, {"op": "get", "experience_id": old["id"],
                                                          "context_id": "work:other-center"}):
         with pytest.raises(ValueError):
