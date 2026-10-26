@@ -202,7 +202,7 @@ try {
   await page.waitForFunction(sourceIsInViewport);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-earlier-source.png') });
   await page.locator('.message').first().getByRole('button', { name: 'Link page', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Registration tool', exact: false }).click();
+  await page.getByRole('dialog').getByRole('option', { name: 'Registration tool', exact: false }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   await page.getByText('Earlier source message', { exact: true }).waitFor();
   assert.equal(await page.locator('.message').count(), 501);
