@@ -6105,6 +6105,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             self._native_team = NativeTeam(self)
             from .native_local import NativeLocal
             self._native_local = NativeLocal(self)
+            from .native_attention import NativeAttention
+            self._native_attention = NativeAttention(self)
             from .native_cognition_return import NativeCognitionReturn
             self._native_cognition_return = NativeCognitionReturn(self)
             from .native_posture import NativePosture
@@ -6115,6 +6117,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                     self._world_id, engram_id),
                 context_for_turn=self._native_kernel_context_for_turn,
                 work=self._native_work, team=self._native_team, local=self._native_local,
+                attention=(self._native_attention if c.context_pulse is not None
+                           and c.context_pulse.enabled else None),
                 input_for_turn=self._native_cognition_return.input_for_turn,
                 world_storage=self._storage, posture=self._native_posture,
             )
@@ -6578,6 +6582,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 self._storage, self._causal_ledger, self._world,
                 world_id=self._world_id, subject=lambda: self._front_id,
                 fence=lambda: self._current_runtime_fence(), config=c.context_pulse,
+                attention_outcome=(self._native_attention.outcome
+                    if self._harness_kind == "kernel" and c.context_pulse.enabled else None),
             ) if c.context_pulse is not None else None
         )
         self._engine = PulseEngine(
