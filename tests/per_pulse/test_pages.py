@@ -303,6 +303,20 @@ def test_old_source_link_resolves_in_own_page_without_exposing_other_context(tmp
         assert view["messages"][1:] == recent["messages"]
         assert view["page"] == recent["page"]
 
+        # A mutation on the selected old message must not drop that selection
+        # from the returned projection and silently make the source disappear.
+        linked = client.post("/api/pages/home/references", json={
+            "targetPageId": work_id, "sourceMessageId": source, "label": "Launch notes",
+        })
+        assert linked.status_code == 201, linked.text
+        linked_view = linked.json()["view"]
+        assert linked_view["earlierSourceMessageId"] == source
+        assert len(linked_view["messages"]) == 501
+        assert linked_view["messages"][0]["id"] == source
+        assert linked_view["messages"][0]["references"][-1]["targetPageId"] == work_id
+        assert linked_view["messages"][1:] == recent["messages"]
+        assert len(client.get("/api/pages/home").json()["messages"]) == 500
+
         latest_id = recent["messages"][-1]["id"]
         within_window = client.get("/api/pages/home", params={"sourceMessageId": latest_id}).json()
         assert within_window["earlierSourceMessageId"] is None
