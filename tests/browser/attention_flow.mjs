@@ -88,7 +88,10 @@ try {
   await page.getByText(thought.note, { exact: true }).waitFor();
   await page.getByText('Local drive: 0.72', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Open original message', exact: true }).waitFor();
-  checks.push('local thought, strength and exact source appear in Activity');
+  await page.getByText(/Background token admission envelope:/).waitFor();
+  assert.equal(state.providerTokenBudget?.limit, 128);
+  assert.equal(state.providerTokenBudget?.charged, 0);
+  checks.push('local thought, strength, source and explicit background token boundary appear in Activity');
   if (screenshots) {
     await mkdir(screenshots, { recursive: true });
     await page.screenshot({ path: join(screenshots, 'retained-home-en.png') });
@@ -117,6 +120,7 @@ try {
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await page.getByRole('button', { name: '活动', exact: true }).click();
   await page.getByRole('heading', { name: '此页面保留的思考', exact: true }).waitFor();
+  await page.getByText(/后台 token 准入额度/).waitFor();
   await page.getByText(thought.note, { exact: true }).waitFor();
   await page.getByRole('button', { name: '打开原始消息', exact: true }).click();
   await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===

@@ -125,6 +125,18 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
         </p>
         <p className="pulse-activity-summary" role="status">{pulse.paused && pulse.enabled ? t('pulse.paused') : pulse.running ? t('pulse.continuing') : pulse.enabled ? t('pulse.enabled') : t('pulse.disabled')} · {t('pulse.queue', { queued: pulse.queue.queued, running: pulse.queue.running })}</p>
         <p className="pulse-activity-detail">{t('pulse.budget', { remaining: pulse.budget.remaining, limit: pulse.budget.limit })}</p>
+        {pulse.providerTokenBudget ? <>
+          <p className="pulse-activity-detail">{t('pulse.tokens', {
+            charged: pulse.providerTokenBudget.charged,
+            limit: pulse.providerTokenBudget.limit,
+            accounted: pulse.providerTokenBudget.accountedTokens,
+            reserved: pulse.providerTokenBudget.unaccountedReservations,
+            remaining: pulse.providerTokenBudget.remaining,
+          })}</p>
+          {pulse.providerTokenBudget.overrunTokens > 0 ?
+            <p className="pulse-activity-detail">{t('pulse.tokensOverrun', { overrun: pulse.providerTokenBudget.overrunTokens })}</p> : null}
+          <p className="pulse-activity-detail">{t('pulse.tokensCaveat')}</p>
+        </> : null}
         {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">{t('pulse.oldest', { time: eventTime(pulse.queue.oldestQueuedAt) })}</p> : null}
         {!pulse.providerConfigured ? <p className="pulse-activity-detail">{t('pulse.noProvider')}</p> : null}
       </section>

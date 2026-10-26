@@ -159,6 +159,20 @@ export type PulseState = {
   running: boolean;
   providerConfigured: boolean;
   budget: { limit: number; used: number; remaining: number; windowSeconds: number; unit: string };
+  providerTokenBudget: {
+    limit: number;
+    charged: number;
+    remaining: number;
+    accountedTokens: number;
+    unaccountedReservations: number;
+    syntheticTokens: number;
+    overrunTokens: number;
+    trackedAdmissions: number;
+    reservationPerAdmission: number;
+    windowSeconds: number;
+    unit: string;
+    hardProviderSpendingCap: false;
+  } | null;
   queue: { queued: number; running: number; oldestQueuedAt: string | null };
   contexts: { center_id: string | null; pageId: string | null; inhibition: number }[];
   connections: PulseConnection[];

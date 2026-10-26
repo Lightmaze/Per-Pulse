@@ -238,6 +238,49 @@ model/tool round, and provider token usage is learned after the request. The
 inherited Runtime token budget is an estimate, separate from the durable
 background admission quota. Workspace mutation permissions remain unchanged.
 
+## Optional persistent background token admission envelope
+
+The rolling count in `budget` is still an **admission count**, not a token or
+currency limit. For unattended local work, a separate opt-in envelope can now
+reserve nominal provider tokens **before** each new background root is queued:
+
+```sh
+per-pulse --pulse --pulse-budget 12 \
+  --pulse-hourly-tokens 32768 --pulse-token-reservation 8192
+```
+
+A single World SQLite transaction checks both limits at the same original
+`CausalLedger.enqueue` boundary. The budget is derived from durable
+`spontaneous`/`propagation` roots already admitted in this World during the
+rolling hour; reopening the workspace does **not** grant those tokens again.
+An unsettled, cancelled, failed, uncertain or unaccounted turn holds its full
+reservation. A settled original World turn with a matched successful Kernel
+turn and a complete `KERNEL_PROVIDER_USAGE_DURABLE` receipt replaces the
+reservation with the actual recorded **input + output token count**. Explicit
+`TEST_DOUBLE` receipts have the same mechanics in tests, but are marked
+separately; no synthetic tokens are presented as a real provider bill.
+Malformed or missing receipts never become zero-cost evidence.
+
+`GET /api/pulse` preserves `budget` and adds `providerTokenBudget` with
+`limit`, `charged`, `remaining`, `accountedTokens`,
+`unaccountedReservations`, `syntheticTokens`, `overrunTokens`,
+`trackedAdmissions`, `reservationPerAdmission` and
+`hardProviderSpendingCap: false`. The field is `null` until the envelope
+is explicitly configured. Example workspaces remain model-free.
+
+**This is a conservative new-background-admission gate, not a hard provider
+billing limit.** A model/tool turn can exceed its reservation, cost depends on
+the provider's rates and cached-token rules, and usage after a failed or
+interrupted turn may be reported only in the Kernel or by the provider later.
+An overrun remains visible and blocks later admissions, but cannot unspend
+tokens already used. A failed/unknown turn holds its reservation instead of
+releasing it without evidence. An already-admitted or in-flight root may
+finish, and ordinary foreground user input does not consume this optional
+background envelope. A strict financial ceiling would additionally require
+provider-specific per-request maximums, atomic reservations across all model
+and auxiliary calls (including failure/recovery), and reconciliation of
+unknown provider usage. None is claimed here.
+
 ## Verification
 
 Run the native integration and dynamics checks with:
