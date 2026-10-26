@@ -50,6 +50,7 @@ type PageView = {
   breadcrumbs: { id: string; title: string }[];
   provider: ProviderState;
   hasMore: boolean;
+  earlierSourceMessageId: string | null; // one older selected source, separate from recent messages
 };
 type Bootstrap = {
   name: "Per Pulse";
@@ -66,6 +67,14 @@ type Bootstrap = {
 
 - `GET /api/bootstrap` -> `Bootstrap`.
 - `GET /api/pages/{id}` -> `PageView` (latest bounded messages).
+- `GET /api/pages/{id}?sourceMessageId=<native-event-id>` -> the same recent bounded
+  window, plus one selected older message if it is in this page's authorized
+  World/Center/committed-Engram lineage. This is a read-only source anchor, not
+  whole-history pagination: `earlierSourceMessageId` names the extra item,
+  or is null if the source was already recent. A foreign, missing, or wrong-page
+  message returns 404. Intervening messages are not implied or copied.
+  Home/Work deep links pass this native message ID without changing identity,
+  stored drafts, route, or the user's return position.
 - `GET /api/health` -> `{status:"ok", providerConfigured:boolean}`.
 - `GET /api/pulse` -> local pulse settings, rolling admission budget, context
   activity, directed connections, full durable `queue` totals, and the most
