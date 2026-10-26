@@ -23,6 +23,13 @@ test('developer Vite proxy binds only to loopback', async () => {
     assert.equal(address.address, '127.0.0.1');
     assert.equal(server.config.server.proxy['/api'], 'http://127.0.0.1:8000');
     assert.equal(server.config.preview.host, '127.0.0.1');
+    assert.equal(server.config.preview.headers['X-Frame-Options'], 'DENY');
+    assert.equal(server.config.preview.headers['Content-Security-Policy'], "frame-ancestors 'none'");
+    // Check actual dev HTML response headers, not only static config.
+    const page = await fetch(`http://127.0.0.1:${address.port}/`);
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get('x-frame-options'), 'DENY');
+    assert.equal(page.headers.get('content-security-policy'), "frame-ancestors 'none'");
   } finally {
     await server.close();
   }
