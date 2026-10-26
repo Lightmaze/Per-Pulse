@@ -1,0 +1,98 @@
+"""Blind response review is isolated from provider and native action transport."""
+import json
+
+import pytest
+
+from per_pulse import blinded_review as review
+
+
+@pytest.fixture
+def trial(tmp_path, monkeypatch):
+    root = tmp_path / "trial"
+    root.mkdir()
+    names = ("bare_transfer", "conditional_transfer", "bare_negative", "conditional_negative")
+    stages = []
+    for index, name in enumerate(names):
+        filename = name.replace("_", "-") + "-response.md"
+        raw = f"Answer {index + 1}: saved files remain readable.".encode()
+        (root / filename).write_bytes(raw)
+        stages.append({"stage": name, "result_event_id": f"native-{index}",
+                       "artifact": {"path": filename, "sha256": review._sha(raw)},
+                       "usage": {"accounted": index % 2 == 0}})
+    record = {"status": "completed", "origin": "real_provider", "stages": stages,
+              "protocol": [{"stage": name, "prompt": "Write an update" if "transfer" in name else "Outline only"}
+                           for name in names]}
+    (root / "ordinary-transfer.json").write_text(json.dumps(record))
+    monkeypatch.setattr(review, "audit_ordinary_transfer", lambda _: {"status": "verified", "errors": []})
+    return root, record
+
+
+def test_blind_packet_separates_labels_and_private_key(trial, tmp_path, monkeypatch):
+    root, _ = trial
+    flags = iter((0, 1))
+    monkeypatch.setattr(review.secrets, "randbelow", lambda _: next(flags))
+    result = review.prepare(root, tmp_path / "blind")
+    assert result["origin"] == "real_provider" and result["items"] == 4
+    packet = review._load_json(tmp_path / "blind" / "review-packet.json")
+    key = review._load_json(tmp_path / "blind" / "condition-key.json")
+    assert [item["label"] for item in packet["items"]] == ["A", "B", "C", "D"]
+    assert "conditional" not in json.dumps(packet).lower()
+    assert "baseline" not in json.dumps(packet).lower()
+    assert key["mapping"]["A"]["condition"] == "baseline"
+    assert key["mapping"]["C"]["condition"] == "conditional"
+    assert (tmp_path / "blind" / ".gitignore").read_text() == "*\n"
+
+
+def test_fixture_requires_explicit_qa_opt_in(trial, tmp_path):
+    root, record = trial
+    record["origin"] = "synthetic_fixture"
+    (root / "ordinary-transfer.json").write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="fixture"):
+        review.prepare(root, tmp_path / "blind")
+    assert not (tmp_path / "blind").exists()
+    review.prepare(root, tmp_path / "blind", allow_fixture=True)
+    key = review._load_json(tmp_path / "blind" / "condition-key.json")
+    assert key["trial_origin"] == "synthetic_fixture"
+
+
+def test_native_audit_rejects_disconnected_or_tampered_record(trial, tmp_path, monkeypatch):
+    root, _ = trial
+    monkeypatch.setattr(review, "audit_ordinary_transfer", lambda _: {"status": "invalid", "errors": ["native_trace_mismatch"]})
+    with pytest.raises(ValueError, match="native trial audit"):
+        review.prepare(root, tmp_path / "blind")
+    assert not (tmp_path / "blind").exists()
+
+
+def test_artifact_must_still_match_its_native_digest(trial, tmp_path):
+    root, record = trial
+    (root / record["stages"][0]["artifact"]["path"]).write_text("substituted")
+    with pytest.raises(ValueError, match="digest mismatch"):
+        review.prepare(root, tmp_path / "blind")
+    assert not (tmp_path / "blind").exists()
+
+
+def test_blind_grading_is_complete_and_bound_to_packet(trial, tmp_path):
+    root, _ = trial
+    folder = tmp_path / "blind"
+    review.prepare(root, folder)
+    ratings = review._load_json(folder / "ratings-template.json")
+    ratings["reviewer"] = "bounded-human-review"
+    for checks in ratings["ratings"].values():
+        for check in checks:
+            checks[check] = True
+    ratings_path = tmp_path / "ratings.json"
+    ratings_path.write_text(json.dumps(ratings))
+    report = review.grade(folder, ratings_path)
+    assert report["trial_origin"] == "real_provider"
+    assert set(report["comparisons"]) == {"notice", "outline"}
+    assert report["blindness_self_report_only"]
+    ratings["ratings"]["A"]["facts_preserved"] = None
+    ratings_path.write_text(json.dumps(ratings))
+    with pytest.raises(ValueError, match="boolean observation"):
+        review.grade(folder, ratings_path)
+    ratings["ratings"]["A"]["facts_preserved"] = True
+    ratings_path.write_text(json.dumps(ratings))
+    with (folder / "review-packet.json").open("a") as stream:
+        stream.write(" ")
+    with pytest.raises(ValueError, match="packet changed"):
+        review.grade(folder, ratings_path)
