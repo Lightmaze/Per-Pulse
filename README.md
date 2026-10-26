@@ -6,7 +6,7 @@ Per Pulse is an open-source workspace for connected, persistent conversations. S
 
 Home and session pages are contexts of the same continuing subject. Each session has its own conversation history; a link opens that existing context without copying the entire Home conversation into it.
 
-This first release provides an English interface, a local Python service, and a React client. It continues the existing Pulse Home/Work and Harness Kernel implementation.
+The alpha candidate provides English and 简体中文 interface controls, a separate reply-language preference, a local Python service, and a React client. It continues the existing Pulse Home/Work and Harness Kernel implementation.
 
 ## What you can do
 
@@ -136,7 +136,7 @@ See [the API contract](docs/api.md), [pulse core](docs/pulse-core.md) and [sourc
 
 This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The page view shows the latest 500 messages; older events remain in the durable store. The first UI does not expose the inherited runtime's full operational or approval console.
 
-The runtime is configured with workspace mutation disabled in this entry point. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality.
+Workspace mutation remains disabled by default and requires an explicit `--allow-workspace-actions` opt-in plus approval of each actionable proposal. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality.
 
 ## License
 
