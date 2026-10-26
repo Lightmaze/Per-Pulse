@@ -153,6 +153,10 @@ button, a, input, textarea { outline-offset: 4px; }
 .settings-section p { font-size: 12px; line-height: 1.75; color: var(--muted); margin: 8px 0 13px; }
 .settings-section .connection-label { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .settings-section .settings-detail { font-size: 12px; color: var(--muted); }
+.provider-setup { margin-top: 12px; font-size: 12px; }
+.provider-setup summary { color: var(--accent); cursor: pointer; font-weight: 500; }
+.provider-setup pre { max-width: 100%; overflow-x: auto; padding: 12px; border-radius: 6px; background: var(--sidebar); font: 11px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.provider-setup pre code { white-space: pre; }
 .sidebar-scrim { display: none; }
 
 .page-activity { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; margin-top: 14px; }
