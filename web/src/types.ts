@@ -61,7 +61,28 @@ export type Bootstrap = {
   provider: ProviderState;
   pages: PageSummary[];
   settings: WorkspaceSettings;
+  postureEnabled: boolean;
 };
+
+export type LessonCondition = string | { all: LessonCondition[] } | { any: LessonCondition[] } | { not: LessonCondition };
+export type PostureExperience = {
+  id: string;
+  revision: number;
+  title: string;
+  lesson: string;
+  conditions: LessonCondition;
+  counterexamples: string[];
+  shift: { understanding: string; candidates: string; delivery: string };
+  scope: 'context' | 'subject';
+  active: boolean;
+  canEdit: boolean;
+  sourcePageId: string | null;
+  record_type: 'observed_episode' | 'constructed_fixture';
+  encounter?: { situation: string; action: string; outcome: string };
+  source?: { source_message_id?: string; feedback_message_id?: string };
+  feedback?: { verdict: string; evidence: string }[];
+};
+export type PostureView = { enabled: boolean; experiences: PostureExperience[] };
 
 export type DraftReference = { targetPageId: string; label: string };
 export type Draft = { text: string; references: DraftReference[] };

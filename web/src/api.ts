@@ -1,4 +1,4 @@
-import type { Bootstrap, DraftReference, PageReference, PageSummary, PageView, PulseState, ResponseLanguage, WorkspaceSettings } from './types';
+import type { Bootstrap, DraftReference, PageReference, PageSummary, PageView, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
 
 export class ApiError extends Error {
   constructor(message: string, public readonly code: string, public readonly status: number) {
@@ -50,5 +50,14 @@ export const api = {
     request<{ pulse: PulseState }>('/pulse/connections', { method: 'POST', body: JSON.stringify({ sourcePageId, targetPageId, kind, weight: 0.6 }) }),
   disconnectPulse: (sourcePageId: string, targetPageId: string) =>
     request<{ pulse: PulseState }>('/pulse/connections', { method: 'DELETE', body: JSON.stringify({ sourcePageId, targetPageId }) }),
+  posture: (id: string, signal?: AbortSignal) => request<PostureView>(`${pagePath(id)}/posture`, { signal }),
+  reviseExperience: (pageId: string, experience: PostureExperience, changes: { active?: boolean; scope?: 'context' | 'subject' }) =>
+    request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}`, {
+      method: 'PATCH', body: JSON.stringify({ expectedRevision: experience.revision, changes }),
+    }),
+  experienceFeedback: (pageId: string, experience: PostureExperience, verdict: 'useful' | 'harmful', evidence: string) =>
+    request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}/feedback`, {
+      method: 'POST', body: JSON.stringify({ expectedRevision: experience.revision, verdict, evidence }),
+    }),
   rename: (id: string, title: string) => request<PageView>(pagePath(id), { method: 'PATCH', body: JSON.stringify({ title }) }),
 };

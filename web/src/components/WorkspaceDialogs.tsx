@@ -9,6 +9,7 @@ export type Modal =
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'return'; message: Message; content: string }
   | { kind: 'settings' }
+  | { kind: 'learning' }
   | { kind: 'rename' };
 
 export function CreatePageDialog({ initial, busy, error, close, create }: { initial?: Message; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string) => void }) {
@@ -71,7 +72,7 @@ export function ReturnDialog({ initial, busy, error, close, send, sourceTitle }:
   </Dialog>;
 }
 
-export function SettingsDialog({ bootstrap, close, refresh }: { bootstrap: Bootstrap | null; close: () => void; refresh: () => void }) {
+export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootstrap: Bootstrap | null; close: () => void; refresh: () => void; learning: () => void }) {
   const [language, setLanguage] = useState<ResponseLanguage>(bootstrap?.settings?.responseLanguage ?? 'auto');
   const [saving, setSaving] = useState(false);
   const [languageError, setLanguageError] = useState('');
@@ -103,6 +104,7 @@ export function SettingsDialog({ bootstrap, close, refresh }: { bootstrap: Boots
       {saving ? <p role="status">Saving preference…</p> : null}
       {languageError ? <p className="form-error" role="alert">{languageError}</p> : null}
     </div>
+    <div className="settings-section"><h3>Learning from experience</h3><p>{bootstrap?.postureEnabled ? 'On. Relevant lessons can guide the next action and the decision to deliver. Keep, pause, or share a lesson across your pages.' : 'Off. Your conversations are saved; they are not automatically treated as lessons.'}</p><button className="secondary-button" onClick={learning}>View this page’s lessons</button></div>
     <div className="settings-section"><h3>{bootstrap?.example ? 'Example workspace' : 'Your conversations'}</h3><p>{bootstrap?.example ? 'These are authored example conversations in a separate workspace. They show how pages connect; they are not live AI replies.' : 'Conversations are saved in this workspace. Each page keeps its own conversation, and links always return to the same page.'}</p><p>Your unsent drafts and reading position stay in this browser.</p></div>
   </Dialog>;
 }
