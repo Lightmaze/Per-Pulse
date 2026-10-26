@@ -120,6 +120,7 @@ try {
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await page.getByRole('button', { name: '活动', exact: true }).click();
   await page.getByRole('heading', { name: '此页面保留的思考', exact: true }).waitFor();
+  await page.getByText(/后台 token 准入额度/).waitFor();
   await page.getByText(thought.note, { exact: true }).waitFor();
   await page.getByRole('button', { name: '打开原始消息', exact: true }).click();
   await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
