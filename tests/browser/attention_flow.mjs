@@ -205,6 +205,14 @@ try {
   await page.getByRole('heading', { name: 'Actual receiving Work', exact: true }).waitFor();
   await page.locator('.composer textarea').fill('Still composing after exploring causal sources.');
   await page.getByRole('button', { name: '活动', exact: true }).click();
+  // Check the rendered native event, not just the locale lookup table.
+  // Its original machine status/kind remains on title for source audit.
+  const propagationRow = page.locator('.pulse-activity-list li')
+    .filter({ has: page.getByRole('button', { name: 'Actual receiving Work · 打开局部消息', exact: true }) });
+  await propagationRow.getByText('已完成', { exact: true }).waitFor();
+  await propagationRow.getByText('连接传来的影响', { exact: true }).waitFor();
+  assert.equal(await propagationRow.locator('.pulse-activity-state').getAttribute('title'), 'settled');
+  checks.push('Chinese UI renders completed native propagation without replacing its original status evidence');
   await page.getByRole('button', { name: 'Actual receiving Work · 打开局部消息', exact: true }).click();
   await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
     '#message-' + propagated.messageId, 'exact original native receiver event');
