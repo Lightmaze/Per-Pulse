@@ -96,7 +96,13 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
     }
   };
   return <Dialog title={t('settings.title')} onClose={close}>
-    <div className="settings-section"><h3>{t('settings.aiConnection')}</h3><p className="connection-label"><span className={`connection-dot ${bootstrap?.provider.configured ? 'connected' : ''}`} />{bootstrap?.provider.label ?? t('settings.checkingConnection')}</p><p>{bootstrap?.provider.configured ? t('settings.connectedTo', { model: bootstrap.provider.model ?? t('settings.configuredModel') }) : t('settings.disconnected')}</p>{bootstrap?.provider.detail ? <p className="settings-detail">{bootstrap.provider.detail}</p> : null}<button className="secondary-button" onClick={refresh}>{t('settings.checkConnection')}</button></div>
+    <div className="settings-section"><h3>{t('settings.aiConnection')}</h3><p className="connection-label"><span className={`connection-dot ${bootstrap?.provider.configured ? 'connected' : ''}`} />{bootstrap?.provider.label ?? t('settings.checkingConnection')}</p><p>{bootstrap?.provider.configured ? t('settings.connectedTo', { model: bootstrap.provider.model ?? t('settings.configuredModel') }) : t('settings.disconnected')}</p>{bootstrap?.provider.detail ? <p className="settings-detail">{bootstrap.provider.detail}</p> : null}<button className="secondary-button" onClick={refresh}>{t('settings.checkConnection')}</button>
+      {bootstrap && !bootstrap.provider.configured && !bootstrap.example ? <details className="provider-setup">
+        <summary>{t('settings.connectGuide')}</summary>
+        <p>{t('settings.connectSteps')}</p>
+        <pre aria-label={t('settings.connectCommand')}><code>{"export P_PULSE_CHAT_ENDPOINT='https://your-provider.example/v1/chat/completions'\nexport P_PULSE_CHAT_MODEL='your-model-id'\nexport P_PULSE_API_KEY='your-api-key'\nper-pulse"}</code></pre>
+        <p>{t('settings.connectionSafety')}</p>
+      </details> : null}</div>
     <div className="settings-section">
       <h3>{t('settings.languageHeading')}</h3>
       <label className="field-label" htmlFor="interface-language">{t('settings.interfaceLanguage')}</label>
