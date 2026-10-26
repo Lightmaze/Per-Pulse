@@ -192,7 +192,28 @@ class PageService:
             for held in state["heldContexts"]:
                 held["pageId"] = page_id_for(held["center_id"])
             for retained in state.get("retainedAttention", []):
+                # A model's retained local thought has its own original causal
+                # source. Do not infer a navigable message from a turn/action
+                # identifier, or remap an unavailable historical Work to Home.
                 retained["pageId"] = page_id_for(retained["center_id"])
+                retained["sourcePageId"] = None
+                retained["sourceMessageId"] = None
+                source_id = retained.get("sourceEventId")
+                source = self.runtime.causal_ledger.get_event(source_id) if source_id else None
+                if (source is not None and source.world_id == self.runtime.world_id
+                        and source.center_id == retained["center_id"]):
+                    source_page = page_id_for(source.center_id)
+                    retained["sourcePageId"] = source_page
+                    if source_page is not None:
+                        try:
+                            # The original source may be a non-displayable
+                            # background root. Only message-owned evidence
+                            # receives a deep link, even beyond the last 500.
+                            self._check_message(source_page, source.id)
+                        except PageError:
+                            pass
+                        else:
+                            retained["sourceMessageId"] = source.id
             for activation in state["recentActivations"]:
                 activation["pageId"] = page_id_for(activation["centerId"])
                 # A delivery is displayed at its receiver; show the causal

@@ -137,10 +137,25 @@ export type PulseActivation = {
   deferredReason: string | null;
 };
 
+export type PulseRetainedAttention = {
+  center_id: string | null;
+  pageId: string | null;
+  note: string;
+  drive: number;
+  revision: number;
+  sourceTurnId: string | null;
+  sourceActionId: string | null;
+  sourceEventId: string | null;
+  sourcePageId: string | null;
+  sourceMessageId: string | null;
+  operatorEditedAt: string | null;
+};
+
 export type PulseState = {
   enabled: boolean;
   paused: boolean;
   heldContexts: { center_id: string | null; pageId: string | null }[];
+  retainedAttention: PulseRetainedAttention[];
   running: boolean;
   providerConfigured: boolean;
   budget: { limit: number; used: number; remaining: number; windowSeconds: number; unit: string };

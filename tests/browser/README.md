@@ -23,6 +23,20 @@ select another Python environment; it defaults to `.venv/bin/python`.
 `PER_PULSE_SCREENSHOTS` selects an optional output directory for desktop and
 mobile screenshots. Test data and images should stay outside the repository.
 
+A separate native attention-to-source flow uses the same Chromium dependency:
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  node tests/browser/attention_flow.mjs
+```
+It runs a single durable World and Kernel against explicitly synthetic model
+responses. It confirms that a successful original model action creates a
+retained thought only in its Home context, that Work cannot see it, and that
+the bilingual Activity panel can return to the verified original message
+without losing a Work draft. It then restarts the service and tests a distinct
+native model release. Its source link and persistence checks do not measure
+real-provider judgment quality or token spending.
+
 The flow sends an ordinary task followed by a correction, checks the resulting
 lesson after refreshing a panel that was open during background learning,
 checks its exact source, pauses it and restarts the service, resumes it, shares it with

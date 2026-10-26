@@ -213,6 +213,25 @@ source attribution. Its HTTP transport is an explicit test double. Whether a
 live model chooses useful retained work, and what continued activity costs
 in tokens/dollars, remain separate real-provider experiments.
 
+The PerPulse Activity panel now shows only the **opened page's** retained
+model thought. The existing World/Kernel action and causal IDs remain literal
+and attributable, including when the thought is released. The HTTP status
+projection resolves the thought's original source page only when it belongs
+to that same World and local center; it offers a deep link only when the
+original event passes the existing full-history message ownership check.
+An old or unresolvable Work cannot be guessed as Home, and an internal event
+without a displayable message is never given a fabricated message link.
+Navigation reuses the product's message anchor, saved draft and scroll state,
+in English or Simplified Chinese. This projection does not turn a retained
+thought into a user command or show another Work's note as the current one.
+
+`web/tests/pulse-attention.test.mjs` checks the page-local projection and
+source target invariant. `tests/browser/attention_flow.mjs` checks real
+Chromium navigation, a Kernel-held thought and its original Home event,
+Work isolation, bilingual deep linking, process restart, browser draft
+continuation and a later Kernel release. The HTTP model transport is explicitly
+synthetic, not evidence of a live provider's autonomous usefulness.
+
 The quota counts background pulse admissions. It is not a currency limit or a
 hard token ceiling for a provider: a Kernel turn may contain more than one
 model/tool round, and provider token usage is learned after the request. The
