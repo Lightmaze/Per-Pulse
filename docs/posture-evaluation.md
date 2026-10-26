@@ -269,6 +269,42 @@ report. Fixed ordering and extra posture computation remain comparison limits;
 counterbalancing and a computation control are subsequent experiments. No
 external request is made when a provider is not configured.
 
+### Blind review of later ordinary work
+
+The audit validates exposure and native settled work, not response quality.
+After a completed real-provider ordinary-transfer trial, create a separate,
+condition-blind review packet:
+
+    python -m per_pulse.blinded_review prepare /tmp/per-pulse-posture/ordinary-trial --output /tmp/per-pulse-posture/review-001
+
+Only give the reviewer **review-packet.json**, not the raw experiment directory
+or **condition-key.json**. Responses are randomly assigned A/B within the
+finished-notice pair and C/D within the outline pair; each packet includes the
+actual task, response and review checks. The reviewer should check the finished
+notice format, first mention of available service, factual accuracy, and the
+exception where the user requested an outline rather than a finished message.
+
+Copy **ratings-template.json** to a separate ratings file and fill in a reviewer
+identifier plus one boolean for every listed check. Then reveal paired
+observations:
+
+    python -m per_pulse.blinded_review grade /tmp/per-pulse-posture/review-001 /tmp/per-pulse-posture/ratings-001.json
+
+The generated review directory has a local .gitignore and restricted file
+permissions, and contains private outputs and a confidential answer key. The
+preparation command re-audits the real World/Kernel traces and response digests.
+Synthetic transport is refused unless --allow-fixture is explicitly given for
+QA, and synthetic origin remains visible in the report. Changed packets and
+incomplete ratings are rejected. Do not publish private traces or supply the
+condition key to reviewers.
+
+The comparison reports human judgments and whether provider usage was accounted,
+not a bill, statistically significant advantage, or independently authenticated
+blinding. The baseline still precedes sharing and conditional stages can incur
+additional computation. Counterbalanced replications and independently reviewed
+outcomes are needed before attributing changes to learned experience.
+
+
 ## Reproduce the offline mechanism smoke
 
 These commands use programmed `httpx.MockTransport` responses, not an external
