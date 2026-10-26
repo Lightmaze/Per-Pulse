@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import datetime
 import hashlib
 import json
+import re
 import threading
 from typing import Any, Mapping
 
@@ -42,6 +43,7 @@ SCHEMA = {
     "properties": {
         "op": {"type": "string", "enum": ["list", "find", "get", "remember", "feedback", "revise"]},
         "query": {"type": "string", "minLength": 2, "maxLength": 160},
+        "after_experience_id": {"type": "string", "maxLength": 160},
         "experience_id": {"type": "string", "maxLength": 160},
         "expected_revision": {"type": "integer", "minimum": 1},
         "verdict": {"type": "string", "enum": sorted(_NATIVE_VERDICTS)},
@@ -77,7 +79,10 @@ def descriptor() -> ToolDescriptor:
         "list returns a bounded newest-first view and recent original message IDs. "
         "find(query) searches only the title, lesson, conditions, boundaries and "
         "decision shifts of eligible active experiences by literal text (not semantic "
-        "relevance); get(experience_id) retrieves one eligible experience even when "
+        "relevance). Follow next_after_experience_id with find(query, after_experience_id) "
+        "to inspect older eligible matches, including those beyond the response budget; "
+        "a returned reference-only oversized record must not be treated as advice. "
+        "get(experience_id) retrieves one eligible experience even when "
         "the newest-first list omitted it. Neither operation crosses context privacy "
         "or treats a match as applicable to the task. "
         "remember requires an earlier assistant result ID and a later user feedback "
@@ -122,12 +127,20 @@ def validate(arguments: Mapping[str, Any]) -> dict:
     values = deepcopy(dict(arguments))
     if values == {"op": "list"}:
         return values
-    if values.get("op") == "find" and set(values) == {"op", "query"}:
+    if values.get("op") == "find" and set(values) in (
+        {"op", "query"}, {"op", "query", "after_experience_id"}
+    ):
         query = values["query"]
         if (not isinstance(query, str) or not 2 <= len(query.strip()) <= 160
                 or any(ord(character) < 32 for character in query)):
             raise ValueError("find query must be 2..160 printable characters")
-        return {"op": "find", "query": query.strip()}
+        result = {"op": "find", "query": query.strip()}
+        if "after_experience_id" in values:
+            after = values["after_experience_id"]
+            if not isinstance(after, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", after):
+                raise ValueError("invalid after_experience_id")
+            result["after_experience_id"] = after
+        return result
     if values.get("op") == "get" and set(values) == {"op", "experience_id"}:
         identity = values["experience_id"]
         if (not isinstance(identity, str) or not identity.strip()
@@ -427,11 +440,44 @@ class NativePosture:
                         json.dumps(item["counterexamples"], ensure_ascii=False) + "\n" +
                         json.dumps(item["shift"], ensure_ascii=False)
                     ).casefold()]
-                    packed = pack_posture_materials({"episodes": eligible}, byte_budget=16000)
-                    visible = packed["episodes"][:8]
+                    # The order is the journal's newest-first (updated_at, id) order.
+                    # A cursor is accepted only if it is still in this caller's
+                    # *matching and accessible* results, so it cannot probe another
+                    # Work's private IDs or jump across unrelated searches.
+                    start = 0
+                    after = values.get("after_experience_id")
+                    if after is not None:
+                        positions = [index for index, item in enumerate(eligible)
+                                     if item["id"] == after]
+                        if not positions:
+                            raise ScopeConflict("experience cursor is not active or accessible for this query")
+                        start = positions[0] + 1
+                    selected, visible = [], []
+                    for item in eligible[start:]:
+                        if len(visible) == 8:
+                            break
+                        packed = pack_posture_materials(
+                            {"episodes": [*selected, item]}, byte_budget=16000,
+                        )
+                        if len(packed["episodes"]) != len(selected) + 1:
+                            if visible:
+                                # Do not jump past an omitted record: the next
+                                # request must start with the first one not seen.
+                                break
+                            # An individually oversized record is still
+                            # discoverable by ID, but its partial conditions
+                            # cannot safely be offered as usable guidance.
+                            visible.append({"id": item["id"], "revision": item["revision"],
+                                            "title": item["title"], "material_too_large": True})
+                            break
+                        selected.append(item)
+                        visible.append(packed["episodes"][-1])
+                    consumed = start + len(visible)
+                    remaining = max(0, len(eligible) - consumed)
                     return {"experiences": visible, "matching_count": len(eligible),
-                            "more_experiences": len(eligible) > len(visible),
-                            "omitted_experience_count": len(eligible) - len(visible),
+                            "more_experiences": remaining > 0,
+                            "omitted_experience_count": remaining,
+                            "next_after_experience_id": visible[-1]["id"] if remaining and visible else None,
                             "retrieval": "literal_casefold_on_eligible_abstractions_only",
                             "scope": "current_context_and_explicit_subject_transfers",
                             "semantic_applicability": "not_yet_assessed"}
