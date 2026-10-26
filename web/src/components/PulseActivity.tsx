@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage } from '../i18n';
 import { PulseActivityRequestGate } from '../pulseActivityRequestGate';
+import { attentionSourceTarget, localRetainedAttention } from '../pulseAttention';
 import type { PageSummary, PulseState } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
@@ -86,13 +87,16 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
     return t('pulse.unknown');
   };
 
-  const jump = (id: string | null) => {
+  const jump = (id: string | null, messageId?: string) => {
     if (!id || !validIds.has(id)) return;
     onClose();
-    navigate(id);
+    navigate(id, id === pageId ? undefined : { pageId }, messageId);
   };
 
   const edges = pulse?.connections.filter(edge => edge.sourcePageId === pageId) ?? [];
+  // Model-retained notes are private to their original local context, not a
+  // global cross-Work summary. An unknown older center stays unresolved.
+  const retained = localRetainedAttention(pulse, pageId);
   const recent = pulse?.recentActivations ?? [];
   const thisPageHeld = pulse?.heldContexts.some(held => held.pageId === pageId) ?? false;
 
@@ -123,6 +127,28 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
         <p className="pulse-activity-detail">{t('pulse.budget', { remaining: pulse.budget.remaining, limit: pulse.budget.limit })}</p>
         {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">{t('pulse.oldest', { time: eventTime(pulse.queue.oldestQueuedAt) })}</p> : null}
         {!pulse.providerConfigured ? <p className="pulse-activity-detail">{t('pulse.noProvider')}</p> : null}
+      </section>
+      <section className="pulse-activity-section" aria-label={t('pulse.thoughts')}>
+        <h3>{t('pulse.thoughts')}</h3>
+        <p className="pulse-activity-detail">{t('pulse.thoughtsInfo')}</p>
+        {!retained.length ? <p className="pulse-activity-empty">{t('pulse.thoughtsNone')}</p> :
+          <ul className="pulse-activity-list">{retained.map(entry => {
+            const source = attentionSourceTarget(entry, validIds);
+            return <li key={entry.center_id ?? 'home'}>
+              <p className="pulse-activity-thought">{entry.note || t('pulse.thoughtsReleased')}</p>
+              {entry.note ? <span className="pulse-activity-detail">{t('pulse.thoughtsDrive', { drive: entry.drive.toFixed(2) })}</span> : null}
+              {entry.sourceEventId ? <>
+                {source
+                  ? <button className="pulse-activity-link" type="button"
+                      onClick={() => jump(source.pageId, source.messageId)}>
+                      {t(source.messageId ? 'pulse.thoughtsOpenSource' : 'pulse.thoughtsOpenPage')}
+                    </button>
+                  : <span className="pulse-activity-detail">{t('pulse.thoughtsUnavailable')}</span>}
+                <span className="pulse-activity-identity" title={entry.sourceEventId}>{t('pulse.source', { id: shortId(entry.sourceEventId) })}</span>
+                {entry.sourceActionId ? <span className="pulse-activity-identity" title={entry.sourceActionId}>{t('pulse.thoughtsAction', { id: shortId(entry.sourceActionId) })}</span> : null}
+              </> : null}
+            </li>;
+          })}</ul>}
       </section>
       <section className="pulse-activity-section" aria-label={t('pulse.connections')}>
         <h3>{t('pulse.connections')}</h3>
