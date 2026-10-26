@@ -51,6 +51,7 @@ const wait = async (fn, label, timeout = 20000) => {
 };
 const status = () => fetch(base + '/__journey/status').then(r => r.json());
 let server = startServer();
+let diagnosticWork = null;
 try {
   await wait(async () => (await fetch(base + '/api/health')).ok, 'service ready');
   browser = await chromium.launch({
@@ -79,6 +80,7 @@ try {
   const closeDialog = () => page.getByRole('button', { name: 'Close dialog', exact: true }).click();
 
   const originalId = await create('Original product brief', 'DESIGN_FIRST_VIEW');
+  diagnosticWork = originalId;
   await page.getByText('The first screen is a twelve-field intake form. [Synthetic browser fixture]',
     { exact: true }).waitFor();
   await page.getByRole('textbox', { name: /^Message / }).fill(
@@ -189,6 +191,19 @@ try {
   }));
 } catch (error) {
   console.error(error.stack, '\nSERVER:\n', serverLog);
+  const diagnostics = {};
+  for (const [key, path] of [
+    ['fixture', '/__journey/status'],
+    ...(diagnosticWork ? [
+      ['work', '/api/pages/' + diagnosticWork],
+      ['execution', '/api/pages/' + diagnosticWork + '/execution'],
+      ['posture', '/api/pages/' + diagnosticWork + '/posture'],
+    ] : []),
+  ]) {
+    try { diagnostics[key] = await (await fetch(base + path)).json(); }
+    catch (fetchError) { diagnostics[key] = String(fetchError); }
+  }
+  console.error('Synthetic fixture diagnostics:', JSON.stringify(diagnostics).slice(0, 16000));
   process.exitCode = 1;
 } finally {
   await browser?.close();
