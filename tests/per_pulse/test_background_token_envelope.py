@@ -45,7 +45,8 @@ def queue_background(runtime, parent_id):
     return runtime.causal_ledger.enqueue(
         runtime.world_id, kind="spontaneous", domain="pulse", source="self",
         engram_id=runtime.continuity_engram_id, parent_event_id=parent_id,
-        metadata={"context_pulse": "reentry"},
+        metadata={"context_pulse": "reentry", "source_result_id": parent_id, "depth": 0},
+        idempotency_key=f"context-reentry:{runtime.world_id}:{parent_id}",
         admission_guard=runtime.context_pulse._guard,
         runtime_fence=runtime._current_runtime_fence(),
     )
@@ -77,8 +78,11 @@ def test_token_admission_reserves_then_reconciles_from_the_original_turn(tmp_pat
         assert pending["charged"] == 60
         assert pending["unaccountedReservations"] == 60
         assert pending["trackedAdmissions"] == 1
+        # A repeated idempotency key is a read, not a second charge.
+        assert queue_background(runtime, parent_id).id == first.id
+        other_parent = seed_source(runtime)
         with pytest.raises(_QuotaReached):
-            queue_background(runtime, parent_id)
+            queue_background(runtime, other_parent)
 
         settle_background(runtime, first)
         settled = runtime.context_pulse.snapshot()["providerTokenBudget"]
@@ -86,7 +90,7 @@ def test_token_admission_reserves_then_reconciles_from_the_original_turn(tmp_pat
         assert settled["unaccountedReservations"] == 0
         assert settled["syntheticTokens"] == 40
         assert settled["remaining"] == 60
-        second = queue_background(runtime, parent_id)
+        second = queue_background(runtime, other_parent)
         turn = runtime.causal_ledger.begin_turn(
             second.id, runtime.continuity_engram_id, "Continuation.",
             runtime_fence=runtime._current_runtime_fence(),
@@ -100,8 +104,9 @@ def test_token_admission_reserves_then_reconciles_from_the_original_turn(tmp_pat
         assert guarded["accountedTokens"] == 40
         assert guarded["unaccountedReservations"] == 60
         assert guarded["remaining"] == 0
+        third_parent = seed_source(runtime)
         with pytest.raises(_QuotaReached):
-            queue_background(runtime, parent_id)
+            queue_background(runtime, third_parent)
         # The budget gates background admission, not a human foreground input.
         foreground_id = runtime.inject(runtime.continuity_engram_id, "Correct the plan.")
         assert runtime.causal_ledger.get_event(foreground_id).source.value == "user"
@@ -116,7 +121,7 @@ def test_token_admission_reserves_then_reconciles_from_the_original_turn(tmp_pat
         assert old["unaccountedReservations"] == 60
         assert old["trackedAdmissions"] == 2
         with pytest.raises(_QuotaReached):
-            queue_background(runtime, parent_id)
+            queue_background(runtime, third_parent)
     finally:
         reopened.runtime.close()
 
@@ -133,8 +138,9 @@ def test_missing_and_oversized_receipts_never_create_free_budget(tmp_path):
         unknown = runtime.context_pulse.snapshot()["providerTokenBudget"]
         assert unknown["charged"] == 60
         assert unknown["accountedTokens"] == 0
+        second_parent = seed_source(runtime)
         with pytest.raises(_QuotaReached):
-            queue_background(runtime, parent)
+            queue_background(runtime, second_parent)
     finally:
         service.runtime.close()
 
@@ -149,8 +155,9 @@ def test_missing_and_oversized_receipts_never_create_free_budget(tmp_path):
         assert overrun["overrunTokens"] == 80
         assert overrun["remaining"] == 0
         assert overrun["hardProviderSpendingCap"] is False
+        second_parent = seed_source(runtime)
         with pytest.raises(_QuotaReached):
-            queue_background(runtime, parent)
+            queue_background(runtime, second_parent)
     finally:
         other.runtime.close()
 
