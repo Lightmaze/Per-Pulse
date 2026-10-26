@@ -225,6 +225,19 @@ Navigation reuses the product's message anchor, saved draft and scroll state,
 in English or Simplified Chinese. This projection does not turn a retained
 thought into a user command or show another Work's note as the current one.
 
+Recent Pulse activations now also expose two *independent*, source-checked
+message anchors: `messageId` for the receiver's original local event and
+`sourceMessageId` for the actual causal-parent event in its source Home/Work.
+The existing `GET /api/pages/{page}?sourceMessageId=...` path can reopen
+either message even outside the recent 500-message window. An internal event
+without a displayable message falls back to **open that page**, not a made-up
+message; an unavailable historical Work offers neither a link nor a Home
+substitute. Opening a queued propagation is an inspection of pending native
+evidence, **not** a claim its receiver finished the task. From an actual
+settled Work result, the user can still select **Bring to Home** and preserve
+the original message provenance. All event/message ownership validation
+remains in the original PageService/World; no new state or scheduler exists.
+
 `web/tests/pulse-attention.test.mjs` checks the page-local projection and
 source target invariant. `tests/browser/attention_flow.mjs` checks real
 Chromium navigation, a Kernel-held thought and its original Home event,
