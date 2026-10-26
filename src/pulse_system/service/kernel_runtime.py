@@ -318,6 +318,11 @@ class KernelHarnessRuntime:
         # Turn admission is serialized per subject-owned context. Lifecycle
         # operations (abort, succession, shutdown) remain subject-wide.
         self._active: dict[tuple[str, str], HarnessScope] = {}
+        # A claimed scope exists before create_turn has written its durable row.
+        # Abort/close must record cancellation intent during that admission gap,
+        # rather than call TurnRunner.abort against an unknown turn.
+        self._starting_turn_ids: set[str] = set()
+        self._abort_before_create: dict[str, str] = {}
         self._runner_locks: dict[str, Any] = {}
         self._approval_calls = 0
         self._shutdown_lock = threading.Lock()
@@ -780,6 +785,7 @@ class KernelHarnessRuntime:
                 scope, runtime = self._session(engram_id, context_id)
                 scope = scope.for_turn(turn_id or str(uuid4()))
                 self._active[active_key] = scope
+                self._starting_turn_ids.add(scope.turn_id)
                 run_lock = self._runner_locks.setdefault(scope.session_id, threading.RLock())
                 claimed = True
             assert self.kernel is not None
@@ -798,6 +804,19 @@ class KernelHarnessRuntime:
                 from pulse_harness.core.transcript import TranscriptStore
                 submitted = internal
             self.kernel.store.create_turn(scope, submitted)
+            # Publish durable admission and consume an early abort under the
+            # same lock used by abort()/close(). Exactly one side owns the
+            # cancellation; no model request or tool action may race ahead.
+            with self._lock:
+                self._starting_turn_ids.discard(scope.turn_id)
+                early_abort = self._abort_before_create.pop(scope.turn_id, None)
+            if early_abort is not None:
+                runtime.runner.abort(scope, reason=early_abort)
+                raise _error(
+                    "kernel_turn_cancelled_before_start",
+                    "Kernel turn was cancelled before model admission",
+                    accepted=True,
+                )
             if internal is not None:
                 TranscriptStore(self.kernel.store).append(scope, role="system", content=submitted,
                     item_id="cognition-return:" + scope.turn_id)
@@ -893,6 +912,9 @@ class KernelHarnessRuntime:
                 timer.cancel()
                 timer.join()
             with self._lock:
+                if claimed:
+                    self._starting_turn_ids.discard(scope.turn_id)
+                    self._abort_before_create.pop(scope.turn_id, None)
                 if claimed and self._active.get(active_key) == locals().get("scope"):
                     self._active.pop(active_key, None)
                 self._lock.notify_all()
@@ -905,6 +927,12 @@ class KernelHarnessRuntime:
                 for key, scope in self._active.items()
                 if key[0] == engram_id
             )
+            abortable = []
+            for scope in scopes:
+                if scope.turn_id in self._starting_turn_ids:
+                    self._abort_before_create[scope.turn_id] = "world_abort"
+                else:
+                    abortable.append(scope)
         cancelled_work = self.work.cancel_subject(engram_id) if self.work is not None else 0
         cancelled_work += self.team.cancel_subject(engram_id) if self.team is not None else 0
         cancelled_work += self.posture.cancel_subject(engram_id) if self.posture is not None else 0
@@ -913,7 +941,7 @@ class KernelHarnessRuntime:
             if paused or cancelled_work:
                 return
             raise _error("kernel_turn_not_running", "Engram has no attached world turn")
-        for scope in scopes:
+        for scope in abortable:
             self.kernel._runtimes[scope.session_id].runner.abort(
                 scope,
                 reason="world_abort",
@@ -962,11 +990,17 @@ class KernelHarnessRuntime:
                 self._closing = True
                 self.life.close()  # revoke capture before waiting on model/approval owners
                 active = tuple(self._active.items())
+                abortable = []
+                for _, scope in active:
+                    if scope.turn_id in self._starting_turn_ids:
+                        self._abort_before_create[scope.turn_id] = "world_shutdown"
+                    else:
+                        abortable.append(scope)
                 observed = 0 if self.kernel is None else len(self.kernel._runtimes)
             if self.cognition is not None:
                 self.cognition.close()
             if self.kernel is not None:
-                for _, scope in active:
+                for scope in abortable:
                     self.kernel._runtimes[scope.session_id].runner.abort(scope, reason="world_shutdown")
                 with self._lock:
                     while self._active or self._approval_calls:
