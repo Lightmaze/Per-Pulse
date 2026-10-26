@@ -49,3 +49,25 @@ location, checking that the original message and recent window remain distinct.
 It adds a page link without losing that source, then deliberately delivers a
 stale background-read response before a new navigation response in both
 directions. The current source or recent view must win the race.
+
+## One rendered correction-to-artifact journey
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  node tests/browser/learning_artifact_flow.mjs
+```
+
+This additional integrated browser flow uses its own temporary World/Kernel/SQLite
+and an **explicit synthetic HTTP model fixture**, not a paid model. It visits
+the actual English-first UI: original Work result and ordinary user correction,
+native attributable experience, negative control in an unshared Work (denied
+intake file), explicit sharing, changed proposal in a later Work, native
+approval and real local file, temporary Chinese UI/Pulse activity inspection,
+selection of the completed message for a sourced Home return, exact source
+navigation, preserved Work draft and restart. The fixture checks that only
+the abstract lesson—not the raw source correction or original result—reaches
+the later Work. This is mechanism and user-interface acceptance, **not**
+evidence that a real model independently learned a new default behavior.
+It does not establish a hard spending cap or long-duration autonomous Pulse.
+`PER_PULSE_JOURNEY_SCREENSHOTS` optionally records an approval/artifact screenshot.

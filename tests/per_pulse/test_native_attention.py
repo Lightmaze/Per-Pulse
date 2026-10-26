@@ -246,8 +246,18 @@ def test_real_kernel_tool_lane_stages_and_settles_attention_with_synthetic_http(
                 break
             time.sleep(0.025)
         assert final is not None and final["status"] == "idle", final
-        r.context_pulse.tick()
-        note = r.context_pulse.inspect_attention(None)["retained"]
+        # A successful Kernel turn can become idle before the World-local
+        # attention settlement is visible. Tick/read the original controller
+        # until that exact turn is committed; do not treat the first idle
+        # snapshot as an atomic attention barrier.
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            r.context_pulse.tick()
+            note = r.context_pulse.inspect_attention(None)["retained"]
+            if (note["note"] == "Keep exploring the visitor's first experience."
+                    and note["sourceTurnId"] == final["turnId"]):
+                break
+            time.sleep(0.025)
         assert note["note"] == "Keep exploring the visitor's first experience."
         assert note["drive"] == 0.7
         assert note["sourceTurnId"] == final["turnId"]
