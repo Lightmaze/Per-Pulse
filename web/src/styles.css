@@ -186,6 +186,7 @@ button, a, input, textarea { outline-offset: 4px; }
 .pulse-activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .pulse-activity-summary { font-size: 13px; color: var(--text); margin-bottom: 7px; }
 .pulse-activity-detail { display: block; font-size: 11px; line-height: 1.7; color: var(--muted); margin: 5px 0; }
+.pulse-activity-thought { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 9px; font-size: 12px; line-height: 1.6; }
 .pulse-activity-empty { font-size: 12px; color: var(--muted); margin: 11px 0; }
 .pulse-activity-list { list-style: none; padding: 0; margin: 5px 0 0; }
 .pulse-activity-list li { border-bottom: 1px solid var(--border); padding: 10px 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
