@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, type Translate } from '../i18n';
+import { ExecutionResponseGate } from '../executionResponseGate';
 import type { PageView, PendingAction } from '../types';
 
 function actionTitle(action: PendingAction, t: Translate): string {
@@ -16,27 +17,44 @@ export function ExecutionStatus({ view, applyView }: { view: PageView; applyView
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState('');
   const pageId = view.page.id;
-  const currentPage = useRef(pageId);
-  currentPage.current = pageId;
-  useEffect(() => { setError(''); setBusy(false); setStopping(false); }, [pageId]);
+  const requestGate = useRef(new ExecutionResponseGate(pageId));
+  // Fence the previous Work synchronously, before its in-flight action returns.
+  requestGate.current.forPage(pageId);
+  useEffect(() => {
+    setError(''); setBusy(false); setStopping(false);
+    return () => requestGate.current.invalidate();
+  }, [pageId]);
   const execution = view.execution;
   if (!execution || (!error && !execution.canCancel && !execution.pendingActions.length && !execution.recoveryRequired && execution.status !== 'stopped')) return null;
 
   const act = async (operation: () => Promise<{ view: PageView; continuationError?: { message: string } | null }>, stop = false) => {
     if (stop ? stopping : busy || stopping) return;
+    const ticket = requestGate.current.begin(pageId);
+    if (ticket === null) return;
+    const isCurrent = () => requestGate.current.accepts(pageId, ticket);
     if (stop) setStopping(true); else setBusy(true);
     setError('');
     try {
-      const result = await operation(); applyView(result.view);
-      if (currentPage.current === pageId && result.continuationError) setError(result.continuationError.message);
-    }
-    catch (problem) {
-      if (currentPage.current === pageId) setError(problem instanceof Error ? problem.message : t('execution.error'));
-      // Refresh a stale decision, but never retry a mutation automatically.
-      try { applyView(await api.page(pageId)); } catch { /* Preserve existing work. */ }
+      const result = await operation();
+      // A later Stop or page transition wins over an earlier Allow response.
+      if (isCurrent()) {
+        applyView(result.view);
+        if (result.continuationError) setError(result.continuationError.message);
+      }
+    } catch (problem) {
+      if (isCurrent()) {
+        setError(problem instanceof Error ? problem.message : t('execution.error'));
+        // Unknown outcome: read the native state once, never retry a mutation.
+        // The recovery GET itself can become stale while a new action runs.
+        try {
+          const restored = await api.page(pageId);
+          if (isCurrent()) applyView(restored);
+        } catch { /* Preserve existing work and the original error. */ }
+      }
     } finally {
-      if (currentPage.current === pageId) {
-        if (stop) setStopping(false); else setBusy(false);
+      if (isCurrent()) {
+        setBusy(false);
+        setStopping(false);
       }
     }
   };
