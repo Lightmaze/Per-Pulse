@@ -1,4 +1,4 @@
-import type { Bootstrap, DraftReference, PageReference, PageSummary, PageView, PulseState } from './types';
+import type { Bootstrap, DraftReference, PageReference, PageSummary, PageView, PulseState, ResponseLanguage, WorkspaceSettings } from './types';
 
 export class ApiError extends Error {
   constructor(message: string, public readonly code: string, public readonly status: number) {
@@ -30,6 +30,8 @@ const pagePath = (id: string) => `/pages/${encodeURIComponent(id)}`;
 
 export const api = {
   bootstrap: (signal?: AbortSignal) => request<Bootstrap>('/bootstrap', { signal }),
+  settings: (signal?: AbortSignal) => request<WorkspaceSettings>('/settings', { signal }),
+  updateSettings: (responseLanguage: ResponseLanguage) => request<WorkspaceSettings>('/settings', { method: 'PATCH', body: JSON.stringify({ responseLanguage }) }),
   page: (id: string, signal?: AbortSignal, sourceMessageId?: string) =>
     request<PageView>(pagePath(id) + (sourceMessageId ? `?sourceMessageId=${encodeURIComponent(sourceMessageId)}` : ''), { signal }),
   createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null }) =>

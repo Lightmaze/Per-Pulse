@@ -21,6 +21,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pulse_system.service.runtime import ServiceError
 
 from . import __version__
+from .language import ResponseLanguage
 from .service import PageError, PageService, PulseSettings, _ENV_PROVIDER
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
@@ -60,6 +61,10 @@ class ReturnHome(Input):
 
 class Rename(Input):
     title: Title
+
+
+class SettingsInput(Input):
+    responseLanguage: ResponseLanguage
 
 
 class ConnectionPages(Input):
@@ -164,6 +169,14 @@ def create_app(
     @app.get("/api/bootstrap")
     def bootstrap(request: Request):
         return pages(request).bootstrap()
+
+    @app.get("/api/settings")
+    def settings(request: Request):
+        return pages(request).settings()
+
+    @app.patch("/api/settings")
+    def update_settings(body: SettingsInput, request: Request):
+        return pages(request).update_settings(body.responseLanguage)
 
     @app.get("/api/pulse")
     def pulse_status(request: Request):

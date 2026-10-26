@@ -49,6 +49,9 @@ export type PageView = {
   earlierSourceMessageId?: string | null;
 };
 
+export type ResponseLanguage = 'auto' | 'en' | 'zh-CN';
+export type WorkspaceSettings = { responseLanguage: ResponseLanguage };
+
 export type Bootstrap = {
   name: 'Per Pulse';
   version: string;
@@ -57,6 +60,7 @@ export type Bootstrap = {
   homeId: 'home';
   provider: ProviderState;
   pages: PageSummary[];
+  settings: WorkspaceSettings;
 };
 
 export type DraftReference = { targetPageId: string; label: string };
