@@ -180,6 +180,39 @@ resume a partially admitted fanout without replaying its already settled
 predecessor deliveries. An uncommitted or unrelated identity cannot use that
 lineage evidence as a continuation source.
 
+### Model-side attention joins the same Context Body (integration draft)
+
+The optional `attention` tool is exposed only in the native Pulse-enabled
+World/Kernel, bound to the exact active Home or Work scope. `inspect` reads
+that context's retained thought, source and operator state. `hold(note,drive)`
+stages a bounded local concern; `release` stages clearing it. Neither tool
+creates another agent, copies a Work transcript, adds a new human instruction,
+or grants permission to use external tools.
+
+The original action result alone is *not* a successful change. An intent
+is reconciled in the existing `ContextPulseController` only after the same
+World turn and exact Kernel turn/action both succeed; failed/cancelled or
+mismatched actions are discarded. Later ordinary user inputs and an operator
+local Hold/Resume override an older staged model preference. The accepted
+entry retains the original `sourceTurnId`, `sourceActionId`,
+`sourceEventId`, local center and revision; the existing PerPulse API maps
+that center back to its original Home/Work page when possible.
+
+Retained drive may increase a local context's chance of a *native* reentry
+when that context has an eligible settled result. It cannot bypass the
+existing `spontaneous_rate` ceiling, hourly admission quota, inhibition,
+refractory period, depth limit, global/local pause, worker capacity or
+foreground priority. Operator pause does not erase already stored thoughts
+or in-flight turns. The feature is not the alternative second ContextBody,
+continuous token streaming, or the `Keep thinking` UI of the earlier #6
+exploration.
+
+The focused `tests/per_pulse/test_native_attention.py` exercises staged
+intent, original action outcome, later human correction, pause, and original
+source attribution. Its HTTP transport is an explicit test double. Whether a
+live model chooses useful retained work, and what continued activity costs
+in tokens/dollars, remain separate real-provider experiments.
+
 The quota counts background pulse admissions. It is not a currency limit or a
 hard token ceiling for a provider: a Kernel turn may contain more than one
 model/tool round, and provider token usage is learned after the request. The
