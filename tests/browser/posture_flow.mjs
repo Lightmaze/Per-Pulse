@@ -98,8 +98,24 @@ try {
     await mkdir(screenshots, { recursive: true });
     await page.screenshot({ path: join(screenshots, 'posture-desktop.png') });
   }
-  await lesson.getByRole('button', { name: 'Go to correction', exact: true }).click();
+  // Exercise the same sourced correction through the Chinese workspace UI.
+  // The original lesson, encounter, source IDs, and user-authored content remain unchanged.
+  await close();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.locator('#interface-language').selectOption('zh-CN');
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '查看此页面的经验', exact: true }).click();
+  await page.getByRole('dialog', { name: '工作中的经验', exact: true }).waitFor();
+  await lesson.getByText('使用中 · v1', { exact: true }).waitFor();
+  await lesson.getByText('原始经历', { exact: true }).click();
+  assert.match(await lesson.innerText(), /twelve-field intake form/);
+  await lesson.getByRole('button', { name: '查看纠正', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.locator('#interface-language').selectOption('en');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('textbox', { name: /^Message / }).waitFor();
   const initialLesson = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
   const revisionFeedback = 'When a practice session needs an existing booking, confirm that booking before starting. Keep optional profile questions after the first interaction.';
   await send(revisionFeedback, 3);
