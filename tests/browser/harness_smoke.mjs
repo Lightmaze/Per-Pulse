@@ -49,7 +49,30 @@ try {
   await page.getByText('A real file from a synthetic model fixture.',{exact:true}).waitFor();
   check('approved effect has a readable source-linked artifact',true);
   await page.screenshot({path:output+'/qa-artifact-desktop.png',fullPage:false});
+  // The native file action and the Work's completed message must return to Home
+  // with a usable source link, not as an unattributed copied conversation.
+  const approvedResult = page.locator('.message-assistant').filter({hasText:'Synthetic model fixture: this page has finished its turn.'}).last();
+  await approvedResult.getByRole('button',{name:'Bring to Home',exact:true}).click();
+  const returnDialog = page.getByRole('dialog',{name:'Bring this back to Home.',exact:true});
+  await returnDialog.waitFor();
+  await returnDialog.getByRole('button',{name:'Bring to Home',exact:true}).click();
+  await page.getByRole('heading',{name:'A place to keep going.',exact:true}).waitFor();
+  const sourcedReturn = page.locator('.message-user').filter({hasText:'Synthetic model fixture: this page has finished its turn.'}).last();
+  await sourcedReturn.getByRole('link',{name:'Approved note',exact:true}).waitFor();
+  check('selected Work result returns to Home with its original source',true);
+  await sourcedReturn.getByRole('link',{name:'Approved note',exact:true}).click();
+  await page.getByRole('heading',{name:'Approved note',exact:true}).waitFor();
+  check('Home source link returns to the original Work',new URL(page.url()).pathname.endsWith('/'+approvedId));
   await create('Declined note','WRITE_DECLINE');
+  const declinedId = new URL(page.url()).pathname.split('/').pop();
+  // One Work's pending approval must not hold the whole continuing subject.
+  await page.getByRole('link',{name:'Home',exact:true}).click();
+  await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home can answer while another Work awaits approval.');
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await page.getByText('Synthetic model fixture: this page has finished its turn.',{exact:true}).waitFor();
+  check('foreground Home stays usable while a sibling Work awaits approval',true);
+  await page.goto(base+'/page/'+declinedId);
+  await page.getByRole('button',{name:'Decline',exact:true}).waitFor();
   await page.getByRole('button',{name:'Decline',exact:true}).click();
   await wait(async()=>!(await page.getByRole('button',{name:'Allow once',exact:true}).count()),'declined approval clears');
   check('declined effect did not create a file',!(await (await fetch(base+'/__fixture/status')).json()).files.includes('declined.txt'));
