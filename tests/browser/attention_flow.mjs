@@ -218,11 +218,16 @@ try {
   await page.locator('#message-' + propagated.sourceMessageId).waitFor();
   checks.push('native source event opens original Work with validated causal identity');
 
-  await page.goto(base + '/page/' + encodeURIComponent(localReceiver));
+  // Follow the product's actual Back/return route, not a manual URL reset.
+  // It should recover the receiver's exact local event and unsent draft.
+  await page.locator('.return-to-thread').click();
+  await wait(async () => decodeURIComponent(new URL(page.url()).pathname) ===
+    '/page/' + localReceiver && decodeURIComponent(new URL(page.url()).hash) ===
+    '#message-' + propagated.messageId, 'return to original receiver event and position');
   await page.locator('.composer textarea').waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(),
     'Still composing after exploring causal sources.');
-  checks.push('causal source inspection preserves the receiving Work draft');
+  checks.push('Back returns to original local message without losing receiving Work draft');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks,
