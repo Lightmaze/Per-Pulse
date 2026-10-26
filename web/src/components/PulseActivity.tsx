@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage } from '../i18n';
 import { PulseActivityRequestGate } from '../pulseActivityRequestGate';
-import { attentionSourceTarget, localRetainedAttention } from '../pulseAttention';
+import { activationMessageTarget, attentionSourceTarget, localRetainedAttention } from '../pulseAttention';
 import type { PageSummary, PulseState } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
@@ -198,14 +198,20 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
           {recent.slice(0, 12).map(activity => <li key={activity.eventId}>
             <div className="pulse-activity-event">
               {activity.pageId && validIds.has(activity.pageId)
-                ? <button className="pulse-activity-link" onClick={() => jump(activity.pageId)}>{nameFor(activity.pageId)}</button>
+                ? <button className="pulse-activity-link" type="button" onClick={() => {
+                    const location = activationMessageTarget(activity, validIds, 'receiver');
+                    if (location) jump(location.pageId, location.messageId);
+                  }}>{nameFor(activity.pageId)} · {t(activity.messageId === activity.eventId ? 'pulse.openActivityMessage' : 'pulse.openActivityPage')}</button>
                 : <span>{nameFor(activity.pageId, activity.centerId)}</span>}
               <span className="pulse-activity-state">{activity.status}</span>
             </div>
             <span className="pulse-activity-detail">{eventTime(activity.createdAt)} · {activity.kind}</span>
             {activity.deferredReason ? <span className="pulse-activity-detail">{t('pulse.waiting', { reason: activity.deferredReason })}</span> : null}
             {activity.sourceEventId ? <span className="pulse-activity-detail">{t('pulse.from')} {activity.sourcePageId && validIds.has(activity.sourcePageId)
-              ? <button className="pulse-activity-link" onClick={() => jump(activity.sourcePageId)}>{nameFor(activity.sourcePageId)}</button>
+              ? <button className="pulse-activity-link" type="button" onClick={() => {
+                  const location = activationMessageTarget(activity, validIds, 'source');
+                  if (location) jump(location.pageId, location.messageId);
+                }}>{nameFor(activity.sourcePageId)} · {t(activity.sourceMessageId === activity.sourceEventId ? 'pulse.openSourceMessage' : 'pulse.openSourcePage')}</button>
               : <span>{nameFor(activity.sourcePageId, activity.sourceCenterId)}</span>}
               <span className="pulse-activity-identity" title={activity.sourceEventId}>{t('pulse.source', { id: shortId(activity.sourceEventId) })}</span>
             </span> : null}
