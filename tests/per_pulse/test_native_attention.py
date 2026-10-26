@@ -170,3 +170,88 @@ def test_identical_staging_is_idempotent_and_different_arguments_rejected(native
 def test_attention_rejects_ambiguous_or_unsafe_arguments(payload):
     with pytest.raises(ValueError):
         validate(payload)
+
+
+def test_real_kernel_tool_lane_stages_and_settles_attention_with_synthetic_http(tmp_path, monkeypatch):
+    """Unlike focused terminal-state fixtures, this exercises an actual
+    World input -> Kernel -> tool call -> provider continuation -> World result.
+    The HTTP provider responses remain an explicit synthetic fixture.
+    """
+    import json
+    import time
+
+    import httpx
+    from fastapi.testclient import TestClient
+
+    from per_pulse.app import create_app
+    from per_pulse.execution import PageExecution
+    from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
+
+    monkeypatch.setenv("PER_PULSE_ATTENTION_TEST_KEY", "synthetic-test-credential")
+    requests = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        has_tool_reply = any(m.get("role") == "tool" for m in body["messages"])
+        if not has_tool_reply:
+            delta = {"tool_calls": [{
+                "index": 0, "id": "fixture-attention", "type": "function",
+                "function": {"name": "attention", "arguments": json.dumps({
+                    "op": "hold", "note": "Keep exploring the visitor's first experience.",
+                    "drive": 0.7,
+                })},
+            }]}
+            finish = "tool_calls"
+        else:
+            delta = {"content": "I kept the design goal as a local thought."}
+            finish = "stop"
+        chunks = [
+            {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
+        ]
+        stream = "".join("data: " + json.dumps(item) + "\n\n" for item in chunks)
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"},
+            content=stream + "data: [DONE]\n\n",
+        )
+
+    def factory(_scope):
+        return ChatHTTPModelAdapter(
+            ChatHTTPConfig(
+                "https://fixture.invalid/chat/completions",
+                "native-attention-fixture", credential_env="PER_PULSE_ATTENTION_TEST_KEY",
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+
+    pulse = PulseSettings(
+        enabled=True, check_interval_seconds=0.01, spontaneous_rate=0,
+        refractory_seconds=0, max_background_pulses_per_hour=2,
+    )
+    with TestClient(create_app(tmp_path, pulse=pulse, model_factory=factory)) as client:
+        response = client.post(
+            "/api/pages/home/messages",
+            json={"content": "Think about a useful first-time visitor experience."},
+        )
+        assert response.status_code == 202, response.text
+        r = client.app.state.pages.runtime
+        execution = PageExecution(r)
+        deadline = time.monotonic() + 12
+        final = None
+        while time.monotonic() < deadline:
+            final = execution.snapshot("home")
+            if final["turnId"] and final["status"] in {"idle", "error"}:
+                break
+            time.sleep(0.025)
+        assert final is not None and final["status"] == "idle", final
+        r.context_pulse.tick()
+        note = r.context_pulse.inspect_attention(None)["retained"]
+        assert note["note"] == "Keep exploring the visitor's first experience."
+        assert note["drive"] == 0.7
+        assert note["sourceTurnId"] == final["turnId"]
+        assert note["sourceActionId"]
+        assert len(requests) >= 2
+        advertised = {tool["function"]["name"] for tool in requests[0]["tools"]}
+        assert "attention" in advertised
+        assert r.context_pulse.snapshot()["budget"]["used"] == 0
