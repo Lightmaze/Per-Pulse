@@ -72,8 +72,10 @@ try {
   // One Work's pending approval must not hold the whole continuing subject.
   await page.getByRole('link',{name:'Home',exact:true}).click();
   await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home can answer while another Work awaits approval.');
+  const repliesBeforeApproval = await page.locator('.message-assistant').count();
   await page.getByRole('button',{name:'Send message',exact:true}).click();
-  await page.getByText('Synthetic model fixture: this page has finished its turn.',{exact:true}).waitFor();
+  await wait(async()=>await page.locator('.message-assistant').count()>repliesBeforeApproval,
+             'foreground Home response while sibling approval is pending');
   check('foreground Home stays usable while a sibling Work awaits approval',true);
   await page.goto(base+'/page/'+declinedId);
   await page.getByRole('button',{name:'Decline',exact:true}).waitFor();
@@ -90,8 +92,10 @@ try {
   check('UI cancels the exact continuing turn',true);
   await page.getByRole('link',{name:'Home',exact:true}).click();
   await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home keeps working.');
+  const repliesBeforeCancellation = await page.locator('.message-assistant').count();
   await page.getByRole('button',{name:'Send message',exact:true}).click();
-  await page.getByText('Synthetic model fixture: this page has finished its turn.',{exact:true}).waitFor({timeout:15000});
+  await wait(async()=>await page.locator('.message-assistant').count()>repliesBeforeCancellation,
+             'foreground Home response after sibling cancellation');
   check('Home remains usable after sibling cancellation',true);
   await create('Completed effect with response failure','WRITE_REDACTED');
   await page.getByRole('button',{name:'Allow once',exact:true}).click();
