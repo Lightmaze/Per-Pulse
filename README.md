@@ -22,10 +22,10 @@ The server stores pages, messages, and references in the existing Pulse persiste
 
 ## Run from source
 
-Requirements: Python 3.12 or later and Node.js 20.19 or later. Run these commands from the repository root in a POSIX shell:
+Requirements: Python 3.12 or later and Node.js 20.19 or later. **The default `main` branch still contains only the project title while this candidate is in Draft PR #31.** To try the working review version, explicitly check out that branch (not an empty default checkout):
 
 ```sh
-git clone https://github.com/Lightmaze/Per-Pulse.git
+git clone --branch integration/installed-alpha-main-candidate-20261026 --single-branch https://github.com/Lightmaze/Per-Pulse.git
 cd Per-Pulse
 python -m venv .venv
 source .venv/bin/activate
