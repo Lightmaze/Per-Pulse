@@ -109,7 +109,7 @@ try {
   assert.equal(await page.getByText(thought.note, { exact: true }).count(), 0);
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   checks.push('other local Work cannot see Home thought');
-  await page.getByRole('link', { name: 'Home', exact: true }).click();
+  await page.locator('.sidebar .main-nav a').click();
 
   // The original message and IDs remain literal when viewing in Chinese.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -142,7 +142,7 @@ try {
   checks.push('Work draft survives source navigation, language change and restart');
 
   // A second original model tool action releases the note, not a synthetic UI toggle.
-  await page.getByRole('link', { name: '主页', exact: true }).click();
+  await page.locator('.sidebar .main-nav a').click();
   await page.locator('.composer textarea').fill('RELEASE_LOCAL_THOUGHT: that observation is complete.');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await wait(async () => (await (await fetch(base + '/api/pulse')).json())
