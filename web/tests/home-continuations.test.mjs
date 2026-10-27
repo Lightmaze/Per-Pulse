@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { homeContinuations } from '../src/homeContinuations.ts';
+import { homeContinuations, homeWorkNeedsAttention } from '../src/homeContinuations.ts';
 
 const work = (id) => ({ id, kind: 'work', title: id });
 const pages = [{ id: 'home', kind: 'home', title: 'Home' }, work('source'), work('receiver'), work('another')];
@@ -53,4 +53,30 @@ test('An unreadable source identity never becomes an invented message anchor', (
     sourceEventId: 'original-a', sourceMessageId: 'unrelated-message',
   })), pages);
   assert.deepEqual(row.source, { pageId: 'source' });
+});
+
+test('Home routes real pending approvals and failures to their original Work, not a new task', () => {
+  const live = [
+    { ...work('ready'), status: 'idle', updatedAt: '2026-10-26T18:00:00Z' },
+    { ...work('failed'), status: 'error', updatedAt: '2026-10-26T21:00:00Z' },
+    { ...work('older-approval'), status: 'needs_attention', updatedAt: '2026-10-26T19:00:00Z' },
+    { ...work('newer-approval'), status: 'needs_attention', updatedAt: '2026-10-26T20:00:00Z' },
+    { ...work('working'), status: 'working', updatedAt: '2026-10-26T22:00:00Z' },
+    { id: 'home', kind: 'home', status: 'needs_attention', updatedAt: '2026-10-26T23:00:00Z' },
+  ];
+  assert.deepEqual(homeWorkNeedsAttention(live).map(page => page.id), [
+    'newer-approval', 'older-approval', 'failed',
+  ]);
+  assert.deepEqual(homeWorkNeedsAttention(live, 2).map(page => page.id), [
+    'newer-approval', 'older-approval',
+  ]);
+  assert.deepEqual(homeWorkNeedsAttention(live, 0), []);
+});
+
+test('Home does not keep a stale approval once the live Work settles', () => {
+  const prior = { ...work('source'), status: 'needs_attention', updatedAt: '2026-10-26T19:00:00Z' };
+  const settled = { ...prior, status: 'idle', updatedAt: '2026-10-26T19:01:00Z' };
+  assert.deepEqual(homeWorkNeedsAttention([prior]).map(page => page.id), ['source']);
+  assert.deepEqual(homeWorkNeedsAttention([settled]), []);
+  assert.deepEqual(homeWorkNeedsAttention([prior], -1), []);
 });
