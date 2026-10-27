@@ -17,10 +17,8 @@ import { HomeContinuations } from './components/HomeContinuations';
 import { LearningDialog } from './components/LearningDialog';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
-
 export default function App() {
-  const { t, pageTitle } = useLanguage();
+  const { t, pageTitle, errorText } = useLanguage();
   const workspace = useWorkspace();
   const { bootstrap, route, view, loading, error, setError, applyView, refreshPage, syncError, isRefreshing, refreshWorkspace } = workspace;
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -131,7 +129,7 @@ export default function App() {
         requestAnimationFrame(() => { if (currentPage.current === id) document.getElementById(`message-${response.messageId}`)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });
         input.current?.focus();
       }
-    } catch (problem) { setError(errorMessage(problem)); }
+    } catch (problem) { setError(errorText(problem)); }
     finally { setSending(false); }
   };
 
@@ -145,7 +143,7 @@ export default function App() {
       refreshPage(sourceId).catch(() => {});
       navigate(response.page.id, { pageId: sourceId, messageId: message?.id, referenceId: response.reference.id });
       setToast(t('app.pageCreated'));
-    } catch (problem) { setModalError(errorMessage(problem)); }
+    } catch (problem) { setModalError(errorText(problem)); }
     finally { setBusy(false); }
   };
 
@@ -166,7 +164,7 @@ export default function App() {
     try {
       const response = await api.reference(route.id, { targetPageId: page.id, label: page.title, sourceMessageId: modal.message?.id });
       applyView(response.view); setModal(null); setToast(t('app.pageLinked', { title: page.title }));
-    } catch (problem) { setModalError(errorMessage(problem)); }
+    } catch (problem) { setModalError(errorText(problem)); }
     finally { setBusy(false); }
   };
 
@@ -178,14 +176,14 @@ export default function App() {
       applyView(response.view);
       navigate('home', undefined, response.messageId);
       setToast(t('app.broughtHome'));
-    } catch (problem) { setModalError(errorMessage(problem)); }
+    } catch (problem) { setModalError(errorText(problem)); }
     finally { setBusy(false); }
   };
 
   const renamePage = async (title: string) => {
     setBusy(true); setModalError('');
     try { const next = await api.rename(route.id, title); applyView(next); setModal(null); }
-    catch (problem) { setModalError(errorMessage(problem)); }
+    catch (problem) { setModalError(errorText(problem)); }
     finally { setBusy(false); }
   };
 
@@ -236,7 +234,7 @@ export default function App() {
             {sourceNotice ? <p className="conversation-note source-notice" role="status">{sourceNotice}</p> : null}
           </section>
           {route.id === 'home' && bootstrap ? <HomeContinuations pages={pages} workspaceId={bootstrap.workspaceId} navigate={navigate} /> : null}
-          {error ? <div className="error-notice" role="alert"><span>{error}</span><button disabled={isRefreshing} onClick={() => { setError(''); refreshWorkspace().catch(problem => setError(errorMessage(problem))); }}>{t('app.retry')}</button></div> : null}
+          {error ? <div className="error-notice" role="alert"><span>{error}</span><button disabled={isRefreshing} onClick={() => { setError(''); refreshWorkspace().catch(problem => setError(errorText(problem))); }}>{t('app.retry')}</button></div> : null}
           {syncError && !error ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <PageArtifacts key={`artifacts-${route.id}`} view={view} /> : null}
@@ -251,7 +249,7 @@ export default function App() {
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'rename' ? <RenameDialog initial={view?.page.title ?? ''} busy={busy} error={modalError} close={closeModal} rename={renamePage} /> : null}
-    {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast(t('app.connectionChecked'))).catch(problem => setToast(errorMessage(problem)))} /> : null}
+    {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast(t('app.connectionChecked'))).catch(problem => setToast(errorText(problem)))} /> : null}
     {modal?.kind === 'learning' ? <LearningDialog pageId={route.id} pageTitle={view?.page.title ?? t('dialogs.thisPage')} close={closeModal} navigate={navigate} /> : null}
   </div>;
 }
