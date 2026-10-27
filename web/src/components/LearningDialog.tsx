@@ -14,7 +14,7 @@ function describeCondition(value: LessonCondition, t: Translate): string {
   return children.map(child => typeof child === 'string' ? child : `(${describeCondition(child, t)})`).join(t(all ? 'learning.all' : 'learning.any'));
 }
 
-type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; counterexamples?: string[] };
+type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; counterexamples?: string[]; shift?: PostureExperience['shift'] };
 
 function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
   experience: PostureExperience; pageId: string; busy: boolean;
@@ -28,22 +28,31 @@ function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
   const [refineOpen, setRefineOpen] = useState(false);
   const [lessonDraft, setLessonDraft] = useState(experience.lesson);
   const [exceptionDraft, setExceptionDraft] = useState(experience.counterexamples.join('\n'));
+  const [shiftDraft, setShiftDraft] = useState<PostureExperience['shift']>({ ...experience.shift });
   const [refineEvidence, setRefineEvidence] = useState('');
   const refinedLesson = lessonDraft.trim();
   const refinedExceptions = exceptionDraft.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  const refinedShift = {
+    understanding: shiftDraft.understanding.trim(),
+    candidates: shiftDraft.candidates.trim(),
+    delivery: shiftDraft.delivery.trim(),
+  };
   const validRefinement = Boolean(refinedLesson) && refinedLesson.length <= 4000
     && refinedExceptions.length >= 1 && refinedExceptions.length <= 8
-    && refinedExceptions.every(value => value.length <= 2000);
+    && refinedExceptions.every(value => value.length <= 2000)
+    && Object.values(refinedShift).every(value => value.length > 0 && value.length <= 2400);
   const changedRefinement = refinedLesson !== experience.lesson
-    || JSON.stringify(refinedExceptions) !== JSON.stringify(experience.counterexamples);
+    || JSON.stringify(refinedExceptions) !== JSON.stringify(experience.counterexamples)
+    || Object.keys(refinedShift).some(key => refinedShift[key as keyof typeof refinedShift] !== experience.shift[key as keyof typeof refinedShift]);
   const beginRefinement = () => {
     setLessonDraft(experience.lesson);
     setExceptionDraft(experience.counterexamples.join('\n'));
+    setShiftDraft({ ...experience.shift });
     setRefineEvidence('');
     setRefineOpen(true);
   };
   const submitRefinement = async () => {
-    await revise(experience, { lesson: refinedLesson, counterexamples: refinedExceptions }, refineEvidence.trim() || undefined);
+    await revise(experience, { lesson: refinedLesson, counterexamples: refinedExceptions, shift: refinedShift }, refineEvidence.trim() || undefined);
     setRefineEvidence('');
     setRefineOpen(false);
   };
@@ -82,6 +91,17 @@ function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
       <textarea id={`refine-lesson-${experience.id}`} rows={3} value={lessonDraft} maxLength={4000} disabled={busy} onChange={event => setLessonDraft(event.target.value)} />
       <label className="field-label" htmlFor={`refine-exceptions-${experience.id}`}>{t('learning.refineExceptions')}</label>
       <textarea id={`refine-exceptions-${experience.id}`} rows={3} value={exceptionDraft} maxLength={16000} disabled={busy} onChange={event => setExceptionDraft(event.target.value)} />
+      <details className="lesson-refinement-shift">
+        <summary>{t('learning.refineEffect')}</summary>
+        <p className="lesson-note">{t('learning.refineEffectHelp')}</p>
+        {(['understanding', 'candidates', 'delivery'] as const).map(field => <div key={field}>
+          <label className="field-label" htmlFor={`refine-${field}-${experience.id}`}>
+            {t(field === 'understanding' ? 'learning.understanding' : field === 'candidates' ? 'learning.actions' : 'learning.delivery')}
+          </label>
+          <textarea id={`refine-${field}-${experience.id}`} rows={2} value={shiftDraft[field]} maxLength={2400}
+            disabled={busy} onChange={event => setShiftDraft(current => ({ ...current, [field]: event.target.value }))} />
+        </div>)}
+      </details>
       <label className="field-label" htmlFor={`refine-evidence-${experience.id}`}>{t('learning.refineEvidence')}</label>
       <textarea id={`refine-evidence-${experience.id}`} rows={2} value={refineEvidence} maxLength={1500} disabled={busy} onChange={event => setRefineEvidence(event.target.value)} placeholder={t('learning.refineEvidenceHint')} />
       <div className="lesson-actions">

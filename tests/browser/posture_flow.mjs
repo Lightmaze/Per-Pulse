@@ -148,6 +148,9 @@ try {
   const beforeManualRefinement = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
   const refinedLesson = 'Offer the practice interaction before optional setup, after any required booking check. Make the first step usable without optional profile questions.';
   const refinedExceptions = ['A required booking has not been confirmed.', 'The user explicitly requests a short registration form.'];
+  const refinedShift = { ...beforeManualRefinement.shift,
+    candidates: 'Offer a playable practice scene when free exploration is requested; retain short registration when it is the actual goal.',
+    delivery: 'Ship a usable first practice exchange or, for explicit registration, a working minimal form.' };
   await lesson.getByRole('button', { name: 'Refine lesson', exact: true }).click();
   const newLesson = lesson.getByRole('textbox', { name: 'What should guide future work?', exact: true });
   const newExceptions = lesson.getByRole('textbox', { name: 'Where should this lesson not apply? (one per line)', exact: true });
@@ -155,6 +158,12 @@ try {
   assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isEnabled(), false);
   await newLesson.fill(refinedLesson);
   await newExceptions.fill(refinedExceptions.join('\n'));
+  await lesson.getByText('Revise how this changes future choices', { exact: true }).click();
+  const actionShift = lesson.getByRole('textbox', { name: 'Possible actions', exact: true });
+  await actionShift.fill('');
+  assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isEnabled(), false);
+  await actionShift.fill(refinedShift.candidates);
+  await lesson.getByRole('textbox', { name: 'Ready to deliver', exact: true }).fill(refinedShift.delivery);
   const reportedRevision = 'The optional setup questions delayed the playable interaction in this Work.';
   await lesson.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).fill(reportedRevision);
   await lesson.getByRole('button', { name: 'Save refinement', exact: true }).click();
@@ -166,6 +175,7 @@ try {
   assert.deepEqual(afterManualRefinement.encounter, beforeManualRefinement.encounter);
   assert.equal(afterManualRefinement.revision, beforeManualRefinement.revision + 1);
   assert.deepEqual(afterManualRefinement.counterexamples, refinedExceptions);
+  assert.deepEqual(afterManualRefinement.shift, refinedShift);
   assert.equal(afterManualRefinement.feedback.length, beforeManualRefinement.feedback.length + 1);
   assert.equal(afterManualRefinement.feedback.at(-1).evidence, reportedRevision);
   assert.equal(afterManualRefinement.feedback.at(-1).source.kind, 'operator_described_refinement');
@@ -191,6 +201,7 @@ try {
   const sharedView = (await (await fetch(base + '/api/pages/' + encodeURIComponent((await (await fetch(base + '/api/bootstrap')).json()).pages.find(item => item.title === 'Registration tool').id) + '/posture')).json()).experiences[0];
   assert.equal(sharedView.lesson, refinedLesson);
   assert.deepEqual(sharedView.counterexamples, refinedExceptions);
+  assert.deepEqual(sharedView.shift, refinedShift);
   assert.equal(sharedView.source, undefined);
   assert.equal(sharedView.encounter, undefined);
   await lesson.getByRole('button', { name: 'Go to correction', exact: true }).click();

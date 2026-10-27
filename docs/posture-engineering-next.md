@@ -74,7 +74,12 @@ identities stay unchanged, the new revision and described evidence survive
 restart together, and another Work receives only the revised abstraction.
 The reported outcome is explicitly tagged `operator_described_refinement`;
 it is **not** a newly observed native user event or evidence that a model
-autonomously learned. Without a description, quick operator revisions retain
+autonomously learned. The same source-Work editor now optionally exposes the
+three existing action/understanding/delivery `shift` fields in a collapsed
+section. An operator can revise the *proposed future action* as well as the
+lesson text and exceptions in one atomic, version-checked native revision;
+unchanged fields remain intact, and the receiving Work only gets the shared
+abstraction. Blank or oversized shift fields are refused before save. Without a description, quick operator revisions retain
 the previous behavior. Sharing/pausing changes cannot masquerade as attributed
 learning; later genuine model-interpreted user corrections still follow the
 existing source-message and turn-evidence path.
