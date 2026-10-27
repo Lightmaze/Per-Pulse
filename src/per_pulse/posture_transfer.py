@@ -56,6 +56,23 @@ STAGES = (
 )
 
 
+TASK_ORDERS = ("notice-first", "outline-first")
+
+
+def trial_stages(task_order: str = "notice-first") -> tuple[tuple[str, str, str], ...]:
+    """Counterbalance notice/outline order *within* both memory phases.
+
+    Source/feedback must precede baseline, and explicit sharing must precede
+    conditional trials. This cannot counterbalance baseline-versus-sharing
+    order or equalize the extra posture computations.
+    """
+    if task_order not in TASK_ORDERS:
+        raise ValueError("task_order must be notice-first or outline-first")
+    if task_order == "notice-first":
+        return STAGES
+    return (STAGES[0], STAGES[1], STAGES[3], STAGES[2], STAGES[5], STAGES[4])
+
+
 def _provider_identity(adapter):
     return {
         "adapter_id": adapter.capabilities.adapter_id,
@@ -125,6 +142,7 @@ def _exposure_summary(record, requests):
 def run_ordinary_transfer(
     output: Path, *, model_factory=None, training_calls: int = 12,
     trial_calls: int = 8, stage_timeout: float = 180,
+    task_order: str = "notice-first",
 ) -> dict:
     """Compare fresh contexts before and after explicit sharing of a native lesson.
 
@@ -142,6 +160,7 @@ def run_ordinary_transfer(
         raise ValueError("call ceilings must be integers between 1 and 64")
     if type(stage_timeout) not in (float, int) or not 1 <= stage_timeout <= 1800:
         raise ValueError("stage_timeout must be between 1 and 1800 seconds")
+    stages = trial_stages(task_order)
     factory = model_factory if model_factory is not None else model_factory_from_env()
     if factory is None:
         raise ValueError("No provider configured; no external request was made. Configure the native P_PULSE provider environment explicitly.")
@@ -154,7 +173,7 @@ def run_ordinary_transfer(
     if output.exists():
         raise ValueError("output directory must be new")
 
-    ceilings = {partition: training_calls if partition == "training" else trial_calls for _, partition, _ in STAGES}
+    ceilings = {partition: training_calls if partition == "training" else trial_calls for _, partition, _ in stages}
     lock = threading.Lock()
     accounting = {"stage": "source", "partition": "training", "counts": dict.fromkeys(ceilings, 0), "requests": []}
 
@@ -182,24 +201,24 @@ def run_ordinary_transfer(
     output.mkdir(parents=True, mode=0o700)
     (output / ".gitignore").write_text("*\n")
     protocol = [{"stage": name, "budget_partition": partition, "prompt": prompt,
-                 "prompt_sha256": _digest(prompt.encode())} for name, partition, prompt in STAGES]
+                 "prompt_sha256": _digest(prompt.encode())} for name, partition, prompt in stages]
     record = {
         "schema": SCHEMA, "status": "running", "origin": "synthetic_fixture" if test_only else "real_provider",
         "provider_identity": identity, "budget": ceilings, "stage_timeout_seconds": stage_timeout,
-        "protocol": protocol, "stages": [], "learned_lessons": [], "shared_lessons": [],
+        "protocol": protocol, "task_order": task_order, "stages": [], "learned_lessons": [], "shared_lessons": [],
         "capture_status": "pending", "review_status": "unreviewed", "eligible_for_behavior_comparison": False,
         "ordinary_feedback_has_learning_instruction": False,
         "sharing_policy": "Operator explicitly promotes only source-attributed native lessons after both no-memory targets settle.",
-        "condition_order": [name for name, _, _ in STAGES[2:]],
+        "condition_order": [name for name, _, _ in stages[2:]],
         "limitations": [
-            "Baseline runs first; provider drift and order effects remain possible.",
+            "Baseline runs before sharing; task-order reversal only counterbalances notice versus outline within each phase.",
             "Conditional trials add posture computations; equal request ceilings do not match realized compute.",
             "Explicit operator sharing tests abstraction transfer, not spontaneous cross-page promotion.",
             "Absence checks cover exact source text and private packet fields, not all semantic paraphrases.",
             "Native capture and request exposure do not score the usefulness of the later response.",
         ],
     }
-    manifest = {"schema": SCHEMA, "protocol": protocol, "budget": ceilings, "provider_identity": identity,
+    manifest = {"schema": SCHEMA, "protocol": protocol, "task_order": task_order, "budget": ceilings, "provider_identity": identity,
                 "adapter_test_only": test_only}
     manifest_path = output / "ordinary-transfer-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
@@ -221,8 +240,8 @@ def run_ordinary_transfer(
         source_page = None
         try:
             await pages.start()
-            for name, partition, prompt in STAGES:
-                if name == "conditional_transfer":
+            for name, partition, prompt in stages:
+                if name == stages[4][0]:
                     for lesson in record["learned_lessons"]:
                         promoted = pages.learning.revise(source_page, lesson["id"], lesson["revision"], {"scope": "subject"})["experience"]
                         record["shared_lessons"].append({"id": promoted["id"], "revision": promoted["revision"],
@@ -360,9 +379,13 @@ def audit_ordinary_transfer(output: Path) -> dict:
         return {"status": "incomplete", "run_status": record.get("status"), "errors": errors,
                 "review_status": "unreviewed", "eligible_for_behavior_comparison": False}
     try:
+        task_order = record.get("task_order", "notice-first")
+        expected_stages = trial_stages(task_order)
         expected_protocol = [{"stage": name, "budget_partition": partition, "prompt": prompt,
-                              "prompt_sha256": _digest(prompt.encode())} for name, partition, prompt in STAGES]
-        if record["protocol"] != expected_protocol or manifest["protocol"] != expected_protocol:
+                              "prompt_sha256": _digest(prompt.encode())} for name, partition, prompt in expected_stages]
+        if (record["protocol"] != expected_protocol or manifest["protocol"] != expected_protocol
+                or manifest.get("task_order", "notice-first") != task_order
+                or record.get("condition_order") != [name for name, _, _ in expected_stages[2:]]):
             errors.append("predeclared_protocol_mismatch")
         if record["provider_identity"] != manifest["provider_identity"] or record["budget"] != manifest["budget"]:
             errors.append("host_configuration_mismatch")
@@ -387,7 +410,7 @@ def audit_ordinary_transfer(output: Path) -> dict:
                 value["expected_memory_exposure"] and value["source_transcript_absent"] for value in exposures.values()):
             errors.append("transfer_exposure_mismatch")
         stages = record["stages"]
-        expected_names = [name for name, _, _ in STAGES][:2 if record["status"] == "capture_absent" else 6]
+        expected_names = [name for name, _, _ in expected_stages][:2 if record["status"] == "capture_absent" else 6]
         if [stage["stage"] for stage in stages] != expected_names:
             raise ValueError("completed stage sequence does not match outcome")
         if stages[0]["context_id"] != stages[1]["context_id"] or len({value["context_id"] for value in stages}) != len(stages) - 1:
@@ -493,7 +516,7 @@ def audit_ordinary_transfer(output: Path) -> dict:
         audited = Counter(value["audit"]["request_sha256"] for value in requests)
         if audited - Counter(native_requests) or Counter(completed_requests) - audited:
             errors.append("native_request_audit_mismatch")
-        partitions = {name: partition for name, partition, _ in STAGES}
+        partitions = {name: partition for name, partition, _ in expected_stages}
         for request in requests:
             if (request["stage"] not in request_scopes
                     or request["budget_partition"] != partitions.get(request["stage"])
