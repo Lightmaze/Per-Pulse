@@ -86,6 +86,14 @@ remain available when the background quota is exhausted.
 remain navigation links. The detailed [pulse core contract](docs/pulse-core.md)
 explains configuration, connection semantics, recovery and verification.
 
+An optional `--pulse-hourly-tokens N` adds a separate background token
+*admission* envelope. Each local activation reserves
+`--pulse-token-reservation` tokens (default 8192) until accounted usage is
+available. A positive `N` must cover at least one reservation; the CLI rejects
+an impossible pairing rather than silently starving every local activation.
+Use `N=0` to intentionally prevent new background token admission. This is
+not a hard model-token or monetary spending limit.
+
 The default command leaves automatic pulses disabled. The quota counts
 background admissions, not individual provider requests, tokens or money.
 

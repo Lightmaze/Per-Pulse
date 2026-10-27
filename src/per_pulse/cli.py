@@ -37,6 +37,12 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("--pulse-hourly-tokens requires --pulse.")
     if args.pulse_token_reservation <= 0:
         parser.error("--pulse-token-reservation must be positive.")
+    if (args.pulse_hourly_tokens is not None
+            and 0 < args.pulse_hourly_tokens < args.pulse_token_reservation):
+        parser.error(
+            "--pulse-hourly-tokens must be 0 (to hold background admission) "
+            "or at least --pulse-token-reservation; otherwise no local activation can be admitted."
+        )
     if not 1 <= args.pulse_main_rounds <= 16:
         parser.error("--pulse-main-rounds must be between 1 and 16.")
     if args.pulse_main_rounds != 4 and not args.pulse:
