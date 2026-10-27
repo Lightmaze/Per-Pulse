@@ -216,7 +216,7 @@ export default function App() {
           </Fragment>)}
         </nav>
         <button className="text-button pulse-activity-trigger" onClick={() => { setModal(null); setSidebarOpen(false); setPulseOpen(true); }}>{t('pulse.title')}</button>
-        {route.id !== 'home' ? <button className="text-button return-to-thread" onClick={goBack} aria-label={t('app.back')}><Icon name="back" size={16} /><span className="return-label-long">{t('app.back')}</span><span className="return-label-short">Back</span></button> : null}
+        {route.id !== 'home' ? <button className="text-button return-to-thread" onClick={goBack} aria-label={t('app.back')}><Icon name="back" size={16} /><span className="return-label-long">{t('app.back')}</span><span className="return-label-short">{t('app.backShort')}</span></button> : null}
       </header>
       <main className="workspace-main" ref={main} onScroll={() => {
         if (!workspaceId) return;
@@ -237,7 +237,7 @@ export default function App() {
           </section>
           {route.id === 'home' && bootstrap ? <HomeContinuations pages={pages} workspaceId={bootstrap.workspaceId} navigate={navigate} /> : null}
           {error ? <div className="error-notice" role="alert"><span>{error}</span><button disabled={isRefreshing} onClick={() => { setError(''); refreshWorkspace().catch(problem => setError(errorMessage(problem))); }}>{t('app.retry')}</button></div> : null}
-          {syncError && !error ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? 'Checking…' : 'Refresh updates'}</button></div> : null}
+          {syncError && !error ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <PageArtifacts key={`artifacts-${route.id}`} view={view} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
@@ -251,7 +251,7 @@ export default function App() {
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'rename' ? <RenameDialog initial={view?.page.title ?? ''} busy={busy} error={modalError} close={closeModal} rename={renamePage} /> : null}
-    {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast('Connection checked.')).catch(problem => setToast(errorMessage(problem)))} /> : null}
-    {modal?.kind === 'learning' ? <LearningDialog pageId={route.id} pageTitle={view?.page.title ?? 'this page'} close={closeModal} navigate={navigate} /> : null}
+    {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast(t('app.connectionChecked'))).catch(problem => setToast(errorMessage(problem)))} /> : null}
+    {modal?.kind === 'learning' ? <LearningDialog pageId={route.id} pageTitle={view?.page.title ?? t('dialogs.thisPage')} close={closeModal} navigate={navigate} /> : null}
   </div>;
 }
