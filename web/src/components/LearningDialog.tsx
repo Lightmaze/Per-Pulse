@@ -14,15 +14,36 @@ function describeCondition(value: LessonCondition, t: Translate): string {
   return children.map(child => typeof child === 'string' ? child : `(${describeCondition(child, t)})`).join(t(all ? 'learning.all' : 'learning.any'));
 }
 
+type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; counterexamples?: string[] };
+
 function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
   experience: PostureExperience; pageId: string; busy: boolean;
-  revise: (experience: PostureExperience, changes: { active?: boolean; scope?: 'context' | 'subject' }) => void;
+  revise: (experience: PostureExperience, changes: LessonRevision) => Promise<void>;
   feedback: (experience: PostureExperience, verdict: 'useful' | 'harmful', evidence: string) => Promise<void>;
   navigate: Navigate;
 }) {
   const { t } = useLanguage();
   const [evidence, setEvidence] = useState('');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [lessonDraft, setLessonDraft] = useState(experience.lesson);
+  const [exceptionDraft, setExceptionDraft] = useState(experience.counterexamples.join('\n'));
+  const refinedLesson = lessonDraft.trim();
+  const refinedExceptions = exceptionDraft.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  const validRefinement = Boolean(refinedLesson) && refinedLesson.length <= 4000
+    && refinedExceptions.length >= 1 && refinedExceptions.length <= 8
+    && refinedExceptions.every(value => value.length <= 2000);
+  const changedRefinement = refinedLesson !== experience.lesson
+    || JSON.stringify(refinedExceptions) !== JSON.stringify(experience.counterexamples);
+  const beginRefinement = () => {
+    setLessonDraft(experience.lesson);
+    setExceptionDraft(experience.counterexamples.join('\n'));
+    setRefineOpen(true);
+  };
+  const submitRefinement = async () => {
+    await revise(experience, { lesson: refinedLesson, counterexamples: refinedExceptions });
+    setRefineOpen(false);
+  };
   const originalId = experience.sourceAnchor?.resultMessageId ?? experience.source?.source_message_id;
   const correctionId = experience.sourceAnchor?.feedbackMessageId ?? experience.source?.feedback_message_id;
   // Inspect the original Work without losing the receiving Work's place or draft.
@@ -47,10 +68,22 @@ function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
     </details> : null}
     {experience.feedback?.length ? <details><summary>{t('learning.later', { count: experience.feedback.length })}</summary>{experience.feedback.map((entry, index) => <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}</p>)}</details> : null}
     {experience.canEdit ? <div className="lesson-actions">
-      <button className="secondary-button" disabled={busy} onClick={() => revise(experience, { active: !experience.active })}>{t(experience.active ? 'learning.pause' : 'learning.resume')}</button>
-      <button className="secondary-button" disabled={busy} onClick={() => revise(experience, { scope: experience.scope === 'context' ? 'subject' : 'context' })}>{t(experience.scope === 'context' ? 'learning.share' : 'learning.keepLocal')}</button>
+      <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { active: !experience.active }).catch(() => {}); }}>{t(experience.active ? 'learning.pause' : 'learning.resume')}</button>
+      <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { scope: experience.scope === 'context' ? 'subject' : 'context' }).catch(() => {}); }}>{t(experience.scope === 'context' ? 'learning.share' : 'learning.keepLocal')}</button>
+      <button className="text-button" disabled={busy} onClick={beginRefinement}>{t('learning.refine')}</button>
       <button className="text-button" disabled={busy} onClick={() => setFeedbackOpen(value => !value)}>{t('learning.giveFeedback')}</button>
     </div> : experience.sourcePageId && !experience.sourceAnchor ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin)}>{t('learning.editSource')}</button> : null}
+    {refineOpen && experience.canEdit ? <div className="lesson-feedback">
+      <p className="lesson-note">{t('learning.refineHelp')}</p>
+      <label className="field-label" htmlFor={`refine-lesson-${experience.id}`}>{t('learning.refineLesson')}</label>
+      <textarea id={`refine-lesson-${experience.id}`} rows={3} value={lessonDraft} maxLength={4000} disabled={busy} onChange={event => setLessonDraft(event.target.value)} />
+      <label className="field-label" htmlFor={`refine-exceptions-${experience.id}`}>{t('learning.refineExceptions')}</label>
+      <textarea id={`refine-exceptions-${experience.id}`} rows={3} value={exceptionDraft} maxLength={16000} disabled={busy} onChange={event => setExceptionDraft(event.target.value)} />
+      <div className="lesson-actions">
+        <button className="secondary-button" disabled={busy || !validRefinement || !changedRefinement} onClick={() => { void submitRefinement().catch(() => {}); }}>{t('learning.saveRefinement')}</button>
+        <button className="text-button" disabled={busy} onClick={() => setRefineOpen(false)}>{t('learning.cancelRefinement')}</button>
+      </div>
+    </div> : null}
     {experience.scope === 'subject' && experience.canEdit ? <p className="lesson-note">{t('learning.sharingNote')}</p> : null}
     {feedbackOpen ? <div className="lesson-feedback"><label className="field-label" htmlFor={`feedback-${experience.id}`}>{t('learning.changed')}</label><textarea id={`feedback-${experience.id}`} rows={3} value={evidence} maxLength={1500} onChange={event => setEvidence(event.target.value)} placeholder={t('learning.feedbackPlaceholder')} /><div className="lesson-actions"><button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button><button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t('learning.hurt')}</button></div></div> : null}
   </article>;
@@ -90,7 +123,7 @@ export function LearningDialog({ pageId, pageTitle, close, navigate }: { pageId:
     {view && !view.enabled ? <p>{t('learning.disabled')}</p> : null}
     {view?.enabled && !view.experiences.length ? <div className="lessons-empty"><h3>{t('learning.emptyTitle')}</h3><p>{t('learning.emptyHelp')}</p><p>{t('learning.emptyModel')}</p></div> : null}
     {view?.experiences.map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} busy={busy} navigate={navigate}
-      revise={(item, changes) => { void update(() => api.reviseExperience(pageId, item, changes)).catch(() => {}); }}
+      revise={(item, changes) => update(() => api.reviseExperience(pageId, item, changes))}
       feedback={(item, verdict, evidence) => update(() => api.experienceFeedback(pageId, item, verdict, evidence))} />)}
   </Dialog>;
 }
