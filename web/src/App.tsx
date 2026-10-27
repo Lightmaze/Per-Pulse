@@ -214,7 +214,7 @@ export default function App() {
           </Fragment>)}
         </nav>
         <button className="text-button pulse-activity-trigger" onClick={() => { setModal(null); setSidebarOpen(false); setPulseOpen(true); }}>{t('pulse.title')}</button>
-        {route.id !== 'home' ? <button className="text-button return-to-thread" onClick={goBack} aria-label={t('app.back')}><Icon name="back" size={16} /><span className="return-label-long">{t('app.back')}</span><span className="return-label-short">{t('app.backShort')}</span></button> : null}
+        {(route.id !== 'home' || Boolean(route.origin)) ? <button className="text-button return-to-thread" onClick={goBack} aria-label={t('app.back')}><Icon name="back" size={16} /><span className="return-label-long">{t('app.back')}</span><span className="return-label-short">{t('app.backShort')}</span></button> : null}
       </header>
       <main className="workspace-main" ref={main} onScroll={() => {
         if (!workspaceId) return;

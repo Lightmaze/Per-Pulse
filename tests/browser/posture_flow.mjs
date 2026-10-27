@@ -161,13 +161,23 @@ try {
   assert.equal(await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).count(), 0);
   await lesson.getByRole('button', { name: 'Go to correction', exact: true }).click();
   await page.getByText('Let me try the interaction before asking for a profile.', { exact: true }).first().waitFor();
-  await page.goBack();
+  // The source is Home, which must now offer a direct return to the receiving
+  // Work. Reload on the source to prove the navigation origin survives refresh.
+  await page.reload();
+  await page.getByText('Let me try the interaction before asking for a profile.', { exact: true }).first().waitFor();
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await page.getByRole('button', { name: 'Registration tool', exact: true }).waitFor();
   assert.equal(await page.getByRole('textbox', { name: /^Message / }).inputValue(), unsentWorkDraft);
   await openLessons();
   await lesson.getByText('Source experience', { exact: true }).click();
   await lesson.getByRole('button', { name: 'Go to original result', exact: true }).click();
   await page.getByText('The first screen is a twelve-field intake form. [Explicit browser test fixture]', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await page.getByRole('button', { name: 'Registration tool', exact: true }).waitFor();
+  assert.equal(await page.getByRole('textbox', { name: /^Message / }).inputValue(), unsentWorkDraft);
+  // Continue the original Home-side lesson management after proving both
+  // sourced links return to the receiving Work without exposing raw feedback.
+  await page.locator('.breadcrumbs').getByRole('button', { name: 'Home', exact: true }).click();
   await openLessons();
   const other = await page.context().newPage();
   await other.goto(base);
