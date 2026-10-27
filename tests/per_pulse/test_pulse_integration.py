@@ -496,13 +496,25 @@ def test_native_background_model_round_ceiling_is_causally_scoped(tmp_path, monk
         eventually(lambda: view(client, target), lambda value: assistant_count(value) == 2)
         runtime = client.app.state.pages.runtime
         assert client.get("/api/pulse").json()["backgroundMainModelRoundLimit"] == 2
+        # The provider factory receives a *session* scope (no turn_id). Each
+        # actual model round belongs to a durable Kernel turn; inspect those
+        # scopes instead of mistaking the factory's session for a World turn.
+        sessions = {scope.session_id: scope.session_scope() for scope in fixture.scopes}
+        bound_turns = []
+        for session_scope in sessions.values():
+            kernel = runtime.kernel_service._runtime(session_scope)
+            bound_turns.extend(
+                (kernel, record.scope)
+                for record in kernel.store.turns_for_session(session_scope, limit=16)
+            )
+        assert len(bound_turns) == len(fixture.requests) == 4
         foreground, background = [], []
-        for scope in fixture.scopes:
+        for kernel, scope in bound_turns:
+            assert scope.turn_id
             world_turn = runtime.causal_ledger.get_turn_for_world(scope.turn_id, runtime.world_id)
             assert world_turn is not None
             event = runtime.causal_ledger.get_event(world_turn.event_id)
             assert event is not None
-            kernel = runtime.kernel_service._runtime(scope.session_scope())
             cap = kernel.runner.tool_provider.model_round_limit_for_scope(scope, 16)
             if event.kind.value == "propagation":
                 assert event.source.value == "propagation"
@@ -510,8 +522,7 @@ def test_native_background_model_round_ceiling_is_causally_scoped(tmp_path, monk
             else:
                 foreground.append(cap)
         assert background == [2]
-        assert foreground == [16, 16, 16]
-        assert len(fixture.requests) == 4
+        assert sorted(foreground) == [16, 16, 16]
 
     with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
         assert client.get("/api/pulse").json()["backgroundMainModelRoundLimit"] == 2
