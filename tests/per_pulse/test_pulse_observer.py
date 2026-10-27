@@ -167,3 +167,34 @@ def test_existing_report_and_invalid_duration_are_never_replaced(tmp_path):
         observe("http://127.0.0.1:8000", output, duration_seconds=1,
                 interval_seconds=1)
     assert output.read_text() == "KEEP"
+
+
+def test_read_only_observation_uses_actual_world_kernel_http_without_side_effects(tmp_path):
+    """The observer consumes the real product read API, not only a mock response."""
+    from per_pulse.service import PulseSettings
+    from test_pulse_integration import client_for, page
+
+    data = tmp_path / "native"
+    pulse = PulseSettings(enabled=True, spontaneous_rate=0,
+                          check_interval_seconds=0.01)
+    with client_for(data, pulse=pulse, model_factory=None) as service:
+        first = page(service, "Reading", "READING_LOCAL_SOURCE")
+        second = page(service, "Writing", "WRITING_LOCAL_SOURCE")
+        before = service.get("/api/bootstrap").json()
+        runtime = service.app.state.pages.runtime
+        original = [(event.id, event.status.value) for event in
+                    runtime.causal_ledger.list_events(limit=200)]
+        clock = Clock()
+        output = tmp_path / "native-observation.jsonl"
+        report = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=0.1, interval_seconds=0.1,
+                         client=service, clock=clock, sleep=clock.sleep)
+        after = [(event.id, event.status.value) for event in
+                 runtime.causal_ledger.list_events(limit=200)]
+        assert report["workspaceId"] == before["workspaceId"]
+        assert report["provider_configured_samples"] == 0
+        assert report["observed_events"] == 0
+        assert original == after, "Reading native status must not enqueue model work"
+        assert {p["id"] for p in service.get("/api/bootstrap").json()["pages"]} >= {
+            "home", first, second
+        }
