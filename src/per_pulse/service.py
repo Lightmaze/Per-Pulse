@@ -264,6 +264,20 @@ class PageService:
             state["providerConfigured"] = self.configured
             return state
 
+    def pulse_observation(self) -> dict:
+        """Bind one native Pulse status to the World and this live service instance.
+
+        A pair of independent HTTP reads can straddle a service restart and
+        attribute new-instance events to an old-instance observation. Keep
+        provenance and status in one response without starting any activity.
+        """
+        with self._lock:
+            return {
+                "workspaceId": self.runtime.world_id,
+                "serviceInstanceId": self.service_instance_id,
+                "pulse": self.pulse_status(),
+            }
+
     def set_pulse_paused(self, paused: bool) -> dict:
         with self._lock:
             self.runtime._require_runtime_owner()

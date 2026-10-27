@@ -45,25 +45,23 @@ def activation(event_id, status, page):
 
 
 def mock_client(states, *, worlds=None, instances=None, error_sample=None):
-    readings = {"pulse": 0, "bootstrap": 0}
+    """One service-bound status response per observation, never split reads."""
+    readings = {"observation": 0}
     worlds = worlds or ["world-A"] * len(states)
     instances = instances or ["service-A"] * len(states)
 
     def respond(request):
         assert request.method == "GET"
-        if request.url.path == "/api/bootstrap":
-            pos = readings["bootstrap"]
-            readings["bootstrap"] += 1
-            return httpx.Response(200, json={
-                "workspaceId": worlds[min(pos, len(worlds) - 1)],
-                "serviceInstanceId": instances[min(pos, len(instances) - 1)],
-            })
-        assert request.url.path == "/api/pulse"
-        pos = readings["pulse"]
-        readings["pulse"] += 1
+        assert request.url.path == "/api/pulse/observation"
+        pos = readings["observation"]
+        readings["observation"] += 1
         if error_sample is not None and pos == error_sample:
             return httpx.Response(503)
-        return httpx.Response(200, json=states[min(pos, len(states) - 1)])
+        return httpx.Response(200, json={
+            "workspaceId": worlds[min(pos, len(worlds) - 1)],
+            "serviceInstanceId": instances[min(pos, len(instances) - 1)],
+            "pulse": states[min(pos, len(states) - 1)],
+        })
 
     return httpx.Client(
         base_url="http://127.0.0.1:8000",
@@ -217,6 +215,10 @@ def test_read_only_observation_uses_actual_world_kernel_http_without_side_effect
         first = page(service, "Reading", "READING_LOCAL_SOURCE")
         second = page(service, "Writing", "WRITING_LOCAL_SOURCE")
         before = service.get("/api/bootstrap").json()
+        bound = service.get("/api/pulse/observation").json()
+        assert bound["workspaceId"] == before["workspaceId"]
+        assert bound["serviceInstanceId"] == before["serviceInstanceId"]
+        assert isinstance(bound["pulse"]["recentActivations"], list)
         runtime = service.app.state.pages.runtime
         original = [(event.id, event.status.value) for event in
                     runtime.causal_ledger.list_events(limit=200)]
@@ -248,3 +250,4 @@ def test_native_service_restart_changes_instance_not_persistent_world(tmp_path):
         resumed = second.get("/api/bootstrap").json()
     assert resumed["workspaceId"] == initial["workspaceId"]
     assert resumed["serviceInstanceId"] != initial["serviceInstanceId"]
+    assert resumed["serviceInstanceId"] == second.get("/api/pulse/observation").json()["serviceInstanceId"]

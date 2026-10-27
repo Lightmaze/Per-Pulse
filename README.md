@@ -108,7 +108,8 @@ python -m per_pulse.pulse_observer --url http://127.0.0.1:8000 \
   --output ./private-pulse-observation.jsonl
 ```
 
-This read-only observer polls native `/api/bootstrap` and `/api/pulse`,
+This read-only observer polls native `/api/pulse/observation` (one response
+binds the persistent World, current service instance and Pulse status),
 retains one World identity, records queue/budget snapshots and changed local
 activation IDs with source links, and writes a private, create-only JSONL file
 (mode 0600 on POSIX). Interrupted runs have no completed success footer unless

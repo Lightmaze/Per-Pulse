@@ -103,12 +103,17 @@ def observe(
                     if samples and elapsed > duration_seconds:
                         break
                     try:
-                        bootstrap = _read(client, "/api/bootstrap")
-                        pulse = _read(client, "/api/pulse")
-                        current_id = bootstrap.get("workspaceId")
+                        # A single response binds the live service identity
+                        # to the native status. Separate calls could straddle
+                        # a restart and silently mix two different instances.
+                        observation = _read(client, "/api/pulse/observation")
+                        pulse = observation.get("pulse")
+                        if not isinstance(pulse, dict):
+                            raise ValueError("Observation has no native Pulse status")
+                        current_id = observation.get("workspaceId")
                         if not isinstance(current_id, str) or not current_id:
                             raise ValueError("Bootstrap has no native World identity")
-                        current_instance = bootstrap.get("serviceInstanceId")
+                        current_instance = observation.get("serviceInstanceId")
                         if not isinstance(current_instance, str) or not current_instance:
                             raise ValueError("Bootstrap has no service instance identity")
                         if world_id is None:

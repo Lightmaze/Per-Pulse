@@ -237,6 +237,10 @@ def create_app(
     def pulse_status(request: Request):
         return pages(request).pulse_status()
 
+    @app.get("/api/pulse/observation")
+    def pulse_observation(request: Request):
+        return pages(request).pulse_observation()
+
     @app.patch("/api/pulse")
     def set_pulse_paused(body: PulseControlInput, request: Request):
         return pages(request).set_pulse_paused(body.paused)
