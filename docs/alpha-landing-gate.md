@@ -1,8 +1,9 @@
 # First runnable alpha — landing gate
 
-Per Pulse's default `main` still consists of a title-only README. The
-integrated Home/Work application is currently developed as a stack of review
-branches, not a usable default checkout. This candidate deliberately targets
+Per Pulse's default `main` now contains a navigation README that links to
+Draft PR #31, but it does **not** contain the runnable Home/Work application.
+The integrated product is still developed as a stack of review branches,
+not a usable default checkout. This candidate deliberately targets
 `main` so users can obtain one runnable product instead of learning a chain
 of thirty pull requests. **It is a Draft review candidate, not an alpha
 release, deployment, or request to publish a package.**
