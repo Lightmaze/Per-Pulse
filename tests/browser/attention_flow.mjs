@@ -263,6 +263,23 @@ try {
   assert.equal(await page.locator('.return-label-short').textContent(), '返回');
   assert.equal(await page.locator('.return-to-thread').getAttribute('aria-label'), '返回对话');
   checks.push('compact mobile return uses the chosen Chinese interface in the original Work');
+  // A failed native API request must keep the editable Work draft, and render
+  // its known recovery message in the chosen UI locale. This synthetic HTTP
+  // error never enters the World as a user input or a model response.
+  const unsentOnFailure = 'Keep this draft after a failed request.';
+  await page.locator('.composer textarea').fill(unsentOnFailure);
+  await page.route('**/api/pages/**/messages', async route => {
+    await route.fulfill({
+      status: 400, contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'invalid_request', message: 'fixture-internal-error-in-English' } }),
+    });
+  });
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await page.getByRole('alert').getByText('请检查必填项后重试。', { exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
+  await page.unroute('**/api/pages/**/messages');
+  checks.push('Chinese recovery message preserves an unsent Work draft after a known API error');
+
 
 
   assert.deepEqual(errors, []);
