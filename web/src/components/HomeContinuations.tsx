@@ -30,36 +30,59 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
 
   useEffect(() => {
     const controller = new AbortController();
-    let reading = false;
-    const refresh = async () => {
-      if (reading || controller.signal.aborted) return;
-      reading = true;
+    let readingPulse = false;
+    let readingWorkspace = false;
+    // Foreground Work review must not wait behind a slow Pulse read. These
+    // independent native read models share only a World-tagged UI projection.
+    const refreshPulse = async () => {
+      if (readingPulse || controller.signal.aborted) return;
+      readingPulse = true;
       try {
-        // The two read-only projections fail independently. Native Work status
-        // is meaningful even when Pulse is disabled or unavailable.
-        const [pulseRead, workspaceRead] = await Promise.allSettled([
-          api.pulse(controller.signal),
-          api.bootstrap(controller.signal),
-        ]);
-        if (controller.signal.aborted) return;
-        setSnapshot({
-          workspaceId,
-          pulse: pulseRead.status === 'fulfilled' ? pulseRead.value : null,
-          pages: workspaceRead.status === 'fulfilled'
-            && workspaceRead.value.workspaceId === workspaceId
-            ? workspaceRead.value.pages : null,
-        });
+        const latest = await api.pulse(controller.signal);
+        if (!controller.signal.aborted) setSnapshot(previous => ({
+          workspaceId, pages: previous?.workspaceId === workspaceId ? previous.pages : null,
+          pulse: latest,
+        }));
+      } catch {
+        if (!controller.signal.aborted) setSnapshot(previous => ({
+          workspaceId, pages: previous?.workspaceId === workspaceId ? previous.pages : null,
+          pulse: null,
+        }));
       } finally {
-        reading = false;
+        readingPulse = false;
       }
     };
-    void refresh();
-    const interval = window.setInterval(() => { void refresh(); }, 12000);
+    const refreshWorkspace = async () => {
+      if (readingWorkspace || controller.signal.aborted) return;
+      readingWorkspace = true;
+      try {
+        const latest = await api.bootstrap(controller.signal);
+        if (!controller.signal.aborted) setSnapshot(previous => ({
+          workspaceId, pulse: previous?.workspaceId === workspaceId ? previous.pulse : null,
+          pages: latest.workspaceId === workspaceId ? latest.pages : null,
+        }));
+      } catch {
+        if (!controller.signal.aborted) setSnapshot(previous => ({
+          workspaceId, pulse: previous?.workspaceId === workspaceId ? previous.pulse : null,
+          pages: null,
+        }));
+      } finally {
+        readingWorkspace = false;
+      }
+    };
+    void refreshPulse();
+    void refreshWorkspace();
+    const interval = window.setInterval(() => {
+      void refreshPulse();
+      void refreshWorkspace();
+    }, 12000);
     return () => { controller.abort(); window.clearInterval(interval); };
   }, [workspaceId]);
 
+  // Verify page ownership against the fresh native World before producing
+  // exact-source Pulse links or actionable Work status.
   const currentPages = freshPages ?? pages;
-  const items = homeContinuations(pulse, currentPages);
+  const items = homeContinuations(freshPages ? pulse : null, freshPages ?? []);
   const needAttention = homeWorkNeedsAttention(freshPages ?? []);
   if (!items.length && !needAttention.length) return null;
 
