@@ -10,7 +10,7 @@ import pytest
 
 from per_pulse.posture_evaluation import _canonical, _digest, _record_digest, main
 from per_pulse.posture_transfer import (
-    ORDINARY_FEEDBACK, SOURCE_MARKER, STAGES, audit_ordinary_transfer, run_ordinary_transfer,
+    ORDINARY_FEEDBACK, SOURCE_MARKER, STAGES, audit_ordinary_transfer, run_ordinary_transfer, trial_stages,
 )
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 
@@ -52,7 +52,8 @@ def fixture_factory(monkeypatch, requests, *, capture=True, leak=False):
                 }
             elif index == 3:
                 text = "Saved documents remain available. Search is slow. We are investigating, and the next update is at 09:00 UTC. No recovery time is confirmed."
-            elif index in {5, 7}:
+            elif any("Give me a short outline for a customer incident update" in str(message.get("content", ""))
+                     for message in body["messages"] if message.get("role") == "user"):
                 text = "Outline: 1. Current service availability. 2. Disruption and customer impact. 3. Known facts and uncertainties. 4. Next update."
             else:
                 text = "Existing files can still be viewed. Uploads are delayed; no data loss has been detected. We are investigating and have no confirmed recovery time. Next update: 14:00 UTC."
@@ -124,6 +125,42 @@ def test_ordinary_feedback_keeps_native_capture_and_fresh_transfer_separate(tmp_
     manifest["record_digest"] = _record_digest(result)
     manifest_path.write_text(json.dumps(manifest))
     assert "native_request_audit_mismatch" in audit_ordinary_transfer(output)["errors"]
+
+
+def test_outline_first_still_keeps_native_promotion_and_exposure_bound(tmp_path, monkeypatch):
+    output = tmp_path / "outline-first-trial"
+    result = run_ordinary_transfer(
+        output, model_factory=fixture_factory(monkeypatch, []),
+        task_order="outline-first", stage_timeout=10,
+    )
+    assert result["status"] == "completed", result
+    assert result["task_order"] == "outline-first"
+    assert [stage["stage"] for stage in result["stages"]] == [stage[0] for stage in trial_stages("outline-first")]
+    assert result["condition_order"] == [
+        "bare_negative", "bare_transfer", "conditional_negative", "conditional_transfer"
+    ]
+    assert result["shared_lessons"][0]["scope"] == "subject"
+    assert all(check["source_transcript_absent"] and check["expected_memory_exposure"]
+               for check in result["exposure_checks"].values())
+    assert "Outline:" in (output / "bare-negative-response.md").read_text()
+    assert "Outline:" in (output / "conditional-negative-response.md").read_text()
+    assert audit_ordinary_transfer(output)["status"] == "verified"
+
+    # Rebinding a tampered condition order must not make it a valid protocol.
+    result["condition_order"] = list(reversed(result["condition_order"]))
+    (output / "ordinary-transfer.json").write_text(json.dumps(result))
+    manifest_file = output / "ordinary-transfer-manifest.json"
+    manifest = json.loads(manifest_file.read_text())
+    manifest["record_digest"] = _record_digest(result)
+    manifest_file.write_text(json.dumps(manifest))
+    assert "predeclared_protocol_mismatch" in audit_ordinary_transfer(output)["errors"]
+
+
+def test_invalid_task_order_rejected_before_provider_and_directory(tmp_path):
+    folder = tmp_path / "bad-order"
+    with pytest.raises(ValueError, match="task_order"):
+        run_ordinary_transfer(folder, task_order="conditional-first")
+    assert not folder.exists()
 
 
 def test_absent_capture_is_an_observed_outcome_and_never_seeded_by_host(tmp_path, monkeypatch):
