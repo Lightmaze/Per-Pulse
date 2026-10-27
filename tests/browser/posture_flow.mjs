@@ -181,7 +181,7 @@ try {
   await lesson.getByText(refinedLesson, { exact: true }).waitFor();
   assert.equal(await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).count(), 0);
   assert.equal(await lesson.getByRole('button', { name: 'Refine lesson', exact: true }).count(), 0);
-  const sharedView = (await (await fetch(base + '/api/pages/' + encodeURIComponent((await (await fetch(base + '/api/pages')).json()).pages.find(item => item.title === 'Registration tool').id) + '/posture')).json()).experiences[0];
+  const sharedView = (await (await fetch(base + '/api/pages/' + encodeURIComponent((await (await fetch(base + '/api/bootstrap')).json()).pages.find(item => item.title === 'Registration tool').id) + '/posture')).json()).experiences[0];
   assert.equal(sharedView.lesson, refinedLesson);
   assert.deepEqual(sharedView.counterexamples, refinedExceptions);
   assert.equal(sharedView.source, undefined);
