@@ -15,7 +15,7 @@ from per_pulse.posture_transfer import (
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 
 
-def fixture_factory(monkeypatch, requests, *, capture=True, leak=False):
+def fixture_factory(monkeypatch, requests, *, capture=True, leak=False, echo_target_marker=False):
     monkeypatch.setenv("ORDINARY_TRANSFER_FIXTURE_KEY", "fixture-only")
     state = {"main": 0}
 
@@ -23,6 +23,7 @@ def fixture_factory(monkeypatch, requests, *, capture=True, leak=False):
         body = json.loads(request.content)
         requests.append(body)
         arguments = None
+        index = None
         if "WORK_MATERIAL_JSON" in json.dumps(body["messages"]):
             text = "PASS"
         else:
@@ -57,6 +58,10 @@ def fixture_factory(monkeypatch, requests, *, capture=True, leak=False):
                 text = "Outline: 1. Current service availability. 2. Disruption and customer impact. 3. Known facts and uncertainties. 4. Next update."
             else:
                 text = "Existing files can still be viewed. Uploads are delayed; no data loss has been detected. We are investigating and have no confirmed recovery time. Next update: 14:00 UTC."
+        if echo_target_marker and index is not None and index >= 4 and arguments is None:
+            # Simulate provider-side leakage into a later fresh Work response,
+            # without inserting source text into its recorded request.
+            text += " " + SOURCE_MARKER
         delta = {"content": text} if arguments is None else {"tool_calls": [{"index": 0,
             "id": "fixture-" + str(len(requests)), "type": "function",
             "function": {"name": "posture", "arguments": json.dumps(arguments)}}]}
@@ -185,6 +190,23 @@ def test_private_marker_in_learned_abstraction_is_detected_at_real_request_bound
     assert result["exposure_checks"]["bare_transfer"]["source_transcript_absent"]
     audit = audit_ordinary_transfer(output)
     assert "transfer_exposure_mismatch" in audit["errors"]
+
+
+def test_private_source_echo_in_fresh_work_output_invalidates_audit(tmp_path, monkeypatch):
+    output = tmp_path / "response-leak"
+    result = run_ordinary_transfer(
+        output, model_factory=fixture_factory(monkeypatch, [], echo_target_marker=True),
+        stage_timeout=10,
+    )
+    assert result["status"] == "completed", result
+    # Request privacy alone can pass while the provider's target *answer*
+    # includes information only present in a previous source Work.
+    assert all(check["source_transcript_absent"] and check["expected_memory_exposure"]
+               for check in result["exposure_checks"].values())
+    assert SOURCE_MARKER in (output / "bare-transfer-response.md").read_text()
+    audit = audit_ordinary_transfer(output)
+    assert audit["status"] == "invalid", audit
+    assert "target_output_private_source_leak" in audit["errors"]
 
 
 def test_request_budget_failure_does_not_turn_into_capture_absent(tmp_path, monkeypatch):
