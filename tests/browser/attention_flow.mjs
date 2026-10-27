@@ -258,6 +258,12 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(),
     'Still composing after exploring causal sources.');
   checks.push('Back returns to original local message without losing receiving Work draft');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('.return-label-short').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.return-label-short').textContent(), '返回');
+  assert.equal(await page.locator('.return-to-thread').getAttribute('aria-label'), '返回对话');
+  checks.push('compact mobile return uses the chosen Chinese interface in the original Work');
+
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks,
