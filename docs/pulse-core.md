@@ -264,11 +264,15 @@ per-pulse --pulse --pulse-budget 12 \
 
 A single World SQLite transaction checks both limits at the same original
 `CausalLedger.enqueue` boundary. The budget is derived from durable
-`spontaneous`/`propagation` roots already admitted in this World during the
-rolling hour; reopening the workspace does **not** grant those tokens again.
-An unsettled, cancelled, failed, uncertain or unaccounted turn holds its full
-reservation. A settled original World turn with a matched successful Kernel
-turn and a complete `KERNEL_PROVIDER_USAGE_DURABLE` receipt replaces the
+`spontaneous`/`propagation` roots in this World. It includes recent admissions
+and outcomes in the rolling hour **plus old roots still queued or running**.
+This matters when a paused context or long backlog resumes: a reservation
+must not become free merely because an hour passed before the provider call.
+Reopening the workspace does **not** grant those tokens again.
+Unaccounted roots hold their full reservation while pending or within the
+hour after a terminal outcome; terminal work eventually ages out rather than
+locking the budget forever. A settled original World turn with a matched
+successful Kernel turn and a complete `KERNEL_PROVIDER_USAGE_DURABLE` receipt replaces the
 reservation with the actual recorded **input + output token count**. Explicit
 `TEST_DOUBLE` receipts have the same mechanics in tests, but are marked
 separately; no synthetic tokens are presented as a real provider bill.
