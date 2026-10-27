@@ -127,3 +127,24 @@ def test_cold_image_restore_requires_explicit_destination(tmp_path, capsys):
     assert stopped.value.code == 2
     assert "--data-dir NEW_HOME" in capsys.readouterr().err
     assert not archive.exists()
+
+
+@pytest.mark.parametrize("marker_kind", ["regular_file", "dangling_symlink"])
+def test_incomplete_cold_image_refuses_product_start(tmp_path, marker_kind):
+    from per_pulse.service import PageError, PageService
+
+    home = tmp_path / "partly-restored"
+    home.mkdir()
+    marker = home / image.INCOMPLETE
+    if marker_kind == "regular_file":
+        marker.write_text("interrupted private copy")
+    else:
+        marker.symlink_to("missing-marker-target")
+    # A failed or interrupted native restore must not be initialized as a
+    # runnable Home/Work just because the user opened the product CLI.
+    with pytest.raises(PageError, match="incomplete cold Image restore") as error:
+        PageService(home, model_factory=None)
+    assert error.value.code == "image_restore_incomplete"
+    assert marker.is_symlink() or marker.exists()
+    assert not (home / "world.db").exists()
+    assert not (home / "kernel.db").exists()

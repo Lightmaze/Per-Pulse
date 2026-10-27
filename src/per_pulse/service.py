@@ -57,6 +57,18 @@ class PageService:
         model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None | object = _ENV_PROVIDER,
     ):
         self.data_dir = Path(data_dir).expanduser().resolve()
+        # Cold Image leaves this marker on an interrupted restore. Refuse to
+        # turn partial carried state into a fresh or corrupted World. Check a
+        # dangling symlink marker too; it is never a valid completed restore.
+        from pulse_system.product.image import INCOMPLETE
+        incomplete = self.data_dir / INCOMPLETE
+        if incomplete.exists() or incomplete.is_symlink():
+            raise PageError(
+                "image_restore_incomplete",
+                "This workspace has an incomplete cold Image restore. "
+                "Do not start it; restore the archive into a different new directory.",
+                409,
+            )
         self.data_dir.mkdir(parents=True, exist_ok=True)
         workspace = self.data_dir / "workspace"
         workspace.mkdir(exist_ok=True)
