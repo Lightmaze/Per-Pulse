@@ -137,3 +137,19 @@ estimated tokens; optional posture, expert and other side computations
 are outside the primary-round ceiling. Provider usage may be delayed
 or missing. Long-lived Context Body state and attributed local influence
 continue across separately admitted activations.
+
+## Explain why new background activity cannot currently enter
+
+The same native Pulse status projection now gives Home/Work Activity a bilingual
+admission explanation when either the rolling count is exhausted or the
+remaining nominal token allowance cannot cover one more reservation. This is
+only a read-only client projection of the existing native count and budget;
+no new scheduler, quota, model call or permission is introduced. Existing
+queued/running activations can still proceed, and human foreground turns are
+not blocked by this admission envelope. Paused, disabled and disconnected
+states keep their existing independent explanations.
+
+Node regressions cover count exhaustion during already-running work, the
+one-reservation token boundary, absent optional token envelope, and pause /
+disconnect precedence. Neither a successful build nor synthetic HTTP
+regressions prove a real provider charge limit or useful independent activity.

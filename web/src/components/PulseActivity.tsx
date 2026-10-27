@@ -4,6 +4,7 @@ import { useLanguage } from '../i18n';
 import { PulseActivityRequestGate } from '../pulseActivityRequestGate';
 import { activationMessageTarget, attentionSourceTarget, localRetainedAttention } from '../pulseAttention';
 import { pulseActivityLabel } from '../pulseActivityLabels';
+import { pulseAdmissionHold } from '../pulseAdmission';
 import type { PageSummary, PulseState } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
@@ -100,6 +101,7 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
   const retained = localRetainedAttention(pulse, pageId);
   const recent = pulse?.recentActivations ?? [];
   const thisPageHeld = pulse?.heldContexts.some(held => held.pageId === pageId) ?? false;
+  const admissionHold = pulse ? pulseAdmissionHold(pulse) : null;
 
   return <Dialog title={t('pulse.title')} onClose={() => { if (!busy) onClose(); }} className="pulse-activity-dialog">
     <p className="dialog-description">{t('pulse.description')}</p>
@@ -126,6 +128,7 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
         </p>
         <p className="pulse-activity-summary" role="status">{pulse.paused && pulse.enabled ? t('pulse.paused') : pulse.running ? t('pulse.continuing') : pulse.enabled ? t('pulse.enabled') : t('pulse.disabled')} · {t('pulse.queue', { queued: pulse.queue.queued, running: pulse.queue.running })}</p>
         <p className="pulse-activity-detail">{t('pulse.budget', { remaining: pulse.budget.remaining, limit: pulse.budget.limit })}</p>
+        {admissionHold ? <p className="pulse-activity-detail">{t(admissionHold === 'hourly_count' ? 'pulse.admissionCountHeld' : 'pulse.admissionTokensHeld')}</p> : null}
         {pulse.providerTokenBudget ? <>
           <p className="pulse-activity-detail">{t('pulse.tokens', {
             charged: pulse.providerTokenBudget.charged,
