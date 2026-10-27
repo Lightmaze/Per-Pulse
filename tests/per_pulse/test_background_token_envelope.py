@@ -222,6 +222,37 @@ def test_old_admission_settled_now_counts_in_current_hour(tmp_path):
         service.runtime.close()
 
 
+def test_old_terminal_uncertainty_ages_out_after_its_actual_failure(tmp_path, monkeypatch):
+    """A failed old activation counts near failure but is not held forever."""
+    service = PageService(tmp_path, model_factory=None, pulse=settings(limit=60))
+    try:
+        runtime = service.runtime
+        first = queue_background(runtime, seed_source(runtime))
+        old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        with runtime.causal_ledger._transaction() as conn:
+            conn.execute("UPDATE causal_events SET created_at = ? WHERE id = ?",
+                         (old_time, first.id))
+        turn = runtime.causal_ledger.begin_turn(
+            first.id, runtime.continuity_engram_id, "Continuation.",
+            runtime_fence=runtime._current_runtime_fence(),
+        )
+        runtime.causal_ledger.fail_turn(
+            turn.id, acceptance=None, code="provider_usage_unknown",
+            phase="kernel", runtime_fence=runtime._current_runtime_fence(),
+        )
+        near_failure = runtime.context_pulse.snapshot()["providerTokenBudget"]
+        assert near_failure["charged"] == 60
+        assert near_failure["unaccountedReservations"] == 60
+        future = datetime.now(timezone.utc) + timedelta(hours=2)
+        monkeypatch.setattr(context_module, "_now", lambda: future)
+        later = runtime.context_pulse.snapshot()["providerTokenBudget"]
+        assert later["charged"] == 0
+        assert later["trackedAdmissions"] == 0
+        assert later["remaining"] == 60
+    finally:
+        service.runtime.close()
+
+
 @pytest.mark.parametrize("kwargs", [
     {"max_background_provider_tokens_per_hour": -1},
     {"max_background_provider_tokens_per_hour": True},
