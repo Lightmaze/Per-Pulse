@@ -143,8 +143,29 @@ try {
   await lesson.getByText('Offer the practice interaction before optional setup, after any required booking check.', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
   await lesson.getByText('In use · v4', { exact: true }).waitFor();
-  await lesson.getByRole('button', { name: 'Use in other pages', exact: true }).click();
+  // The operator can correct the reusable abstraction itself without replacing
+  // the source episode, opening a second journal, or changing shared authority.
+  const beforeManualRefinement = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
+  const refinedLesson = 'Offer the practice interaction before optional setup, after any required booking check. Make the first step usable without optional profile questions.';
+  const refinedExceptions = ['A required booking has not been confirmed.', 'The user explicitly requests a short registration form.'];
+  await lesson.getByRole('button', { name: 'Refine lesson', exact: true }).click();
+  const newLesson = lesson.getByRole('textbox', { name: 'What should guide future work?', exact: true });
+  const newExceptions = lesson.getByRole('textbox', { name: 'Where should this lesson not apply? (one per line)', exact: true });
+  await newLesson.fill('');
+  assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isEnabled(), false);
+  await newLesson.fill(refinedLesson);
+  await newExceptions.fill(refinedExceptions.join('\n'));
+  await lesson.getByRole('button', { name: 'Save refinement', exact: true }).click();
   await lesson.getByText('In use · v5', { exact: true }).waitFor();
+  await lesson.getByText(refinedLesson, { exact: true }).waitFor();
+  const afterManualRefinement = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
+  assert.equal(afterManualRefinement.id, beforeManualRefinement.id);
+  assert.deepEqual(afterManualRefinement.source, beforeManualRefinement.source);
+  assert.deepEqual(afterManualRefinement.encounter, beforeManualRefinement.encounter);
+  assert.equal(afterManualRefinement.revision, beforeManualRefinement.revision + 1);
+  assert.deepEqual(afterManualRefinement.counterexamples, refinedExceptions);
+  await lesson.getByRole('button', { name: 'Use in other pages', exact: true }).click();
+  await lesson.getByText('In use · v6', { exact: true }).waitFor();
   await close();
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Registration tool');
@@ -157,8 +178,14 @@ try {
   await lesson.getByText('Source experience', { exact: true }).click();
   assert.equal(await lesson.getByText('Later feedback (1)', { exact: true }).count(), 0);
   assert.equal(await lesson.getByText('twelve-field intake form', { exact: false }).count(), 0);
-  await lesson.getByText('Offer the practice interaction before optional setup, after any required booking check.', { exact: true }).waitFor();
+  await lesson.getByText(refinedLesson, { exact: true }).waitFor();
   assert.equal(await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).count(), 0);
+  assert.equal(await lesson.getByRole('button', { name: 'Refine lesson', exact: true }).count(), 0);
+  const sharedView = (await (await fetch(base + '/api/pages/' + encodeURIComponent((await (await fetch(base + '/api/pages')).json()).pages.find(item => item.title === 'Registration tool').id) + '/posture')).json()).experiences[0];
+  assert.equal(sharedView.lesson, refinedLesson);
+  assert.deepEqual(sharedView.counterexamples, refinedExceptions);
+  assert.equal(sharedView.source, undefined);
+  assert.equal(sharedView.encounter, undefined);
   await lesson.getByRole('button', { name: 'Go to correction', exact: true }).click();
   await page.getByText('Let me try the interaction before asking for a profile.', { exact: true }).first().waitFor();
   // The source is Home, which must now offer a direct return to the receiving
@@ -184,19 +211,19 @@ try {
   await other.getByRole('button', { name: 'Settings', exact: true }).click();
   await other.getByRole('button', { name: 'View this page’s lessons', exact: true }).click();
   await other.getByRole('button', { name: 'Pause lesson', exact: true }).click();
-  await other.getByText('Paused · v6', { exact: true }).waitFor();
+  await other.getByText('Paused · v7', { exact: true }).waitFor();
   await other.close();
   await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).click();
   await page.getByRole('alert').getByText('This lesson changed. Refresh it before saving.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Refresh lessons', exact: true }).click();
-  await lesson.getByText('Paused · v6', { exact: true }).waitFor();
+  await lesson.getByText('Paused · v7', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
-  await lesson.getByText('In use · v7', { exact: true }).waitFor();
+  await lesson.getByText('In use · v8', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
   assert.equal(await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).isEnabled(), false);
   await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill('A preview delayed the requested registration task.');
   await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).click();
-  await lesson.getByText('Paused · v8', { exact: true }).waitFor();
+  await lesson.getByText('Paused · v9', { exact: true }).waitFor();
   await lesson.getByText('Later feedback (2)', { exact: true }).click();
   assert.match(await lesson.innerText(), /A preview delayed/);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -296,7 +323,7 @@ try {
   }
   await page.unroute('**/api/pages/home*');
   assert.deepEqual(errors, []);
-  console.log('PASS: browser learning, ordinary correction of one existing lesson, retained original source, revised lesson after restart, sharing without raw revision feedback, background admission refresh, concurrent revision recovery, feedback, mobile dialog, Escape, older source navigation/reload/linking, and delayed-read navigation races. Explicit synthetic transport only.');
+  console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, negative feedback, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
 } finally {
   await browser?.close();
   await stopServer(server);
