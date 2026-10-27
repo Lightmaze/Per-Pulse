@@ -191,7 +191,10 @@ def main() -> None:
         )
 
     with tempfile.TemporaryDirectory(prefix="per-pulse-installed-wheel-") as temp:
-        root = Path(temp)
+        # Keep the private archive and restored copy INSIDE the disposable
+        # parent, but OUTSIDE the source home required by native Image.
+        root = Path(temp) / "original"
+        root.mkdir()
         example_before = run_workspace(root, example=True, fake_provider=True)
         ordinary = run_workspace(root, example=False, fake_provider=False, exercise=True)
         ordinary_after = run_workspace(root, example=False, fake_provider=False, expected=ordinary)
