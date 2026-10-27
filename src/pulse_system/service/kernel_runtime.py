@@ -104,9 +104,10 @@ class _GuardedModel:
 
 
 class _WorldWorkspace(CommandWorkspaceToolProvider):
-    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, local=None, posture=None, attention=None, replay_authorize=None, **kwargs):
+    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, local=None, posture=None, attention=None, replay_authorize=None, background_main_round_limit=None, **kwargs):
         self._guard, self._mutation_guard = guard, mutation_guard
         self._allow_mutations = allow_mutations
+        self._background_main_round_limit = background_main_round_limit
         super().__init__(*args, command_guard=guard, command_start_guard=mutation_guard, **kwargs)
         self._life = life_hub
         self._work = work
@@ -129,7 +130,14 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
 
     def model_round_limit_for_scope(self, scope, configured):
         entry = native_replay.mode(self.store, scope)
-        return min(configured, entry['model_round_ceiling']) if entry else configured
+        limit = min(configured, entry['model_round_ceiling']) if entry else configured
+        if self._background_main_round_limit is not None and scope.turn_id is not None:
+            background = self._background_main_round_limit(scope.engram_id, scope.turn_id)
+            if background is not None:
+                if type(background) is not int or not 1 <= background <= configured:
+                    raise ScopeConflict("invalid native background model-round allowance")
+                limit = min(limit, background)
+        return limit
 
     def _local_descriptor(self):
         from .native_local import descriptor
@@ -366,7 +374,8 @@ class KernelHarnessRuntime:
                    *, history_lineage: Callable[[str], tuple[str, ...]] | None = None,
                    context_for_turn: Callable[[str, str], str] | None = None, work=None, team=None, local=None,
                    attention=None, input_for_turn: Callable[[str, str], str | None] | None = None,
-                   world_storage=None, posture=None) -> None:
+                   world_storage=None, posture=None,
+                   background_main_round_limit_for_turn=None) -> None:
         """Called by RuntimeService after it owns/reconciles the durable world."""
         if self.kernel is not None:
             raise RuntimeError("Kernel runtime is already bound")
@@ -420,7 +429,8 @@ class KernelHarnessRuntime:
                     store, root, checkpoints, guard=self._check,
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
                     command_executor=self._command_executor, history_scopes=self._history_scopes, life_hub=self.life,
-                    cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, posture=self.posture, replay_authorize=self.authorize_replay),
+                    cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, posture=self.posture, replay_authorize=self.authorize_replay,
+                    background_main_round_limit=background_main_round_limit_for_turn),
             )
             if self._cognition_steps is not None:
                 if self.db_path == ":memory:":

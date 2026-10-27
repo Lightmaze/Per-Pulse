@@ -6121,6 +6121,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                            and c.context_pulse.enabled else None),
                 input_for_turn=self._native_cognition_return.input_for_turn,
                 world_storage=self._storage, posture=self._native_posture,
+                background_main_round_limit_for_turn=self._native_kernel_background_main_round_limit_for_turn,
             )
         self._purpose_governance = PurposeGovernance(
             c.db_path,
@@ -8406,6 +8407,27 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 "native Kernel turn references a foreign or missing causal event"
             )
         return self._native_kernel_context_for_center(event.center_id)
+
+    def _native_kernel_background_main_round_limit_for_turn(
+        self, engram_id: str, turn_id: str,
+    ) -> int | None:
+        """Bound only original local activity; never trust a caller-supplied background flag."""
+        config = self._config.context_pulse
+        if config is None or not config.enabled:
+            return None
+        turn = self._causal_ledger.get_turn_for_world(turn_id, self._world_id)
+        if turn is None or turn.engram_id != engram_id:
+            raise RuntimeError("background allowance requires an owned World turn")
+        event = self._causal_ledger.get_event(turn.event_id)
+        if (event is None or event.world_id != self._world_id
+                or event.engram_id != engram_id):
+            raise RuntimeError("background allowance requires original causal admission")
+        if ((event.kind is CausalEventKind.SPONTANEOUS and event.source is CausalEventSource.SELF)
+                or (event.kind is CausalEventKind.PROPAGATION
+                    and event.source is CausalEventSource.PROPAGATION)
+                or (event.kind is CausalEventKind.PULSE and event.source is CausalEventSource.SELF)):
+            return config.max_background_main_model_rounds_per_turn
+        return None
 
     def _harness_summary(self) -> dict[str, Any]:
         if self._harness_kind == _HARNESS_KIND_MOCK:

@@ -14,8 +14,8 @@ contains one native Context Body with local activations and computational
 connections; Home and distinct Work contexts; exact-source navigation and
 return-to-draft; attributed and revisable experience; native action approval
 and provenance-checked text artifacts; separate English/简体中文 UI and reply
-language controls; conservative restart-stable background token **admission**
-(not a dollar or per-request provider hard cap). Earlier owner work is
+language controls; conservative restart-stable background token **admission** and bounded primary
+Kernel model rounds per local activation (neither is a provider billing cap). Earlier owner work is
 preserved as Git history, not copied into parallel stores or runners.
 
 The exact dependency is the #30 integration head, including #1/#2/#7 and

@@ -474,3 +474,51 @@ def test_two_local_outputs_converge_once_with_both_sources_and_no_transcript_cop
         assert assistant_count(view(client, target)) == 2
         assert len(fixture.requests) == 6
         assert client.get("/api/pulse").json()["budget"]["used"] == 2
+
+
+def test_native_background_model_round_ceiling_is_causally_scoped(tmp_path, monkeypatch):
+    """Use actual World/Kernel scopes to distinguish a user input from propagation."""
+    fixture = TransportFixture(monkeypatch)
+    settings = PulseSettings(
+        enabled=True, spontaneous_rate=0, check_interval_seconds=0.01,
+        refractory_seconds=0, max_propagation_depth=1,
+        max_background_pulses_per_hour=1,
+        max_background_main_model_rounds_per_turn=2,
+    )
+    with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
+        source = page(client, "Source", "A_LOCAL_HISTORY")
+        target = page(client, "Receiver", "B_LOCAL_HISTORY")
+        eventually(lambda: view(client, source), lambda value: assistant_count(value) == 1)
+        eventually(lambda: view(client, target), lambda value: assistant_count(value) == 1)
+        connect(client, source, target, weight=0.9)
+        sent = client.post(f"/api/pages/{source}/messages", json={"content": "Human input"})
+        assert sent.status_code == 202
+        eventually(lambda: view(client, target), lambda value: assistant_count(value) == 2)
+        runtime = client.app.state.pages.runtime
+        assert client.get("/api/pulse").json()["backgroundMainModelRoundLimit"] == 2
+        foreground, background = [], []
+        for scope in fixture.scopes:
+            world_turn = runtime.causal_ledger.get_turn_for_world(scope.turn_id, runtime.world_id)
+            assert world_turn is not None
+            event = runtime.causal_ledger.get_event(world_turn.event_id)
+            assert event is not None
+            kernel = runtime.kernel_service._runtime(scope.session_scope())
+            cap = kernel.runner.tool_provider.model_round_limit_for_scope(scope, 16)
+            if event.kind.value == "propagation":
+                assert event.source.value == "propagation"
+                background.append(cap)
+            else:
+                foreground.append(cap)
+        assert background == [2]
+        assert foreground == [16, 16, 16]
+        assert len(fixture.requests) == 4
+
+    with client_for(tmp_path, pulse=settings, model_factory=fixture.factory) as client:
+        assert client.get("/api/pulse").json()["backgroundMainModelRoundLimit"] == 2
+        assert len(fixture.requests) == 4
+
+
+@pytest.mark.parametrize("invalid", [0, -1, 17, True, 2.5, None])
+def test_native_background_model_round_limit_invalid(invalid):
+    with pytest.raises(ValueError, match="max_background_main_model_rounds_per_turn"):
+        PulseSettings(max_background_main_model_rounds_per_turn=invalid)

@@ -44,6 +44,8 @@ class ContextPulseConfig:
     # reservation, and failed/uncertain turns may have unreported provider use.
     max_background_provider_tokens_per_hour: int | None = None
     background_provider_token_reservation: int = 8192
+    # Main Kernel model rounds for each native local activation, not a bill cap.
+    max_background_main_model_rounds_per_turn: int = 4
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
@@ -67,6 +69,9 @@ class ContextPulseConfig:
         if (type(self.background_provider_token_reservation) is not int
                 or self.background_provider_token_reservation <= 0):
             raise ValueError("background_provider_token_reservation must be a positive integer")
+        rounds = self.max_background_main_model_rounds_per_turn
+        if type(rounds) is not int or not 1 <= rounds <= 16:
+            raise ValueError("max_background_main_model_rounds_per_turn must be an integer from 1 to 16")
 
 
 class _QuotaReached(Exception):
@@ -884,6 +889,7 @@ class ContextPulseController:
                            "used": used, "remaining": max(0, self.config.max_background_pulses_per_hour - used),
                            "windowSeconds": 3600, "unit": "background pulse admissions"},
                 "providerTokenBudget": self._token_window(now),
+                "backgroundMainModelRoundLimit": self.config.max_background_main_model_rounds_per_turn,
                 "cursor": self._state["cursor"],
                 "observedCursor": self._state["observed_cursor"],
                 "contexts": [dict(item, inhibition=inhibition_by_center.get(item["center_id"], 0.0))
