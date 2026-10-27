@@ -307,6 +307,11 @@ def test_converged_local_budget_reserves_the_executable_aggregate(convergence_bo
     fused queued turn to run after the admission hour for free.
     """
     storage, ledger, subject, centers = convergence_body
+    # The other convergence tests use only a causal ledger. Native context
+    # control additionally needs the durable World identity from Runtime.
+    storage.save_component_state(
+        "pulse.world.v1", {"world_id": "world", "continuity_engram_id": subject},
+    )
     controller = ContextPulseController(
         storage, ledger, WorldRegistry(storage), world_id="world",
         subject=lambda: subject, fence=lambda: None,
