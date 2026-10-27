@@ -23,6 +23,8 @@ def _image_command(argv: list[str]) -> None:
     parser.add_argument("--data-dir", type=Path,
                         help="Source home for save, NEW destination home for restore.")
     args = parser.parse_args(argv)
+    if args.operation == "restore" and args.data_dir is None:
+        parser.error("Image restore requires --data-dir NEW_HOME; do not silently select the default personal workspace.")
     home = args.data_dir or Path.home() / ".local" / "share" / "per-pulse"
 
     from pulse_system.product import image

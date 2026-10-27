@@ -50,7 +50,8 @@ def post_json(port: int, path: str, payload: dict, *, status: int) -> dict:
 
 
 def run_workspace(root: Path, *, example: bool, fake_provider: bool,
-                  exercise: bool = False, expected: dict | None = None) -> dict:
+                  exercise: bool = False, expected: dict | None = None,
+                  continue_after_restore: bool = False) -> dict:
     port = free_port()
     env = os.environ.copy()
     for key in ("P_PULSE_CHAT_ENDPOINT", "P_PULSE_CHAT_MODEL", "P_PULSE_API_KEY",
@@ -151,6 +152,38 @@ def run_workspace(root: Path, *, example: bool, fake_provider: bool,
                            row["sourceMessageId"] == followup["messageId"]
                            for row in home["messages"]), "Sourced return missing from installed Home"
                 bootstrap = json_response(port, "/api/bootstrap")
+            if continue_after_restore:
+                # After cold restoration, do NEW work in the original Work,
+                # source the result back to Home and keep that new history.
+                # This must not silently write to the source home's SQLite.
+                assert not example and expected is not None
+                work_id = next(
+                    (item["id"] for item in bootstrap["pages"] if item["id"] != "home"), None
+                )
+                assert work_id is not None, "Restored Context Body lost its existing Work"
+                work_before = json_response(port, f"/api/pages/{work_id}")
+                old_ids = {item["id"] for item in work_before["messages"]}
+                continued_input = post_json(
+                    port, f"/api/pages/{work_id}/messages",
+                    {"content": "Continue the same Work after a cold move."}, status=202,
+                )
+                continued_id = continued_input["messageId"]
+                assert continued_id not in old_ids
+                chosen = post_json(
+                    port, f"/api/pages/{work_id}/return",
+                    {"content": "A second sourced result from the restored Work.",
+                     "messageId": continued_id}, status=201,
+                )
+                work_after = json_response(port, f"/api/pages/{work_id}")
+                assert any(item["id"] == continued_id for item in work_after["messages"])
+                home = json_response(port, "/api/pages/home")
+                assert any(
+                    item["id"] == chosen["messageId"]
+                    and item["sourcePageId"] == work_id
+                    and item["sourceMessageId"] == continued_id
+                    for item in home["messages"]
+                ), "Restored Work's next return lost native causal provenance"
+                bootstrap = json_response(port, "/api/bootstrap")
             result = {
                 "workspaceId": bootstrap["workspaceId"],
                 "pageIds": sorted(page["id"] for page in bootstrap["pages"]),
@@ -158,7 +191,13 @@ def run_workspace(root: Path, *, example: bool, fake_provider: bool,
                 "example": example,
             }
             if expected is not None:
-                assert result == expected, "Native sourced work changed across installed restart"
+                if continue_after_restore:
+                    assert result["workspaceId"] == expected["workspaceId"]
+                    assert result["pageIds"] == expected["pageIds"]
+                    assert result["example"] is False
+                    assert result["homeMessageIds"][:-1] == expected["homeMessageIds"]
+                else:
+                    assert result == expected, "Native sourced work changed across installed restart"
             return result
         except BaseException as error:
             output.flush()
@@ -233,13 +272,23 @@ def main() -> None:
                 destination, example=False, fake_provider=False, expected=ordinary,
             )
             assert continued == ordinary, "Restored World/Work history or source identity changed"
+            after_new_work = run_workspace(
+                destination, example=False, fake_provider=False,
+                expected=ordinary, continue_after_restore=True,
+            )
+            assert len(after_new_work["homeMessageIds"]) == len(ordinary["homeMessageIds"]) + 1
+            # The restored continuation is independently restartable, while
+            # the cleanly stopped original retains its own earlier history.
+            run_workspace(destination, example=False, fake_provider=False,
+                          expected=after_new_work)
+            run_workspace(root, example=False, fake_provider=False, expected=ordinary)
             assert root.joinpath("world.db").exists(), "Cold restore changed its source home"
         example_after = run_workspace(root, example=True, fake_provider=True)
         assert example_before == example_after, "Native example history changed across restart"
         assert ordinary["workspaceId"] != example_before["workspaceId"], "Examples share an ordinary World"
         assert len(ordinary["homeMessageIds"]) == 2, "Ordinary user input and sourced return must persist"
         print(json.dumps({
-            "passed": 9 if os.name == "posix" else 8,
+            "passed": 10 if os.name == "posix" else 8,
             "checks": [
                 "all three packages resolved from isolated virtualenv, not editable source",
                 "installed wheel CLI started from outside source checkout",
@@ -250,7 +299,8 @@ def main() -> None:
                 "loopback health/bootstrap/pages APIs returned persistent native state",
                 "installed ordinary Home -> Work -> sourced Home survives restart without a provider",
                 *(
-                    ["installed cold Image save/inspect/restore preserves same native World and returns in a NEW home"]
+                    ["installed cold Image save/inspect/restore preserves same native World and returns in a NEW home",
+                     "restored wheel continues ORIGINAL Work with a new sourced return; source remains unchanged"]
                     if os.name == "posix" else []
                 ),
             ],

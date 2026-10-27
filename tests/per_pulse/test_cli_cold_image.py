@@ -117,3 +117,13 @@ def test_cold_image_refuses_unbound_upstream_archive(tmp_path, monkeypatch, caps
     assert stopped.value.code == 2
     assert "not bound to a Per Pulse" in capsys.readouterr().err
     assert not (tmp_path / "new").exists()
+
+
+def test_cold_image_restore_requires_explicit_destination(tmp_path, capsys):
+    # A new copy must be a deliberate destination, never the default home.
+    archive = tmp_path / "unused-private.zip"
+    with pytest.raises(SystemExit) as stopped:
+        main(["image", "restore", str(archive)])
+    assert stopped.value.code == 2
+    assert "--data-dir NEW_HOME" in capsys.readouterr().err
+    assert not archive.exists()
