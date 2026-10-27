@@ -69,6 +69,14 @@ class ContextPulseConfig:
         if (type(self.background_provider_token_reservation) is not int
                 or self.background_provider_token_reservation <= 0):
             raise ValueError("background_provider_token_reservation must be a positive integer")
+        # Direct Python/API callers bypass the CLI. Do not silently start a
+        # policy whose positive envelope can never admit even one local pulse.
+        # Zero is an explicit hold and remains supported.
+        if (limit is not None and 0 < limit < self.background_provider_token_reservation):
+            raise ValueError(
+                "max_background_provider_tokens_per_hour must be 0 (hold) or "
+                "at least background_provider_token_reservation"
+            )
         rounds = self.max_background_main_model_rounds_per_turn
         if type(rounds) is not int or not 1 <= rounds <= 16:
             raise ValueError("max_background_main_model_rounds_per_turn must be an integer from 1 to 16")

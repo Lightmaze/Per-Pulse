@@ -264,6 +264,27 @@ def test_invalid_token_policy_is_rejected(kwargs):
         PulseSettings(**kwargs)
 
 
+@pytest.mark.parametrize("limit,reservation", [(1, 8192), (8191, 8192), (60, 61)])
+def test_native_config_refuses_unreachable_positive_background_budget(limit, reservation):
+    # Library callers bypass the CLI: reject the impossible budget before a
+    # World or Kernel can be initialized with a misleading active profile.
+    with pytest.raises(ValueError, match="at least background_provider_token_reservation"):
+        PulseSettings(
+            enabled=True, max_background_provider_tokens_per_hour=limit,
+            background_provider_token_reservation=reservation,
+        )
+
+
+@pytest.mark.parametrize("limit,reservation", [(0, 8192), (60, 60), (None, 8192)])
+def test_native_config_preserves_explicit_hold_exact_fit_and_unbounded_option(limit, reservation):
+    profile = PulseSettings(
+        enabled=True, max_background_provider_tokens_per_hour=limit,
+        background_provider_token_reservation=reservation,
+    )
+    assert profile.max_background_provider_tokens_per_hour == limit
+    assert profile.background_provider_token_reservation == reservation
+
+
 def test_http_kernel_usage_releases_only_a_proven_background_reservation(tmp_path, monkeypatch):
     fixture = TransportFixture(monkeypatch)
     profile = settings(limit=90, reservation=60)
