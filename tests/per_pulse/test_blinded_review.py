@@ -33,14 +33,20 @@ def test_blind_packet_separates_labels_and_private_key(trial, tmp_path, monkeypa
     monkeypatch.setattr(review.secrets, "randbelow", lambda _: next(flags))
     result = review.prepare(root, tmp_path / "blind")
     assert result["origin"] == "real_provider" and result["items"] == 4
-    packet = review._load_json(tmp_path / "blind" / "review-packet.json")
-    key = review._load_json(tmp_path / "blind" / "condition-key.json")
+    packet = review._load_json(tmp_path / "blind" / "reviewer" / "review-packet.json")
+    key = review._load_json(tmp_path / "blind" / "private" / "condition-key.json")
     assert [item["label"] for item in packet["items"]] == ["A", "B", "C", "D"]
     assert "conditional" not in json.dumps(packet).lower()
     assert "baseline" not in json.dumps(packet).lower()
     assert key["mapping"]["A"]["condition"] == "baseline"
     assert key["mapping"]["C"]["condition"] == "conditional"
     assert (tmp_path / "blind" / ".gitignore").read_text() == "*\n"
+    assert result["reviewer_directory"] == str(tmp_path / "blind" / "reviewer")
+    assert result["review_file"] == "reviewer/review-packet.json"
+    assert result["private_key_file"] == "private/condition-key.json"
+    assert not (tmp_path / "blind" / "reviewer" / "condition-key.json").exists()
+    assert set(p.name for p in (tmp_path / "blind" / "reviewer").iterdir()) == {
+        "review-packet.json", "ratings-template.json"}
 
 
 def test_fixture_requires_explicit_qa_opt_in(trial, tmp_path):
@@ -51,7 +57,7 @@ def test_fixture_requires_explicit_qa_opt_in(trial, tmp_path):
         review.prepare(root, tmp_path / "blind")
     assert not (tmp_path / "blind").exists()
     review.prepare(root, tmp_path / "blind", allow_fixture=True)
-    key = review._load_json(tmp_path / "blind" / "condition-key.json")
+    key = review._load_json(tmp_path / "blind" / "private" / "condition-key.json")
     assert key["trial_origin"] == "synthetic_fixture"
 
 
@@ -75,7 +81,7 @@ def test_blind_grading_is_complete_and_bound_to_packet(trial, tmp_path):
     root, _ = trial
     folder = tmp_path / "blind"
     review.prepare(root, folder)
-    ratings = review._load_json(folder / "ratings-template.json")
+    ratings = review._load_json(folder / "reviewer" / "ratings-template.json")
     ratings["reviewer"] = "bounded-human-review"
     for checks in ratings["ratings"].values():
         for check in checks:
@@ -92,7 +98,40 @@ def test_blind_grading_is_complete_and_bound_to_packet(trial, tmp_path):
         review.grade(folder, ratings_path)
     ratings["ratings"]["A"]["facts_preserved"] = True
     ratings_path.write_text(json.dumps(ratings))
-    with (folder / "review-packet.json").open("a") as stream:
+    with (folder / "reviewer" / "review-packet.json").open("a") as stream:
         stream.write(" ")
     with pytest.raises(ValueError, match="packet changed"):
         review.grade(folder, ratings_path)
+
+
+def test_only_reviewer_directory_cannot_grade_or_disclose_mapping(trial, tmp_path):
+    root, _ = trial
+    folder = tmp_path / "blind"
+    review.prepare(root, folder)
+    reviewer = folder / "reviewer"
+    ratings = review._load_json(reviewer / "ratings-template.json")
+    ratings["reviewer"] = "separate-reviewer"
+    for checks in ratings["ratings"].values():
+        for check in checks:
+            checks[check] = True
+    ratings_path = reviewer / "completed-ratings.json"
+    ratings_path.write_text(json.dumps(ratings))
+    with pytest.raises(FileNotFoundError):
+        review.grade(reviewer, ratings_path)
+    assert review.grade(folder, ratings_path)["reviewer"] == "separate-reviewer"
+
+
+def test_grade_accepts_legacy_private_folder_layout_without_emitting_it(trial, tmp_path):
+    root, _ = trial
+    folder = tmp_path / "blind"
+    review.prepare(root, folder)
+    (folder / "reviewer" / "review-packet.json").replace(folder / "review-packet.json")
+    (folder / "private" / "condition-key.json").replace(folder / "condition-key.json")
+    ratings = review._load_json(folder / "reviewer" / "ratings-template.json")
+    ratings["reviewer"] = "historic-packet"
+    for checks in ratings["ratings"].values():
+        for check in checks:
+            checks[check] = True
+    ratings_path = tmp_path / "legacy-ratings.json"
+    ratings_path.write_text(json.dumps(ratings))
+    assert review.grade(folder, ratings_path)["reviewer"] == "historic-packet"

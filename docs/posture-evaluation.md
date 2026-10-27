@@ -277,22 +277,27 @@ condition-blind review packet:
 
     python -m per_pulse.blinded_review prepare /tmp/per-pulse-posture/ordinary-trial --output /tmp/per-pulse-posture/review-001
 
-Only give the reviewer **review-packet.json**, not the raw experiment directory
-or **condition-key.json**. Responses are randomly assigned A/B within the
-finished-notice pair and C/D within the outline pair; each packet includes the
-actual task, response and review checks. The reviewer should check the finished
-notice format, first mention of available service, factual accuracy, and the
-exception where the user requested an outline rather than a finished message.
+Give the reviewer **only** the generated
+`/tmp/per-pulse-posture/review-001/reviewer/` directory. It contains
+`review-packet.json` and `ratings-template.json`, but **not** the mapping key.
+Keep the parent `review-001/` directory private: its `private/condition-key.json`
+can unblind every answer. Never upload or share the parent folder, even as a ZIP.
+Responses are randomly assigned A/B within the finished-notice pair and C/D
+within the outline pair; each packet contains the task, response and checks.
+Review the finished notice, availability-first ordering, factual accuracy,
+and the outline-only exception.
 
-Copy **ratings-template.json** to a separate ratings file and fill in a reviewer
-identifier plus one boolean for every listed check. Then reveal paired
-observations:
+Copy `reviewer/ratings-template.json` into a completed ratings file, and fill
+in a reviewer identifier and one boolean per check. Transfer only the completed
+ratings file back to the experimenter. With the private parent directory and
+ratings file available, the experimenter reveals descriptive paired results:
 
     python -m per_pulse.blinded_review grade /tmp/per-pulse-posture/review-001 /tmp/per-pulse-posture/ratings-001.json
 
-The generated review directory has a local .gitignore and restricted file
-permissions, and contains private outputs and a confidential answer key. The
-preparation command re-audits the real World/Kernel traces and response digests.
+New packets use separate `reviewer/` and `private/` subdirectories, with
+restricted local permissions and a parent .gitignore. Legacy flat-directory
+packets can still be graded but must never be shared as a whole. Preparation
+re-audits the native World/Kernel traces and response digests.
 Synthetic transport is refused unless --allow-fixture is explicitly given for
 QA, and synthetic origin remains visible in the report. Changed packets and
 incomplete ratings are rejected. Do not publish private traces or supply the

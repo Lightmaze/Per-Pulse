@@ -90,29 +90,44 @@ def prepare(trial: Path, output: Path, *, allow_fixture: bool = False) -> dict:
     if output.exists():
         raise ValueError("review output directory must be new")
     output.mkdir(parents=True, mode=0o700)
+    # Only the reviewer/ subtree may be handed to a blind judge. The root is
+    # the experimenter's private workspace; it also holds the condition key.
+    reviewer_root = output / "reviewer"
+    private_root = output / "private"
+    reviewer_root.mkdir(mode=0o700)
+    private_root.mkdir(mode=0o700)
     (output / ".gitignore").write_text("*\n", encoding="utf-8")
     (output / ".gitignore").chmod(0o600)
     try:
-        _write_private(output / "review-packet.json", packet)
-        key["review_packet_sha256"] = _sha((output / "review-packet.json").read_bytes())
-        _write_private(output / "condition-key.json", key)
-        _write_private(output / "ratings-template.json", {"schema": SCHEMA, "reviewer": "",
+        _write_private(reviewer_root / "review-packet.json", packet)
+        key["review_packet_sha256"] = _sha((reviewer_root / "review-packet.json").read_bytes())
+        _write_private(private_root / "condition-key.json", key)
+        _write_private(reviewer_root / "ratings-template.json", {"schema": SCHEMA, "reviewer": "",
             "ratings": {item["label"]: {check: None for check in item["checks"]} for item in packet["items"]}})
     except Exception:
         # Do not silently reuse partially created blind assignments.
         raise
     return {"output": str(output), "items": len(packet["items"]), "origin": record["origin"],
-            "review_file": "review-packet.json", "private_key_file": "condition-key.json"}
+            "reviewer_directory": str(reviewer_root),
+            "review_file": "reviewer/review-packet.json",
+            "private_key_file": "private/condition-key.json"}
 
 
 def grade(review_dir: Path, ratings_file: Path) -> dict:
     """Reveal paired descriptive differences only after all ratings are complete."""
-    packet = _load_json(review_dir / "review-packet.json")
-    key = _load_json(review_dir / "condition-key.json")
+    packet_path = review_dir / "reviewer" / "review-packet.json"
+    key_path = review_dir / "private" / "condition-key.json"
+    if not packet_path.is_file() and (review_dir / "review-packet.json").is_file():
+        # Older PR #29 packets used the same directory for reviewer and key.
+        # Preserve grading compatibility; never emit this layout for new runs.
+        packet_path = review_dir / "review-packet.json"
+        key_path = review_dir / "condition-key.json"
+    packet = _load_json(packet_path)
+    key = _load_json(key_path)
     ratings = _load_json(ratings_file)
     if packet.get("schema") != SCHEMA or key.get("schema") != SCHEMA or ratings.get("schema") != SCHEMA:
         raise ValueError("review schema mismatch")
-    if _sha((review_dir / "review-packet.json").read_bytes()) != key.get("review_packet_sha256"):
+    if _sha(packet_path.read_bytes()) != key.get("review_packet_sha256"):
         raise ValueError("review packet changed since condition mapping was sealed")
     if not isinstance(ratings.get("reviewer"), str) or not ratings["reviewer"].strip():
         raise ValueError("a reviewer identifier is required")
