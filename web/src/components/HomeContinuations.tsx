@@ -18,10 +18,15 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
   workspaceId: string;
 }) {
   const { t, pageTitle } = useLanguage();
-  const [pulse, setPulse] = useState<PulseState | null>(null);
-  // Only a freshly fetched, same-World bootstrap may advertise actionable Work
-  // states. The last route's cached page list can be stale after an approval.
-  const [freshPages, setFreshPages] = useState<PageSummary[] | null>(null);
+  // Keep both read models in a single World-tagged snapshot. If the local
+  // service switches Worlds, no prior Work names or Pulse events may flash
+  // into the new Home before its own bootstrap is confirmed.
+  const [snapshot, setSnapshot] = useState<{
+    workspaceId: string; pulse: PulseState | null; pages: PageSummary[] | null;
+  } | null>(null);
+  const currentSnapshot = snapshot?.workspaceId === workspaceId ? snapshot : null;
+  const pulse = currentSnapshot?.pulse ?? null;
+  const freshPages = currentSnapshot?.pages ?? null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -37,10 +42,13 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
           api.bootstrap(controller.signal),
         ]);
         if (controller.signal.aborted) return;
-        setPulse(pulseRead.status === 'fulfilled' ? pulseRead.value : null);
-        setFreshPages(workspaceRead.status === 'fulfilled'
-          && workspaceRead.value.workspaceId === workspaceId
-          ? workspaceRead.value.pages : null);
+        setSnapshot({
+          workspaceId,
+          pulse: pulseRead.status === 'fulfilled' ? pulseRead.value : null,
+          pages: workspaceRead.status === 'fulfilled'
+            && workspaceRead.value.workspaceId === workspaceId
+            ? workspaceRead.value.pages : null,
+        });
       } finally {
         reading = false;
       }
