@@ -121,6 +121,8 @@ class ChatHTTPConfig:
     timeout_seconds: float = 60.0
     max_output_tokens: int = 4096
     max_response_bytes: int = 2 * 1024 * 1024
+    # Exact serialized HTTP JSON body bound; not a token or monetary budget.
+    max_request_bytes: int = 8 * 1024 * 1024
     allow_local_http: bool = False
     reasoning_field: str | None = None
     provider_namespace: str | None = None
@@ -137,7 +139,7 @@ class ChatHTTPConfig:
             raise ValueError("model and credential environment variable must be valid")
         if isinstance(self.timeout_seconds, bool) or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be finite and positive")
-        for value in (self.max_output_tokens, self.max_response_bytes):
+        for value in (self.max_output_tokens, self.max_response_bytes, self.max_request_bytes):
             if type(value) is not int or value <= 0:
                 raise ValueError("token and response bounds must be positive integers")
         if self.reasoning_field not in {None, "reasoning_content"}:
@@ -368,6 +370,14 @@ class _ChatStream:
                 raise ProviderUnavailable("configured model credential is missing", code="provider_credential_missing")
             request = self.adapter._client.build_request("POST", self.adapter.config.endpoint,
                 headers={"Authorization": f"Bearer {key}", "Accept": "text/event-stream"}, json=self.body)
+            # Check the actual encoded HTTP body, including tool schemas and
+            # temporary image parts, before *any* network send. Never truncate
+            # the continuing history invisibly to fit this transport guard.
+            if len(request.content) > self.adapter.config.max_request_bytes:
+                raise ProviderUnavailable(
+                    "model request exceeds configured byte bound; no provider call was sent",
+                    code="provider_request_too_large",
+                )
             response = self.adapter._client.send(request, stream=True)
             with self._lock:
                 self._response = response
@@ -551,6 +561,7 @@ def model_factory_from_env():
         credential_env=os.environ.get("P_PULSE_CREDENTIAL_ENV", "P_PULSE_API_KEY"),
         timeout_seconds=float(os.environ.get("P_PULSE_CHAT_TIMEOUT", "60")),
         max_output_tokens=int(os.environ.get("P_PULSE_MAX_OUTPUT_TOKENS", "4096")),
+        max_request_bytes=int(os.environ.get("P_PULSE_MAX_REQUEST_BYTES", "8388608")),
         reasoning_field=os.environ.get("P_PULSE_REASONING_FIELD") or None,
         allow_local_http=os.environ.get("P_PULSE_ALLOW_LOCAL_HTTP") == "1",
         provider_namespace=os.environ.get("P_PULSE_PROVIDER_NAMESPACE") or None,
