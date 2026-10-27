@@ -287,16 +287,23 @@ within the outline pair; each packet contains the task, response and checks.
 Review the finished notice, availability-first ordering, factual accuracy,
 and the outline-only exception.
 
-Copy `reviewer/ratings-template.json` into a completed ratings file, and fill
-in a reviewer identifier and one boolean per check. Transfer only the completed
-ratings file back to the experimenter. With the private parent directory and
+Copy `reviewer/ratings-template.json` into a completed ratings file, retaining
+its `review_packet_sha256` and filling in a reviewer identifier and one boolean
+per check. Ratings are bound to the **exact** review packet, so accidentally
+grading responses with another trial's A/B key fails rather than inventing an
+experience benefit. Preparation also requires matching task prompts inside
+each blinded pair. Transfer only the completed ratings file back to the experimenter. With the private parent directory and
 ratings file available, the experimenter reveals descriptive paired results:
 
     python -m per_pulse.blinded_review grade /tmp/per-pulse-posture/review-001 /tmp/per-pulse-posture/ratings-001.json
 
 New packets use separate `reviewer/` and `private/` subdirectories, with
 restricted local permissions and a parent .gitignore. Legacy flat-directory
-packets can still be graded but must never be shared as a whole. Preparation
+packets can still be graded but must never be shared as a whole. Older ratings
+templates without a packet digest require the explicit
+`grade --allow-legacy-unbound` option; the resulting report marks
+`ratings_packet_bound=false`, and such scores must not be silently mixed with
+digest-bound reviews. Preparation
 re-audits the native World/Kernel traces and response digests.
 Synthetic transport is refused unless --allow-fixture is explicitly given for
 QA, and synthetic origin remains visible in the report. Changed packets and

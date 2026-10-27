@@ -70,6 +70,10 @@ def prepare(trial: Path, output: Path, *, allow_fixture: bool = False) -> dict:
                            "Baseline was run before conditional sharing; order and compute are not controlled.",
                            "One trial cannot establish a general behavioral or causal improvement."]}
     for task, baseline, conditional, left, right in PAIRS:
+        # The reviewer must see the same task for each condition. Divergent
+        # prompts make A/B assignment reveal the treatment before scoring.
+        if protocol[baseline] != protocol[conditional]:
+            raise ValueError(f"paired review prompts differ for {task}")
         stages = [baseline, conditional]
         if secrets.randbelow(2):
             stages.reverse()
@@ -103,6 +107,7 @@ def prepare(trial: Path, output: Path, *, allow_fixture: bool = False) -> dict:
         key["review_packet_sha256"] = _sha((reviewer_root / "review-packet.json").read_bytes())
         _write_private(private_root / "condition-key.json", key)
         _write_private(reviewer_root / "ratings-template.json", {"schema": SCHEMA, "reviewer": "",
+            "review_packet_sha256": key["review_packet_sha256"],
             "ratings": {item["label"]: {check: None for check in item["checks"]} for item in packet["items"]}})
     except Exception:
         # Do not silently reuse partially created blind assignments.
@@ -113,8 +118,8 @@ def prepare(trial: Path, output: Path, *, allow_fixture: bool = False) -> dict:
             "private_key_file": "private/condition-key.json"}
 
 
-def grade(review_dir: Path, ratings_file: Path) -> dict:
-    """Reveal paired descriptive differences only after all ratings are complete."""
+def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = False) -> dict:
+    """Reveal descriptive differences after checking each rating's packet identity."""
     packet_path = review_dir / "reviewer" / "review-packet.json"
     key_path = review_dir / "private" / "condition-key.json"
     if not packet_path.is_file() and (review_dir / "review-packet.json").is_file():
@@ -127,8 +132,13 @@ def grade(review_dir: Path, ratings_file: Path) -> dict:
     ratings = _load_json(ratings_file)
     if packet.get("schema") != SCHEMA or key.get("schema") != SCHEMA or ratings.get("schema") != SCHEMA:
         raise ValueError("review schema mismatch")
-    if _sha(packet_path.read_bytes()) != key.get("review_packet_sha256"):
+    packet_digest = _sha(packet_path.read_bytes())
+    if packet_digest != key.get("review_packet_sha256"):
         raise ValueError("review packet changed since condition mapping was sealed")
+    rating_digest = ratings.get("review_packet_sha256")
+    if rating_digest != packet_digest:
+        if not (allow_legacy_unbound and rating_digest is None):
+            raise ValueError("ratings are not bound to this review packet")
     if not isinstance(ratings.get("reviewer"), str) or not ratings["reviewer"].strip():
         raise ValueError("a reviewer identifier is required")
     items = packet["items"]
@@ -152,6 +162,7 @@ def grade(review_dir: Path, ratings_file: Path) -> dict:
                              "usage_accounted": {condition: key["mapping"][label]["usage"].get("accounted")
                                                  for condition, label in (("baseline", b), ("conditional", c))}}
     return {"schema": SCHEMA, "reviewer": ratings["reviewer"], "trial_origin": key["trial_origin"],
+            "ratings_packet_bound": rating_digest == packet_digest,
             "blindness_self_report_only": True, "comparisons": comparisons,
             "interpretation": "Descriptive paired reviewer judgments only; not proof of causal improvement."
             }
@@ -167,9 +178,13 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("grade", help="reveal descriptive pairs after all checks are scored")
     g.add_argument("review_dir", type=Path)
     g.add_argument("ratings", type=Path)
+    g.add_argument("--allow-legacy-unbound", action="store_true",
+                   help="explicitly accept historical ratings without a packet digest")
     try:
         args = parser.parse_args(argv)
-        result = prepare(args.trial, args.output, allow_fixture=args.allow_fixture) if args.command == "prepare" else grade(args.review_dir, args.ratings)
+        result = (prepare(args.trial, args.output, allow_fixture=args.allow_fixture)
+                  if args.command == "prepare" else
+                  grade(args.review_dir, args.ratings, allow_legacy_unbound=args.allow_legacy_unbound))
     except (ValueError, OSError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
         print(f"blinded review: {exc}", file=sys.stderr)
         return 2

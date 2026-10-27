@@ -92,6 +92,7 @@ def test_blind_grading_is_complete_and_bound_to_packet(trial, tmp_path):
     assert report["trial_origin"] == "real_provider"
     assert set(report["comparisons"]) == {"notice", "outline"}
     assert report["blindness_self_report_only"]
+    assert report["ratings_packet_bound"]
     ratings["ratings"]["A"]["facts_preserved"] = None
     ratings_path.write_text(json.dumps(ratings))
     with pytest.raises(ValueError, match="boolean observation"):
@@ -135,3 +136,38 @@ def test_grade_accepts_legacy_private_folder_layout_without_emitting_it(trial, t
     ratings_path = tmp_path / "legacy-ratings.json"
     ratings_path.write_text(json.dumps(ratings))
     assert review.grade(folder, ratings_path)["reviewer"] == "historic-packet"
+
+
+def test_ratings_from_a_different_packet_are_not_reused(trial, tmp_path):
+    root, _ = trial
+    first = tmp_path / "review-one"
+    second = tmp_path / "review-two"
+    review.prepare(root, first)
+    review.prepare(root, second)
+    ratings = review._load_json(first / "reviewer" / "ratings-template.json")
+    ratings["reviewer"] = "independent-review"
+    for checks in ratings["ratings"].values():
+        for check in checks:
+            checks[check] = True
+    submitted = tmp_path / "submitted.json"
+    submitted.write_text(json.dumps(ratings))
+    assert review.grade(first, submitted)["ratings_packet_bound"] is True
+    with pytest.raises(ValueError, match="not bound to this review packet"):
+        review.grade(second, submitted)
+    del ratings["review_packet_sha256"]
+    submitted.write_text(json.dumps(ratings))
+    with pytest.raises(ValueError, match="not bound to this review packet"):
+        review.grade(first, submitted)
+    legacy = review.grade(first, submitted, allow_legacy_unbound=True)
+    assert legacy["ratings_packet_bound"] is False
+
+
+def test_review_rejects_differing_prompts_before_export(trial, tmp_path):
+    root, record = trial
+    for item in record["protocol"]:
+        if item["stage"] == "conditional_transfer":
+            item["prompt"] = "A condition-revealing alternative task"
+    (root / "ordinary-transfer.json").write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="paired review prompts differ"):
+        review.prepare(root, tmp_path / "unsafe-review")
+    assert not (tmp_path / "unsafe-review").exists()
