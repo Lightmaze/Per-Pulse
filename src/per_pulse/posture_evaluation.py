@@ -1212,6 +1212,8 @@ def main(argv: list[str] | None = None) -> int:
     ordinary.add_argument("--training-calls", type=int, default=12)
     ordinary.add_argument("--trial-calls", type=int, default=8)
     ordinary.add_argument("--stage-timeout", type=float, default=180)
+    ordinary.add_argument("--task-order", choices=("notice-first", "outline-first"), default="notice-first",
+                          help="counterbalance notice/outline order within each memory phase; baseline still runs first")
     ordinary_audit = commands.add_parser("audit-ordinary-transfer", help="Check native ordinary-feedback transfer, exact provider exposure and source isolation.")
     ordinary_audit.add_argument("output", type=Path)
     args = parser.parse_args(argv)
@@ -1235,7 +1237,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "ordinary-transfer":
             from .posture_transfer import run_ordinary_transfer
             result = run_ordinary_transfer(args.output, training_calls=args.training_calls,
-                                          trial_calls=args.trial_calls, stage_timeout=args.stage_timeout)
+                                          trial_calls=args.trial_calls, stage_timeout=args.stage_timeout,
+                                          task_order=args.task_order)
         elif args.command == "audit-ordinary-transfer":
             from .posture_transfer import audit_ordinary_transfer
             result = audit_ordinary_transfer(args.output)
