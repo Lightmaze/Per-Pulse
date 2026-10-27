@@ -280,7 +280,26 @@ try {
   await page.unroute('**/api/pages/**/messages');
   checks.push('Chinese recovery message preserves an unsent Work draft after a known API error');
 
-
+  // Exhaust the actual native hourly admission count, not a mocked React
+  // status. A second original Work result schedules the second local
+  // influence through the same World/Kernel budget.
+  const anotherSource = await fetch(base + '/api/pages/' + localSource + '/messages', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: 'Another distinct source finding for the receiving Work.' }),
+  });
+  assert.equal(anotherSource.status, 202, await anotherSource.text());
+  await wait(async () => {
+    const budget = (await (await fetch(base + '/api/pulse')).json()).budget;
+    return budget.used === budget.limit && budget.limit === 2;
+  }, 'two actual native background admissions exhaust the rolling count', 20000);
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByText(
+    '一小时内的后台准入次数已用尽，暂不能加入新的局部后台回合；已排队的工作仍可能继续，前台输入不受影响。',
+    { exact: true },
+  ).waitFor();
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
+  checks.push('real native exhausted admission renders Chinese reason without losing foreground draft');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks,
