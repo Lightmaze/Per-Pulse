@@ -138,8 +138,12 @@ def test_grade_accepts_legacy_private_folder_layout_without_emitting_it(trial, t
     assert review.grade(folder, ratings_path)["reviewer"] == "historic-packet"
 
 
-def test_ratings_from_a_different_packet_are_not_reused(trial, tmp_path):
+def test_ratings_from_a_different_packet_are_not_reused(trial, tmp_path, monkeypatch):
     root, _ = trial
+    # The real exporter randomizes assignments. Force distinct packets so
+    # this identity regression cannot fail one time in four by chance.
+    assignments = iter((0, 0, 1, 0))
+    monkeypatch.setattr(review.secrets, "randbelow", lambda _: next(assignments))
     first = tmp_path / "review-one"
     second = tmp_path / "review-two"
     review.prepare(root, first)
