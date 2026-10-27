@@ -248,6 +248,8 @@ def test_native_service_restart_changes_instance_not_persistent_world(tmp_path):
         initial = first.get("/api/bootstrap").json()
     with client_for(data, pulse=pulse, model_factory=None) as second:
         resumed = second.get("/api/bootstrap").json()
+        bound = second.get("/api/pulse/observation").json()
     assert resumed["workspaceId"] == initial["workspaceId"]
     assert resumed["serviceInstanceId"] != initial["serviceInstanceId"]
-    assert resumed["serviceInstanceId"] == second.get("/api/pulse/observation").json()["serviceInstanceId"]
+    assert bound["workspaceId"] == resumed["workspaceId"]
+    assert bound["serviceInstanceId"] == resumed["serviceInstanceId"]
