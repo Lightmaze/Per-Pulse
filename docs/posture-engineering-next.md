@@ -84,6 +84,18 @@ the previous behavior. Sharing/pausing changes cannot masquerade as attributed
 learning; later genuine model-interpreted user corrections still follow the
 existing source-message and turn-evidence path.
 
+### Finding an older lesson without exposing the source episode
+
+The source-Work Lessons dialog now offers a compact search of the bounded
+journal's shareable abstraction: title, lesson, conditions, counterexamples
+and proposed future choices. It deliberately does not index the original
+encounter or private feedback. Filtering happens within the already authorized
+page projection; it makes no provider request, changes no lesson permissions,
+and does not disturb the original source/return journey. The English/简体中文
+browser regression checks matching, empty results, and a private-encounter
+phrase that must not match. This helps a person locate an old judgment before
+refining or pausing it; it is not itself model learning or retrieval.
+
 ## Checkpoint verification
 
 On 2026-10-25, the complete Python suite passed **160 tests** in 48.65 seconds.
