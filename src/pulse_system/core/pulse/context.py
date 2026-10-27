@@ -451,12 +451,15 @@ class ContextPulseController:
         ).fetchone()[0]
 
     def _token_window(self, now: datetime, conn=None) -> dict | None:
-        """Read the same durable World evidence used to admit background roots.
+        """Read durable World evidence for recent and still-executable roots.
 
-        Missing, cancelled and unaccounted outcomes retain their reservation;
-        a successful World/Kernel turn with an attributable provider usage
-        receipt replaces its reservation. Never infer zero spending from a
-        failed/uncertain turn or from a missing receipt.
+        Admission can precede execution by more than an hour (a paused local
+        context, queue backlog, or restart). An old queued/running root still
+        reserves future provider use; otherwise the hourly enqueue window can
+        refill while that root remains eligible to spend. Recent settlement of
+        an old root also counts in the current window. Terminal roots eventually
+        age out; missing/uncertain usage remains reserved through settlement.
+        This remains admission accounting, never a provider billing hard cap.
         """
         limit = self.config.max_background_provider_tokens_per_hour
         if limit is None:
@@ -473,8 +476,11 @@ class ContextPulseController:
             "AND root.kind IN ('spontaneous', 'propagation') "
             "AND (json_extract(root.metadata, '$.context_pulse') = 'reentry' "
             "OR json_extract(root.metadata, '$.context_connection_id') IS NOT NULL) "
-            "AND julianday(root.created_at) >= julianday(?)",
-            (self.world_id, (now - timedelta(hours=1)).isoformat()),
+            "AND (julianday(root.created_at) >= julianday(?) "
+            "OR root.status IN ('queued', 'running') "
+            "OR julianday(root.settled_at) >= julianday(?))",
+            (self.world_id, (now - timedelta(hours=1)).isoformat(),
+             (now - timedelta(hours=1)).isoformat()),
         ).fetchall()
         reservation = self.config.background_provider_token_reservation
         accounted = unaccounted = synthetic = overrun = 0
