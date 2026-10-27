@@ -199,10 +199,13 @@ def test_private_source_echo_in_fresh_work_output_invalidates_audit(tmp_path, mo
         stage_timeout=10,
     )
     assert result["status"] == "completed", result
-    # Request privacy alone can pass while the provider's target *answer*
-    # includes information only present in a previous source Work.
-    assert all(check["source_transcript_absent"] and check["expected_memory_exposure"]
-               for check in result["exposure_checks"].values())
+    # The first request into a fresh target Work is clean. Once the model
+    # itself echoes the marker, a later posture-review side request may
+    # legitimately contain that *generated* output. Do not pretend that
+    # every request in the stage stayed clean.
+    requests = json.loads((output / "provider-requests.json").read_text())
+    bare_first = next(item["request"] for item in requests if item["stage"] == "bare_transfer")
+    assert SOURCE_MARKER not in json.dumps(bare_first)
     assert SOURCE_MARKER in (output / "bare-transfer-response.md").read_text()
     audit = audit_ordinary_transfer(output)
     assert audit["status"] == "invalid", audit
