@@ -80,7 +80,7 @@ try {
     await heldPulseRead;
     try { await route.continue(); } catch { /* The old Home read may be aborted. */ }
   });
-  await page.getByRole('link',{name:'Home',exact:true}).click();
+  await page.locator('aside.sidebar').getByRole('link',{name:'Home',exact:true}).click();
   await wait(async()=>pulseReadIntercepted,'stalled read of background activity');
   const needsWork = page.getByRole('region',{name:'Work needing attention',exact:true});
   await needsWork.getByRole('button',{name:'Open Declined note',exact:true}).waitFor({timeout:15000});
@@ -94,7 +94,7 @@ try {
     new URL(page.url()).pathname.endsWith('/'+declinedId)
     && await page.getByRole('button',{name:'Allow once',exact:true}).count()===1);
   // One Work's pending approval must not hold the whole continuing subject.
-  await page.getByRole('link',{name:'Home',exact:true}).click();
+  await page.locator('aside.sidebar').getByRole('link',{name:'Home',exact:true}).click();
   await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home can answer while another Work awaits approval.');
   const repliesBeforeApproval = await page.locator('.message-assistant').count();
   await page.getByRole('button',{name:'Send message',exact:true}).click();
@@ -106,7 +106,7 @@ try {
   await page.getByRole('button',{name:'Decline',exact:true}).click();
   await wait(async()=>!(await page.getByRole('button',{name:'Allow once',exact:true}).count()),'declined approval clears');
   check('declined effect did not create a file',!(await (await fetch(base+'/__fixture/status')).json()).files.includes('declined.txt'));
-  await page.getByRole('link',{name:'Home',exact:true}).click();
+  await page.locator('aside.sidebar').getByRole('link',{name:'Home',exact:true}).click();
   await wait(async()=>await page.getByRole('button',{name:'Open Declined note',exact:true}).count()===0,
              'settled approval disappears from Home review');
   check('Home clears the review doorway after original Work settlement',true);
@@ -128,7 +128,7 @@ try {
     await slowDraft.inputValue()==='Unsent draft: keep this context and approval.');
   // A fresh bilingual Home projects the same pending Work, without carrying
   // its private approval contents or its unsent draft into Home.
-  await page.getByRole('link',{name:'主页',exact:true}).click();
+  await page.locator('aside.sidebar').getByRole('link',{name:'主页',exact:true}).click();
   const chineseReview = page.getByRole('region',{name:'需要处理的工作',exact:true});
   await chineseReview.getByRole('button',{name:'打开 Slow continuation',exact:true}).waitFor({timeout:15000});
   check('Chinese Home makes the original blocked Work discoverable',true);
@@ -181,7 +181,7 @@ try {
     && await slowDraft.inputValue()==='Unsent draft: keep this context and approval.');
   await page.unroute(approvalRoute);
   check('UI cancels the exact continuing turn',true);
-  await page.getByRole('link',{name:'Home',exact:true}).click();
+  await page.locator('aside.sidebar').getByRole('link',{name:'Home',exact:true}).click();
   await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home keeps working.');
   const repliesBeforeCancellation = await page.locator('.message-assistant').count();
   await page.getByRole('button',{name:'Send message',exact:true}).click();
