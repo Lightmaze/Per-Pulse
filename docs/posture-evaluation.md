@@ -285,8 +285,11 @@ request digests and multiplicity, per-stage scopes, budgets, response bytes,
 and offered lesson versions. It checks that baseline requests did not receive
 the teaching lesson and that conditional requests received its shared version.
 It also checks for exact source text, a source-only reference, and raw private
-episode fields. Those checks establish bounded exposure evidence, not the
-absence of every possible semantic paraphrase.
+episode fields in the target **requests**. Separately, it rejects a settled
+fresh-Work **response** that echoes the exact source-only incident reference,
+even if every target request was clean. This is an output-leak alarm, not an
+automatic redaction mechanism or proof against semantic/paraphrased leakage.
+Inspect the actual artifacts before claiming privacy or useful learning.
 
 All quality results remain `unreviewed`, including trials whose consistency
 audit passes. Inspect the four actual later responses against their original
