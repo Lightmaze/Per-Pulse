@@ -89,6 +89,17 @@ try {
   await page.getByRole('button', { name: 'Refresh lessons', exact: true }).click();
   const lesson = page.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Direct interaction before optional setup', exact: true }) });
   await lesson.getByText('In use · v1', { exact: true }).waitFor();
+  // Only the shareable abstraction is searchable: original encounters stay private.
+  const finder = page.getByRole('searchbox', { name: 'Find a lesson', exact: true });
+  await finder.fill('absent-lesson-marker-817');
+  await page.getByText('No lessons match this search.', { exact: true }).waitFor();
+  assert.equal(await lesson.count(), 0);
+  await finder.fill('optional setup');
+  await lesson.getByText('In use · v1', { exact: true }).waitFor();
+  await finder.fill('twelve-field intake form');
+  assert.equal(await lesson.count(), 0, 'private encounter text must not become a search index');
+  await finder.fill('');
+  await lesson.getByText('In use · v1', { exact: true }).waitFor();
   assert.match(await lesson.innerText(), /Test experience/);
   await lesson.getByText('When it applies', { exact: true }).click();
   assert.match(await lesson.innerText(), /AND \(The central value can be tried now OR A reversible sample is possible\)/);
@@ -108,6 +119,10 @@ try {
   await page.getByRole('button', { name: '查看此页面的经验', exact: true }).click();
   await page.getByRole('dialog', { name: '工作中的经验', exact: true }).waitFor();
   await lesson.getByText('使用中 · v1', { exact: true }).waitFor();
+  const chineseFinder = page.getByRole('searchbox', { name: '查找经验', exact: true });
+  await chineseFinder.fill('optional setup');
+  await lesson.getByText('使用中 · v1', { exact: true }).waitFor();
+  await chineseFinder.fill('');
   await lesson.getByText('原始经历', { exact: true }).click();
   assert.match(await lesson.innerText(), /twelve-field intake form/);
   await lesson.getByRole('button', { name: '查看纠正', exact: true }).click();
