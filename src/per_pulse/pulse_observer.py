@@ -76,6 +76,7 @@ def observe(
     start = clock()
     deadline = start + duration_seconds
     world_id = None
+    service_instance_id = None
     seen: dict[str, dict] = {}
     samples = 0
     poll_errors = 0
@@ -107,11 +108,21 @@ def observe(
                         current_id = bootstrap.get("workspaceId")
                         if not isinstance(current_id, str) or not current_id:
                             raise ValueError("Bootstrap has no native World identity")
+                        current_instance = bootstrap.get("serviceInstanceId")
+                        if not isinstance(current_instance, str) or not current_instance:
+                            raise ValueError("Bootstrap has no service instance identity")
                         if world_id is None:
                             world_id = current_id
+                            service_instance_id = current_instance
                         if current_id != world_id:
                             exit_reason = "world_changed"
                             emit({"type": "world_change", "elapsed_seconds": round(elapsed, 3)})
+                            break
+                        if current_instance != service_instance_id:
+                            # A restarted process can retain the same World.
+                            # It must not count as uninterrupted live execution.
+                            exit_reason = "service_restarted"
+                            emit({"type": "service_restart", "elapsed_seconds": round(elapsed, 3)})
                             break
                         recent = pulse.get("recentActivations")
                         if not isinstance(recent, list):
@@ -169,6 +180,7 @@ def observe(
             )
             summary = {
                 "type": "summary", "reason": exit_reason, "workspaceId": world_id,
+                "serviceInstanceId": service_instance_id,
                 "elapsed_seconds": round(clock() - start, 3),
                 "successful_samples": samples, "poll_errors": poll_errors,
                 "provider_configured_samples": connected_samples,

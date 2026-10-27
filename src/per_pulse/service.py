@@ -73,6 +73,8 @@ class PageService:
         workspace = self.data_dir / "workspace"
         workspace.mkdir(exist_ok=True)
         self._lock = threading.RLock()
+        # An ephemeral process identity is distinct from the persistent World.
+        self.service_instance_id = uuid4().hex
         self.allow_workspace_actions = bool(allow_workspace_actions and not example)
         # Explicit example data must remain usable with no credentials and
         # must never consume a user's model budget, even if the shell has keys.
@@ -393,6 +395,7 @@ class PageService:
             return {
                 "name": "Per Pulse", "version": __version__, "example": self.example,
                 "workspaceId": self.runtime.world_id,
+                "serviceInstanceId": self.service_instance_id,
                 "homeId": "home", "provider": self.provider, "pages": pages,
                 "settings": self.settings(),
                 "postureEnabled": self.learning.enabled,

@@ -116,6 +116,10 @@ the observer catches the interruption; a caught interruption is marked
 `interrupted`. Poll failures and a full twenty-event server window are
 explicit evidence gaps, never silently counted as successful endurance.
 The observed event count is a **lower bound**, not an exhaustive ledger read.
+The native bootstrap exposes an ephemeral `serviceInstanceId`: when a running
+service restarts under the same persistent World identity, the observer ends
+with `service_restarted` instead of claiming uninterrupted process activity.
+The Context Body and its history can remain persistent across that restart.
 
 This command does not enable Pulse or a provider for you: start Per Pulse
 normally, with `--pulse` and any explicitly authorized model, before observing.
