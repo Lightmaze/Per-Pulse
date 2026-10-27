@@ -1,6 +1,9 @@
 /** Interface text only: original work, events and filenames remain verbatim. */
 export const continuityEnglish = {
   "pulse.title": "Activity",
+  "pulse.homeReview.title": "Work needing attention",
+  "pulse.homeReview.info": "An earlier Work is waiting for your decision or could not finish. Open that original page to inspect its turn. Home cannot approve actions.",
+  "pulse.homeReview.open": "Open {title}",
   "pulse.home.title": "Recent local work",
   "pulse.home.info": "Finished local activations in your existing Works. Open the original message to inspect what happened; nothing is copied into Home.",
   "pulse.home.open": "Return to {title}",
@@ -143,6 +146,9 @@ export const continuityEnglish = {
 } as const;
 export const continuityChinese: Record<keyof typeof continuityEnglish, string> = {
   "pulse.title": "活动",
+  "pulse.homeReview.title": "需要处理的工作",
+  "pulse.homeReview.info": "有些 Work 正等待你的决断或未能完成。打开原始页面检查对应回合；不能在 Home 直接批准操作。",
+  "pulse.homeReview.open": "打开 {title}",
   "pulse.home.title": "近期局部工作",
   "pulse.home.info": "这些活动在原有 Work 中完成。可返回原始消息核查经过；内容不会自动复制到 Home。",
   "pulse.home.open": "返回 {title}",
