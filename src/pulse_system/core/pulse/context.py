@@ -465,6 +465,10 @@ class ContextPulseController:
         if limit is None:
             return None
         conn = conn if conn is not None else self.storage._conn
+        # Dendritic convergence supersedes its original propagation members:
+        # they cannot each spend model tokens after reconciliation. Charge the
+        # single durable aggregate instead (kind='pulse', marker='convergence'),
+        # including when its queued execution outlives the admission hour.
         rows = conn.execute(
             "SELECT root.id, result.metadata FROM causal_events root "
             "LEFT JOIN harness_turns turn ON turn.event_id = root.id "
@@ -473,9 +477,11 @@ class ContextPulseController:
             "AND result.parent_event_id = root.id AND result.world_id = root.world_id "
             "AND result.kind = 'assistant_result' AND result.status = 'settled' "
             "WHERE root.world_id = ? "
-            "AND root.kind IN ('spontaneous', 'propagation') "
+            "AND ((root.kind IN ('spontaneous', 'propagation') "
             "AND (json_extract(root.metadata, '$.context_pulse') = 'reentry' "
-            "OR json_extract(root.metadata, '$.context_connection_id') IS NOT NULL) "
+            "OR json_extract(root.metadata, '$.context_connection_id') IS NOT NULL)) "
+            "OR (root.kind = 'pulse' AND json_extract(root.metadata, '$.context_pulse') = 'convergence')) "
+            "AND root.status <> 'reconciled' "
             "AND (julianday(root.created_at) >= julianday(?) "
             "OR root.status IN ('queued', 'running') "
             "OR julianday(root.settled_at) >= julianday(?))",
