@@ -101,6 +101,38 @@ background admissions, not individual provider requests, tokens or money.
 
 Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. The example workspace is always read-only. See [Core Harness](docs/harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
 
+### Carry a stopped workspace to another directory (POSIX alpha)
+
+Per Pulse uses the **existing native cold Pulse Image** format, not a second
+history store or a live agent clone. After cleanly stopping the server, save
+a private archive outside the source directory:
+
+```sh
+per-pulse image save ./per-pulse-private.zip --data-dir ~/.local/share/per-pulse
+per-pulse image inspect ./per-pulse-private.zip
+per-pulse image restore ./per-pulse-private.zip --data-dir ./restored-per-pulse
+per-pulse --data-dir ./restored-per-pulse
+```
+
+Restore requires a **new, nonexistent directory** and an archive made with
+a compatible **Per Pulse** implementation; an upstream P-Pulse image alone
+is not assumed to be interchangeable. Save refuses an active World or
+unfinished Kernel turns/actions. Restore checks member digests and the
+matching Python implementation before writing, preserves the native
+World/Kernel identities and source links, and does not start any model.
+If a restore fails, do not start its incomplete destination. The archive
+contains **private conversations, histories and workspace files**: do not
+publish or share it. Model credentials and external tool/resource bindings
+must be configured deliberately after restore.
+
+This is a **cold copy**: it does not transfer a running process, merge later
+changes made to the original home, or copy browser-local unsent drafts and
+scroll positions. The old and restored homes can diverge; treat the
+restored copy as the continuation you choose to use, not a synchronized
+second subject. Image save/restore currently support POSIX hosts only.
+Compatibility is bound to current Python source code, not a guarantee of
+semantic equivalence across other model/provider versions.
+
 ## Develop
 
 Run the backend in one terminal:

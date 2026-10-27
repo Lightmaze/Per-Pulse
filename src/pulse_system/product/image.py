@@ -64,7 +64,7 @@ def _implementation():
     # Release version alone is insufficient while this alpha changes under the
     # same package version. Compare installed/source Python code, not its path.
     result = {}
-    for package in ('pulse_system', 'pulse_harness', 'stream_cognition'):
+    for package in ('pulse_system', 'pulse_harness', 'stream_cognition', 'per_pulse'):
         spec = importlib.util.find_spec(package)
         if spec is None or not spec.submodule_search_locations:
             continue
@@ -255,7 +255,7 @@ def _manifest(z):
             if str(parent) != '.': _check(str(parent) in dirs, 'missing or conflicting directory')
     impl = manifest.get('implementation')
     _check(isinstance(impl,dict) and {'pulse_system','pulse_harness'} <= set(impl)
-           and set(impl) <= {'pulse_system','pulse_harness','stream_cognition'}, 'invalid implementation binding')
+           and set(impl) <= {'pulse_system','pulse_harness','stream_cognition','per_pulse'}, 'invalid implementation binding')
     if 'kernel.db.cognition.sqlite3' in expected:
         _check('stream_cognition' in impl, 'missing cognition implementation binding')
     return manifest

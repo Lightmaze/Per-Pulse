@@ -5,10 +5,56 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
+import sqlite3
+import sys
+import zipfile
+
+
+def _image_command(argv: list[str]) -> None:
+    """Carry a stopped, private Context Body without starting the server."""
+    parser = argparse.ArgumentParser(
+        prog="per-pulse image",
+        description="Save, inspect or restore a private cold Per Pulse workspace; no model calls.",
+    )
+    parser.add_argument("operation", choices=("save", "inspect", "restore"))
+    parser.add_argument("archive", type=Path)
+    parser.add_argument("--data-dir", type=Path,
+                        help="Source home for save, NEW destination home for restore.")
+    args = parser.parse_args(argv)
+    home = args.data_dir or Path.home() / ".local" / "share" / "per-pulse"
+
+    from pulse_system.product import image
+
+    try:
+        if args.operation == "save":
+            result = image.save(home, args.archive)
+        elif args.operation == "inspect":
+            result = image.inspect(args.archive)
+        else:
+            # P-Pulse archives use a related native runtime, but their product
+            # history is not automatically a compatible Per Pulse workspace.
+            # Require the exact Per Pulse implementation to have been bound
+            # when the source image was created.
+            details = image.inspect(args.archive)
+            if "per_pulse" not in details["implementation"]:
+                parser.error("This image is not bound to a Per Pulse product implementation.")
+            result = image.restore(args.archive, home)
+    except image.ImageError as exc:
+        parser.error(str(exc))
+    except (OSError, sqlite3.Error, zipfile.BadZipFile, ValueError,
+            KeyError, TypeError, RecursionError):
+        parser.error("Image operation failed; inspect the archive and keep any incomplete destination.")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def main(argv: list[str] | None = None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "image":
+        _image_command(argv[1:])
+        return
     parser = argparse.ArgumentParser(description="Per Pulse — a connected workspace for your conversations.")
     parser.add_argument("--data-dir", type=Path, help="Directory for persistent data (default: ~/.local/share/per-pulse).")
     parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "localhost", "::1"], help="Local address to listen on.")
