@@ -505,7 +505,7 @@ def test_native_background_model_round_ceiling_is_causally_scoped(tmp_path, monk
             kernel = runtime.kernel_service._runtime(session_scope)
             bound_turns.extend(
                 (kernel, record.scope)
-                for record in kernel.store.turns_for_session(session_scope, limit=16)
+                for record in kernel.runner.store.turns_for_session(session_scope, limit=16)
             )
         assert len(bound_turns) == len(fixture.requests) == 4
         foreground, background = [], []
