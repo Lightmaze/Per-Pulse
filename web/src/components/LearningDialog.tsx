@@ -120,6 +120,13 @@ export function LearningDialog({ pageId, pageTitle, close, navigate }: { pageId:
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [version, setVersion] = useState(0);
+  const [search, setSearch] = useState('');
+  // Search only the shareable abstraction, never private source encounters or feedback.
+  const needle = search.trim().toLocaleLowerCase();
+  const visibleExperiences = (view?.experiences ?? []).filter(item => !needle || [
+    item.title, item.lesson, JSON.stringify(item.conditions), ...item.counterexamples,
+    item.shift.understanding, item.shift.candidates, item.shift.delivery,
+  ].some(value => value.toLocaleLowerCase().includes(needle)));
   useEffect(() => {
     const controller = new AbortController();
     setView(null); setError('');
@@ -147,7 +154,12 @@ export function LearningDialog({ pageId, pageTitle, close, navigate }: { pageId:
     {!view && !error ? <p role="status">{t('learning.loading')}</p> : null}
     {view && !view.enabled ? <p>{t('learning.disabled')}</p> : null}
     {view?.enabled && !view.experiences.length ? <div className="lessons-empty"><h3>{t('learning.emptyTitle')}</h3><p>{t('learning.emptyHelp')}</p><p>{t('learning.emptyModel')}</p></div> : null}
-    {view?.experiences.map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} busy={busy} navigate={navigate}
+    {view?.enabled && view.experiences.length > 0 ? <div className="lesson-search">
+      <label className="field-label" htmlFor="lesson-search">{t('learning.search')}</label>
+      <input id="lesson-search" type="search" autoComplete="off" value={search} onChange={event => setSearch(event.target.value)} placeholder={t('learning.searchHint')} />
+    </div> : null}
+    {view?.enabled && view.experiences.length > 0 && !visibleExperiences.length ? <p className="lesson-note" role="status">{t('learning.noMatches')}</p> : null}
+    {visibleExperiences.map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} busy={busy} navigate={navigate}
       revise={(item, changes, evidence) => update(() => api.reviseExperience(pageId, item, changes, evidence))}
       feedback={(item, verdict, evidence) => update(() => api.experienceFeedback(pageId, item, verdict, evidence))} />)}
   </Dialog>;
