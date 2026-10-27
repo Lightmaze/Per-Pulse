@@ -195,12 +195,48 @@ def main() -> None:
         example_before = run_workspace(root, example=True, fake_provider=True)
         ordinary = run_workspace(root, example=False, fake_provider=False, exercise=True)
         ordinary_after = run_workspace(root, example=False, fake_provider=False, expected=ordinary)
+
+        # Exercise cold Context Body portability through the *wheel-installed*
+        # Per Pulse CLI, not just by importing native Image methods from source.
+        # The prior server exited and released the World owner lease.
+        if os.name == "posix":
+            archive = root.parent / (root.name + "-private.pulse.zip")
+            destination = root.parent / (root.name + "-restored")
+            command = [sys.executable, "-m", "per_pulse.cli", "image"]
+            def image_cli(operation: str, *, home: Path | None = None) -> dict:
+                args = command + [operation, str(archive)]
+                if home is not None:
+                    args += ["--data-dir", str(home)]
+                result = subprocess.run(
+                    args, cwd=root, text=True, capture_output=True, timeout=60,
+                    check=False,
+                )
+                assert result.returncode == 0, (
+                    f"Installed Image {operation} failed: {result.stderr[-2000:]}"
+                )
+                return json.loads(result.stdout)
+
+            saved = image_cli("save", home=root)
+            assert saved["model_calls"] == 0
+            inspected = image_cli("inspect")
+            assert inspected["compatible"] is True
+            assert "per_pulse" in inspected["implementation"]
+            assert inspected["world_id"] == ordinary["workspaceId"]
+            restored_receipt = image_cli("restore", home=destination)
+            assert restored_receipt["world_id"] == ordinary["workspaceId"]
+            assert restored_receipt["model_calls"] == 0
+            assert not (destination / ".image-restore-incomplete").exists()
+            continued = run_workspace(
+                destination, example=False, fake_provider=False, expected=ordinary,
+            )
+            assert continued == ordinary, "Restored World/Work history or source identity changed"
+            assert root.joinpath("world.db").exists(), "Cold restore changed its source home"
         example_after = run_workspace(root, example=True, fake_provider=True)
         assert example_before == example_after, "Native example history changed across restart"
         assert ordinary["workspaceId"] != example_before["workspaceId"], "Examples share an ordinary World"
         assert len(ordinary["homeMessageIds"]) == 2, "Ordinary user input and sourced return must persist"
         print(json.dumps({
-            "passed": 8,
+            "passed": 9 if os.name == "posix" else 8,
             "checks": [
                 "all three packages resolved from isolated virtualenv, not editable source",
                 "installed wheel CLI started from outside source checkout",
@@ -210,6 +246,10 @@ def main() -> None:
                 "ordinary disconnected World stayed empty and isolated",
                 "loopback health/bootstrap/pages APIs returned persistent native state",
                 "installed ordinary Home -> Work -> sourced Home survives restart without a provider",
+                *(
+                    ["installed cold Image save/inspect/restore preserves same native World and returns in a NEW home"]
+                    if os.name == "posix" else []
+                ),
             ],
             "provider": "none; example authored fixture and real local persistence",
         }, indent=2))
