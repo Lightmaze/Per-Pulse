@@ -122,3 +122,35 @@ def test_environment_bound_is_explicit_and_shared_by_native_adapter_instances(mo
     finally:
         first.close()
         second.close()
+
+
+@pytest.mark.parametrize("cancel_mode", ["request_cancel", "native_stream_stop"])
+def test_cancel_while_encoding_never_sends(monkeypatch, cancel_mode):
+    """A foreground Stop or local hold may arrive after the initial gate.
+
+    The deterministic boundary is between build_request (which serializes the
+    complete continuing history) and HTTP dispatch. Sending here could consume
+    real paid tokens even though the native work was already cancelled.
+    """
+    import threading
+
+    sent = []
+    adapter = _adapter(monkeypatch, 8192, sent)
+    cancel = threading.Event()
+    stream = adapter.stream(_request("A continuing Work awaiting its turn."), cancel_event=cancel)
+    original_build = adapter._client.build_request
+
+    def cancel_during_encoding(*args, **kwargs):
+        wire = original_build(*args, **kwargs)
+        if cancel_mode == "request_cancel":
+            cancel.set()
+        else:
+            stream.close()
+        return wire
+
+    monkeypatch.setattr(adapter._client, "build_request", cancel_during_encoding)
+    try:
+        assert list(stream) == []
+        assert sent == [], "Cancellation before dispatch must not contact the provider"
+    finally:
+        adapter.close()
