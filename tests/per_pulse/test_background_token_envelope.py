@@ -6,8 +6,11 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
+import pulse_system.core.pulse.context as context_module
 from per_pulse.service import PageService, PulseSettings
 from pulse_system.core.pulse.context import _QuotaReached
 from test_pulse_integration import (
@@ -160,6 +163,63 @@ def test_missing_and_oversized_receipts_never_create_free_budget(tmp_path):
             queue_background(runtime, second_parent)
     finally:
         other.runtime.close()
+
+
+def test_old_queued_background_still_reserves_after_one_hour(tmp_path, monkeypatch):
+    """A held local activation is a future liability, not a free new hour."""
+    service = PageService(tmp_path, model_factory=None, pulse=settings(limit=60))
+    try:
+        runtime = service.runtime
+        parent = seed_source(runtime)
+        first = queue_background(runtime, parent)
+        future = datetime.now(timezone.utc) + timedelta(hours=2)
+        monkeypatch.setattr(context_module, "_now", lambda: future)
+        budget = runtime.context_pulse.snapshot()["providerTokenBudget"]
+        assert budget["charged"] == budget["unaccountedReservations"] == 60
+        assert budget["trackedAdmissions"] == 1
+        assert budget["remaining"] == 0
+        second_parent = seed_source(runtime)
+        with pytest.raises(_QuotaReached):
+            queue_background(runtime, second_parent)
+        assert runtime.causal_ledger.get_event(first.id).status.value == "queued"
+    finally:
+        service.runtime.close()
+
+    reopened = PageService(tmp_path, model_factory=None, pulse=settings(limit=60))
+    try:
+        saved = reopened.runtime.context_pulse.snapshot()["providerTokenBudget"]
+        assert saved["charged"] == 60
+        assert saved["trackedAdmissions"] == 1
+        with pytest.raises(_QuotaReached):
+            queue_background(reopened.runtime, second_parent)
+    finally:
+        reopened.runtime.close()
+
+
+def test_old_admission_settled_now_counts_in_current_hour(tmp_path):
+    """Recent real settlement of an earlier reservation is not free usage."""
+    service = PageService(tmp_path, model_factory=None, pulse=settings(limit=60))
+    try:
+        runtime = service.runtime
+        source = seed_source(runtime)
+        first = queue_background(runtime, source)
+        # Simulate the passage of two hours between enqueue and execution
+        # without sleeping: only the root's admission timestamp is backdated.
+        old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        with runtime.causal_ledger._transaction() as conn:
+            conn.execute("UPDATE causal_events SET created_at = ? WHERE id = ?",
+                         (old_time, first.id))
+        settle_background(runtime, first, inputs=28, outputs=12)
+        budget = runtime.context_pulse.snapshot()["providerTokenBudget"]
+        assert budget["trackedAdmissions"] == 1
+        assert budget["charged"] == budget["accountedTokens"] == 40
+        assert budget["unaccountedReservations"] == 0
+        assert budget["remaining"] == 20
+        second_parent = seed_source(runtime)
+        with pytest.raises(_QuotaReached):
+            queue_background(runtime, second_parent)
+    finally:
+        service.runtime.close()
 
 
 @pytest.mark.parametrize("kwargs", [
