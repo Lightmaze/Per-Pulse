@@ -10,6 +10,7 @@ from pulse_system.core.causality.ledger import CausalTransitionError, DendriticW
 from pulse_system.core.connection.network import ConnectionNetwork
 from pulse_system.core.dendrite.processor import DendriteConfig, DendriteProcessor
 from pulse_system.core.pulse.engine import PulseEngine, PulseEngineConfig, PulseEvent, PulseReason
+from pulse_system.core.pulse.context import ContextPulseConfig, ContextPulseController
 from pulse_system.core.runtime.resource import RuntimeManager
 from pulse_system.core.types import CausalEventDomain, CausalEventFlow, CausalEventKind, CausalEventSource, CausalEventStatus
 from pulse_system.core.world.registry import WorldRegistry
@@ -296,3 +297,58 @@ def test_revocation_and_convergence_commit_atomically(convergence_body, monkeypa
         assert ledger.get_event(aggregate.id).status is CausalEventStatus.CANCELLED
         assert ledger.get_dendritic_integration_for_event(aggregate.id).member_count == 2
     engine.close()
+
+
+def test_converged_local_budget_reserves_the_executable_aggregate(convergence_body, monkeypatch):
+    """Two replaced deliveries fund one real model turn, even hours later.
+
+    Both original members were admitted and are now reconciled; charging them
+    *and* the aggregate would double count, while charging neither allows a
+    fused queued turn to run after the admission hour for free.
+    """
+    storage, ledger, subject, centers = convergence_body
+    controller = ContextPulseController(
+        storage, ledger, WorldRegistry(storage), world_id="world",
+        subject=lambda: subject, fence=lambda: None,
+        config=ContextPulseConfig(
+            enabled=True, spontaneous_rate=0,
+            max_background_provider_tokens_per_hour=120,
+            background_provider_token_reservation=60,
+        ),
+    )
+    left, right = enqueue_pair(storage, ledger, subject, centers)
+    original = controller.snapshot()["providerTokenBudget"]
+    assert original["trackedAdmissions"] == 2
+    assert original["unaccountedReservations"] == 120
+
+    engine = make_engine(storage, ledger)
+    try:
+        form_window(engine, (left, right), monkeypatch)
+        assert len(engine._pending_events) == 1
+        aggregate = ledger.get_event(engine._pending_events[0].event_id)
+        assert aggregate.kind is CausalEventKind.PULSE
+        assert aggregate.metadata["context_pulse"] == "convergence"
+        assert all(ledger.get_event(event.id).status is CausalEventStatus.RECONCILED
+                   for event in (left, right))
+        pending = controller.snapshot()["providerTokenBudget"]
+        assert pending["trackedAdmissions"] == 1
+        assert pending["charged"] == pending["unaccountedReservations"] == 60
+        assert pending["remaining"] == 60
+
+        future = max(left.created_at, right.created_at) + timedelta(hours=2)
+        later = controller.snapshot(now=future)["providerTokenBudget"]
+        assert later["trackedAdmissions"] == 1
+        assert later["charged"] == later["unaccountedReservations"] == 60
+
+        turn = ledger.begin_turn(aggregate.id, subject, aggregate.content,
+                                 execution_context=centers[2])
+        ledger.settle_turn(turn.id, "One completed synthesis.",
+                           metadata={"evidence_class": "TEST_DOUBLE"},
+                           usage={"input_count": 24, "output_count": 11})
+        settled = controller.snapshot()["providerTokenBudget"]
+        assert settled["trackedAdmissions"] == 1
+        assert settled["charged"] == settled["accountedTokens"] == 35
+        assert settled["unaccountedReservations"] == 0
+        assert settled["syntheticTokens"] == 35
+    finally:
+        engine.close()
