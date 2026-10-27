@@ -155,6 +155,8 @@ try {
   assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isEnabled(), false);
   await newLesson.fill(refinedLesson);
   await newExceptions.fill(refinedExceptions.join('\n'));
+  const reportedRevision = 'The optional setup questions delayed the playable interaction in this Work.';
+  await lesson.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).fill(reportedRevision);
   await lesson.getByRole('button', { name: 'Save refinement', exact: true }).click();
   await lesson.getByText('In use · v5', { exact: true }).waitFor();
   await lesson.getByText(refinedLesson, { exact: true }).waitFor();
@@ -164,6 +166,11 @@ try {
   assert.deepEqual(afterManualRefinement.encounter, beforeManualRefinement.encounter);
   assert.equal(afterManualRefinement.revision, beforeManualRefinement.revision + 1);
   assert.deepEqual(afterManualRefinement.counterexamples, refinedExceptions);
+  assert.equal(afterManualRefinement.feedback.length, beforeManualRefinement.feedback.length + 1);
+  assert.equal(afterManualRefinement.feedback.at(-1).evidence, reportedRevision);
+  assert.equal(afterManualRefinement.feedback.at(-1).source.kind, 'operator_described_refinement');
+  await lesson.getByText('Later feedback (2)', { exact: true }).click();
+  await lesson.getByText(reportedRevision, { exact: false }).waitFor();
   await lesson.getByRole('button', { name: 'Use in other pages', exact: true }).click();
   await lesson.getByText('In use · v6', { exact: true }).waitFor();
   await close();
@@ -224,7 +231,7 @@ try {
   await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill('A preview delayed the requested registration task.');
   await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).click();
   await lesson.getByText('Paused · v9', { exact: true }).waitFor();
-  await lesson.getByText('Later feedback (2)', { exact: true }).click();
+  await lesson.getByText('Later feedback (3)', { exact: true }).click();
   assert.match(await lesson.innerText(), /A preview delayed/);
   await page.setViewportSize({ width: 390, height: 844 });
   const bounds = await page.getByRole('dialog').boundingBox();

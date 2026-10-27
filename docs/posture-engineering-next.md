@@ -65,6 +65,20 @@ accusing a successful answer of being a writing plan. Request-audit comparison
 also reconciles digest multiplicity: repeating one valid request entry cannot
 stand in for a different completed request.
 
+### Source-preserving operator refinement with optional evidence
+
+The originating Work's Refine lesson editor can now attach a short, optional
+operator-described outcome to the same atomic lesson revision. This reuses the
+native journal's `revise_from_feedback` operation: original encounter and source
+identities stay unchanged, the new revision and described evidence survive
+restart together, and another Work receives only the revised abstraction.
+The reported outcome is explicitly tagged `operator_described_refinement`;
+it is **not** a newly observed native user event or evidence that a model
+autonomously learned. Without a description, quick operator revisions retain
+the previous behavior. Sharing/pausing changes cannot masquerade as attributed
+learning; later genuine model-interpreted user corrections still follow the
+existing source-message and turn-evidence path.
+
 ## Checkpoint verification
 
 On 2026-10-25, the complete Python suite passed **160 tests** in 48.65 seconds.

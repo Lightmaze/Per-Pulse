@@ -120,13 +120,28 @@ class PageLearning:
                 raise PageError("invalid_experience_source", str(error), 422) from error
             return {"experience": self._public(record, context_id)}
 
-    def revise(self, page_id, experience_id, revision, changes):
+    def revise(self, page_id, experience_id, revision, changes, evidence=None):
         with self.pages._lock:
             memory, record = self._owned(page_id, experience_id)
+            # A described correction may alter the lesson, not silently change
+            # scope or activation. The report is not invented native feedback.
+            if evidence is not None and (
+                not isinstance(changes, dict) or not changes
+                or set(changes) - {"title", "lesson", "conditions", "counterexamples", "shift"}
+            ):
+                raise PageError("invalid_experience", "A sourced refinement can only change lesson content.", 422)
             try:
-                updated = memory.revise_experience(
-                    experience_id, expected_revision=revision, changes=changes,
-                )
+                if evidence is None:
+                    updated = memory.revise_experience(
+                        experience_id, expected_revision=revision, changes=changes,
+                    )
+                else:
+                    updated = memory.revise_from_feedback(
+                        experience_id, expected_revision=revision, changes=changes,
+                        evidence=evidence,
+                        source={"kind": "operator_described_refinement", "page_id": page_id,
+                                "experience_id": experience_id},
+                    )
             except (ValueError, RedactionRequired) as error:
                 raise self._invalid(error) from error
             return {"experience": self._public(updated, record["context_id"])}

@@ -202,3 +202,46 @@ def test_lesson_source_remains_reachable_after_recent_window_without_exposing_ot
         assert current["earlierSourceMessageId"] is None and len(current["messages"]) == 500
         assert client.get(f"/api/pages/{other_page}", params={"sourceMessageId": source}).status_code == 404
         assert client.get("/api/pages/home", params={"sourceMessageId": "missing-event"}).status_code == 404
+
+
+def test_operator_refinement_keeps_described_evidence_and_source_private(tmp_path, monkeypatch):
+    with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
+        _, source, feedback = observed_pair(client)
+        endpoint = "/api/pages/home/posture/experiences"
+        initial = client.post(endpoint, json=lesson(source, feedback)).json()["experience"]
+        target = endpoint + "/" + initial["id"]
+        shared = client.patch(target, json={"expectedRevision": 1, "changes": {"scope": "subject"}})
+        assert shared.status_code == 200
+        receiver = new_page(client, title="Different task", instruction="Build a registration form.")["page"]["id"]
+        evidence = "A later registration job needed only fixed fields, not an interactive preview."
+        rejected = client.patch(target, json={"expectedRevision": 2, "changes": {"scope": "context"},
+                                               "evidence": evidence})
+        assert rejected.status_code == 422
+        assert client.get("/api/pages/home/posture").json()["experiences"][0]["revision"] == 2
+        revised = client.patch(target, json={"expectedRevision": 2, "changes": {
+            "lesson": "Give an immediate trial only when the user requests an experience.",
+            "counterexamples": ["A fixed registration form is requested."],
+        }, "evidence": evidence})
+        assert revised.status_code == 200, revised.text
+        current = revised.json()["experience"]
+        assert current["id"] == initial["id"] and current["revision"] == 3
+        assert current["source"] == initial["source"] and current["encounter"] == initial["encounter"]
+        assert len(current["feedback"]) == 1
+        entry = current["feedback"][0]
+        assert entry["verdict"] == "revised" and entry["evidence"] == evidence
+        assert entry["source"]["kind"] == "operator_described_refinement"
+        assert entry["source"]["page_id"] == "home"
+        exposed = client.get(f"/api/pages/{receiver}/posture").json()["experiences"][0]
+        assert exposed["lesson"] == current["lesson"] and exposed["revision"] == 3
+        assert not exposed["canEdit"]
+        assert all(field not in exposed for field in ("source", "encounter", "feedback"))
+        assert evidence not in json.dumps(exposed)
+        stale = client.patch(target, json={"expectedRevision": 2, "changes": {
+            "lesson": "Stale change",
+        }, "evidence": "An obsolete observation."})
+        assert stale.status_code == 409
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        persisted = client.get("/api/pages/home/posture").json()["experiences"][0]
+        assert persisted["source"] == initial["source"] and persisted["encounter"] == initial["encounter"]
+        assert persisted["feedback"] == current["feedback"]
+        assert persisted["revision"] == 3

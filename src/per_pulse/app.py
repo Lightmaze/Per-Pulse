@@ -110,6 +110,8 @@ class NewExperience(Input):
 class ReviseExperience(Input):
     expectedRevision: int = Field(ge=1, strict=True)
     changes: dict[str, Any]
+    # Operator-authored evidence, not a purported new native user message.
+    evidence: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1500)] | None = None
 
 
 class ExperienceFeedback(Input):
@@ -287,7 +289,7 @@ def create_app(
 
     @app.patch("/api/pages/{page_id}/posture/experiences/{experience_id}")
     def revise_experience(page_id: str, experience_id: str, body: ReviseExperience, request: Request):
-        return pages(request).learning.revise(page_id, experience_id, body.expectedRevision, body.changes)
+        return pages(request).learning.revise(page_id, experience_id, body.expectedRevision, body.changes, body.evidence)
 
     @app.post("/api/pages/{page_id}/posture/experiences/{experience_id}/feedback")
     def experience_feedback(page_id: str, experience_id: str, body: ExperienceFeedback, request: Request):

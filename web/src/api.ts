@@ -53,9 +53,9 @@ export const api = {
   disconnectPulse: (sourcePageId: string, targetPageId: string) =>
     request<{ pulse: PulseState }>('/pulse/connections', { method: 'DELETE', body: JSON.stringify({ sourcePageId, targetPageId }) }),
   posture: (id: string, signal?: AbortSignal) => request<PostureView>(`${pagePath(id)}/posture`, { signal }),
-  reviseExperience: (pageId: string, experience: PostureExperience, changes: { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; counterexamples?: string[] }) =>
+  reviseExperience: (pageId: string, experience: PostureExperience, changes: { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; counterexamples?: string[] }, evidence?: string) =>
     request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}`, {
-      method: 'PATCH', body: JSON.stringify({ expectedRevision: experience.revision, changes }),
+      method: 'PATCH', body: JSON.stringify({ expectedRevision: experience.revision, changes, ...(evidence ? { evidence } : {}) }),
     }),
   experienceFeedback: (pageId: string, experience: PostureExperience, verdict: 'useful' | 'harmful', evidence: string) =>
     request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}/feedback`, {
