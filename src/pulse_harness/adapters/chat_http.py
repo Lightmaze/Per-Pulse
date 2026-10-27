@@ -378,6 +378,12 @@ class _ChatStream:
                     "model request exceeds configured byte bound; no provider call was sent",
                     code="provider_request_too_large",
                 )
+            # Stop, local attention hold or a revoked operation may arrive while
+            # serializing a long-lived Context Body. Recheck immediately before
+            # dispatch; the earlier cancellation check cannot fence a request
+            # that became unnecessary during encoding.
+            if self._cancelled():
+                return
             response = self.adapter._client.send(request, stream=True)
             with self._lock:
                 self._response = response
