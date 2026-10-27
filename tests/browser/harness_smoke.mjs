@@ -114,6 +114,16 @@ try {
   await page.getByRole('button',{name:'仅允许本次',exact:true}).waitFor();
   check('pending native approval and unsent Work draft survive Chinese switch',
     await slowDraft.inputValue()==='Unsent draft: keep this context and approval.');
+  // A fresh bilingual Home projects the same pending Work, without carrying
+  // its private approval contents or its unsent draft into Home.
+  await page.getByRole('link',{name:'主页',exact:true}).click();
+  const chineseReview = page.getByRole('region',{name:'需要处理的工作',exact:true});
+  await chineseReview.getByRole('button',{name:'打开 Slow continuation',exact:true}).waitFor({timeout:15000});
+  check('Chinese Home makes the original blocked Work discoverable',true);
+  await chineseReview.getByRole('button',{name:'打开 Slow continuation',exact:true}).click();
+  await page.getByRole('button',{name:'仅允许本次',exact:true}).waitFor();
+  check('Chinese Home reentry preserves the Work approval and unsent draft',
+    await slowDraft.inputValue()==='Unsent draft: keep this context and approval.');
   await page.getByRole('button',{name:'活动',exact:true}).click();
   await page.getByRole('dialog',{name:'活动',exact:true}).waitFor();
   await page.getByRole('heading',{name:'后台活动',exact:true}).waitFor();
