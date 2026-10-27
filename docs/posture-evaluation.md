@@ -83,6 +83,33 @@ attributed records from their original workspace and use the evaluator below.
 The two included examples contain no benchmark answers and no private user
 history.
 
+### Counterbalance the negative-control task order
+
+The ordinary-feedback trial normally runs the finished notice before the
+outline negative control in both the **unshared baseline** and **shared
+conditional** phases. To reverse only that task order, run an independent
+new trial with:
+
+```sh
+python -m per_pulse.posture_evaluation ordinary-transfer \\
+  --task-order outline-first --output /tmp/per-pulse-posture/trial-outline-first
+```
+
+This order is sealed in the manifest and checked against the native World/
+Kernel event chronology by `audit-ordinary-transfer`. The original
+`notice-first` order remains the default and both orders must retain the
+same task prompts, native lesson source, exposure checks and sharing boundary.
+`blinded_review prepare` accepts either verified trial because labels are
+assigned within tasks, independently of execution order. Compare **independent
+replications** under each order with the same provider and bounded resources;
+do not turn separate trials into one fictional paired run.
+
+Important limit: lesson capture happens in the source Work and sharing follows
+the unshared baseline. Reversing notice/outline order **does not** reverse
+baseline versus treatment, match realized inference cost, or establish a
+causal benefit from a single run. An absent native capture remains an absent
+capture; neither condition is manufactured to fill it.
+
 ## Evaluate actual work
 
 ```sh
