@@ -1,8 +1,9 @@
 """A held local activation remains the same unfinished work across time and restart.
 
-Only the clock of a queued causal root is shifted; all model replies come from
-an explicitly synthetic HTTP transport. Real World, Kernel, SQLite, page
-navigation and foreground execution are exercised. No real provider is billed.
+Future budget windows are inspected without rewriting causal timestamps;
+all model replies come from an explicitly synthetic HTTP transport. Real World,
+Kernel, SQLite, page routing and foreground execution are exercised. No real
+provider is billed or simulated two-hour wall-clock runtime claimed.
 Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 from __future__ import annotations
@@ -56,18 +57,20 @@ def test_held_cross_work_influence_resumes_after_long_backlog_without_refilling_
         assert queued[0].status.value == "queued"
         assert assistant_count(view(client, target)) == 1
 
-        # Model an actual two-hour outstanding liability without sleeping two
-        # hours or inventing a later settled result. The native root stays queued.
-        two_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        with runtime.causal_ledger._transaction() as conn:
-            conn.execute("UPDATE causal_events SET created_at = ? WHERE id = ?",
-                         (two_hours_ago, incoming_id))
-        before = client.get("/api/pulse").json()
-        assert before["providerTokenBudget"]["charged"] == 60
-        assert before["providerTokenBudget"]["unaccountedReservations"] == 60
-        assert before["providerTokenBudget"]["trackedAdmissions"] == 1
-        assert before["providerTokenBudget"]["remaining"] == 0
-        assert before["providerTokenBudget"]["hardProviderSpendingCap"] is False
+        # Inspect the budget as of two hours in the future, while preserving
+        # the ledger's valid parent -> result -> propagation chronology. Moving
+        # only a child's created_at before its parent would corrupt causal
+        # evidence and is not a valid simulation of a delayed execution.
+        future = datetime.now(timezone.utc) + timedelta(hours=2)
+        before = runtime.context_pulse.snapshot(now=future)
+        live = client.get("/api/pulse").json()
+        for projection in (before, live):
+            budget = projection["providerTokenBudget"]
+            assert budget["charged"] == 60
+            assert budget["unaccountedReservations"] == 60
+            assert budget["trackedAdmissions"] == 1
+            assert budget["remaining"] == 0
+            assert budget["hardProviderSpendingCap"] is False
         assert runtime.causal_ledger.get_event(incoming_id).status.value == "queued"
 
         # A human can still make progress in a sibling Work when the held
@@ -82,7 +85,7 @@ def test_held_cross_work_influence_resumes_after_long_backlog_without_refilling_
 
     with client_for(tmp_path, pulse=profile, model_factory=fixture.factory) as client:
         runtime = client.app.state.pages.runtime
-        state = client.get("/api/pulse").json()
+        state = runtime.context_pulse.snapshot(now=datetime.now(timezone.utc) + timedelta(hours=2))
         assert {"center_id": target_center} in state["heldContexts"]
         assert state["providerTokenBudget"]["charged"] == 60
         assert state["providerTokenBudget"]["unaccountedReservations"] == 60
