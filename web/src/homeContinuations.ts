@@ -42,3 +42,36 @@ export function homeContinuations(
   }
   return rows;
 }
+
+/** Return live original Works where a person must inspect a blocked or failed turn.
+ *
+ * These are native page projections (not AI-suggested tasks). An approval is
+ * never exposed or executed from Home; only the original Work can resolve it.
+ * Keep errors visible too: a failed action must not silently disappear when
+ * the user returns Home.
+ */
+export function homeWorkNeedsAttention(
+  pages: readonly PageSummary[],
+  maximum = 3,
+): PageSummary[] {
+  if (!Number.isInteger(maximum) || maximum <= 0) return [];
+  const seen = new Set<string>();
+  return pages
+    .filter(page => page.kind === 'work'
+      && (page.status === 'needs_attention' || page.status === 'error'))
+    .sort((a, b) => {
+      const aNeedsReview = a.status === 'needs_attention' ? 0 : 1;
+      const bNeedsReview = b.status === 'needs_attention' ? 0 : 1;
+      if (aNeedsReview !== bNeedsReview) return aNeedsReview - bNeedsReview;
+      // ISO timestamps are server-authored; an invalid timestamp stays last.
+      const aTime = Date.parse(a.updatedAt) || 0;
+      const bTime = Date.parse(b.updatedAt) || 0;
+      return bTime - aTime || a.id.localeCompare(b.id);
+    })
+    .filter(page => {
+      if (seen.has(page.id)) return false;
+      seen.add(page.id);
+      return true;
+    })
+    .slice(0, maximum);
+}
