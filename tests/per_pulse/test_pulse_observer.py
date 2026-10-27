@@ -1,0 +1,169 @@
+"""Offline checks for the read-only live Pulse observation instrument.
+
+Synthetic HTTP statuses check evidence handling, not model quality or a
+multi-hour run. Copyright 2026 Lightmaze Contributors. Apache-2.0.
+"""
+from __future__ import annotations
+
+import json
+import os
+
+import httpx
+import pytest
+
+from per_pulse.pulse_observer import observe
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def snapshot(events, *, connected=True):
+    return {
+        "enabled": True, "paused": False, "running": True,
+        "providerConfigured": connected,
+        "queue": {"queued": 0, "running": 0, "oldestQueuedAt": None},
+        "budget": {"limit": 4, "used": len(events), "remaining": 0},
+        "providerTokenBudget": None,
+        "recentActivations": events,
+    }
+
+
+def activation(event_id, status, page):
+    return {
+        "eventId": event_id, "status": status, "kind": "spontaneous",
+        "pageId": page, "sourceEventId": "source-" + event_id,
+        "sourcePageId": page,
+    }
+
+
+def mock_client(states, *, worlds=None, error_sample=None):
+    readings = {"pulse": 0, "bootstrap": 0}
+    worlds = worlds or ["world-A"] * len(states)
+
+    def respond(request):
+        assert request.method == "GET"
+        if request.url.path == "/api/bootstrap":
+            pos = readings["bootstrap"]
+            readings["bootstrap"] += 1
+            return httpx.Response(200, json={"workspaceId": worlds[min(pos, len(worlds) - 1)]})
+        assert request.url.path == "/api/pulse"
+        pos = readings["pulse"]
+        readings["pulse"] += 1
+        if error_sample is not None and pos == error_sample:
+            return httpx.Response(503)
+        return httpx.Response(200, json=states[min(pos, len(states) - 1)])
+
+    return httpx.Client(
+        base_url="http://127.0.0.1:8000",
+        transport=httpx.MockTransport(respond),
+    )
+
+
+def records(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_native_local_provenance_is_deduplicated_over_elapsed_samples(tmp_path):
+    clock = Clock()
+    phases = [
+        snapshot([activation("a", "queued", "work-A")]),
+        snapshot([activation("a", "settled", "work-A")]),
+        snapshot([activation("b", "settled", "work-B"),
+                  activation("a", "settled", "work-A")]),
+    ]
+    output = tmp_path / "private" / "observation.jsonl"
+    with mock_client(phases) as client:
+        report = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=2, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+    rows = records(output)
+    assert [row["type"] for row in rows] == [
+        "header", "sample", "sample", "sample", "summary"
+    ]
+    assert [len(row["event_updates"]) for row in rows[1:4]] == [1, 1, 1]
+    assert report["workspaceId"] == "world-A"
+    assert report["observed_events"] == 2
+    assert report["observed_settled_background_by_page"] == {
+        "work-A": 1, "work-B": 1
+    }
+    assert report["eligible_for_uninterrupted_observation"]
+    assert report["provider_quality_or_cost_verified"] is False
+    if os.name == "posix":
+        assert output.stat().st_mode & 0o077 == 0
+    assert "source-a" in output.read_text()
+    assert "PRIVATE_TRANSCRIPT" not in output.read_text()
+
+
+def test_world_switch_stops_without_cross_body_merging(tmp_path):
+    clock = Clock()
+    output = tmp_path / "watch.jsonl"
+    with mock_client(
+        [snapshot([activation("one", "settled", "first")])] * 2,
+        worlds=["world-A", "world-B"],
+    ) as client:
+        result = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=2, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+    assert result["reason"] == "world_changed"
+    assert result["observed_events"] == 1
+    assert not result["eligible_for_uninterrupted_observation"]
+    assert records(output)[-2]["type"] == "world_change"
+
+
+def test_failed_poll_is_reported_not_erased(tmp_path):
+    clock = Clock()
+    output = tmp_path / "watch.jsonl"
+    with mock_client([snapshot([]), snapshot([]), snapshot([])],
+                     error_sample=1) as client:
+        result = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=2, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+    assert result["poll_errors"] == 1
+    assert not result["eligible_for_uninterrupted_observation"]
+    assert "poll_error" in [row["type"] for row in records(output)]
+
+
+def test_full_recent_window_cannot_pass_as_exhaustive_evidence(tmp_path):
+    clock = Clock()
+    twenty = [activation(str(i), "settled", "work") for i in range(20)]
+    output = tmp_path / "watch.jsonl"
+    with mock_client([snapshot(twenty)]) as client:
+        result = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=0.1, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+    assert result["recent_window_saturated"]
+    assert not result["eligible_for_uninterrupted_observation"]
+    assert result["observed_events"] == 20
+
+
+@pytest.mark.parametrize("url", [
+    "https://127.0.0.1:8000", "http://example.com:8000",
+    "http://user:secret@localhost:8000", "http://localhost",
+    "http://localhost:8000/secret", "http://localhost:8000/?key=secret",
+])
+def test_rejects_non_loopback_or_credentialed_endpoints_before_file_creation(tmp_path, url):
+    with pytest.raises(ValueError, match="loopback"):
+        observe(url, tmp_path / "watch.jsonl", duration_seconds=1,
+                interval_seconds=1)
+    assert not (tmp_path / "watch.jsonl").exists()
+
+
+def test_existing_report_and_invalid_duration_are_never_replaced(tmp_path):
+    output = tmp_path / "watch.jsonl"
+    output.write_text("KEEP")
+    with pytest.raises(ValueError):
+        observe("http://127.0.0.1:8000", output, duration_seconds=1,
+                interval_seconds=0)
+    assert output.read_text() == "KEEP"
+    with pytest.raises(FileExistsError):
+        observe("http://127.0.0.1:8000", output, duration_seconds=1,
+                interval_seconds=1)
+    assert output.read_text() == "KEEP"
