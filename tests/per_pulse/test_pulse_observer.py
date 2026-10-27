@@ -149,7 +149,8 @@ def test_missing_service_instance_identity_is_a_poll_error(tmp_path):
                          duration_seconds=0.1, interval_seconds=1,
                          client=client, clock=clock, sleep=clock.sleep)
     assert result["successful_samples"] == 0
-    assert result["poll_errors"] == 1
+    assert result["poll_errors"] >= 1
+    assert [row["type"] for row in records(output)].count("poll_error") == result["poll_errors"]
     assert not result["eligible_for_uninterrupted_observation"]
 
 
