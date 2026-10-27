@@ -69,6 +69,18 @@ try {
   check('Home source link returns to the original Work',new URL(page.url()).pathname.endsWith('/'+approvedId));
   await create('Declined note','WRITE_DECLINE');
   const declinedId = new URL(page.url()).pathname.split('/').pop();
+  // An approval blocked in a sibling Work must become discoverable in Home,
+  // yet remain exercisable only in its original local context.
+  await page.getByRole('link',{name:'Home',exact:true}).click();
+  const needsWork = page.getByRole('region',{name:'Work needing attention',exact:true});
+  await needsWork.getByRole('button',{name:'Open Declined note',exact:true}).waitFor({timeout:15000});
+  check('Home notices a native pending Work without preapproving its file effect',
+    !(await (await fetch(base+'/__fixture/status')).json()).files.includes('declined.txt'));
+  await needsWork.getByRole('button',{name:'Open Declined note',exact:true}).click();
+  await page.getByRole('heading',{name:'Declined note',exact:true}).waitFor();
+  check('Home review opens the original Work approval and retains native authority',
+    new URL(page.url()).pathname.endsWith('/'+declinedId)
+    && await page.getByRole('button',{name:'Allow once',exact:true}).count()===1);
   // One Work's pending approval must not hold the whole continuing subject.
   await page.getByRole('link',{name:'Home',exact:true}).click();
   await page.getByRole('textbox',{name:'Message Home',exact:true}).fill('Home can answer while another Work awaits approval.');
@@ -82,6 +94,10 @@ try {
   await page.getByRole('button',{name:'Decline',exact:true}).click();
   await wait(async()=>!(await page.getByRole('button',{name:'Allow once',exact:true}).count()),'declined approval clears');
   check('declined effect did not create a file',!(await (await fetch(base+'/__fixture/status')).json()).files.includes('declined.txt'));
+  await page.getByRole('link',{name:'Home',exact:true}).click();
+  await wait(async()=>await page.getByRole('button',{name:'Open Declined note',exact:true}).count()===0,
+             'settled approval disappears from Home review');
+  check('Home clears the review doorway after original Work settlement',true);
   await create('Slow continuation','WRITE_SLOW SLOW_AFTER_APPROVAL');
   // Locale is presentation state. A Work draft and exact pending approval must
   // survive changing language without remounting its continuing context.
