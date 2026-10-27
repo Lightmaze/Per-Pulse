@@ -321,7 +321,13 @@ Copy `reviewer/ratings-template.json` into a completed ratings file, retaining
 its `review_packet_sha256` and filling in a reviewer identifier and one boolean
 per check. Ratings are bound to the **exact** review packet, so accidentally
 grading responses with another trial's A/B key fails rather than inventing an
-experience benefit. Preparation also requires matching task prompts inside
+experience benefit. New packets also publish a salted SHA-256 commitment to
+the randomized private mapping **before** review. Its unrevealed salt stays
+in the private condition key; at grading the commitment is checked before
+revealing which label belonged to which condition. Swapping A/B or relabeling
+the origin after a reviewer returns scores is therefore detected. This is a
+local tamper-evidence contract, not independent custody or reviewer identity
+authentication. Preparation also requires matching task prompts inside
 each blinded pair. Transfer only the completed ratings file back to the experimenter. With the private parent directory and
 ratings file available, the experimenter reveals descriptive paired results:
 
@@ -333,7 +339,10 @@ packets can still be graded but must never be shared as a whole. Older ratings
 templates without a packet digest require the explicit
 `grade --allow-legacy-unbound` option; the resulting report marks
 `ratings_packet_bound=false`, and such scores must not be silently mixed with
-digest-bound reviews. Preparation
+digest-bound reviews. Historical packets that predate the mapping commitment
+must additionally opt in with `grade --allow-legacy-uncommitted`; their
+results carry `condition_mapping_bound=false`. Never pool them as sealed
+condition mappings. Preparation
 re-audits the native World/Kernel traces and response digests.
 Synthetic transport is refused unless --allow-fixture is explicitly given for
 QA, and synthetic origin remains visible in the report. Changed packets and

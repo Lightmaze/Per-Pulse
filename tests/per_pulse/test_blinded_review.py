@@ -38,6 +38,9 @@ def test_blind_packet_separates_labels_and_private_key(trial, tmp_path, monkeypa
     assert [item["label"] for item in packet["items"]] == ["A", "B", "C", "D"]
     assert "conditional" not in json.dumps(packet).lower()
     assert "baseline" not in json.dumps(packet).lower()
+    assert len(packet["condition_key_commitment_sha256"]) == 64
+    assert review._key_commitment(key) == packet["condition_key_commitment_sha256"]
+    assert "commitment_salt_hex" not in json.dumps(packet)
     assert key["mapping"]["A"]["condition"] == "baseline"
     assert key["mapping"]["C"]["condition"] == "conditional"
     assert (tmp_path / "blind" / ".gitignore").read_text() == "*\n"
@@ -93,6 +96,7 @@ def test_blind_grading_is_complete_and_bound_to_packet(trial, tmp_path):
     assert set(report["comparisons"]) == {"notice", "outline"}
     assert report["blindness_self_report_only"]
     assert report["ratings_packet_bound"]
+    assert report["condition_mapping_bound"]
     ratings["ratings"]["A"]["facts_preserved"] = None
     ratings_path.write_text(json.dumps(ratings))
     with pytest.raises(ValueError, match="boolean observation"):
@@ -175,3 +179,58 @@ def test_review_rejects_differing_prompts_before_export(trial, tmp_path):
     with pytest.raises(ValueError, match="paired review prompts differ"):
         review.prepare(root, tmp_path / "unsafe-review")
     assert not (tmp_path / "unsafe-review").exists()
+
+
+def test_private_key_cannot_swap_conditions_after_packet_scoring(trial, tmp_path):
+    root, _ = trial
+    folder = tmp_path / "sealed-blind"
+    review.prepare(root, folder)
+    ratings = review._load_json(folder / "reviewer" / "ratings-template.json")
+    ratings["reviewer"] = "separate-reviewer"
+    for checks in ratings["ratings"].values():
+        for check in checks:
+            checks[check] = True
+    rating_file = tmp_path / "blind-ratings.json"
+    rating_file.write_text(json.dumps(ratings))
+    assert review.grade(folder, rating_file)["condition_mapping_bound"] is True
+
+    key_path = folder / "private" / "condition-key.json"
+    key = review._load_json(key_path)
+    key["mapping"]["A"], key["mapping"]["B"] = key["mapping"]["B"], key["mapping"]["A"]
+    key_path.write_text(json.dumps(key))
+    with pytest.raises(ValueError, match="condition mapping changed"):
+        review.grade(folder, rating_file)
+    # Editing origin metadata or the private commitment salt is also visible.
+    key["mapping"]["A"], key["mapping"]["B"] = key["mapping"]["B"], key["mapping"]["A"]
+    key["trial_origin"] = "synthetic_fixture"
+    key_path.write_text(json.dumps(key))
+    with pytest.raises(ValueError, match="condition mapping changed"):
+        review.grade(folder, rating_file)
+
+
+def test_historical_uncommitted_packet_requires_explicit_grading_exception(trial, tmp_path):
+    root, _ = trial
+    folder = tmp_path / "old-blind"
+    review.prepare(root, folder)
+    packet_path = folder / "reviewer" / "review-packet.json"
+    key_path = folder / "private" / "condition-key.json"
+    packet = review._load_json(packet_path)
+    del packet["condition_key_commitment_sha256"]
+    packet_path.write_text(json.dumps(packet))
+    key = review._load_json(key_path)
+    del key["commitment_salt_hex"]
+    key["review_packet_sha256"] = review._sha(packet_path.read_bytes())
+    key_path.write_text(json.dumps(key))
+    ratings = review._load_json(folder / "reviewer" / "ratings-template.json")
+    ratings["review_packet_sha256"] = key["review_packet_sha256"]
+    ratings["reviewer"] = "historical-review"
+    for checks in ratings["ratings"].values():
+        for check in checks:
+            checks[check] = True
+    rating_file = tmp_path / "old-ratings.json"
+    rating_file.write_text(json.dumps(ratings))
+    with pytest.raises(ValueError, match="uncommitted legacy"):
+        review.grade(folder, rating_file)
+    result = review.grade(folder, rating_file, allow_legacy_uncommitted=True)
+    assert result["ratings_packet_bound"] is True
+    assert result["condition_mapping_bound"] is False

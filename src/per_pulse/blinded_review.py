@@ -33,6 +33,29 @@ def _sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _key_commitment(key: dict) -> str:
+    """Seal the randomized private mapping before a reviewer sees responses.
+
+    The unrevealed 256-bit salt prevents guessing the two A/B assignments
+    from the public digest. Ratings separately bind the exact public packet.
+    """
+    salt = key.get("commitment_salt_hex")
+    if not isinstance(salt, str) or len(salt) != 64:
+        raise ValueError("missing or invalid private condition commitment salt")
+    try:
+        secret = bytes.fromhex(salt)
+    except ValueError as exc:
+        raise ValueError("invalid private condition commitment salt") from exc
+    public_identity = {
+        "schema": key["schema"],
+        "trial_origin": key["trial_origin"],
+        "trial_record_sha256": key["trial_record_sha256"],
+        "mapping": key["mapping"],
+    }
+    canonical = json.dumps(public_identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return _sha(secret + canonical)
+
+
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -91,6 +114,11 @@ def prepare(trial: Path, output: Path, *, allow_fixture: bool = False) -> dict:
             key["mapping"][label] = {"condition": "conditional" if stage_name.startswith("conditional") else "baseline",
                                       "stage": stage_name, "result_event_id": entry["result_event_id"],
                                       "response_sha256": attachment["sha256"], "usage": entry.get("usage", {})}
+    # Publish a salted commitment in the reviewer packet before ratings are
+    # made. The condition key and salt stay only in the experimenter's private
+    # subtree; a later edit to the key cannot silently reverse A/B conclusions.
+    key["commitment_salt_hex"] = secrets.token_hex(32)
+    packet["condition_key_commitment_sha256"] = _key_commitment(key)
     if output.exists():
         raise ValueError("review output directory must be new")
     output.mkdir(parents=True, mode=0o700)
@@ -118,7 +146,8 @@ def prepare(trial: Path, output: Path, *, allow_fixture: bool = False) -> dict:
             "private_key_file": "private/condition-key.json"}
 
 
-def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = False) -> dict:
+def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = False,
+          allow_legacy_uncommitted: bool = False) -> dict:
     """Reveal descriptive differences after checking each rating's packet identity."""
     packet_path = review_dir / "reviewer" / "review-packet.json"
     key_path = review_dir / "private" / "condition-key.json"
@@ -135,6 +164,12 @@ def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = 
     packet_digest = _sha(packet_path.read_bytes())
     if packet_digest != key.get("review_packet_sha256"):
         raise ValueError("review packet changed since condition mapping was sealed")
+    commitment = packet.get("condition_key_commitment_sha256")
+    if commitment is None:
+        if not allow_legacy_uncommitted:
+            raise ValueError("uncommitted legacy condition mapping; use --allow-legacy-uncommitted for historical review only")
+    elif not isinstance(commitment, str) or commitment != _key_commitment(key):
+        raise ValueError("private condition mapping changed after the blind packet was issued")
     rating_digest = ratings.get("review_packet_sha256")
     if rating_digest != packet_digest:
         if not (allow_legacy_unbound and rating_digest is None):
@@ -163,6 +198,7 @@ def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = 
                                                  for condition, label in (("baseline", b), ("conditional", c))}}
     return {"schema": SCHEMA, "reviewer": ratings["reviewer"], "trial_origin": key["trial_origin"],
             "ratings_packet_bound": rating_digest == packet_digest,
+            "condition_mapping_bound": commitment is not None,
             "blindness_self_report_only": True, "comparisons": comparisons,
             "interpretation": "Descriptive paired reviewer judgments only; not proof of causal improvement."
             }
@@ -180,11 +216,15 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("ratings", type=Path)
     g.add_argument("--allow-legacy-unbound", action="store_true",
                    help="explicitly accept historical ratings without a packet digest")
+    g.add_argument("--allow-legacy-uncommitted", action="store_true",
+                   help="explicitly accept historical packets without a sealed condition key")
     try:
         args = parser.parse_args(argv)
         result = (prepare(args.trial, args.output, allow_fixture=args.allow_fixture)
                   if args.command == "prepare" else
-                  grade(args.review_dir, args.ratings, allow_legacy_unbound=args.allow_legacy_unbound))
+                  grade(args.review_dir, args.ratings,
+                        allow_legacy_unbound=args.allow_legacy_unbound,
+                        allow_legacy_uncommitted=args.allow_legacy_uncommitted))
     except (ValueError, OSError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
         print(f"blinded review: {exc}", file=sys.stderr)
         return 2
