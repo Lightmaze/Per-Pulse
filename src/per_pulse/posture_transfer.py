@@ -446,6 +446,15 @@ def audit_ordinary_transfer(output: Path) -> dict:
                 body, artifact_problem = _read_artifact(output, artifact["path"], artifact["sha256"])
                 if artifact_problem or body != (outgoing["content"] or "").encode():
                     errors.append("native_response_artifact_mismatch")
+                # Clean *inputs* alone cannot certify that a fresh Work's
+                # *output* kept the private source reference out. Preserve
+                # the actual output as evidence; fail the audit if it echoes
+                # the exact source-only sentinel after the context boundary.
+                # This check is deliberately exact, not a claim to detect
+                # semantic or paraphrased information leakage.
+                if (stage["stage"] not in {"source", "feedback"}
+                        and SOURCE_MARKER in (outgoing["content"] or "")):
+                    errors.append("target_output_private_source_leak")
                 if stage["stage"] == "source" and record.get("source_result_text") != outgoing["content"]:
                     errors.append("native_source_result_mismatch")
                 native_turn = kernel.execute("SELECT * FROM turns WHERE session_id=? AND turn_id=?", (scope["session_id"], scope["turn_id"])).fetchone()
@@ -527,4 +536,4 @@ def audit_ordinary_transfer(output: Path) -> dict:
     return {"status": "verified" if not errors else "invalid", "run_status": record.get("status"),
             "origin": record.get("origin"), "capture_status": record.get("capture_status"), "errors": errors,
             "review_status": "unreviewed", "eligible_for_behavior_comparison": False,
-            "note": "Checks source, native requests and clean target exposure. Review actual responses for usefulness; host files are not authenticated against their filesystem owner."}
+            "note": "Checks native source/requests, clean target inputs and exact source-only markers in target outputs. It does not detect paraphrased leaks or grade usefulness; host files are not authenticated against their filesystem owner."}
