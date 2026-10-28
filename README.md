@@ -259,6 +259,15 @@ contains **private conversations, histories and workspace files**: do not
 publish or share it. Model credentials and external tool/resource bindings
 must be configured deliberately after restore.
 
+To continue a partly read source after moving the workspace, the native model
+can use `reading.recent` to find its earlier passage, then explicitly call
+`reading.resume(receipt_id)`. Resume checks the same relative path, complete
+file bytes and redacted text view before reading from the saved position.
+The new receipt retains its original receipt and workspace provenance; later
+`reading.continue` calls use the new receipt. A changed file must be opened
+deliberately from the beginning. This does not carry approvals, cross logical
+session boundaries, or establish that the material was understood.
+
 This is a **cold copy**: it does not transfer a running process, merge later
 changes made to the original home, or copy browser-local unsent drafts and
 scroll positions. The old and restored homes can diverge; treat the

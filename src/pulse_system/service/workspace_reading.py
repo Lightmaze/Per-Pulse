@@ -2,7 +2,9 @@
 
 A receipt names an exposed passage, not comprehension or a new task. Continuing
 verifies the whole source and redacted-view digests before exposing another
-passage. No sidecar bookmark store, semantic scheduler or file write is involved.
+passage. Explicit resume can reobserve an unchanged source in a relocated
+workspace, retaining the prior receipt as provenance rather than authority.
+No sidecar bookmark store, semantic scheduler or file write is involved.
 """
 from __future__ import annotations
 
@@ -30,13 +32,13 @@ MAX_RECENT_ACTIONS = 128
 SCHEMA = {
     "type": "object",
     "properties": {
-        "op": {"type": "string", "enum": ["open", "continue", "recent"]},
+        "op": {"type": "string", "enum": ["open", "continue", "resume", "recent"]},
         "path": {"type": "string", "maxLength": 2048,
                  "description": "Workspace-relative UTF-8 text path, for open only."},
         "expected_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$",
                             "description": "Optional original SHA-256, for open only; refuse changed bytes before exposing text."},
         "receipt_id": {"type": "string", "maxLength": 256,
-                       "description": "Exact saved receipt_id for continue; never invent offsets."},
+                       "description": "Exact saved receipt_id for continue or resume; never invent offsets."},
         "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_CHARS},
         "limit": {"type": "integer", "minimum": 1, "maximum": 8},
     },
@@ -50,7 +52,12 @@ def descriptor() -> ToolDescriptor:
         "Read a text material in manageable passages. open(path, max_chars?) starts "
         "at its beginning; pass expected_digest when an input specifies a file version. "
         "continue(receipt_id, max_chars?) reads after that actual "
-        "saved passage, refusing changed source content. recent(limit?) finds the "
+        "saved passage, refusing changed source content or workspace root. "
+        "After moving a workspace, resume(receipt_id, max_chars?) explicitly "
+        "reads from that saved position in the CURRENT workspace, only when the "
+        "same path, full file bytes and redacted text view match. It creates a "
+        "fresh receipt linked to the old one; it cannot rebind write approvals "
+        "or cross logical sessions. recent(limit?) finds the "
         "latest exposed positions in THIS logical session, including after reopen, "
         "without opening files. Use an older receipt to reread its following page; "
         "use open to deliberately start a changed version. A passage receipt is "
@@ -75,6 +82,7 @@ def validate(args: Mapping[str, Any]) -> str:
     allowed = {
         "open": {"op", "path", "max_chars", "expected_digest"},
         "continue": {"op", "receipt_id", "max_chars"},
+        "resume": {"op", "receipt_id", "max_chars"},
         "recent": {"op", "limit"},
     }
     if not isinstance(op, str) or op not in allowed or set(args) - allowed[op]:
@@ -83,7 +91,7 @@ def validate(args: Mapping[str, Any]) -> str:
         digest = args["expected_digest"]
         if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ProviderProtocolError("reading source digest is invalid", code="reading_arguments_invalid")
-    field = "path" if op == "open" else "receipt_id" if op == "continue" else None
+    field = "path" if op == "open" else "receipt_id" if op in {"continue", "resume"} else None
     if field:
         value = args.get(field)
         maximum = 2048 if field == "path" else 256
@@ -168,6 +176,8 @@ def _recent(provider, scope, args, cancellation):
             "next": output["next"],
             "source_turn_id": record.scope.turn_id,
         }
+        if "resumed_from" in output:
+            item["resumed_from"] = output["resumed_from"]
         result["passages"].append(item)
         if _size(result) > provider.store.max_payload_bytes // 2:
             result["passages"].pop()
@@ -203,7 +213,7 @@ def execute(
 
     prior = None
     offset = 0
-    if op == "continue":
+    if op in {"continue", "resume"}:
         _, prior = _receipt(provider, scope, call.arguments["receipt_id"])
         path = prior["source"]["path"]
         offset = prior["position"]["end_char"]
@@ -222,10 +232,19 @@ def execute(
         "view_digest": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "view_format": VIEW, "workspace_digest": provider._workspace_provenance,
     }
-    if prior is not None and dict(prior["source"]) != source:
-        raise WorkspaceDigestConflict(
-            "reading source or text view changed; use open to inspect the new version",
-            code="reading_source_changed")
+    if prior is not None:
+        previous = dict(prior["source"])
+        # Only the physical workspace binding may change. Keep every other
+        # version field exact, including future source-format distinctions.
+        if ({key: value for key, value in previous.items() if key != "workspace_digest"}
+                != {key: value for key, value in source.items() if key != "workspace_digest"}):
+            raise WorkspaceDigestConflict(
+                "reading source or text view changed; use open to inspect the new version",
+                code="reading_source_changed")
+        if op == "continue" and previous != source:
+            raise WorkspaceDigestConflict(
+                "reading workspace changed; use resume to explicitly recheck this source at its saved position",
+                code="reading_workspace_changed")
     if type(offset) is not int or not 0 <= offset <= len(text):
         raise ScopeConflict("saved reading position is invalid")
     end = min(len(text), offset + call.arguments.get("max_chars", 4000))
@@ -237,6 +256,13 @@ def execute(
         "content": "", "redacted": redacted, "next": None,
         "observation_only": True,
     }
+    if op == "resume":
+        result["resumed_from"] = {
+            "receipt_id": call.arguments["receipt_id"],
+            "workspace_digest": prior["source"]["workspace_digest"],
+            "observed_at": prior["observed_at"],
+            "meaning": "new_read_of_verified_unchanged_source_at_saved_position",
+        }
 
     def set_end(stop):
         # A cut can create an apparent assignment at the new boundary. Apply
