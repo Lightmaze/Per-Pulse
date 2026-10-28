@@ -165,10 +165,14 @@ def bound_payload(value: Mapping[str, Any], max_bytes: int) -> tuple[dict[str, A
     if max_bytes < 256:
         raise ValueError("max_bytes must be at least 256")
     if _is_bounded_payload(value):
-        return dict(value), bool(value["_redacted"]), True
+        return dict(value), bool(value["_redacted"]) or _contains_redaction_marker(value["preview"]), True
     normalized = normalize_secret_refs(value)
     reject_bare_credentials(normalized)
     clean_value, redacted = redact_value(normalized)
+    # Native tools may already have hidden sensitive lines. Their markers must
+    # retain the same visibility flag through action rows and event envelopes;
+    # replay validation recovers that flag from the persisted content.
+    redacted = redacted or _contains_redaction_marker(clean_value)
     clean = dict(clean_value) if isinstance(clean_value, Mapping) else {"value": clean_value}
     encoded = json.dumps(
         clean, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
@@ -210,9 +214,13 @@ def bound_text(value: str, max_bytes: int) -> tuple[str, bool, bool]:
         raise ValueError("max_bytes must be at least 128")
     reject_bare_credentials(value)
     clean, redacted = redact_text(value)
+    # Preserve a canonical old truncation marker's declared flag. Rescanning
+    # its preview could change metadata for an otherwise valid saved row.
+    prior_redacted, prior_truncated = stored_text_flags(clean)
+    redacted = redacted or prior_redacted
     encoded = clean.encode("utf-8")
     if len(encoded) <= max_bytes:
-        return clean, redacted, False
+        return clean, redacted, prior_truncated
     digest = hashlib.sha256(encoded).hexdigest()
     marker = f"[TRUNCATED sha256={digest} redacted={int(redacted)} preview="
     suffix = "]"

@@ -333,11 +333,44 @@ silently retry a write against a different World.
 These operations reuse `WorkspaceFiles`; they create no Kernel sessions,
 turns, model read receipts or artifacts. Explicit user upload is separate
 from granting model mutation permissions. Uploaded files are shared across
-pages; page conversations remain scoped. The browser adds a reviewed path
-and observed SHA-256 as ordinary draft text, preserving existing page links.
-It does not claim that the model has read the source or enforce the observed
-version on a future model choice. Native read tools return their own observed
-digests when a configured model actually opens the file.
+pages; page conversations remain scoped. The browser's **Add to draft** action
+uses a native attachment receipt, preserving existing draft text and page links.
+Sending verifies that selected files still match their recorded bytes and
+digests. This reference is not a model read receipt: native read tools return
+their own observations when a configured model actually opens the file.
+
+### Native message attachments
+
+- `GET /api/pages/{id}/materials` lists that page's latest 100 receipts,
+  with `truncated` and `limitBytes`. Older message attachments remain readable.
+- `POST /api/pages/{id}/materials?name=notes.md` creates a file and its page
+  receipt from original octet-stream bytes. It requires `X-Per-Pulse-World`,
+  `X-Per-Pulse-Upload-Id` (32 lowercase hex characters) and
+  `X-Per-Pulse-File-SHA256`. First-party callers also send the current service
+  instance; older World-only native callers remain supported. An exact retry
+  returns the same receipt, while changed bytes, name or owner conflict.
+- `POST /api/pages/{id}/materials/reference`, with the current World/instance
+  headers and `{"path":"uploads/notes.md","sha256":"<64 hex characters>"}`,
+  verifies an existing file and creates or reuses that page's own receipt.
+  It copies neither file bytes nor another page's conversation.
+- `GET /api/pages/{id}/materials/{materialId}` verifies ownership and current
+  version, then returns `material`, bounded `content`, `redacted`, `truncated`
+  and `previewLimitBytes`. A changed or missing source is refused. The preview
+  limit is 64 KiB, independently of the 1 MiB original-file limit.
+
+Upload and reference responses contain `material` and `repeated`; first-party
+responses also carry World/instance identity. A material has `id`, `pageId`,
+`name`, `path`, `bytes`, `sha256`, `source` and `createdAt`. The workspace retains
+at most 1,024 receipts. File publication and receipt publication are separate
+durable effects, so an unconfirmed upload must be inspected before retrying.
+
+`POST /api/pages/{id}/messages` accepts up to five distinct receipt IDs in
+`materials`, alongside ordinary `content` and `references`. A file-only input
+may have empty content. The canonical input records an ASCII JSON source
+footer; message projection exposes `materials` and `materialSuffixLength` so
+the UI can show source chips without changing the original input. An explicit
+`includeMaterials:true` on selected Return Home retains access through the
+original source page; it does not transfer upload ownership.
 
 The browser never executes file HTML. It limits previews to the first 64,000
 characters and labels shortened previews. An upload whose response is lost

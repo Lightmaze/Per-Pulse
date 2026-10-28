@@ -66,6 +66,12 @@ try {
   const dialog = () => page.getByRole('dialog', { name: /^(Materials|Source files)$/ });
   const input = () => page.getByRole('textbox', { name: 'Message Inventory review', exact: true });
   const attach = () => page.getByRole('button', { name: 'Materials', exact: true }).click();
+  const addToDraft = async () => {
+    await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
+    // Referencing an existing file persists its native receipt asynchronously.
+    // The composer remains inert until the modal actually closes.
+    await dialog().waitFor({ state: 'hidden' });
+  };
   const choose = (name, buffer, mimeType = 'text/plain') => dialog().getByLabel('Choose a text file', { exact: true }).setInputFiles({ name, mimeType, buffer });
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Inventory review');
@@ -80,7 +86,7 @@ try {
   await input().fill(draft);
   await attach(); await choose(filename, bytes, 'text/csv');
   await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
-  await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
+  await addToDraft();
   await page.getByRole('button', { name: `Remove ${filename} from this message`, exact: true }).waitFor();
   const material = (await data('/api/pages/' + origin + '/materials')).materials[0];
   assert.equal(material.name, filename);
@@ -188,7 +194,7 @@ try {
   await page.unroute(uploadUrl);
   await dialog().locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();
   await dialog().locator('.material-list button').filter({ hasText: 'Unconfirmed.txt' }).click();
-  await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
+  await addToDraft();
   assert.equal((await data('/api/pages/' + origin + '/materials')).materials.length, 2);
   assert.equal((await readdir(join(directory, 'workspace', 'uploads'))).length, 2);
   checks.push('a dropped successful upload response remains uncertain and can be recovered from the actual saved file without automatic duplication');
@@ -205,9 +211,7 @@ try {
   await attach();
   await dialog().locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();
   await dialog().locator('.material-list button').filter({ hasText: 'Unconfirmed.txt' }).click();
-  await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
-  await dialog().waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: 'Remove Unconfirmed.txt from this message', exact: true }).waitFor();
+  await addToDraft();
   await input().fill('Keep this draft if its file has changed.');
   const other = (await data('/api/pages/' + origin + '/materials')).materials.find(item => item.name === 'Unconfirmed.txt');
   await writeFile(join(directory, 'workspace', other.path), 'REPLACEMENT_BYTES_NOT_SELECTED');
@@ -223,7 +227,7 @@ try {
   await input().fill('');
   await attach(); await choose('Only a source.md', Buffer.from('# Source only\n\nA durable file-only draft.\n'));
   await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
-  await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
+  await addToDraft();
   await page.getByRole('button', { name: 'Remove Only a source.md from this message', exact: true }).waitFor();
   await stop(server); server = start(true);
   await wait(async () => (await fetch(base + '/api/health')).ok, 'offline restart');

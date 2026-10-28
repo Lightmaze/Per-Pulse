@@ -271,6 +271,12 @@ redact sensitive values. The workspace library previews up to 64,000 characters.
 Files are shared native workspace material, not isolated
 per-page filesystem permissions.
 
+To locate a specific phrase in a long source, the native `reading.find` operation
+searches literal text in the redacted view and returns up to eight short excerpts
+with exact source coordinates and digests. It checks an optional expected file
+version, identifies when more matches remain, and reports when its search stopped
+early. Finding a passage is distinct from reading or understanding the whole file.
+
 A lost upload response is shown as unconfirmed and never retried automatically.
 Open **Materials → uploads/** to inspect the saved file and add it to the draft.
 The native file creation

@@ -1209,7 +1209,7 @@ class TurnRunner:
 
     def _require_text_payload(self, value: str, label: str) -> None:
         clean, redacted, truncated = bound_text(value, self.store.max_payload_bytes)
-        if redacted:
+        if redacted and clean != value:
             raise RedactionRequired(f"{label} contains a raw credential")
         if truncated or clean != value:
             raise ProviderProtocolError(
@@ -1444,7 +1444,9 @@ class TurnRunner:
         clean, redacted, truncated = bound_payload(
             dict(normalized), self.store.max_payload_bytes
         )
-        if redacted:
+        # Already-hidden content is valid evidence, with its visibility flag
+        # preserved. Refuse a result that would newly lose raw text here.
+        if redacted and clean != dict(normalized):
             raise RedactionRequired(f"{label} contains a raw credential")
         if truncated or clean != dict(normalized):
             raise ProviderProtocolError(

@@ -267,6 +267,7 @@ def execute(
             cancellation.raise_if_cancelled()
             if len(result["matches"]) >= maximum:
                 result["more_matches"] = True
+                result["searched_entire_redacted_view"] = False
                 break
             left = max(0, found.start() - 72)
             right = min(len(text), found.end() + 96)
@@ -280,6 +281,7 @@ def execute(
             if _size(result) > limit:
                 result["matches"].pop()
                 result["more_matches"] = True
+                result["searched_entire_redacted_view"] = False
                 break
         if _size(result) > limit:
             raise ProviderProtocolError("session allowance cannot fit reading search evidence",
