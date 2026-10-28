@@ -206,14 +206,17 @@ try {
   await dialog().locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();
   await dialog().locator('.material-list button').filter({ hasText: 'Unconfirmed.txt' }).click();
   await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
-  await input().fill('Keep this draft if its file has changed.');
+  const editedDraft = 'Keep this draft if its file has changed.';
+  await input().fill(editedDraft);
+  assert.equal(await input().inputValue(), editedDraft);
   const other = (await data('/api/pages/' + origin + '/materials')).materials.find(item => item.name === 'Unconfirmed.txt');
   await writeFile(join(directory, 'workspace', other.path), 'REPLACEMENT_BYTES_NOT_SELECTED');
+  assert.equal(await input().inputValue(), editedDraft);
   const beforeRejected = (await view(origin)).messages.length;
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('This source file changed. Upload the version you want to use.', { exact: true }).waitFor();
   assert.equal((await view(origin)).messages.length, beforeRejected);
-  assert.equal(await input().inputValue(), 'Keep this draft if its file has changed.');
+  assert.equal(await input().inputValue(), editedDraft);
   await page.getByRole('button', { name: 'Remove Unconfirmed.txt from this message', exact: true }).waitFor();
   checks.push('unsupported and oversized files do not create receipts; a changed selected version cannot be submitted and the draft remains editable');
 
