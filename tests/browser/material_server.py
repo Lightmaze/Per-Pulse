@@ -23,7 +23,7 @@ if __name__ == "__main__":
     parser.add_argument("--offline", action="store_true")
     args = parser.parse_args()
     fixture = MaterialFixture(os.environ.__setitem__)
-    app = create_app(args.data_dir, allow_workspace_actions=True,
+    app = create_app(args.data_dir, allow_workspace_actions=True, posture=True,
                      model_factory=None if args.offline else fixture.factory)
 
     @app.get("/__materials/evidence")

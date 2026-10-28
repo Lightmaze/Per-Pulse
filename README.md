@@ -106,6 +106,11 @@ can stand on its own without a rule or evaluation. You can save one from a
 previous reply even while the model is disconnected. The source passage stays
 intact when you later edit its note.
 
+When that experience began with an attached file, **Source experience** shows
+the readable message and an **Open source message** link to its original file
+references. The stored encounter retains its exact input. Shared experiences
+keep that private input and its file references in the source page.
+
 With a model connected, explain what worked or what should change after a reply.
 The model may save a conditional lesson with its original result and your
 correction. **Settings → View this page’s experience** lets you inspect that

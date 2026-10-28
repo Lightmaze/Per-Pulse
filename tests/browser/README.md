@@ -153,3 +153,8 @@ dropped successful upload response, unsupported files, changed-version refusal,
 offline restart, file-only messages, and Chinese phone layout. Upload, reading,
 approval and filesystem effects are real; semantic choices and arithmetic are
 fixture code and do not establish real-model performance.
+
+The same flow saves a concrete example of the report, opens its source
+experience, and returns to the actual attached-file input with the draft intact.
+The rendered episode hides only a server-verified file-reference envelope;
+the stored encounter stays unchanged and does not travel with shared guidance.

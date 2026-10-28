@@ -1,11 +1,30 @@
 // Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, type Translate } from '../i18n';
 import type { LessonCondition, LessonShift, LessonVerdict, Message, PostureExperience, PostureView } from '../types';
 import { Dialog } from './Dialog';
 import { CopyButton } from './CopyButton';
 import type { Navigate } from './SessionLink';
+import { messageBody } from '../messageBody';
+
+function SourceEncounter({ experience, pageId, navigate }: {
+  experience: PostureExperience; pageId: string; navigate: Navigate;
+}) {
+  const { t } = useLanguage();
+  const fields = [['situation', 'learning.situation'], ['action', 'learning.encounterAction'], ['outcome', 'learning.outcome']] as const;
+  return <dl>{fields.map(([field, label]) => {
+    const content = experience.encounter?.[field];
+    const source = experience.encounterSources?.[field];
+    return <Fragment key={field}><dt>{t(label)}</dt><dd>
+      {content === undefined ? t('learning.noFollowup') : messageBody({ content, materialSuffixLength: source?.materialSuffixLength })}
+      {source ? <div className="encounter-files">
+        <p className="lesson-note">{t('materials.attached')}: {source.materials.map(material => material.name).join(', ')}</p>
+        <button className="text-button" onClick={() => navigate(source.pageId, source.pageId !== pageId ? { pageId } : undefined, source.messageId)}>{t('learning.openSourceMessage')}</button>
+      </div> : null}
+    </dd></Fragment>;
+  })}</dl>;
+}
 
 function describeCondition(value: LessonCondition, t: Translate): string {
   if (typeof value === 'string') return value;
@@ -86,7 +105,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     {lesson ? <details><summary>{t('learning.when')}</summary><p>{describeCondition(lesson.conditions, t)}</p><h4>{t('learning.exclude')}</h4><ul>{lesson.counterexamples.map((value, index) => <li key={index}>{value}</li>)}</ul><h4>{t('learning.changes')}</h4><dl><dt>{t('learning.understanding')}</dt><dd>{lesson.shift.understanding}</dd><dt>{t('learning.actions')}</dt><dd>{lesson.shift.candidates}</dd><dt>{t('learning.delivery')}</dt><dd>{lesson.shift.delivery}</dd></dl></details> : null}
     {(experience.encounter || (experience.sourcePageId && (originalId || correctionId))) ? <details>
       <summary>{t('learning.source')}</summary>
-      {experience.encounter ? <dl><dt>{t('learning.situation')}</dt><dd>{experience.encounter.situation}</dd><dt>{t('learning.encounterAction')}</dt><dd>{experience.encounter.action}</dd><dt>{t('learning.outcome')}</dt><dd>{experience.encounter.outcome ?? t('learning.noFollowup')}</dd></dl> : <p className="lesson-scope">{t('learning.sourcePrivate')}</p>}
+      {experience.encounter ? <SourceEncounter experience={experience} pageId={pageId} navigate={navigate} /> : <p className="lesson-scope">{t('learning.sourcePrivate')}</p>}
       {experience.sourcePageId ? <div className="lesson-actions">
         {originalId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, originalId)}>{t('learning.original')}</button> : null}
         {correctionId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, correctionId)}>{t('learning.correction')}</button> : null}

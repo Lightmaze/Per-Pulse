@@ -124,6 +124,24 @@ try {
   if (screenshots) await page.screenshot({ path: join(screenshots, 'materials-report.png') });
   checks.push('native reading consumes the supplied version across actual passages; a report is written only after approval and downloads exactly');
 
+  const retainedDraft = 'Keep this draft while inspecting a saved source.';
+  await input().fill(retainedDraft);
+  const report = completed.messages.at(-1);
+  await page.locator('[data-message-id="' + report.id + '"]').getByRole('button', { name: 'Save example', exact: true }).click();
+  const exampleEditor = page.getByRole('dialog', { name: 'Save example', exact: true });
+  await exampleEditor.getByRole('textbox', { name: 'Example name', exact: true }).fill('Inventory source review');
+  await exampleEditor.getByRole('textbox', { name: 'Original passage', exact: true }).fill('Inventory total: 2250.00.');
+  await exampleEditor.getByRole('button', { name: 'Save example', exact: true }).click();
+  const learning = page.getByRole('dialog', { name: 'Lessons and examples', exact: true });
+  await learning.getByRole('heading', { name: 'Inventory source review', exact: true }).waitFor();
+  await learning.getByText('Source experience', { exact: true }).click();
+  assert.ok(!(await learning.textContent()).includes('[Attached workspace materials]'));
+  assert.ok((await learning.textContent()).includes(filename));
+  await learning.getByRole('button', { name: 'Open source message', exact: true }).click();
+  await wait(() => page.url().endsWith('#message-' + original.id), 'experience returns to its actual file input');
+  assert.equal(await input().inputValue(), retainedDraft);
+  checks.push('source experience shows readable text and original file-message access without rewriting the raw encounter or losing the draft');
+
   await article.getByRole('button', { name: filename, exact: true }).click();
   await dialog().getByRole('region', { name: 'Source file preview', exact: true }).waitFor();
   assert.equal(await dialog().getByLabel('Source file text', { exact: true }).textContent(), bytes.toString('utf8'));
