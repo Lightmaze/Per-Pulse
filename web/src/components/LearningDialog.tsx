@@ -2,8 +2,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, type Translate } from '../i18n';
-import type { LessonCondition, LessonVerdict, Message, PostureExperience, PostureView } from '../types';
+import type { LessonCondition, LessonShift, LessonVerdict, Message, PostureExperience, PostureView } from '../types';
 import { Dialog } from './Dialog';
+import { CopyButton } from './CopyButton';
 import type { Navigate } from './SessionLink';
 
 function describeCondition(value: LessonCondition, t: Translate): string {
@@ -14,7 +15,7 @@ function describeCondition(value: LessonCondition, t: Translate): string {
   return children.map(child => typeof child === 'string' ? child : `(${describeCondition(child, t)})`).join(t(all ? 'learning.all' : 'learning.any'));
 }
 
-type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; counterexamples?: string[]; shift?: PostureExperience['shift'] };
+type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; note?: string; counterexamples?: string[]; shift?: LessonShift };
 
 function Experience({ experience, pageId, results, busy, hidden, revise, feedback, navigate }: {
   experience: PostureExperience; pageId: string; busy: boolean; hidden: boolean;
@@ -24,13 +25,16 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   navigate: Navigate;
 }) {
   const { t } = useLanguage();
+  const example = experience.representation === 'example' ? experience : undefined;
+  const lesson = experience.representation === 'example' ? undefined : experience;
   const [evidence, setEvidence] = useState('');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [resultMessageId, setResultMessageId] = useState('');
   const [refineOpen, setRefineOpen] = useState(false);
-  const [lessonDraft, setLessonDraft] = useState(experience.lesson);
-  const [exceptionDraft, setExceptionDraft] = useState(experience.counterexamples.join('\n'));
-  const [shiftDraft, setShiftDraft] = useState<PostureExperience['shift']>({ ...experience.shift });
+  const [lessonDraft, setLessonDraft] = useState(lesson?.lesson ?? '');
+  const [noteDraft, setNoteDraft] = useState(example?.note ?? '');
+  const [exceptionDraft, setExceptionDraft] = useState(lesson?.counterexamples.join('\n') ?? '');
+  const [shiftDraft, setShiftDraft] = useState<LessonShift>({ understanding: '', candidates: '', delivery: '', ...lesson?.shift });
   const [refineEvidence, setRefineEvidence] = useState('');
   const refinedLesson = lessonDraft.trim();
   const refinedExceptions = exceptionDraft.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
@@ -39,22 +43,23 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     candidates: shiftDraft.candidates.trim(),
     delivery: shiftDraft.delivery.trim(),
   };
-  const validRefinement = Boolean(refinedLesson) && refinedLesson.length <= 4000
+  const validRefinement = example ? new TextEncoder().encode(noteDraft.trim()).length <= 4000 : Boolean(refinedLesson) && refinedLesson.length <= 4000
     && refinedExceptions.length >= 1 && refinedExceptions.length <= 8
     && refinedExceptions.every(value => value.length <= 2000)
     && Object.values(refinedShift).every(value => value.length > 0 && value.length <= 2400);
-  const changedRefinement = refinedLesson !== experience.lesson
-    || JSON.stringify(refinedExceptions) !== JSON.stringify(experience.counterexamples)
-    || Object.keys(refinedShift).some(key => refinedShift[key as keyof typeof refinedShift] !== experience.shift[key as keyof typeof refinedShift]);
+  const changedRefinement = example ? noteDraft.trim() !== example.note : refinedLesson !== lesson?.lesson
+    || JSON.stringify(refinedExceptions) !== JSON.stringify(lesson?.counterexamples)
+    || Object.keys(refinedShift).some(key => refinedShift[key as keyof typeof refinedShift] !== lesson?.shift[key as keyof typeof refinedShift]);
   const beginRefinement = () => {
-    setLessonDraft(experience.lesson);
-    setExceptionDraft(experience.counterexamples.join('\n'));
-    setShiftDraft({ ...experience.shift });
+    setNoteDraft(example?.note ?? '');
+    setLessonDraft(lesson?.lesson ?? '');
+    setExceptionDraft(lesson?.counterexamples.join('\n') ?? '');
+    setShiftDraft({ understanding: '', candidates: '', delivery: '', ...lesson?.shift });
     setRefineEvidence('');
     setRefineOpen(true);
   };
   const submitRefinement = async () => {
-    await revise(experience, { lesson: refinedLesson, counterexamples: refinedExceptions, shift: refinedShift }, refineEvidence.trim() || undefined);
+    await revise(experience, example ? { note: noteDraft.trim() } : { lesson: refinedLesson, counterexamples: refinedExceptions, shift: refinedShift }, refineEvidence.trim() || undefined);
     setRefineEvidence('');
     setRefineOpen(false);
   };
@@ -69,12 +74,18 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   };
   return <article hidden={hidden} className={`lesson ${experience.active ? '' : 'lesson-paused'}`}>
     <div className="lesson-heading"><h3>{experience.title}</h3><span>{t(experience.active ? 'learning.active' : 'learning.paused')} · v{experience.revision}</span></div>
-    <p>{experience.lesson}</p>
+    {example ? <div className="saved-example">
+      <p className="lesson-scope">{t('learning.example')}</p>
+      <pre tabIndex={0} aria-label={t('learning.excerpt')}><code>{example.excerpt}</code></pre>
+      <CopyButton text={example.excerpt} label={t('learning.copyExample')} />
+      {example.note ? <p>{example.note}</p> : null}
+      <p className="lesson-note">{t('learning.exampleJudgment')}</p>
+    </div> : <p>{lesson?.lesson}</p>}
     <p className="lesson-scope">{t(experience.scope === 'subject' ? 'learning.shared' : 'learning.local')}{experience.record_type === 'constructed_fixture' ? ` · ${t('learning.fixture')}` : ''}</p>
-    <details><summary>{t('learning.when')}</summary><p>{describeCondition(experience.conditions, t)}</p><h4>{t('learning.exclude')}</h4><ul>{experience.counterexamples.map((value, index) => <li key={index}>{value}</li>)}</ul><h4>{t('learning.changes')}</h4><dl><dt>{t('learning.understanding')}</dt><dd>{experience.shift.understanding}</dd><dt>{t('learning.actions')}</dt><dd>{experience.shift.candidates}</dd><dt>{t('learning.delivery')}</dt><dd>{experience.shift.delivery}</dd></dl></details>
+    {lesson ? <details><summary>{t('learning.when')}</summary><p>{describeCondition(lesson.conditions, t)}</p><h4>{t('learning.exclude')}</h4><ul>{lesson.counterexamples.map((value, index) => <li key={index}>{value}</li>)}</ul><h4>{t('learning.changes')}</h4><dl><dt>{t('learning.understanding')}</dt><dd>{lesson.shift.understanding}</dd><dt>{t('learning.actions')}</dt><dd>{lesson.shift.candidates}</dd><dt>{t('learning.delivery')}</dt><dd>{lesson.shift.delivery}</dd></dl></details> : null}
     {(experience.encounter || (experience.sourcePageId && (originalId || correctionId))) ? <details>
       <summary>{t('learning.source')}</summary>
-      {experience.encounter ? <dl><dt>{t('learning.situation')}</dt><dd>{experience.encounter.situation}</dd><dt>{t('learning.encounterAction')}</dt><dd>{experience.encounter.action}</dd><dt>{t('learning.outcome')}</dt><dd>{experience.encounter.outcome}</dd></dl> : <p className="lesson-scope">{t('learning.sourcePrivate')}</p>}
+      {experience.encounter ? <dl><dt>{t('learning.situation')}</dt><dd>{experience.encounter.situation}</dd><dt>{t('learning.encounterAction')}</dt><dd>{experience.encounter.action}</dd><dt>{t('learning.outcome')}</dt><dd>{experience.encounter.outcome ?? t('learning.noFollowup')}</dd></dl> : <p className="lesson-scope">{t('learning.sourcePrivate')}</p>}
       {experience.sourcePageId ? <div className="lesson-actions">
         {originalId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, originalId)}>{t('learning.original')}</button> : null}
         {correctionId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, correctionId)}>{t('learning.correction')}</button> : null}
@@ -94,13 +105,18 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       </p>;
     })}</details> : null}
     {experience.canEdit ? <div className="lesson-actions">
-      <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { active: !experience.active }).catch(() => {}); }}>{t(experience.active ? 'learning.pause' : 'learning.resume')}</button>
+      <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { active: !experience.active }).catch(() => {}); }}>{t(experience.active ? (example ? 'learning.pauseExample' : 'learning.pause') : 'learning.resume')}</button>
       <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { scope: experience.scope === 'context' ? 'subject' : 'context' }).catch(() => {}); }}>{t(experience.scope === 'context' ? 'learning.share' : 'learning.keepLocal')}</button>
-      <button className="text-button" disabled={busy} onClick={beginRefinement}>{t('learning.refine')}</button>
+      <button className="text-button" disabled={busy} onClick={beginRefinement}>{t(example ? 'learning.refineExample' : 'learning.refine')}</button>
     </div> : experience.sourcePageId && !experience.sourceAnchor ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin)}>{t('learning.editSource')}</button> : null}
     {experience.canReport ? <div className="lesson-actions"><button type="button" className="text-button" disabled={busy} onClick={() => setFeedbackOpen(value => !value)}>{t('learning.giveFeedback')}</button></div> : null}
     {refineOpen && experience.canEdit ? <div className="lesson-feedback">
-      <p className="lesson-note">{t('learning.refineHelp')}</p>
+      <p className="lesson-note">{t(example ? 'learning.refineExampleHelp' : 'learning.refineHelp')}</p>
+      {example ? <>
+        <label className="field-label" htmlFor={`refine-note-${experience.id}`}>{t('learning.exampleNote')}</label>
+        <textarea id={`refine-note-${experience.id}`} rows={4} value={noteDraft} maxLength={4000} disabled={busy} onChange={event => setNoteDraft(event.target.value)} />
+        {!validRefinement ? <p className="form-error">{t('learning.noteLong')}</p> : null}
+      </> : <>
       <label className="field-label" htmlFor={`refine-lesson-${experience.id}`}>{t('learning.refineLesson')}</label>
       <textarea id={`refine-lesson-${experience.id}`} rows={3} value={lessonDraft} maxLength={4000} disabled={busy} onChange={event => setLessonDraft(event.target.value)} />
       <label className="field-label" htmlFor={`refine-exceptions-${experience.id}`}>{t('learning.refineExceptions')}</label>
@@ -116,6 +132,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
             disabled={busy} onChange={event => setShiftDraft(current => ({ ...current, [field]: event.target.value }))} />
         </div>)}
       </details>
+      </>}
       <label className="field-label" htmlFor={`refine-evidence-${experience.id}`}>{t('learning.refineEvidence')}</label>
       <textarea id={`refine-evidence-${experience.id}`} rows={2} value={refineEvidence} maxLength={1500} disabled={busy} onChange={event => setRefineEvidence(event.target.value)} placeholder={t('learning.refineEvidenceHint')} />
       <div className="lesson-actions">
@@ -123,7 +140,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
         <button className="text-button" disabled={busy} onClick={() => setRefineOpen(false)}>{t('learning.cancelRefinement')}</button>
       </div>
     </div> : null}
-    {experience.scope === 'subject' && experience.canEdit ? <p className="lesson-note">{t('learning.sharingNote')}</p> : null}
+    {experience.scope === 'subject' && experience.canEdit ? <p className="lesson-note">{t(example ? 'learning.exampleSharingNote' : 'learning.sharingNote')}</p> : null}
     {feedbackOpen && experience.canReport ? <div className="lesson-feedback">
       {!experience.canEdit ? <p className="lesson-note">{t('learning.receivingFeedbackNote')}</p> : null}
       <label className="field-label" htmlFor={`feedback-${experience.id}`}>{t('learning.changed')}</label>
@@ -155,12 +172,12 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate }:
   const [version, setVersion] = useState(0);
   const [search, setSearch] = useState('');
   const results = messages.filter(message => message.role === 'assistant' && message.status === 'settled');
-  // Search only the shareable abstraction, never private source encounters or feedback.
+  // Search only content eligible for sharing, never private encounters or feedback.
   const needle = search.trim().toLocaleLowerCase();
-  const visibleExperiences = (view?.experiences ?? []).filter(item => !needle || [
+  const visibleExperiences = (view?.experiences ?? []).filter(item => !needle || (item.representation === 'example' ? [item.title, item.excerpt, item.note] : [
     item.title, item.lesson, JSON.stringify(item.conditions), ...item.counterexamples,
     item.shift.understanding, item.shift.candidates, item.shift.delivery,
-  ].some(value => value.toLocaleLowerCase().includes(needle)));
+  ]).some(value => value.toLocaleLowerCase().includes(needle)));
   const visibleIds = new Set(visibleExperiences.map(item => item.id));
   useEffect(() => {
     const controller = new AbortController();
@@ -177,7 +194,7 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate }:
   }, [pageId, version]);
 
   const update = async (operation: () => Promise<{ experience: PostureExperience }>) => {
-    if (writing.current || refreshing) throw new Error('Wait for the current lesson request to finish.');
+    if (writing.current || refreshing) throw new Error('Wait for the current experience request to finish.');
     writing.current = true;
     setBusy(true); setError('');
     try {

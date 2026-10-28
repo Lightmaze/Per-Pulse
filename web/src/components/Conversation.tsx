@@ -6,8 +6,9 @@ import { useLanguage } from '../i18n';
 import { MessageContent } from './MessageContent';
 import { CopyButton } from './CopyButton';
 
-export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onHistory, onFind, stale = false }: {
+export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onSaveExample, onHistory, onFind, stale = false }: {
   view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
+  onSaveExample?: (message: Message, excerpt: string) => void;
 }) {
   const { t, pageTitle } = useLanguage();
   const pageMap = new Map(pages.map(page => [page.id, page]));
@@ -28,6 +29,14 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
           <CopyButton text={message.content} label={t('conversation.copyMessage')} />
           <button onClick={() => onCreate(message)} title={t("conversation.newPageTitle")}><Icon name="plus" size={14} />{t("conversation.newPage")}</button>
           <button onClick={() => onReference(message)} title={t("conversation.linkPageTitle")}><Icon name="link" size={14} />{t("conversation.linkPage")}</button>
+          {onSaveExample && message.role === 'assistant' && message.status === 'settled' ? <button onClick={() => {
+            const selected = window.getSelection();
+            const node = document.getElementById(`message-${message.id}`);
+            const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString() : '';
+            // Rendered Markdown may join text that was not contiguous in the
+            // source. The editor always starts with an exact source passage.
+            onSaveExample(message, text.trim() && message.content.includes(text) ? text : message.content);
+          }}>{t('learning.saveExample')}</button> : null}
           {view.page.kind === 'work' ? <button onClick={() => {
             const selected = window.getSelection();
             const node = document.getElementById(`message-${message.id}`);

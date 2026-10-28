@@ -115,6 +115,16 @@ class ReviseExperience(Input):
     evidence: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1500)] | None = None
 
 
+class NewExample(Input):
+    sourceMessageId: Identifier
+    feedbackMessageId: Identifier | None = None
+    title: Title
+    # Preserve original whitespace; the native source validator checks exact
+    # membership and the stricter UTF-8 byte bound before journal admission.
+    excerpt: Annotated[str, StringConstraints(min_length=1, max_length=8000)]
+    note: Annotated[str, StringConstraints(max_length=4000)] = ""
+
+
 class ExperienceFeedback(Input):
     expectedRevision: int = Field(ge=1, strict=True)
     verdict: Literal["useful", "not_useful", "harmful", "withdrawn"]
@@ -308,6 +318,10 @@ def create_app(
     @app.post("/api/pages/{page_id}/posture/experiences", status_code=201)
     def learn(page_id: str, body: NewExperience, request: Request):
         return pages(request).learning.create(page_id, body.model_dump())
+
+    @app.post("/api/pages/{page_id}/posture/examples", status_code=201)
+    def create_example(page_id: str, body: NewExample, request: Request):
+        return pages(request).learning.create_example(page_id, body.model_dump())
 
     @app.patch("/api/pages/{page_id}/posture/experiences/{experience_id}")
     def revise_experience(page_id: str, experience_id: str, body: ReviseExperience, request: Request):

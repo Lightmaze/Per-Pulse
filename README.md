@@ -78,33 +78,41 @@ If neither endpoint nor model is set, the workspace runs disconnected. Setting o
 
 Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. Per Pulse also enforces a default **8 MiB maximum serialized request body** at the outbound Chat Completions boundary, configurable with `P_PULSE_MAX_REQUEST_BYTES`. This rejects oversized requests *before network send*, including those arising from long history, side computations, tool schemas or image parts. It never silently truncates the saved context; a blocked turn remains visible for review. This byte guard is **not** a context-token limit, provider bill cap, or solution to automatic long-history management. Provider compatibility must be verified separately.
 
-### Learn from a correction and inspect what changed
+### Keep concrete examples and learn from corrections
 
-With a model configured, enable attributed experience learning when starting
-the same workspace:
+Enable attributed experience when starting the same workspace:
 
 ```sh
 per-pulse --posture
 ```
 
-After a reply, explain what worked or what should change in the conversation.
-The model may save a conditional lesson with its original result and your
-correction. **Settings → View this page’s lessons** lets you inspect that
-source, refine the guidance and its exceptions, pause it, or explicitly make
-it available in other pages. Capture is model-chosen: a correction does not
-guarantee that a lesson will be saved.
+Use **Save example** on a completed reply to retain an exact passage, an optional
+note, and optionally a later message from that page. Selecting text first fills
+the passage editor when that selection matches the original text. An example
+can stand on its own without a rule or evaluation. You can save one from a
+previous reply even while the model is disconnected. The source passage stays
+intact when you later edit its note.
 
-In a later Work, **Give feedback** records the outcome of a shared lesson.
+With a model connected, explain what worked or what should change after a reply.
+The model may save a conditional lesson with its original result and your
+correction. **Settings → View this page’s experience** lets you inspect that
+source, refine the guidance and its exceptions, pause it, or explicitly make
+it available in other pages. The model can also retain a concrete example.
+Model capture is optional: a correction does not guarantee that anything is saved.
+
+In a later Work, **Give feedback** records your observation of a shared lesson or example.
 You can optionally link a completed reply from that Work; the source page's
 feedback history then opens the exact result, including older messages outside
 the recent window. A described observation can also stand without a linked
-reply. **No clear benefit** records a neutral observation and keeps the lesson's
-current active state. Harmful feedback pauses the shared lesson; only its source page can
-edit or reactivate it. The lesson's abstraction can travel, while the original
-conversation and private feedback stay at the source.
+reply. **No clear benefit** records a neutral observation and keeps the experience's
+current active state. Harmful feedback pauses it; only its source page can
+edit or reactivate it. A lesson's abstraction or an example's selected passage
+and note can travel, while the surrounding conversation and private feedback
+stay at the source.
 
-Linking a result establishes where to inspect it, not that the lesson caused
-it. Real-provider learning benefits still need output comparison and review.
+Linking a result establishes where to inspect it, not that the experience caused
+it. Saving an example does not certify its success or future applicability.
+Real-provider learning benefits still need output comparison and review.
 Example mode remains model-free and does not enable experience learning.
 
 ### Enable local pulse computation

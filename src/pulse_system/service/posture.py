@@ -20,7 +20,8 @@ from uuid import uuid4
 from pulse_harness.core.replay import bound_text
 
 
-SCHEMA = "per-pulse.posture.v1"
+SCHEMA = "per-pulse.posture.v2"
+LEGACY_SCHEMA = "per-pulse.posture.v1"
 CONTROL_SCHEMA = "per-pulse.posture-controls.v1"
 MAX_EXPERIENCES = 128
 MAX_STATE_BYTES = 4 * 1024 * 1024
@@ -28,7 +29,9 @@ MAX_STATE_BYTES = 4 * 1024 * 1024
 # bytes + 1024 identity/transition metadata) + 4096 world/schema bytes fits.
 # The source bound already includes its canonical JSON escaping.
 MAX_CONTROL_STATE_BYTES = 6 * 1024 * 1024
-_EDITABLE = frozenset({"title", "lesson", "conditions", "counterexamples", "shift", "scope", "active"})
+_LESSON_FIELDS = ("title", "lesson", "conditions", "counterexamples", "shift")
+_EXAMPLE_FIELDS = ("title", "excerpt", "note")
+_EDITABLE = frozenset({*_LESSON_FIELDS, "note", "scope", "active"})
 _LEARNED_EDITABLE = _EDITABLE - {"scope", "active"}
 _VERDICTS = frozenset({"useful", "not_useful", "harmful", "withdrawn"})
 
@@ -90,22 +93,56 @@ def _conditions(value: Any) -> Any:
 
 def _validate_content(value: dict) -> None:
     _text(value.get("title"), "title", 240)
-    _text(value.get("lesson"), "lesson", 4000)
-    value["conditions"] = _conditions(value.get("conditions"))
-    counterexamples = value.get("counterexamples")
-    if not isinstance(counterexamples, list) or not 1 <= len(counterexamples) <= 8:
-        raise ValueError("provide 1..8 concrete counterexamples or boundaries")
-    for item in counterexamples:
-        _text(item, "counterexample", 2000)
-    shift = value.get("shift")
-    if not isinstance(shift, dict) or set(shift) != {"understanding", "candidates", "delivery"}:
-        raise ValueError("shift requires understanding, candidates, and delivery")
-    for key, item in shift.items():
-        _text(item, key, 2400)
+    if value.get("representation", "lesson") == "example":
+        _text(value.get("excerpt"), "example excerpt", 8000)
+        note = value.get("note")
+        if not isinstance(note, str):
+            raise ValueError("example note must be text")
+        if note:
+            _text(note, "example note", 4000)
+    else:
+        if value.get("representation", "lesson") != "lesson":
+            raise ValueError("unknown experience representation")
+        _text(value.get("lesson"), "lesson", 4000)
+        value["conditions"] = _conditions(value.get("conditions"))
+        counterexamples = value.get("counterexamples")
+        if not isinstance(counterexamples, list) or not 1 <= len(counterexamples) <= 8:
+            raise ValueError("provide 1..8 concrete counterexamples or boundaries")
+        for item in counterexamples:
+            _text(item, "counterexample", 2000)
+        shift = value.get("shift")
+        if not isinstance(shift, dict) or set(shift) != {"understanding", "candidates", "delivery"}:
+            raise ValueError("shift requires understanding, candidates, and delivery")
+        for key, item in shift.items():
+            _text(item, key, 2400)
     if not isinstance(value.get("scope"), str) or value["scope"] not in {"context", "subject"}:
         raise ValueError("scope must be context or subject")
     if type(value.get("active")) is not bool:
         raise ValueError("active must be a boolean")
+
+
+def experience_content_fields(record: dict) -> tuple[str, ...]:
+    """Only intentionally transferable content, never the private episode."""
+    representation = record.get("representation", "lesson")
+    if representation == "example":
+        return _EXAMPLE_FIELDS
+    if representation == "lesson":
+        return _LESSON_FIELDS
+    raise ValueError("unknown experience representation")
+
+
+def experience_search_text(record: dict) -> str:
+    return "\n".join(value if isinstance(value := record[key], str) else
+                     json.dumps(value, ensure_ascii=False)
+                     for key in experience_content_fields(record))
+
+
+def _check_changes(record: dict, changes: dict) -> None:
+    # An example's exact passage and representation are immutable. A later
+    # explanation can change without rewriting what the earlier result was.
+    allowed = set(experience_content_fields(record)) - {"excerpt"} | {"scope", "active"}
+    if set(changes) - allowed:
+        raise ValueError("revision fields do not belong to this experience representation")
 
 
 class PostureMemory:
@@ -153,8 +190,14 @@ class PostureMemory:
         state = self.storage.load_component_state(self.component)
         if state is None:
             state = {"schema": SCHEMA, "world_id": self.world_id, "experiences": {}}
-        if state.get("schema") != SCHEMA or state.get("world_id") != self.world_id:
+        if state.get("schema") not in {SCHEMA, LEGACY_SCHEMA} or state.get("world_id") != self.world_id:
             raise ValueError("unsupported or mismatched posture state")
+        if state["schema"] == LEGACY_SCHEMA:
+            if any(record.get("representation", "lesson") != "lesson" for record in state["experiences"].values()):
+                raise ValueError("legacy posture state contains an unsupported representation")
+            # Read old lessons in place; the next ordinary journal mutation
+            # saves v2 in the same World component, preserving IDs and history.
+            state["schema"] = SCHEMA
         controls = self._load_controls()
         for identity, control in controls["stops"].items():
             record = self._record(state, identity)
@@ -229,10 +272,12 @@ class PostureMemory:
 
     @staticmethod
     def validate_experience(
-        *, subject_id: str, context_id: str, title: str, lesson: str,
-        encounter: dict, conditions: Any, counterexamples: list[str], shift: dict,
+        *, subject_id: str, context_id: str, title: str, lesson: str = "",
+        encounter: dict, conditions: Any = None, counterexamples: list[str] | None = None,
+        shift: dict | None = None,
         source: dict, scope: str = "context", record_type: str = "observed_episode",
         experience_id: str | None = None,
+        representation: str = "lesson", excerpt: str | None = None, note: str = "",
     ) -> dict:
         subject_id = _text(subject_id, "subject_id", 512)
         # The native Harness identifies Home with an empty context id.
@@ -245,20 +290,31 @@ class PostureMemory:
             raise ValueError("invalid posture experience identity")
         if not isinstance(record_type, str) or record_type not in {"observed_episode", "constructed_fixture"}:
             raise ValueError("invalid posture record_type")
-        if not isinstance(encounter, dict) or set(encounter) != {"situation", "action", "outcome"}:
+        allowed_encounters = [{"situation", "action", "outcome"}]
+        if representation == "example":
+            allowed_encounters.append({"situation", "action"})
+        if not isinstance(encounter, dict) or set(encounter) not in allowed_encounters:
             raise ValueError("encounter requires situation, action, and outcome")
         for key, value in encounter.items():
             _text(value, "encounter " + key, 12000)
         now = datetime.now(timezone.utc).isoformat()
         record = {
             "id": experience_id, "revision": 1, "subject_id": subject_id,
-            "context_id": context_id, "title": title, "lesson": lesson,
-            "encounter": deepcopy(encounter), "conditions": deepcopy(conditions),
-            "counterexamples": deepcopy(counterexamples), "shift": deepcopy(shift),
+            "context_id": context_id, "title": title, "representation": representation,
+            "encounter": deepcopy(encounter),
             "source": _source(source), "scope": scope, "record_type": record_type,
             "active": True, "created_at": now, "updated_at": now,
             "feedback": [], "history": [],
         }
+        if representation == "example":
+            if lesson or conditions is not None or counterexamples is not None or shift is not None:
+                raise ValueError("a concrete example does not require lesson fields")
+            record.update(excerpt=excerpt, note=note)
+        else:
+            if excerpt is not None or note:
+                raise ValueError("example fields cannot be attached to a lesson")
+            record.update(lesson=lesson, conditions=deepcopy(conditions),
+                          counterexamples=deepcopy(counterexamples), shift=deepcopy(shift))
         _validate_content(record)
         return record
 
@@ -299,6 +355,7 @@ class PostureMemory:
             state = self._load()
             record = self._record(state, experience_id)
             self._revision(record, expected_revision)
+            _check_changes(record, changes)
             was_active = record["active"]
             self._advance(record)
             record.update(deepcopy(changes))
@@ -324,6 +381,7 @@ class PostureMemory:
             state = self._load()
             record = self._record(state, experience_id)
             self._revision(record, expected_revision)
+            _check_changes(record, changes)
             self._advance(record)
             record.update(deepcopy(changes))
             _validate_content(record)
@@ -365,17 +423,18 @@ class PostureMemory:
         """Offer eligible experiences, not allegedly relevant experiences.
 
         Context privacy is a hard boundary. Explicit subject transfer offers
-        the revisable abstraction and source locators, never the originating
-        context's encounter text, raw feedback, or previous conversation.
+        the lesson abstraction or explicitly shared example passage and note,
+        never the originating context's full encounter or private feedback.
         """
         records = self.list_experiences(subject_id=subject_id, context_id=context_id)
         episodes = []
         for record in records:
             local = record["context_id"] == context_id
             item = {key: deepcopy(record[key]) for key in (
-                "id", "revision", "title", "lesson", "conditions", "counterexamples",
-                "shift", "record_type", "scope", "context_id",
+                "id", "revision", "record_type", "scope", "context_id",
+                *experience_content_fields(record),
             )}
+            item["representation"] = record.get("representation", "lesson")
             item["source"] = {"experience_id": record["id"], "revision": record["revision"],
                               "context_id": record["context_id"]}
             item["encounter_available"] = local

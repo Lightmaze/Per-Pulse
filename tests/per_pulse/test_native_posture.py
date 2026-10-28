@@ -241,7 +241,7 @@ def test_native_lookup_finds_older_lesson_without_cross_context_or_raw_transfer(
     identities = {item["id"] for item in found["experiences"]}
     assert identities == {old["id"], shared["id"]}
     assert found["matching_count"] == 2
-    assert found["retrieval"] == "literal_casefold_on_eligible_abstractions_only"
+    assert found["retrieval"] == "literal_casefold_on_eligible_content_only"
     assert "encounter" not in next(item for item in found["experiences"]
                                    if item["id"] == shared["id"])
     assert "evidence" not in next(item for item in found["experiences"]
