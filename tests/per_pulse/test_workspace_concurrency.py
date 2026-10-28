@@ -401,12 +401,39 @@ def test_running_command_cancellation_releases_lane_after_cleanup(tmp_path, monk
     try:
         command = propose(service, "command", tool_name="run_command", arguments={"argv": ["fixture"]})
         mutation = propose(service, "mutation", "partial-command-result\n", "recovered-result\n")
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        # Hold the control path at its durable model/turn reconciliation
+        # boundary. Before that is committed, the physical command must not
+        # receive its cancellation token and return a stale RUNNING receipt.
+        original_reconcile = service.store.reconcile_model_rounds
+        cancel_commit_entered = threading.Event()
+        release_cancel_commit = threading.Event()
+
+        def observe_cancel_commit(*args, **kwargs):
+            if kwargs.get("cancel_turn"):
+                cancel_commit_entered.set()
+                assert release_cancel_commit.wait(3), "fixture abort was not released"
+            return original_reconcile(*args, **kwargs)
+
+        monkeypatch.setattr(service.store, "reconcile_model_rounds", observe_cancel_commit)
+        command_scope = command[0].for_turn("turn-command")
+        runner = service._runtime(command[0]).runner
+        with ThreadPoolExecutor(max_workers=3) as pool:
             a = pool.submit(approve, service, command)
             assert command_started.wait(3)
             b = pool.submit(approve, service, mutation)
             assert writer_entered.wait(3)
-            service.control(command[0].for_turn("turn-command"), operation="interrupt")
+            cancelling = pool.submit(service.control, command_scope, operation="interrupt")
+            try:
+                assert cancel_commit_entered.wait(3)
+                with runner._lock:
+                    active = runner._active.get((command_scope.session_id, command_scope.turn_id))
+                    assert active is not None and active.active_token is not None
+                    assert not active.active_token.cancelled, (
+                        "Physical cancellation preceded the durable action fence"
+                    )
+            finally:
+                release_cancel_commit.set()
+            cancelling.result(timeout=3)
             command_result = a.result(timeout=3)
             assert command_result["action"]["status"] == "uncertain"
             assert command_result["action"]["error_code"] in {"command_effect_unknown", "abort_effect_unknown"}

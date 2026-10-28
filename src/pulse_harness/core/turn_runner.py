@@ -362,42 +362,53 @@ class TurnRunner:
         with self._lock:
             context = self._active.get((scope.session_id, scope.turn_id))
             if context is not None:
+                # Fence further model activity immediately. An active physical
+                # tool must not observe its cancellation before its action has
+                # a durable terminal winner: otherwise it can unwind and
+                # resolve_approval can return an obsolete "running" snapshot.
                 context.model_cancel.set()
-                if context.active_token is not None:
-                    context.active_token.cancel(reason)
+                active_token = context.active_token
                 active_action_id = context.active_action_id
             else:
+                active_token = None
                 active_action_id = None
 
-        # Fence admitted attempts and close the turn's admission atomically. The
-        # adapter's cancel event is cooperative, so an in-process abort that
-        # cannot prove provider stop is represented as UNCERTAIN; a late
-        # provider return can never replace this durable winner.
-        self.store.reconcile_model_rounds(
-            scope,
-            reason=reason,
-            status=ModelRoundStatus.UNCERTAIN,
-            cancel_turn=True,
-            _writer=self,
-            _writer_capability=self.__model_round_writer_permit,
-        )
-        actions = self.store.actions_for_turn(scope)
-        for action in actions:
-            if action.terminal:
-                continue
-            action_reason = reason
-            outcome = TerminalOutcome.CANCELLED
-            if action.status in {ActionStatus.STARTING, ActionStatus.RUNNING} or action.action_request_id == active_action_id:
-                outcome = TerminalOutcome.UNCERTAIN
-                action_reason = "abort_effect_unknown"
-            self.store.terminal_action(
+        try:
+            # Close model admission before touching physical effect tokens.
+            # Provider cancellation is cooperative; reconciled attempts are
+            # UNCERTAIN, never assumed unbilled or automatically replayable.
+            self.store.reconcile_model_rounds(
                 scope,
-                action.action_request_id,
-                outcome,
-                result={},
-                error_code=action_reason,
+                reason=reason,
+                status=ModelRoundStatus.UNCERTAIN,
+                cancel_turn=True,
+                _writer=self,
+                _writer_capability=self.__model_round_writer_permit,
             )
-        return self._outcome(scope, error_code=reason)
+            actions = self.store.actions_for_turn(scope)
+            for action in actions:
+                if action.terminal:
+                    continue
+                action_reason = reason
+                outcome = TerminalOutcome.CANCELLED
+                if action.status in {ActionStatus.STARTING, ActionStatus.RUNNING} or action.action_request_id == active_action_id:
+                    outcome = TerminalOutcome.UNCERTAIN
+                    action_reason = "abort_effect_unknown"
+                self.store.terminal_action(
+                    scope,
+                    action.action_request_id,
+                    outcome,
+                    result={},
+                    error_code=action_reason,
+                )
+            return self._outcome(scope, error_code=reason)
+        finally:
+            # Always ask the physical worker to stop, even if persistence
+            # failed. Mark uncertainty first when persistence succeeds, so
+            # the worker's early exit cannot race the response projection.
+            # The original workspace resource remains held through cleanup.
+            if active_token is not None:
+                active_token.cancel(reason)
 
     def interrupt(self, scope: HarnessScope) -> TurnOutcome:
         return self.abort(scope, reason="interrupt")
