@@ -146,7 +146,6 @@ def prepare(trial: Path, output: Path, *, allow_fixture: bool = False) -> dict:
             "private_key_file": "private/condition-key.json"}
 
 
-
 def _nonnegative_int(value):
     """Reject booleans, malformed and negative reported token counts."""
     return value if type(value) is int and value >= 0 else None
@@ -193,7 +192,6 @@ def _usage_evidence(usage):
         },
         "limits": "Provider-reported observations only; missing rounds, retries, prices and invoices are not inferred.",
     }
-
 
 
 def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = False,
@@ -244,7 +242,7 @@ def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = 
                              "observed_checks": {check: {"baseline": ratings["ratings"][b][check],
                                                         "conditional": ratings["ratings"][c][check]}
                                                  for check in CHECKS[task]},
-                             "usage_accounted": {condition: key["mapping"][label]["usage"].get("accounted")
+                             "usage_accounted": {condition: _usage_evidence(key["mapping"][label].get("usage"))["native_accounted"]
                                                  for condition, label in (("baseline", b), ("conditional", c))},
                              "usage_observed": {condition: _usage_evidence(key["mapping"][label].get("usage"))
                                                 for condition, label in (("baseline", b), ("conditional", c))}}
