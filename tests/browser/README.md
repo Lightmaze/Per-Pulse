@@ -67,6 +67,13 @@ and verifies the draft after reload. It also checks phone layout, keyboard
 focus, English/Chinese controls and a delayed response after Browser Back.
 No model is configured; no assistant response or learning outcome is invented.
 
+Run `node tests/browser/message_search_flow.mjs` with the same environment to
+verify **Find a message** against this long native fixture. It covers failed-read
+retry, old-source focus and reload, private-context isolation, stable ranges
+while new input arrives, an obsolete query response, phone layout, bilingual
+controls, Escape focus restoration, and Browser Back to another source within
+the same Work while a search is pending. Queries remain local and read-only.
+
 ## One rendered correction-to-artifact journey
 
 ```sh

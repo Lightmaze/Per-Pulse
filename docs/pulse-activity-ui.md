@@ -109,3 +109,46 @@ operator write, overlapping GETs, duplicate clicks, and reading again after
 an uncertain response. Native persistence, browser interaction and actual
 model usefulness remain separate checks; this regression exercises only
 the client-side ordering rule.
+
+## Activity is bound to one World and one service instance
+
+The first-party Activity dialog reads the atomic native `GET /api/pulse/observation`
+response and checks both the persistent `workspaceId` and live
+`serviceInstanceId` against the current workspace bootstrap before exposing
+source navigation or operator controls. Mismatches offer a full workspace
+reload; the current unsent Work draft remains in its browser-local scope.
+
+First-party pause/resume and connection writes carry the
+`X-Per-Pulse-World` and `X-Per-Pulse-Service-Instance` headers.
+Partial or mismatched identities receive a typed HTTP 409
+`pulse_workspace_changed` without editing the original Context Body.
+Legacy native clients that omit *both* headers keep their existing contract.
+This is a stale-tab safety fence, not authentication, a new scheduler, or an
+expanded model permission boundary. It does not establish provider costs.
+
+
+## Inspect a particular Work's durable background backlog
+
+The existing native status now groups the *full queued/running Pulse backlog*
+by original center. Global counts and the per-context figures are computed
+from the same World-scoped SQL rows, rather than attributing only the latest
+20 events. The PageService projects each center to an actual page when still
+available; an older/hidden Work remains a non-navigable historical center,
+never an invented Home link. The Activity panel shows the current page's
+counts and offers direct navigation to other Works with pending activity,
+while preserving the existing return position and identity fence.
+
+For each local backlog the current native observation also checks the oldest
+queued event's *actual admission gate*. Activity shows its reason in English
+or Chinese even when that event has fallen outside the twenty-item recent
+sample. A missing reason means the gate is clear at observation time, **not**
+that the turn will start immediately: worker availability, Dendrite formation
+and foreground priority still apply. Running work has no waiting reason.
+These are read-only projections; pausing or resuming still uses the same
+World-owned operator controls.
+
+A queued local activation is not an awaiting user approval, and this adds no
+scheduler, provider invocation or authority. Native World/SQLite/Kernel tests
+use an explicit synthetic model transport; browser and full-tree CI results
+must be checked on the exact integrated commit. Real-model usefulness,
+wall-clock autonomy and provider billing remain separate acceptance items.

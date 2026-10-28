@@ -193,6 +193,10 @@ export type PulseState = {
     hardProviderSpendingCap: false;
   } | null;
   queue: { queued: number; running: number; oldestQueuedAt: string | null };
+  // Derived from the same complete native queue, not the recent-events sample.
+  queueByContext?: { center_id: string | null; pageId: string | null;
+    queued: number; running: number; oldestQueuedAt: string | null;
+    oldestQueuedDeferredReason?: string | null }[];
   contexts: { center_id: string | null; pageId: string | null; inhibition: number }[];
   connections: PulseConnection[];
   recentActivations: PulseActivation[];

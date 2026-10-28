@@ -128,7 +128,7 @@ with no measured capability gain asserted.
 | --- | --- | --- |
 | 1 | Run ordinary-feedback cross-page trials with a configured real provider, including unsuccessful capture | Actual later responses and costs show whether the captured distinction helps and whether the explicit plan request stays a plan |
 | 2 | Carry the same protocol into the existing practice-product and registration artifact cases | A browser-tested first interaction improves while an appropriate short registration form remains adequate |
-| 3 | Add access to older or omitted lessons when a correction needs them | A relevant old experience can be located and revised after newer lessons exceed the native list window |
+| 3 | Exercise the existing native `find`/`get` retrieval during real-provider corrections after newer lessons exceed the list window | The model locates and revises an appropriate old experience without crossing context privacy; a literal match alone is not evidence of relevance |
 | 4 | Repeat with task order counterbalanced and an appropriate computation control | An apparent improvement survives order changes and can be distinguished from extra inference alone |
 
 Each next step should answer one of these concrete questions. More saved

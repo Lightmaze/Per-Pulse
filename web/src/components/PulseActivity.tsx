@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../api';
+import { ApiError, api } from '../api';
 import { useLanguage } from '../i18n';
 import { PulseActivityRequestGate } from '../pulseActivityRequestGate';
 import { activationMessageTarget, attentionSourceTarget, localRetainedAttention } from '../pulseAttention';
 import { pulseActivityLabel } from '../pulseActivityLabels';
 import { pulseAdmissionHold } from '../pulseAdmission';
+import { otherPendingPulseContexts, pulseQueueForPage } from '../pulseQueue';
 import type { PageSummary, PulseState } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
@@ -20,15 +21,18 @@ function shortId(value: string): string {
   return value.length > 18 ? value.slice(0, 16) + '…' : value;
 }
 
-export function PulseActivity({ pageId, pages, navigate, onClose }: {
+export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, navigate, onClose }: {
   pageId: string;
   pages: PageSummary[];
+  workspaceId: string;
+  serviceInstanceId: string;
   navigate: Navigate;
   onClose: () => void;
 }) {
   const { t, pageTitle } = useLanguage();
   const [pulse, setPulse] = useState<PulseState | null>(null);
   const [error, setError] = useState('');
+  const [identityChanged, setIdentityChanged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [target, setTarget] = useState('');
   const [kind, setKind] = useState<'excitatory' | 'inhibitory'>('excitatory');
@@ -42,9 +46,16 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
     const ticket = gate.beginRead();
     if (!ticket) return; // A PATCH owns the visible state until it settles.
     try {
-      const status = await api.pulse(signal);
+      const observation = await api.pulseObservation(signal);
       if (!signal?.aborted && gate.acceptsRead(ticket)) {
-        setPulse(status);
+        if (observation.workspaceId !== workspaceId || observation.serviceInstanceId !== serviceInstanceId) {
+          setPulse(null);
+          setIdentityChanged(true);
+          setError(t('pulse.workspaceChanged'));
+          return;
+        }
+        setPulse(observation.pulse);
+        setIdentityChanged(false);
         if (!preserveError) setError('');
       }
     } catch (problem) {
@@ -52,7 +63,7 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
         setError(problem instanceof Error ? problem.message : t('pulse.readError'));
       }
     }
-  }, [gate]);
+  }, [gate, workspaceId, serviceInstanceId, t]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -71,11 +82,18 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
       setPulse(result.pulse);
       setTarget('');
     } catch (problem) {
-      // A network failure can hide an already-committed mutation. Re-read the
-      // native state rather than claiming it definitely failed or rolling back.
-      unconfirmed = true;
-      const detail = problem instanceof Error ? problem.message : t('pulse.confirmUnknown');
-      setError(t('pulse.confirm', { detail }));
+      if (problem instanceof ApiError && problem.code === 'pulse_workspace_changed') {
+        // Do not continue from the stale Activity operator context.
+        setPulse(null);
+        setIdentityChanged(true);
+        setError(t('pulse.workspaceChanged'));
+      } else {
+        // A network failure can hide an already-committed mutation. Re-read
+        // native status rather than claiming this action definitely failed.
+        unconfirmed = true;
+        const detail = problem instanceof Error ? problem.message : t('pulse.confirmUnknown');
+        setError(t('pulse.confirm', { detail }));
+      }
     } finally {
       gate.finishWrite();
       setBusy(false);
@@ -95,6 +113,7 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
     navigate(id, id === pageId ? undefined : { pageId }, messageId);
   };
 
+  const identity = { workspaceId, serviceInstanceId };
   const edges = pulse?.connections.filter(edge => edge.sourcePageId === pageId) ?? [];
   // Model-retained notes are private to their original local context, not a
   // global cross-Work summary. An unknown older center stays unresolved.
@@ -102,6 +121,8 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
   const recent = pulse?.recentActivations ?? [];
   const thisPageHeld = pulse?.heldContexts.some(held => held.pageId === pageId) ?? false;
   const admissionHold = pulse ? pulseAdmissionHold(pulse) : null;
+  const localBacklog = pulseQueueForPage(pulse, pageId);
+  const otherBacklogs = otherPendingPulseContexts(pulse, pageId);
   // Older servers do not have partial-failure usage receipts. A receipt is a
   // proven lower bound, not a full provider bill or a released reservation.
   const budgetEvidence = pulse?.providerTokenBudget;
@@ -114,21 +135,23 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
 
   return <Dialog title={t('pulse.title')} onClose={() => { if (!busy) onClose(); }} className="pulse-activity-dialog">
     <p className="dialog-description">{t('pulse.description')}</p>
-    {error ? <p className="form-error" role="alert">{error} <button className="text-button" type="button" onClick={() => void reload()}>{t('pulse.retry')}</button></p> : null}
+    {error ? <p className="form-error" role="alert"><span>{error}</span> {identityChanged
+      ? <button className="text-button" type="button" onClick={() => window.location.reload()}>{t('pulse.reloadWorkspace')}</button>
+      : <button className="text-button" type="button" onClick={() => void reload()}>{t('pulse.retry')}</button>}</p> : null}
     {!pulse ? <p role="status" className="pulse-activity-empty">{t('pulse.reading')}</p> : <>
       <section className="pulse-activity-section" aria-label={t('pulse.background')}>
         <div className="pulse-activity-heading">
           <h3>{t('pulse.background')}</h3>
           <button className="text-button" type="button" onClick={() => void reload()}>{t('pulse.refresh')}</button>
           <button className="text-button" type="button" disabled={busy || !pulse.enabled}
-            onClick={() => void act(() => api.setPulsePaused(!pulse.paused))}>
+            onClick={() => void act(() => api.setPulsePaused(!pulse.paused, identity))}>
             {pulse.paused ? t('pulse.resumeBg') : t('pulse.pauseBg')}
           </button>
         </div>
         <div className="pulse-activity-heading">
           <h3>{t('pulse.current')}</h3>
           <button className="text-button" type="button" disabled={busy || !pulse.enabled}
-            onClick={() => void act(() => api.setPulseContextPaused(pageId, !thisPageHeld))}>
+            onClick={() => void act(() => api.setPulseContextPaused(pageId, !thisPageHeld, identity))}>
             {thisPageHeld ? t('pulse.resumePage') : t('pulse.holdPage')}
           </button>
         </div>
@@ -136,6 +159,12 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
           {thisPageHeld ? t('pulse.held') : t('pulse.holdInfo')}
         </p>
         <p className="pulse-activity-summary" role="status">{pulse.paused && pulse.enabled ? t('pulse.paused') : pulse.running ? t('pulse.continuing') : pulse.enabled ? t('pulse.enabled') : t('pulse.disabled')} · {t('pulse.queue', { queued: pulse.queue.queued, running: pulse.queue.running })}</p>
+        <p className="pulse-activity-detail">{t('pulse.localQueue', {
+          queued: localBacklog?.queued ?? 0, running: localBacklog?.running ?? 0,
+        })}</p>
+        {localBacklog?.oldestQueuedDeferredReason ? <p className="pulse-activity-detail">
+          {t('pulse.waiting', { reason: pulseActivityLabel(t, 'reason', localBacklog.oldestQueuedDeferredReason) })}
+        </p> : null}
         <p className="pulse-activity-detail">{t('pulse.budget', { remaining: pulse.budget.remaining, limit: pulse.budget.limit })}</p>
         {admissionHold ? <p className="pulse-activity-detail">{t(admissionHold === 'hourly_count' ? 'pulse.admissionCountHeld' : 'pulse.admissionTokensHeld')}</p> : null}
         {pulse.providerTokenBudget ? <>
@@ -156,6 +185,26 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
         {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">{t('pulse.oldest', { time: eventTime(pulse.queue.oldestQueuedAt) })}</p> : null}
         {!pulse.providerConfigured ? <p className="pulse-activity-detail">{t('pulse.noProvider')}</p> : null}
       </section>
+      {otherBacklogs.length ? <section className="pulse-activity-section" aria-label={t('pulse.otherBacklogs')}>
+        <h3>{t('pulse.otherBacklogs')}</h3>
+        <p className="pulse-activity-detail">{t('pulse.otherBacklogsInfo')}</p>
+        <ul className="pulse-activity-list">{otherBacklogs.map(entry =>
+          <li key={entry.center_id ?? 'home'}>
+            {entry.pageId && validIds.has(entry.pageId)
+              ? <button className="pulse-activity-link" type="button"
+                  onClick={() => jump(entry.pageId)}>{nameFor(entry.pageId)}</button>
+              : <span>{nameFor(entry.pageId, entry.center_id)}</span>}
+            <span className="pulse-activity-detail"> · {t('pulse.queue', {
+              queued: entry.queued, running: entry.running,
+            })}</span>
+            {entry.oldestQueuedDeferredReason ? <span className="pulse-activity-detail">
+              {t('pulse.waiting', { reason: pulseActivityLabel(t, 'reason', entry.oldestQueuedDeferredReason) })}
+            </span> : null}
+            {entry.oldestQueuedAt ? <span className="pulse-activity-detail">
+              {t('pulse.oldest', { time: eventTime(entry.oldestQueuedAt) })}
+            </span> : null}
+          </li>)}</ul>
+      </section> : null}
       <section className="pulse-activity-section" aria-label={t('pulse.thoughts')}>
         <h3>{t('pulse.thoughts')}</h3>
         <p className="pulse-activity-detail">{t('pulse.thoughtsInfo')}</p>
@@ -188,12 +237,12 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
               ? <button className="pulse-activity-link" onClick={() => jump(edge.targetPageId)}>{nameFor(edge.targetPageId)}</button>
               : <span>{nameFor(edge.targetPageId, edge.target_center_id)}</span>}
             {edge.targetPageId && validIds.has(edge.targetPageId) ?
-              <button className="text-button" type="button" disabled={busy} onClick={() => void act(() => api.disconnectPulse(pageId, edge.targetPageId!))}>{t('pulse.remove')}</button> : null}
+              <button className="text-button" type="button" disabled={busy} onClick={() => void act(() => api.disconnectPulse(pageId, edge.targetPageId!, identity))}>{t('pulse.remove')}</button> : null}
           </li>)}
         </ul>}
         {availableTargets.length ? <form className="pulse-activity-add" onSubmit={event => {
           event.preventDefault();
-          if (!busy && target && validIds.has(target)) void act(() => api.connectPulse(pageId, target, kind));
+          if (!busy && target && validIds.has(target)) void act(() => api.connectPulse(pageId, target, kind, identity));
         }}>
           <label htmlFor="pulse-target">{t('pulse.connectTo')}</label>
           <select id="pulse-target" value={target} onChange={event => setTarget(event.target.value)}>

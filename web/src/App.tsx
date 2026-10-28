@@ -16,6 +16,7 @@ import { PulseActivity } from './components/PulseActivity';
 import { HomeContinuations } from './components/HomeContinuations';
 import { LearningDialog } from './components/LearningDialog';
 import { HistoryDialog } from './components/HistoryDialog';
+import { MessageSearchDialog } from './components/MessageSearchDialog';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 export default function App() {
@@ -72,8 +73,8 @@ export default function App() {
   }, [view?.page.kind, view?.page.title]);
 
   useEffect(() => {
-    setModal(previous => previous?.kind === 'history' ? null : previous);
-  }, [route.id]);
+    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' ? null : previous);
+  }, [route.id, route.serial, workspaceId]);
 
   useEffect(() => () => window.clearTimeout(scrollTimer.current), [route.id]);
 
@@ -264,12 +265,14 @@ export default function App() {
           {syncError && !error && !sendError ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <PageArtifacts key={`artifacts-${route.id}`} view={view} /> : null}
-          {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
+          {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
           {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
     </div>
-    {pulseOpen ? <PulseActivity pageId={route.id} pages={pages} navigate={navigate} onClose={() => setPulseOpen(false)} /> : null}
+    {pulseOpen && bootstrap ? <PulseActivity pageId={route.id} pages={pages}
+      workspaceId={bootstrap.workspaceId} serviceInstanceId={bootstrap.serviceInstanceId}
+      navigate={navigate} onClose={() => setPulseOpen(false)} /> : null}
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
     {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
@@ -278,5 +281,6 @@ export default function App() {
     {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast(t('app.connectionChecked'))).catch(problem => setToast(errorText(problem)))} /> : null}
     {modal?.kind === 'learning' ? <LearningDialog key={`${workspaceId}/${route.id}`} pageId={route.id} pageTitle={view?.page.title ?? t('dialogs.thisPage')} messages={view?.messages ?? []} close={closeModal} navigate={navigate} /> : null}
     {modal?.kind === 'history' ? <HistoryDialog key={`${workspaceId}/${route.id}`} pageId={route.id} beforeMessageId={modal.beforeMessageId} close={closeModal} navigate={navigate} /> : null}
+    {modal?.kind === 'message-search' ? <MessageSearchDialog key={`${workspaceId}/${route.id}`} pageId={route.id} close={closeModal} navigate={navigate} /> : null}
   </div>;
 }

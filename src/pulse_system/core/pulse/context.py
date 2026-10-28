@@ -893,20 +893,58 @@ class ContextPulseController:
             ).fetchall()
             # Count the entire durable backlog, independently of the engine's
             # bounded working set and the twenty-row recent activity display.
-            queue = self.storage._conn.execute(
-                "SELECT COUNT(CASE WHEN status = 'queued' THEN 1 END), "
+            # Group the SAME durable backlog used by the global queue count
+            # so an operator can see which local context is waiting. The
+            # bounded recent list is not sufficient: another Work can fill
+            # its entire window while a held Work remains queued.
+            queue_rows = self.storage._conn.execute(
+                "SELECT center_id, COUNT(CASE WHEN status = 'queued' THEN 1 END), "
                 "COUNT(CASE WHEN status = 'running' THEN 1 END), "
-                "MIN(CASE WHEN status = 'queued' THEN created_at END) "
+                "MIN(CASE WHEN status = 'queued' THEN created_at END), "
+                "MIN(CASE WHEN status = 'queued' THEN seq END) "
                 "FROM causal_events WHERE world_id = ? AND status IN ('queued', 'running') "
                 "AND kind IN ('spontaneous', 'propagation', 'pulse') "
                 "AND (json_extract(metadata, '$.context_pulse') IN ('reentry', 'convergence') "
-                "OR json_extract(metadata, '$.context_connection_id') IS NOT NULL)",
+                "OR json_extract(metadata, '$.context_connection_id') IS NOT NULL) "
+                "GROUP BY center_id",
                 (self.world_id,),
-            ).fetchone()
-            activations = []
-            # Import only at observation time to avoid a context/engine module
-            # dependency during construction. The sample stays bounded at 20.
+            ).fetchall()
+            # The most recent twenty activations can omit an older Work's
+            # entire backlog. Read the oldest queued event in each center to
+            # explain its *current* native admission gate, not to promise when
+            # a worker will execute it. Running turns have no waiting reason.
             from pulse_system.core.pulse.engine import PulseEvent
+            queue_by_context = []
+            for center_id, queued, running, oldest_at, oldest_seq in queue_rows:
+                reason = None
+                if oldest_seq is not None:
+                    oldest_row = self.storage._conn.execute(
+                        "SELECT id FROM causal_events WHERE world_id = ? AND seq = ?",
+                        (self.world_id, oldest_seq),
+                    ).fetchone()
+                    if oldest_row is not None:
+                        oldest_event = self.ledger.get_event(oldest_row[0])
+                        if oldest_event is not None:
+                            reason = self.deferred_reason(
+                                PulseEvent.from_causal_event(oldest_event), now,
+                            )
+                queue_by_context.append({
+                    "center_id": center_id, "queued": queued, "running": running,
+                    "oldestQueuedAt": oldest_at,
+                    "oldestQueuedDeferredReason": reason,
+                })
+            queue_by_context.sort(key=lambda item: (
+                -(item["queued"] + item["running"]), item["center_id"] or "",
+            ))
+            queue = (
+                sum(item["queued"] for item in queue_by_context),
+                sum(item["running"] for item in queue_by_context),
+                min((item["oldestQueuedAt"] for item in queue_by_context
+                     if item["oldestQueuedAt"] is not None), default=None),
+            )
+            activations = []
+            # Recent activity remains a bounded sample, separate from the
+            # complete durable per-context backlog and its oldest-event gate.
             for row in recent:
                 item = dict(zip(("eventId", "centerId", "kind", "status", "createdAt", "sourceEventId"), row))
                 if item["status"] == "queued":
@@ -938,5 +976,6 @@ class ContextPulseController:
                              for item in self._state["contexts"].values()],
                 "connections": graph.get("connections", []),
                 "queue": {"queued": queue[0], "running": queue[1], "oldestQueuedAt": queue[2]},
+                "queueByContext": queue_by_context,
                 "recentActivations": activations,
             }

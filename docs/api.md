@@ -84,6 +84,15 @@ type Bootstrap = {
   an omitted or empty cursor gives 422. The earliest message returns an empty
   history range. Every read retains current statuses, references and source
   identities, without admitting a turn or changing the main page's status.
+- `GET /api/pages/{id}/messages/search?q=<text>&beforeMessageId=<optional-id>`
+  returns the same bounded shape plus `query`, with up to 100 matches **newest
+  first**. The trimmed query is 1–200 characters. Matching is a literal Unicode
+  case-insensitive substring; `%`, `_`, backslashes and quotes have no wildcard
+  or SQL meaning. Recent and older conversation share the same native
+  World/Center/committed-lineage predicates. Older ranges use the last returned
+  `beforeMessageId`; foreign/missing cursors give 404. No match returns an empty
+  list, and reading never starts a model or creates a session. The browser's
+  **Find a message** opens each result at its original message and retains drafts.
 - `GET /api/pages/{id}?sourceMessageId=<native-event-id>` -> the same recent bounded
   window, plus one selected older message if it is in this page's authorized
   World/Center/committed-Engram lineage. This is a read-only source anchor, not
@@ -130,6 +139,12 @@ actual native page queries with and without this index in a disposable
 237 ms to 7 ms, and a 100-message older range from 18 ms to 1 ms (20 measured
 reads after five warmups). These are local synthetic measurements, not a
 latency guarantee for other hardware or histories.
+
+Message search scans matching-context native text; it is not a separate search
+index or transcript copy. `python tests/per_pulse/benchmark_message_search.py`
+measures common, old-only and absent queries in a disposable dense 100,000-row
+fixture. An absent query must inspect the whole selected context, so its cost
+grows with conversation size even though the returned range is bounded.
 
 ## Report an outcome of a lesson
 

@@ -206,6 +206,10 @@ class PageService:
                 context["pageId"] = page_id_for(context["center_id"])
             for held in state["heldContexts"]:
                 held["pageId"] = page_id_for(held["center_id"])
+            for backlog in state.get("queueByContext", []):
+                # Raw center IDs remain available for historical, non-navigable
+                # Work; only a known actual Work can receive a page link.
+                backlog["pageId"] = page_id_for(backlog["center_id"])
             for retained in state.get("retainedAttention", []):
                 # A model's retained local thought has its own original causal
                 # source. Do not infer a navigable message from a turn/action
@@ -279,6 +283,22 @@ class PageService:
                 "pulse": self.pulse_status(),
             }
 
+    def require_pulse_identity(self, world_id: str | None, instance_id: str | None) -> None:
+        """Fence first-party Activity edits to their observed World and process.
+
+        Legacy clients may omit both headers; partial or mismatched identities
+        are rejected before any native pause, resume or connection change.
+        """
+        if world_id is None and instance_id is None:
+            return
+        with self._lock:
+            if world_id != self.runtime.world_id or instance_id != self.service_instance_id:
+                raise PageError(
+                    "pulse_workspace_changed",
+                    "The workspace changed while Activity was open. Reload before changing its activity.",
+                    409,
+                )
+
     def set_pulse_paused(self, paused: bool) -> dict:
         with self._lock:
             self.runtime._require_runtime_owner()
@@ -334,7 +354,8 @@ class PageService:
         return front
 
     def _rows(self, page_id: str, *, limit: int = MAX_MESSAGES + 1,
-              event_id: str | None = None, before_seq: int | None = None) -> list[dict]:
+              event_id: str | None = None, before_seq: int | None = None,
+              content_query: str | None = None) -> list[dict]:
         front = self._front(page_id)
         return self.runtime._causal_message_projection(
             center_id=front.center_id if front else None,
@@ -343,6 +364,7 @@ class PageService:
             # Offline input is real queued input. Do not hide it until a
             # provider admits a Kernel turn, and do not fabricate a transcript.
             session_admitted=False, limit=limit, event_id=event_id, before_seq=before_seq,
+            content_query=content_query,
         )
 
     def _check_message(self, page_id: str, message_id: str | None) -> None:
@@ -472,6 +494,29 @@ class PageService:
                 "hasMore": has_more,
                 "beforeMessageId": rows[0]["event_id"] if has_more else None,
             }
+
+    def search_messages(self, page_id: str, query: str, *, before_message_id: str | None = None) -> dict:
+        """Find original native messages in this conversation, including old ones."""
+        query = query.strip()
+        if not query or len(query) > 200:
+            raise PageError("message_search_invalid", "Enter between 1 and 200 characters to find a message.", 422)
+        with self._lock:
+            self._check_message(page_id, before_message_id)
+            before_seq = None
+            if before_message_id is not None:
+                anchor = self._rows(page_id, limit=1, event_id=before_message_id)
+                if not anchor:
+                    raise PageError("message_not_found", "The selected message does not belong to this page.", 404)
+                before_seq = anchor[0]["seq"]
+            rows = self._rows(page_id, limit=HISTORY_MESSAGES + 1,
+                              before_seq=before_seq, content_query=query)
+            has_more = len(rows) > HISTORY_MESSAGES
+            rows = rows[-HISTORY_MESSAGES:]
+            refs = [dict(r) for r in self._state["references"] if r["sourcePageId"] == page_id]
+            return {"pageId": page_id, "query": query,
+                    "messages": list(reversed(self._messages(page_id, rows, refs))),
+                    "hasMore": has_more,
+                    "beforeMessageId": rows[0]["event_id"] if has_more else None}
 
     def view(self, page_id: str, *, source_message_id: str | None = None) -> dict:
         with self._lock:

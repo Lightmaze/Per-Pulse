@@ -280,6 +280,15 @@ try {
   await page.unroute('**/api/pages/**/messages');
   checks.push('Chinese recovery message preserves an unsent Work draft after a known API error');
 
+  // A held local Work must remain discoverable from another Work even when
+  // a short Recent activity sample is not enough. Native World/Kernel still
+  // owns the pending propagation; this UI never claims to approve or run it.
+  const holdReceiver = await fetch(base + '/api/pulse/contexts/' + localReceiver, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paused: true }),
+  });
+  assert.equal(holdReceiver.status, 200, await holdReceiver.text());
+
   // Exhaust the actual native hourly admission count, not a mocked React
   // status. A second original Work result schedules the second local
   // influence through the same World/Kernel budget.
@@ -288,6 +297,43 @@ try {
     body: JSON.stringify({ content: 'Another distinct source finding for the receiving Work.' }),
   });
   assert.equal(anotherSource.status, 202, await anotherSource.text());
+  await wait(async () => {
+    const observation = (await (await fetch(base + '/api/pulse/observation')).json()).pulse;
+    return observation.queueByContext?.some(entry =>
+      entry.pageId === localReceiver && entry.queued === 1 && entry.running === 0);
+  }, 'held receiver retains native queued propagation', 20000);
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByText('此页面：1 项后台排队 · 0 项运行中。', { exact: true }).waitFor();
+  await page.locator('.pulse-activity-section').first()
+    .getByText('等待：此处的局部关注已暂停', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+
+  await page.goto(base + '/page/' + encodeURIComponent(localSource));
+  await page.locator('.composer textarea').waitFor();
+  const sourceDraft = 'Preserve this source draft while inspecting the other queued Work.';
+  await page.locator('.composer textarea').fill(sourceDraft);
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByRole('heading', { name: '其他局部工作进度', exact: true }).waitFor();
+  const otherWorkBacklog = page.getByRole('region', { name: '其他局部工作进度', exact: true });
+  await otherWorkBacklog.getByText('等待：此处的局部关注已暂停', { exact: true }).waitFor();
+  await otherWorkBacklog.getByRole('button', { name: 'Actual receiving Work', exact: true }).click();
+  await wait(async () => new URL(page.url()).pathname === '/page/' + localReceiver,
+    'native queued receiver opens from source Work Activity');
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
+  await page.locator('.return-to-thread').click();
+  await wait(async () => new URL(page.url()).pathname === '/page/' + localSource,
+    'back to Work that inspected the waiting receiver');
+  assert.equal(await page.locator('.composer textarea').inputValue(), sourceDraft);
+  checks.push('durable per-Work backlog opens held receiver and returns with both drafts');
+
+  const releaseReceiver = await fetch(base + '/api/pulse/contexts/' + localReceiver, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paused: false }),
+  });
+  assert.equal(releaseReceiver.status, 200, await releaseReceiver.text());
+  await page.goto(base + '/page/' + encodeURIComponent(localReceiver));
+  await page.locator('.composer textarea').waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
   await wait(async () => {
     const budget = (await (await fetch(base + '/api/pulse')).json()).budget;
     return budget.used === budget.limit && budget.limit === 2;
@@ -300,6 +346,29 @@ try {
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
   checks.push('real native exhausted admission renders Chinese reason without losing foreground draft');
+
+  // One World can keep its identity while its service process is replaced.
+  // Do not expose stale source links or old operator controls after that.
+  // This intercept changes only the observation envelope, never World state.
+  await page.route('**/api/pulse/observation', async route => {
+    const current = await route.fetch();
+    const observation = await current.json();
+    await route.fulfill({
+      response: current, contentType: 'application/json',
+      body: JSON.stringify({ ...observation, serviceInstanceId: 'synthetic-restarted-service' }),
+    });
+  });
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByRole('alert').getByText(
+    '活动面板打开后，工作区或服务实例已改变。请重新加载并检查当前活动，再执行修改。',
+    { exact: true },
+  ).waitFor();
+  await page.getByRole('button', { name: '重新加载工作区', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '暂停后台' }).count(), 0);
+  await page.unroute('**/api/pulse/observation');
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
+  checks.push('restarted-service observation blocks stale controls and preserves Work draft');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks,

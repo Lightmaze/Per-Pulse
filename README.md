@@ -237,7 +237,7 @@ See [the API contract](docs/api.md), [pulse core](docs/pulse-core.md) and [sourc
 
 ## Current scope
 
-This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The main conversation shows the latest 500 messages. **Earlier messages** reads older native history in groups of 100; opening one retains its original source and the current draft. The first UI does not expose the inherited runtime's full operational or approval console.
+This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The main conversation shows the latest 500 messages. **Earlier messages** reads older native history in groups of 100; **Find a message** searches the whole current conversation. Opening a result retains its original source and the current draft. The first UI does not expose the inherited runtime's full operational or approval console.
 
 Workspace mutation remains disabled by default and requires an explicit `--allow-workspace-actions` opt-in plus approval of each actionable proposal. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality.
 

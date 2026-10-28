@@ -711,6 +711,11 @@ def test_committed_native_succession_retains_source_access_in_its_context(tmp_pa
         assert original_id in {message["id"] for message in older["messages"]}
         assert pending in {message["id"] for message in older["messages"]}
         assert all(message["id"] != correction for message in older["messages"])
+        found = pages.search_messages(page_id, "practice product")
+        assert first_input in {message["id"] for message in found["messages"]}
+        other_page = ("home" if page_kind == "work" else
+                      pages.create_page("Other search context", "An unrelated fixture.")["page"]["id"])
+        assert pages.search_messages(other_page, "practice product")["messages"] == []
         stage.update(name="learn", round=0)
         learned = r._mgr.pulse(
             successor, pulse_event=r.causal_ledger.get_event(correction), execution_context=context,
