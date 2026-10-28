@@ -10,11 +10,13 @@ recorded version and never exposes a later writer's content as the old result.
 
 Only the existing ``mutate_file`` receipt contract is supported. Command output,
 assistant claims, arbitrary workspace paths, and unconfirmed effects are not
-artifacts. Text preview is bounded and redacted; this is not a download API.
+artifacts. Preview is bounded and redacted. Download rechecks the same native
+receipt and only returns complete bytes whose digest still matches it.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
 import re
 from typing import Any
 
@@ -144,6 +146,26 @@ class PageArtifacts:
         pre-images and have separate recovery authority. A missing, replaced,
         binary, protected, or oversized file returns no content.
         """
+        return self._read(page_id, artifact_id, max_bytes=MAX_PREVIEW_BYTES)
+
+    def download(self, page_id: str, artifact_id: str) -> dict:
+        """Capture verified bytes, never hand a mutable filesystem path to HTTP."""
+        result = self._read(page_id, artifact_id, max_bytes=MAX_FILE_BYTES)
+        if result["state"] == "changed":
+            raise ArtifactError("artifact_version_changed", "This file has changed since this result was produced. Open its current result before saving it.", 409)
+        if result["state"] != "current" or not isinstance(result["content"], str):
+            raise ArtifactError("artifact_download_unavailable", "This result is no longer available as a complete text file. Open its preview for details.", 409)
+        data = result["content"].encode("utf-8")
+        # Redaction, bounds, or any other transformation must not become a
+        # different download wearing the original file's name and version.
+        # An original file containing a literal redaction marker is still an
+        # exact file when its bytes match the native receipt.
+        if result["truncated"] or hashlib.sha256(data).hexdigest() != result["artifact"]["sha256"]:
+            raise ArtifactError("artifact_download_redacted", "Only a protected preview is available for this file. Its complete contents cannot be saved here.", 409)
+        return {"name": result["artifact"]["path"].rsplit("/", 1)[-1],
+                "sha256": result["artifact"]["sha256"], "data": data}
+
+    def _read(self, page_id: str, artifact_id: str, *, max_bytes: int) -> dict:
         scope = self.execution._scope(page_id)
         kernel = self.execution._kernel
         missing = ArtifactError("artifact_not_found", "This file result does not belong to this page.", 404)
@@ -193,7 +215,7 @@ class PageArtifacts:
         # Hash the original bytes above, then redact and bound the visible
         # text. A redacted preview must never be mistaken for raw file bytes.
         clean, redacted = redact_text(current["content"])
-        content, bound_redacted, truncated = bound_text(clean, MAX_PREVIEW_BYTES)
+        content, bound_redacted, truncated = bound_text(clean, max_bytes)
         stored_redacted, _ = stored_text_flags(content)
         response.update({
             "state": "current", "content": content,

@@ -106,6 +106,19 @@ controls and a selected sourced return Home. It runs against the real local
 World and filesystem with no provider and no invented assistant response.
 `PER_PULSE_PYTHON` can also select an isolated wheel-installed interpreter.
 
+## Read and save a confirmed document
+
+Run `node tests/browser/documents_flow.mjs` with `PLAYWRIGHT_MODULE` and
+`PER_PULSE_PYTHON` as above. Optional `PER_PULSE_DOCUMENT_SCREENSHOTS` records
+desktop and phone views. It approves a real native Markdown write from an
+explicit synthetic HTTP model, reads headings/tables/code, toggles exact source,
+confirms inert HTML and no remote image requests, and saves actual browser
+downloads with the original Unicode name and SHA-256. It repeats after restart
+without a model call, checks keyboard scrolling and Chinese controls, then lets
+another Work replace the file while the first preview stays open: saving the old
+result must fail without exposing the later Work's content. This is a mechanism
+and rendered-use check, not an assessment of a real model's writing quality.
+
 ## One rendered correction-to-artifact journey
 
 ```sh

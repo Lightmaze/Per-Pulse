@@ -13,16 +13,47 @@ from per_pulse.app import create_app
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 
 os.environ['PER_PULSE_QA_KEY'] = 'synthetic-test-credential'
-temporary = tempfile.TemporaryDirectory(prefix='per-pulse-browser-')
-state = Path(temporary.name)
+configured_state = os.environ.get('PER_PULSE_QA_DATA_DIR')
+temporary = None if configured_state else tempfile.TemporaryDirectory(prefix='per-pulse-browser-')
+state = Path(configured_state or temporary.name)
 release = threading.Event()
 entered = threading.Event()
 requests = []
 before = 'Draft heading.\npassword=abc\nOrdinary report content.\n'
 large_before = 'DRAFT ' + 'An explicitly synthetic long report. ' * 1_400 + '\n'
-(state / 'workspace').mkdir()
-(state / 'workspace' / 'redacted.txt').write_text(before)
-(state / 'workspace' / 'large-report.txt').write_text(large_before)
+document_name = 'field-note-\u6e90.md'
+document = '''# A field note
+
+This **confirmed file** keeps its source available for later work.
+
+## Observe, then decide
+
+1. Open the original material.
+2. Keep the observation separate from its interpretation.
+
+> A successful file write confirms the effect, not the quality of its argument.
+
+| Source | Observation | Interpretation | Version | Context | Next step |
+| --- | --- | --- | --- | --- | --- |
+| Field notes | The page is readable | Test a second case | Original | Reading | Review |
+
+[A source](https://example.org/source)
+[An inert executable link](javascript:alert(1))
+[A relative file](../private-note.md)
+
+![A diagram described without fetching it](https://remote.invalid/unexpected-source-image.png)
+
+<script>window.rawDocumentRuns = true</script>
+
+```html
+<strong>This code stays literal.</strong>
+```
+'''
+document_revision = '# A later version\n\nPRIVATE_LATER_WORK_RESULT belongs to its own original receipt.\n'
+(state / 'workspace').mkdir(exist_ok=True)
+for filename, content in [('redacted.txt', before), ('large-report.txt', large_before)]:
+    if not (state / 'workspace' / filename).exists():
+        (state / 'workspace' / filename).write_text(content)
 
 def handler(request):
     body = json.loads(request.content)
@@ -40,6 +71,10 @@ def handler(request):
             arguments = {'path': 'redacted.txt', 'expected_digest': hashlib.sha256(before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'Draft heading.', 'new': 'Final heading.'}]}}
         if 'WRITE_LARGE' in text:
             arguments = {'path': 'large-report.txt', 'expected_digest': hashlib.sha256(large_before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'DRAFT', 'new': 'FINAL'}]}}
+        if 'WRITE_DOCUMENT' in text:
+            arguments = {'path': document_name, 'expected_digest': None, 'content': document}
+        if 'WRITE_DOCUMENT_REVISION' in text:
+            arguments = {'path': document_name, 'expected_digest': hashlib.sha256(document.encode()).hexdigest(), 'content': document_revision}
         delta = {'tool_calls': [{'index': 0, 'id': 'fixture-file', 'type': 'function', 'function': {
             'name': 'mutate_file', 'arguments': json.dumps(arguments)
         }}]}
@@ -58,7 +93,9 @@ app = create_app(state, model_factory=factory, allow_workspace_actions=True)
 
 @app.get('/__fixture/status')
 def status():
-    return {'requests': len(requests), 'entered': entered.is_set(), 'files': sorted(p.name for p in (state / 'workspace').glob('*.txt'))}
+    return {'requests': len(requests), 'entered': entered.is_set(), 'files': sorted(p.name for p in (state / 'workspace').glob('*.txt')),
+            'document': {'path': document_name, 'content': document, 'sha256': hashlib.sha256(document.encode()).hexdigest(),
+                         'revision': document_revision}}
 
 @app.get('/__fixture/release')
 def unblock():

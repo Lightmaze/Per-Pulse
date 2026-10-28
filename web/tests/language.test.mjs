@@ -6,6 +6,7 @@ import { workspaceEnglish, workspaceChinese } from '../src/locales/workspace.ts'
 import { continuityEnglish, continuityChinese } from '../src/locales/continuity.ts';
 import { learningEnglish, learningChinese } from '../src/locales/learning.ts';
 import { materialsEnglish, materialsChinese } from '../src/locales/materials.ts';
+import { documentsEnglish, documentsChinese } from '../src/locales/documents.ts';
 
 test('an explicit interface choice overrides browser language order', () => {
   assert.equal(resolveLocale('en', ['zh-CN', 'en-US']), 'en');
@@ -55,10 +56,10 @@ test('restricted browser storage does not prevent an in-memory switch', () => {
 });
 
 test('both catalogues have identical keys and interpolation placeholders', () => {
-  const en = { ...commonEnglish, ...workspaceEnglish, ...continuityEnglish, ...learningEnglish, ...materialsEnglish };
-  const zh = { ...commonChinese, ...workspaceChinese, ...continuityChinese, ...learningChinese, ...materialsChinese };
+  const en = { ...commonEnglish, ...workspaceEnglish, ...continuityEnglish, ...learningEnglish, ...materialsEnglish, ...documentsEnglish };
+  const zh = { ...commonChinese, ...workspaceChinese, ...continuityChinese, ...learningChinese, ...materialsChinese, ...documentsChinese };
   const placeholders = text => [...text.matchAll(/\{(\w+)\}/g)].map(match => match[1]).sort();
-  assert.equal(Object.keys(en).length, Object.keys(commonEnglish).length + Object.keys(workspaceEnglish).length + Object.keys(continuityEnglish).length + Object.keys(learningEnglish).length + Object.keys(materialsEnglish).length, 'catalogue keys must not overlap');
+  assert.equal(Object.keys(en).length, Object.keys(commonEnglish).length + Object.keys(workspaceEnglish).length + Object.keys(continuityEnglish).length + Object.keys(learningEnglish).length + Object.keys(materialsEnglish).length + Object.keys(documentsEnglish).length, 'catalogue keys must not overlap');
   assert.deepEqual(Object.keys(en).sort(), Object.keys(zh).sort());
   for (const key of Object.keys(en)) {
     assert.ok(en[key].trim() && zh[key].trim(), `Missing copy: ${key}`);

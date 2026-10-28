@@ -8,11 +8,11 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.exceptions import HTTPException
@@ -384,6 +384,15 @@ def create_app(
     @app.get("/api/pages/{page_id}/artifacts/{artifact_id}")
     def artifact(page_id: str, artifact_id: str, request: Request):
         return pages(request).artifacts.read(page_id, artifact_id)
+
+    @app.get("/api/pages/{page_id}/artifacts/{artifact_id}/download", response_class=Response,
+             responses={200: {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})
+    def download_artifact(page_id: str, artifact_id: str, request: Request):
+        result = pages(request).artifacts.download(page_id, artifact_id)
+        return Response(result["data"], media_type="application/octet-stream", headers={
+            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(result["name"], safe=""),
+            "X-Per-Pulse-Content-SHA256": result["sha256"],
+        })
 
     @app.post("/api/pages/{page_id}/execution/stop")
     def stop(page_id: str, body: StopTurn, request: Request):

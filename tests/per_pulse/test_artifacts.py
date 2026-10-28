@@ -145,6 +145,12 @@ def test_successful_file_result_has_native_source_and_survives_restart(tmp_path,
         opened = client.get(f"/api/pages/{page_id}/artifacts/{action_id}")
         assert opened.status_code == 200 and opened.json() == preview
         assert opened.headers["cache-control"] == "no-store"
+        saved = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert saved.status_code == 200 and saved.content == content.encode()
+        assert saved.headers["content-type"] == "application/octet-stream"
+        assert saved.headers["content-disposition"] == "attachment; filename*=UTF-8''report.txt"
+        assert saved.headers["x-per-pulse-content-sha256"] == _sha(content)
+        assert saved.headers["cache-control"] == "no-store"
         assert artifacts.snapshot("home")["artifacts"] == []
         second_page = _page(client, "No file request.")
         for wrong_page in ("home", second_page):
@@ -152,6 +158,7 @@ def test_successful_file_result_has_native_source_and_survives_restart(tmp_path,
                 artifacts.read(wrong_page, action_id)
             assert mismatch.value.status == 404
             assert client.get(f"/api/pages/{wrong_page}/artifacts/{action_id}").status_code == 404
+            assert client.get(f"/api/pages/{wrong_page}/artifacts/{action_id}/download").status_code == 404
 
     round_count = len(requests)
     with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
@@ -336,6 +343,11 @@ def test_other_page_overwrite_marks_the_original_version_changed(tmp_path, monke
         assert stale["artifact"]["sha256"] == _sha(first)
         assert stale["observedSha256"] == _sha(second)
         assert stale["content"] is None
+        saved = client.get(f"/api/pages/{first_page}/artifacts/{first_id}/download")
+        assert saved.status_code == 409
+        assert saved.json()["error"]["code"] == "artifact_version_changed"
+        assert second not in saved.text
+        assert artifacts.download(second_page, second_id)["data"] == second.encode()
         assert second not in json.dumps(stale)
         response = client.get(f"/api/pages/{first_page}/artifacts/{first_id}")
         assert response.status_code == 200 and response.json()["state"] == "changed"
@@ -431,6 +443,64 @@ def test_preview_redacts_and_bounds_text_after_verifying_original_bytes(tmp_path
         assert "password=abc" not in preview["content"]
         assert len(preview["content"].encode("utf-8")) <= 256
         assert preview["bytes"] == len(after.encode("utf-8"))
+        saved = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert saved.status_code == 409
+        assert saved.json()["error"]["code"] == "artifact_download_redacted"
+        assert "password=abc" not in saved.text
+
+
+def test_download_preserves_complete_file_when_the_preview_is_shortened(tmp_path, monkeypatch):
+    import per_pulse.artifacts as module
+
+    # Exercise a shortened preview without relaxing the native write limit.
+    monkeypatch.setattr(module, "MAX_PREVIEW_BYTES", 256)
+    before = "# Draft field note\n" + "Evidence remains available in context.\n" * 100
+    after = before.replace("# Draft field note", "# Final field note", 1)
+    requests = []
+    factory = _factory(monkeypatch, {"PATCH_DOWNLOAD": {
+        "path": "complete-note.md", "expected_digest": _sha(before),
+        "patch": {"edits": [{"old": "# Draft field note", "new": "# Final field note"}]},
+    }}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        (tmp_path / "workspace" / "complete-note.md").write_text(before)
+        service = client.app.state.pages
+        page_id = _page(client, "PATCH_DOWNLOAD")
+        action_id = _approve(service.execution, page_id)
+        preview = service.artifacts.read(page_id, action_id)
+        assert preview["truncated"] and len(preview["content"].encode()) <= 256
+        response = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert response.status_code == 200
+        assert response.content == after.encode()
+        assert hashlib.sha256(response.content).hexdigest() == response.headers["x-per-pulse-content-sha256"]
+
+
+def test_download_uses_captured_verified_bytes_even_if_the_path_changes_after_read(tmp_path, monkeypatch):
+    from pulse_system.product.files import WorkspaceFiles
+
+    content = "The original confirmed version.\n"
+    name = "notes-\u6e90.md"
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {
+        "path": name, "expected_digest": None, "content": content,
+    }}, [])
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        page_id = _page(client)
+        action_id = _approve(service.execution, page_id)
+        original_read = WorkspaceFiles.read
+
+        def replaced_after_read(files, path):
+            captured = original_read(files, path)
+            (tmp_path / "workspace" / path).write_text("A later writer's private replacement.")
+            return captured
+
+        monkeypatch.setattr(WorkspaceFiles, "read", replaced_after_read)
+        response = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert response.status_code == 200
+        assert response.content == content.encode()
+        assert response.headers["content-disposition"] == "attachment; filename*=UTF-8''notes-%E6%BA%90.md"
+        assert "private replacement" not in response.text
+        monkeypatch.setattr(WorkspaceFiles, "read", original_read)
+        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").status_code == 409
 
 
 def test_artifact_identity_survives_event_retention_and_list_bounds(tmp_path, monkeypatch):

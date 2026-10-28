@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, type Translate } from '../i18n';
 import type { Artifact, ArtifactRead, PageView } from '../types';
+import { TextDocument } from './TextDocument';
 
 function unavailableReason(reason: string | null, t: Translate): string {
   if (reason === 'file_too_large') return t('artifacts.tooLarge');
@@ -12,16 +13,20 @@ function unavailableReason(reason: string | null, t: Translate): string {
 }
 
 export function PageArtifacts({ view }: { view: PageView }) {
-  const { t } = useLanguage();
+  const { t, errorText } = useLanguage();
   const [opened, setOpened] = useState<string | null>(null);
   const [result, setResult] = useState<ArtifactRead | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const download = useRef<AbortController | null>(null);
   const requestId = useRef(0);
+  useEffect(() => () => { ++requestId.current; download.current?.abort(); }, []);
   if (!view.artifacts?.length && !view.artifactsTruncated) return null;
 
   const read = async (artifact: Artifact) => {
     const current = ++requestId.current;
+    download.current?.abort(); download.current = null; setSaving(false);
     if (opened === artifact.id) { setOpened(null); setResult(null); setLoading(false); return; }
     setOpened(artifact.id); setResult(null); setLoading(true); setError('');
     try {
@@ -30,6 +35,28 @@ export function PageArtifacts({ view }: { view: PageView }) {
     } catch (problem) {
       if (current === requestId.current) setError(problem instanceof Error ? problem.message : t('artifacts.error'));
     } finally { if (current === requestId.current) setLoading(false); }
+  };
+
+  const save = async (artifact: Artifact) => {
+    if (download.current) return;
+    const current = requestId.current;
+    const controller = new AbortController();
+    download.current = controller;
+    setSaving(true); setError('');
+    try {
+      const file = await api.downloadArtifact(view.page.id, artifact.id, controller.signal);
+      if (current !== requestId.current || controller.signal.aborted) return;
+      if (file.sha256 !== artifact.sha256) throw new Error(t('document.wrongVersion'));
+      const url = URL.createObjectURL(file.blob);
+      const link = document.createElement('a');
+      link.href = url; link.download = artifact.path.split('/').at(-1) || 'result.txt';
+      document.body.append(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (problem) {
+      if (current === requestId.current && !controller.signal.aborted) setError(errorText(problem));
+    } finally {
+      if (download.current === controller) { download.current = null; setSaving(false); }
+    }
   };
 
   return <section className="page-artifacts" aria-label={t('artifacts.title')}>
@@ -43,10 +70,11 @@ export function PageArtifacts({ view }: { view: PageView }) {
         {loading ? <p role="status">{t('artifacts.reading')}</p> : null}
         {error ? <p role="alert">{error}</p> : null}
         {result?.state === 'current' ? <>
-          <pre>{result.content}</pre>
+          <TextDocument key={artifact.id} path={artifact.path} content={result.content ?? ''} />
           {result.truncated ? <p>{t('artifacts.limited')}</p> : null}
           {result.redacted ? <p>{t('artifacts.redacted')}</p> : null}
           <p className="artifact-provenance">{t('artifacts.provenance', { time: new Date(artifact.createdAt).toLocaleString() })}</p>
+          <button className="secondary-button" disabled={saving} onClick={() => save(artifact)}>{t(saving ? 'document.saving' : 'document.save')}</button>
         </> : result?.state === 'changed' ? <p role="status">{t('artifacts.changed')}</p> : result ? <p role="status">{unavailableReason(result.reason, t)}</p> : null}
       </div> : null}
     </li>)}</ul>

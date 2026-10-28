@@ -110,6 +110,17 @@ jobs:
           path: ${{ runner.temp }}/per-pulse-material-screenshots
           if-no-files-found: ignore
           retention-days: 7
+      - name: Verify readable documents and exact native file downloads
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_DOCUMENT_SCREENSHOTS="$RUNNER_TEMP/per-pulse-document-screenshots" node tests/browser/documents_flow.mjs
+      - name: Keep document browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: document-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-document-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build the distributable package
         run: python -m build --no-isolation
       - name: Verify first run from an installed wheel outside the checkout

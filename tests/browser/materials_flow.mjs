@@ -93,12 +93,15 @@ try {
   assert.equal((await files()).length, 0, 'Selecting a file must not upload it');
   await page.getByRole('button', { name: 'Upload file', exact: true }).click();
   await page.getByRole('button', { name: 'Add to draft', exact: true }).waitFor();
-  await wait(async () => page.locator('.material-preview h3').evaluate(el => document.activeElement === el), 'preview receives focus');
+  await wait(async () => page.locator('.material-preview > h3').evaluate(el => document.activeElement === el), 'preview receives focus');
+  await page.locator('.markdown-document').getByRole('heading', { name: 'Field notes', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Source', exact: true }).click();
   assert.equal(await page.locator('.material-preview pre').innerText(), source);
   assert.equal(await page.evaluate(() => window.materialExecuted), undefined, 'Material text is never executed as HTML');
   const [storedName] = await files();
   const path = 'uploads/' + storedName;
   assert.equal(await readFile(join(directory, 'workspace', path), 'utf8'), source);
+  await page.getByRole('button', { name: 'Read', exact: true }).click();
   await shot('materials-desktop');
   await page.getByRole('button', { name: 'Add to draft', exact: true }).click();
   assert.ok((await page.locator('.composer textarea').inputValue()).startsWith(before + '\n\n'));
@@ -184,11 +187,19 @@ try {
   await page.locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();
   await page.locator('.material-list button').filter({ hasText: storedName }).click();
   await page.getByRole('button', { name: 'Add to draft', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Source', exact: true }).click();
   assert.equal(await page.locator('.material-preview pre').innerText(), source);
-  await wait(async () => page.locator('.material-preview h3').evaluate(el => document.activeElement === el), 'phone preview receives focus');
+  await page.getByRole('button', { name: 'Read', exact: true }).click();
+  await page.locator('.markdown-document').getByRole('heading', { name: 'Field notes', exact: true }).waitFor();
   const bounds = await page.getByRole('dialog').boundingBox();
   assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 375);
   assert.equal(await page.getByRole('dialog').evaluate(el => el.scrollWidth <= el.clientWidth), true, 'Long file names must wrap on a phone');
+  const visiblePreview = await page.locator('.markdown-document').boundingBox();
+  const closeButton = await page.getByRole('button', { name: 'Close dialog', exact: true }).boundingBox();
+  assert.ok(visiblePreview.y + Math.min(visiblePreview.height, 160) < bounds.y + bounds.height,
+    'Opening a material must reveal its content, not just focus a heading near the bottom edge');
+  assert.ok(closeButton.y >= bounds.y && closeButton.y + closeButton.height <= bounds.y + bounds.height,
+    'The dialog close control remains visible while the material body scrolls');
   await shot('materials-mobile');
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('button', { name: 'Materials', exact: true }).evaluate(el => document.activeElement === el), true);

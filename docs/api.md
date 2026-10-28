@@ -342,6 +342,10 @@ digests when a configured model actually opens the file.
 The browser never executes file HTML. It limits previews to the first 64,000
 characters and labels shortened previews. An upload whose response is lost
 can have completed; inspect the existing uploads before choosing to repeat it.
+Markdown uses a lazy reading view with a source-text toggle. Raw HTML stays
+escaped, images become descriptions without remote requests, and only explicit
+absolute HTTP(S) links become external navigation. Relative and executable URLs
+remain text. The same reading component presents confirmed Markdown artifacts.
 
 ## Native execution and file results (opt-in)
 
@@ -361,6 +365,20 @@ an effect. The UI exposes them in **Actions with unconfirmed outcomes** only
 on their originating page, without a retry or approval button.
 
 `GET /api/pages/{id}/artifacts` projects bounded successful native `mutate_file` receipts; `GET /api/pages/{id}/artifacts/{artifactId}` verifies original action/page, regular text file and content SHA-256 before presenting a bounded redacted preview. A changed or missing file has no substitute preview. Page view includes `execution`, `artifacts`, `artifactsTruncated`; provider includes `workspaceActions`. See [Harness foundation](harness-foundation.md) for exact contracts.
+
+`GET /api/pages/{id}/artifacts/{artifactId}/download` repeats that same exact
+action/page and file-version verification, then returns complete captured bytes
+as `application/octet-stream` with attachment `Content-Disposition` and
+`X-Per-Pulse-Content-SHA256`. It never gives the HTTP server a mutable file path
+to reopen after checking. The existing 1 MiB read ceiling and native mutation
+durable-content limit remain unchanged. Download does not create a model turn.
+
+An overwritten file returns `409 artifact_version_changed`; an unavailable,
+binary, oversized or protected file returns `409 artifact_download_unavailable`.
+If redaction or truncation would change the downloaded bytes, the route returns
+`409 artifact_download_redacted`. A literal redaction marker already present in
+the original file is acceptable when the complete bytes still match its recorded
+digest. Wrong-page and unconfirmed action IDs remain `404 artifact_not_found`.
 
 File and uncertainty observation follows only the native committed generation
 lineage in the same World and page context. Prepared or ambiguous transitions,

@@ -46,7 +46,7 @@ These are responsibilities, not a proposal for separate microservices. “Requir
 | Tool catalog and capability boundary | Required / P0 | Native tool descriptors/providers and read-only profile; reused. | Unsupported or unauthorized tools fail explicitly. Read-only Work/team descriptions should advertise only enabled operations. |
 | Effect authority, receipts and recovery | Required / P0 | Native action/approval records; product controls connected. | Original-action allow/deny, no duplicate execution on retry, explicit uncertain effects, completed effect separated from failed continuation. |
 | Environment and resource coordination | Required / P0–P1 | Existing workspace/command adapters; shared writer lane added. | Conflicting cooperating writes serialize while reads and unrelated work proceed. Browser leases and cross-process isolation remain separate. |
-| Artifacts, delivery and acceptance | Required / P0–P1 | `PageArtifacts` projects successful native file actions. Existing selected Return Home remains. | Verify source and digest before preview. Immutable revisions, binary files, uploads/downloads and delivery/acceptance state remain. |
+| Artifacts, delivery and acceptance | Required / P0–P1 | `PageArtifacts` projects successful native file actions. Materials reuse native text uploads; confirmed text results can be read and downloaded with fresh digest verification. Existing selected Return Home remains. | Immutable revisions, binary files and explicit delivery/acceptance state remain. |
 | Usage, budget and admission | Required before unattended work / P1 | Native usage evidence and in-memory runtime budgeting exist. | Add durable reservations, settlement, per-work envelopes and explicit exhaustion. Existing counters are not restart-safe spending limits. |
 | Trigger and schedule admission | Required for unattended work / P1 | Native runtime activation; no new cron loop added. | Admit events through the same causal path with owner, deduplication, timezone, revision, environment and budget. |
 | Attention and notification delivery | Important / P1 | Page waiting indicators and visible background refresh added. Native work reports exist. | Separate actionable waits, ordinary results, unread activity and delivery acknowledgement; avoid tool-event notification spam. |
@@ -74,6 +74,12 @@ flowchart TD
 `PageExecution.snapshot` only observes existing records. It does not create a runner or wake a model. A page maps through its native center to `work:<center>`; Home uses the existing Home scope. Exact action/turn IDs are validated inside that scope. Per-action and per-turn control locks leave unrelated controls independent. A slow model continuation after approval cannot hold the Stop button hostage.
 
 `PageArtifacts` projects confirmed successful `mutate_file` receipts. A click verifies a regular UTF-8 file within the original workspace, with no-follow/identity checks, a 1 MiB file bound and 64 KiB preview bound. The recorded digest must match. A changed file produces a changed-state explanation, never the replacement content presented as the original version. Sensitive values are redacted. The list performs no file-content I/O. There is no second artifact database or implicit immutable blob store.
+
+The explicit download route reuses that authority, captures complete bytes and
+checks their digest after preview protection. Changed, unavailable or modified
+preview bytes are not downloaded as the original file. This does not raise the
+native mutation durable-content bound. Markdown rendering retains a source-text
+view and does not execute HTML or automatically load remote images.
 
 When native succession moves a Work to its next generation, confirmed file
 receipts and uncertain action evidence remain observable through that Work's

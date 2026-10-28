@@ -85,6 +85,10 @@ adding a reference does not mean the model has read the file. With a configured
 provider, the existing read tools can open it when working on your request.
 Uploads create new files and do not grant model write permissions.
 
+Markdown materials and file results have **Read** and **Source** views. Headings,
+lists, tables and code are readable while the original text remains available.
+Images appear as descriptions; links to external sources open only when chosen.
+
 ### Learn from a correction and inspect what changed
 
 With a model configured, enable attributed experience learning when starting
@@ -178,7 +182,12 @@ new outcomes; do not use a short synthetic CI run as that evidence.
 
 ### Native workspace actions and sourced file results
 
-Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. The example workspace is always read-only. See [Core Harness](docs/harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
+Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. Example mode keeps model requests and model file changes disabled. See [Core Harness](docs/harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
+
+Use **Save file** on an opened result to download its complete verified text.
+Saving checks the native write record again. If another Work has changed the
+file since the preview opened, the old result cannot download the replacement.
+A file that needs content redaction is available only as a protected preview.
 
 ### Carry a stopped workspace to another directory (POSIX alpha)
 

@@ -11,7 +11,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function fetchResponse(path: string, options: RequestInit = {}): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
@@ -22,10 +22,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
     throw new ApiError('Your workspace could not be reached. Please try again.', 'network_error', 0);
   }
-  const body = await response.json().catch(() => null);
   if (!response.ok) {
+    const body = await response.json().catch(() => null);
     throw new ApiError(body?.error?.message ?? 'Something went wrong. Please try again.', body?.error?.code ?? 'request_failed', response.status);
   }
+  return response;
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetchResponse(path, options);
+  const body = await response.json().catch(() => null);
   if (body === null) throw new ApiError('The workspace returned an unreadable response.', 'invalid_response', response.status);
   return body as T;
 }
@@ -84,5 +90,12 @@ export const api = {
   stop: (id: string, turnId: string) => request<{ accepted: boolean; repeated: boolean; view: PageView }>(`${pagePath(id)}/execution/stop`, { method: 'POST', body: JSON.stringify({ turnId }) }),
   decide: (id: string, actionId: string, decision: 'allow_once' | 'deny' | 'cancel') => request<ActionReceipt>(`${pagePath(id)}/execution/actions/${encodeURIComponent(actionId)}`, { method: 'POST', body: JSON.stringify({ decision }) }),
   artifact: (id: string, artifactId: string) => request<ArtifactRead>(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}`),
+  downloadArtifact: async (id: string, artifactId: string, signal?: AbortSignal) => {
+    const response = await fetchResponse(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}/download`, { signal });
+    if (response.headers.get('Content-Type') !== 'application/octet-stream') {
+      throw new ApiError('The workspace returned an unreadable file.', 'invalid_response', response.status);
+    }
+    return { blob: await response.blob(), sha256: response.headers.get('X-Per-Pulse-Content-SHA256') };
+  },
   rename: (id: string, title: string) => request<PageView>(pagePath(id), { method: 'PATCH', body: JSON.stringify({ title }) }),
 };
