@@ -163,6 +163,125 @@ def test_successful_file_result_has_native_source_and_survives_restart(tmp_path,
         assert not runtime.kernel_service._runtimes
 
 
+def test_original_work_effect_evidence_survives_native_succession_without_replay(tmp_path, monkeypatch):
+    """A committed generation changes the holder, not the Work's file sources."""
+    import per_pulse.execution as execution_module
+    from pulse_harness.core import TurnStatus
+    from pulse_harness.core.contracts import ActionClassification, TerminalOutcome
+
+    requests = []
+    content = "The original approved report.\n"
+    plans = {"WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": content}}
+    factory = _factory(monkeypatch, plans, requests)
+    monkeypatch.setattr(execution_module, "_MAX_ACTIONS", 2)
+
+    def uncertain_fixture(store, scope, prefix, count):
+        # These are explicitly synthetic read-only outcomes, not claims of
+        # physical effects. The confirmed file below uses actual approval/write.
+        store.create_turn(scope, "Synthetic retained uncertain read evidence")
+        for index in range(count):
+            identity = f"{prefix}-{index}"
+            store.create_action(scope, action_request_id=identity, tool_name="fixture_read",
+                                arguments={"path": f"{prefix}-{index}.txt", "api_key": "SYNTHETIC_SECRET_VALUE"},
+                                requires_approval=False, classification=ActionClassification.READ_ONLY_NOT_REQUIRED)
+            store.claim_action_start(scope, identity)
+            store.mark_action_running(scope, identity)
+            store.terminal_action(scope, identity, TerminalOutcome.UNCERTAIN)
+        store.set_turn_status(scope, TurnStatus.CANCELLED)
+
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        runtime, execution, artifacts = pages.runtime, pages.execution, pages.artifacts
+        work = _page(client)
+        action = _approve(execution, work)
+        item, = artifacts.snapshot(work)["artifacts"]
+        _wait(execution, work, lambda _value: bool(
+            runtime.causal_ledger.get_turn_for_world(item["turnId"], runtime.world_id).result_event_id,
+        ))
+        source_result = runtime.causal_ledger.get_turn_for_world(item["turnId"], runtime.world_id).result_event_id
+        original_subject = runtime.continuity_engram_id
+        original_mtime = (tmp_path / "workspace" / "report.txt").stat().st_mtime_ns
+        store = runtime.kernel_service.store
+        old_scope = execution._scope(work).for_turn("synthetic-uncertain-predecessor")
+        uncertain_fixture(store, old_scope, "older-uncertain", 3)
+
+        # Summary and future explicit input use a declared reply-only fixture.
+        # Native prepare/commit performs the real generation and Work handoff.
+        plans.clear()
+        prepared = runtime._mgr.prepare_succession(
+            original_subject, parent_event_id=source_result, runtime_fence=runtime._current_runtime_fence(),
+        )
+        assert artifacts.snapshot(work)["artifacts"] == [item]
+        assert runtime.causal_ledger.committed_history_lineage(runtime.world_id, prepared.successor_id) == (prepared.successor_id,)
+        rotated = runtime._mgr.commit_succession(prepared, runtime_fence=runtime._current_runtime_fence())
+        assert runtime.world.get_task_front(work).focal_engram_id == rotated.new_id
+        assert runtime.causal_ledger.committed_history_lineage(runtime.world_id, rotated.new_id) == (rotated.new_id, original_subject)
+        before_sessions = store.sessions_for_world(runtime.world_id)
+        before_runners = set(runtime.kernel_service._runtimes)
+        before_requests = len(requests)
+
+        assert artifacts.snapshot(work)["artifacts"] == [item]
+        assert artifacts.read(work, action)["content"] == content
+        inherited = client.get(f"/api/pages/{work}").json()
+        assert inherited["artifacts"] == [item]
+        state = inherited["execution"]
+        assert state["sessionId"] is None  # Reading must not open the new Work session.
+        assert state["historicalUncertainty"] and state["uncertainActionsTruncated"]
+        assert [record["actionId"] for record in state["uncertainActions"]] == ["older-uncertain-2", "older-uncertain-1"]
+        assert not state["canCancel"] and not state["pendingActions"] and not state["recoveryRequired"]
+        assert "SYNTHETIC_SECRET_VALUE" not in json.dumps(state)
+        assert store.sessions_for_world(runtime.world_id) == before_sessions
+        assert set(runtime.kernel_service._runtimes) == before_runners
+        assert len(requests) == before_requests
+        for operation in (
+            lambda: execution.cancel(work, old_scope.turn_id),
+            lambda: execution.resolve_approval(work, action, "allow_once"),
+        ):
+            with pytest.raises(ExecutionError):
+                operation()
+        assert (tmp_path / "workspace" / "report.txt").stat().st_mtime_ns == original_mtime
+
+        sibling = _page(client, "A different Work after succession.")
+        for other in ("home", sibling):
+            assert artifacts.snapshot(other)["artifacts"] == []
+            assert execution.snapshot(other)["uncertainActions"] == []
+            assert client.get(f"/api/pages/{other}/artifacts/{action}").status_code == 404
+        sent = client.post(f"/api/pages/{work}/messages", json={"content": "Continue the same Work with a new explicit instruction."})
+        assert sent.status_code == 202
+        _wait(execution, work, lambda value: value["sessionId"] is not None and value["status"] == "idle")
+        uncertain_fixture(store, execution._scope(work).for_turn("synthetic-uncertain-successor"), "newer-uncertain", 1)
+        latest = execution.snapshot(work)
+        assert [record["actionId"] for record in latest["uncertainActions"]] == ["newer-uncertain-0", "older-uncertain-2"]
+        assert latest["uncertainActionsTruncated"] is True  # One bound across generations.
+        assert artifacts.snapshot(work)["artifacts"] == [item]
+        assert (tmp_path / "workspace" / "report.txt").stat().st_mtime_ns == original_mtime
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        assert pages.runtime.continuity_engram_id == rotated.new_id
+        assert pages.artifacts.snapshot(work)["artifacts"] == [item]
+        assert pages.artifacts.read(work, action)["content"] == content
+        assert [record["actionId"] for record in pages.execution.snapshot(work)["uncertainActions"]] == ["newer-uncertain-0", "older-uncertain-2"]
+        assert not pages.runtime.kernel_service._runtimes
+        assert (tmp_path / "workspace" / "report.txt").stat().st_mtime_ns == original_mtime
+
+
+def test_unverifiable_history_fails_closed_before_reading_effects(tmp_path, monkeypatch):
+    from pulse_system.core.causality import CausalTransitionError
+
+    with _client(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+
+        def invalid_lineage(*_args):
+            raise CausalTransitionError("synthetic ambiguous ancestry")
+
+        monkeypatch.setattr(pages.runtime.causal_ledger, "committed_history_lineage", invalid_lineage)
+        for path in ("/api/pages/home/execution", "/api/pages/home/artifacts"):
+            response = client.get(path)
+            assert response.status_code == 503
+            assert response.json()["error"]["code"] == "execution_history_unavailable"
+
+
 @pytest.mark.parametrize("decision", ["deny", "cancel"])
 def test_rejected_file_actions_and_unattributed_files_are_not_artifacts(tmp_path, monkeypatch, decision):
     requests = []

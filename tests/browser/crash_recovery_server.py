@@ -19,6 +19,7 @@ from per_pulse.app import create_app
 from per_pulse.service import PulseSettings
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 from pulse_harness.adapters.workspace import StructuredWorkspaceToolProvider
+from pulse_system.core.engram.manager import _SUCCESSION_PROMPT
 
 
 def main():
@@ -31,6 +32,7 @@ def main():
     args.evidence_dir.mkdir(parents=True, exist_ok=True)
     journal = args.evidence_dir / "events.jsonl"
     journal_lock = threading.Lock()
+    summary_allowed = threading.Event()
     os.environ["PER_PULSE_CRASH_FIXTURE_KEY"] = "synthetic-local-only"
 
     def record(event):
@@ -41,8 +43,14 @@ def main():
 
     def respond(request):
         payload = json.loads(request.content)
-        record({"kind": "request", "mode": args.mode})
-        if args.mode == "effect":
+        last_user = next((m for m in reversed(payload["messages"])
+                          if m.get("role") == "user"), {})
+        is_summary = summary_allowed.is_set() and _SUCCESSION_PROMPT in json.dumps(last_user, ensure_ascii=False)
+        record({"kind": "summary_request" if is_summary else "request", "mode": args.mode})
+        if is_summary:
+            delta = {"content": "Retain the original Work and its unconfirmed file effect. [Synthetic summary fixture]"}
+            finish = "stop"
+        elif args.mode == "effect":
             delta = {"tool_calls": [{"index": 0, "id": "fixture-crash-write", "type": "function",
                 "function": {"name": "mutate_file", "arguments": json.dumps({
                     "path": "interrupted.txt", "expected_digest": None,
@@ -52,8 +60,6 @@ def main():
         else:
             # Deliberately respond only to a NEW human instruction. The test
             # independently asserts that restarting never calls this fixture.
-            last_user = next((m for m in reversed(payload["messages"])
-                              if m.get("role") == "user"), {})
             assert "CONTINUE_AFTER_REVIEW" in json.dumps(last_user), "Old work was replayed"
             delta = {"content": "Continued the same Work after review. [Synthetic crash fixture]"}
             finish = "stop"
@@ -66,7 +72,7 @@ def main():
         return httpx.Response(200, headers={"content-type": "text/event-stream"},
                               content=wire + "data: [DONE]\n\n")
 
-    def factory(_scope):
+    def factory(scope):
         return ChatHTTPModelAdapter(
             ChatHTTPConfig("https://fixture.invalid/chat/completions", "crash-fixture",
                            credential_env="PER_PULSE_CRASH_FIXTURE_KEY"),
@@ -90,6 +96,30 @@ def main():
         args.data_dir, model_factory=factory, allow_workspace_actions=True,
         pulse=PulseSettings(enabled=True, spontaneous_rate=0, max_background_pulses_per_hour=0),
     )
+
+    @app.post("/api/__crash/succession/{page_id}")
+    def commit_native_succession(page_id: str):
+        # A test-only trigger for the existing native summary/commit path.
+        # It is never mounted by the product application. Only the explicitly
+        # requested native summary may bypass the new-human-input fixture check.
+        assert args.mode == "reply"
+        pages = app.state.pages
+        runtime = pages.runtime
+        source = next(message["id"] for message in reversed(pages.view(page_id)["messages"])
+                      if message["role"] == "assistant" and message["status"] == "settled")
+        previous = runtime.continuity_engram_id
+        summary_allowed.set()
+        try:
+            prepared = runtime._mgr.prepare_succession(
+                previous, parent_event_id=source, runtime_fence=runtime._current_runtime_fence(),
+            )
+            successor = runtime._mgr.commit_succession(prepared, runtime_fence=runtime._current_runtime_fence())
+        finally:
+            summary_allowed.clear()
+        return {"previous": previous, "successor": successor.new_id, "pageId": page_id,
+                "lineage": runtime.causal_ledger.committed_history_lineage(runtime.world_id, successor.new_id)}
+
+    app.router.routes.insert(0, app.router.routes.pop())
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="error")
 
 

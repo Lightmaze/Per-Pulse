@@ -75,6 +75,14 @@ flowchart TD
 
 `PageArtifacts` projects confirmed successful `mutate_file` receipts. A click verifies a regular UTF-8 file within the original workspace, with no-follow/identity checks, a 1 MiB file bound and 64 KiB preview bound. The recorded digest must match. A changed file produces a changed-state explanation, never the replacement content presented as the original version. Sensitive values are redacted. The list performs no file-content I/O. There is no second artifact database or implicit immutable blob store.
 
+When native succession moves a Work to its next generation, confirmed file
+receipts and uncertain action evidence remain observable through that Work's
+verified committed lineage. This reader preserves the same World and context,
+excludes delegated histories, and applies one list bound across generations.
+It works before a successor Kernel session exists and after restart without
+creating a session or making a model call. Old action IDs do not become new
+approvals or cancellation targets. Unverifiable ancestry fails closed.
+
 The shared resource registry coordinates a workspace's participating file writes, restores and commands across native contexts in this process. Waiting is cancellation-aware and deadline-bounded. Reads do not wait for the writer lane. Command cleanup belongs to the effect lifetime; an unresolved cleanup must remain visible and must not authorize a second overlapping writer. This is not an operating-system filesystem lock or protection against arbitrary external writers.
 
 ## Control semantics that must stay distinct

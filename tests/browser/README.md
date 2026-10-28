@@ -86,8 +86,10 @@ It confirms physical exit and waits for the observed native lease expiry
 (normally up to 30 seconds), without changing or removing the lease. The
 successor opens the same World and Work. The browser inspects the original
 unconfirmed action, stops the old turn, preserves the draft across language
-and Home navigation, and submits a new instruction in that same Work. The
-original file is not rewritten; no successful artifact is invented. Desktop
+and Home navigation, and submits a new instruction in that same Work. It then
+commits a native generation succession and verifies that the original Work
+still exposes the action and keeps its new draft. The original file is not
+rewritten; no successful artifact is invented. Desktop
 and mobile checks retain screenshots when `PER_PULSE_CRASH_SCREENSHOTS` is set.
 
 The model and post-write barrier are explicitly synthetic. Actual native

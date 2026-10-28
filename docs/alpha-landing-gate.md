@@ -126,8 +126,12 @@ write. No unconfirmed effect is promoted to a successful artifact.
 
 The interface now exposes these retained native records, with redacted and
 bounded details, under **Actions with unconfirmed outcomes** in their original
-Work. Later successful work does not erase that evidence. The Chromium flow
-also checks bilingual controls, drafts, Home isolation and mobile overflow.
+Work. Later successful work or committed native generation succession does
+not erase that evidence. The Chromium flow also checks succession in the same
+Work, bilingual controls, drafts, Home isolation and mobile overflow. A native
+artifact regression verifies approved file readback across prepare/commit and
+restart, no session creation on read, one global uncertainty bound, redaction,
+and rejection of old controls and other pages' action IDs.
 This is one tested local file crash boundary, not a blanket exactly-once claim
 for commands, external services or arbitrary operating-system failures.
 

@@ -143,6 +143,27 @@ try {
   assert.equal((await stat(file)).mtimeMs, fileStat.mtimeMs);
   checks.push('Home does not expose Work action details; new input continues the original Work without a repeat effect');
 
+  const retainedDraft = 'Keep this draft while the original Work continues across a native generation.';
+  await page.locator('.composer textarea').fill(retainedDraft);
+  const rotation = await fetch(base + `/api/__crash/succession/${work}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  });
+  assert.equal(rotation.status, 200, await rotation.clone().text());
+  const generation = await rotation.json();
+  assert.deepEqual(generation.lineage, [generation.successor, generation.previous]);
+  assert.notEqual(generation.successor, generation.previous);
+  await page.reload();
+  await page.getByRole('heading', { name: 'Interrupted file', exact: true }).waitFor();
+  await outcomes.locator('summary').click();
+  assert.match(await outcomes.innerText(), /interrupted\.txt/);
+  assert.equal(await page.locator('.composer textarea').inputValue(), retainedDraft);
+  assert.equal(await outcomes.getByRole('button').count(), 0);
+  assert.equal((await (await fetch(base + `/api/pages/${work}/artifacts`)).json()).artifacts.length, 0);
+  assert.deepEqual((await journal()).map(event => event.kind), ['request', 'effect', 'request', 'summary_request']);
+  assert.equal((await stat(file)).mtimeMs, fileStat.mtimeMs);
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'crash-unconfirmed-after-succession.png') });
+  checks.push('committed native succession retains the same Work uncertainty and draft without a new approval or repeated effect');
+
   await page.setViewportSize({ width: 390, height: 844 });
   await outcomes.scrollIntoViewIfNeeded();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));

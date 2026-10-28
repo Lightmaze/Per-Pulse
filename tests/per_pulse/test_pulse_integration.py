@@ -459,13 +459,30 @@ def test_two_local_outputs_converge_once_with_both_sources_and_no_transcript_cop
             eventually(lambda local=local: view(client, local), lambda v: assistant_count(v) == 1)
         connect(client, first, target)
         connect(client, second, target)
-        # Hold the existing coordination lock while submitting both inputs.
-        # This makes their source turns one deterministic scheduling cohort;
-        # the real Dendrite, not this test, decides how their results converge.
+        # Submit both sources before the coordinator admits either one. Model
+        # workers still finish independently: under load their results can be
+        # farther apart than the real 150 ms Dendrite silence window. Defer this
+        # fixture's influence scan until both durable outcomes exist so the
+        # native controller observes one batch. Do not rewrite event times or
+        # fabricate a fused event; Dendrite must still form the receiving turn.
         runtime = client.app.state.pages.runtime
+        source_events = []
+        native_tick = runtime._context_pulse.tick
+
+        def after_both_source_outcomes(*args, **kwargs):
+            if len(source_events) != 2 or any(
+                runtime.causal_ledger.get_event(identity).status.value != "settled"
+                for identity in source_events
+            ):
+                return
+            return native_tick(*args, **kwargs)
+
         with runtime._tick_lock:
-            assert client.post(f"/api/pages/{first}/messages", json={"content": "A_NEW_INPUT"}).status_code == 202
-            assert client.post(f"/api/pages/{second}/messages", json={"content": "C_NEW_INPUT"}).status_code == 202
+            monkeypatch.setattr(runtime._context_pulse, "tick", after_both_source_outcomes)
+            for source, instruction in ((first, "A_NEW_INPUT"), (second, "C_NEW_INPUT")):
+                submitted = client.post(f"/api/pages/{source}/messages", json={"content": instruction})
+                assert submitted.status_code == 202
+                source_events.append(submitted.json()["messageId"])
         final = eventually(lambda: view(client, target), lambda v: assistant_count(v) == 2)
         time.sleep(0.15)
         assert len(fixture.requests) == 6, "Two local results should share one receiving Kernel turn."
