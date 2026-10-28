@@ -57,3 +57,21 @@ A green synthetic browser journey is mechanism evidence, not a general claim
 that the deployed model acquired skills. The alpha is local, single-user,
 loopback-only. No remote hosting, account security, PyPI upload or model
 credential provisioning is part of this landing.
+
+## Two distinct shutdown/restart outcomes
+
+A cooperative native Kernel/Pulse shutdown should drain physical owners,
+release the database lease, and allow immediate same-World reentry. If the
+process exits without proving that all physical workers left, retaining the
+active lease is intentional: a successor is rejected until the prior epoch
+expires. Expiry permits a new fenced epoch, not replay of the old worker's
+actions or retroactive proof that its output was delivered.
+
+`tests/per_pulse/test_runtime_lease_fallback.py` exercises this distinction
+against the real SQLite lease transactions with a controlled UTC clock. It
+asserts live-owner conflict, stopped-but-unreleased conflict, expiry takeover,
+stale-epoch rejection and immediate recovery after clean release. The
+low-level test is not a multi-process forced-kill experiment and does not
+supersede the installed Chromium Work restart journey or the outstanding
+non-cooperative native owner acceptance in issue #32. Neither path supplies
+real-provider outcome or spending evidence.
