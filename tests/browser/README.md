@@ -50,6 +50,12 @@ It adds a page link without losing that source, then deliberately delivers a
 stale background-read response before a new navigation response in both
 directions. The current source or recent view must win the race.
 
+The Harness smoke flow also approves a small patch whose resulting diff exceeds
+the native result limit. It opens the confirmed long report, checks successful
+model continuation, exact action identity and draft retention after reload,
+and previews the same file on a phone viewport. The model is explicitly
+synthetic; approval, file replacement, receipt and digest verification are real.
+
 ## One rendered correction-to-artifact journey
 
 ```sh

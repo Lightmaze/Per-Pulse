@@ -19,8 +19,10 @@ release = threading.Event()
 entered = threading.Event()
 requests = []
 before = 'Draft heading.\npassword=abc\nOrdinary report content.\n'
+large_before = 'DRAFT ' + 'An explicitly synthetic long report. ' * 1_400 + '\n'
 (state / 'workspace').mkdir()
 (state / 'workspace' / 'redacted.txt').write_text(before)
+(state / 'workspace' / 'large-report.txt').write_text(large_before)
 
 def handler(request):
     body = json.loads(request.content)
@@ -36,6 +38,8 @@ def handler(request):
         arguments = {'path': name, 'expected_digest': None, 'content': 'A real file from a synthetic model fixture.\n'}
         if 'WRITE_REDACTED' in text:
             arguments = {'path': 'redacted.txt', 'expected_digest': hashlib.sha256(before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'Draft heading.', 'new': 'Final heading.'}]}}
+        if 'WRITE_LARGE' in text:
+            arguments = {'path': 'large-report.txt', 'expected_digest': hashlib.sha256(large_before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'DRAFT', 'new': 'FINAL'}]}}
         delta = {'tool_calls': [{'index': 0, 'id': 'fixture-file', 'type': 'function', 'function': {
             'name': 'mutate_file', 'arguments': json.dumps(arguments)
         }}]}
