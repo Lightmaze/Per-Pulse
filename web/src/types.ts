@@ -106,28 +106,38 @@ export type Bootstrap = {
 
 export type LessonCondition = string | { all: LessonCondition[] } | { any: LessonCondition[] } | { not: LessonCondition };
 export type LessonVerdict = 'useful' | 'not_useful' | 'harmful';
-export type PostureExperience = {
+export type LessonShift = { understanding: string; candidates: string; delivery: string };
+type ExperienceBase = {
   id: string;
   revision: number;
   title: string;
-  lesson: string;
-  conditions: LessonCondition;
-  counterexamples: string[];
-  shift: { understanding: string; candidates: string; delivery: string };
   scope: 'context' | 'subject';
   active: boolean;
   canEdit: boolean;
   canReport: boolean;
   sourcePageId: string | null;
-  sourceAnchor?: { resultMessageId: string; feedbackMessageId: string };
+  sourceAnchor?: { resultMessageId: string; feedbackMessageId?: string };
   record_type: 'observed_episode' | 'constructed_fixture';
-  encounter?: { situation: string; action: string; outcome: string };
+  encounter?: { situation: string; action: string; outcome?: string };
   source?: { source_message_id?: string; feedback_message_id?: string };
   feedback?: { verdict: string; evidence: string; source?: {
     kind?: string; page_id?: string; relation?: string;
     result_message_id?: string; result_evidence_class?: string;
   } }[];
 };
+export type PostureLesson = ExperienceBase & {
+  representation?: 'lesson';
+  lesson: string;
+  conditions: LessonCondition;
+  counterexamples: string[];
+  shift: LessonShift;
+};
+export type PostureExample = ExperienceBase & {
+  representation: 'example';
+  excerpt: string;
+  note: string;
+};
+export type PostureExperience = PostureLesson | PostureExample;
 export type PostureView = { enabled: boolean; experiences: PostureExperience[] };
 
 export type DraftReference = { targetPageId: string; label: string };

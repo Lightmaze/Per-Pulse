@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 
-type IconName = 'pulse' | 'home' | 'search' | 'page' | 'menu' | 'close' | 'link' | 'send' | 'settings' | 'plus' | 'chevron' | 'back' | 'return' | 'check' | 'edit';
+type IconName = 'pulse' | 'home' | 'search' | 'page' | 'menu' | 'close' | 'link' | 'send' | 'settings' | 'plus' | 'chevron' | 'back' | 'return' | 'check' | 'edit' | 'copy';
 const paths: Record<IconName, ReactNode> = {
   pulse: <path d="M2 13h4l3-10 4 19 3-13 2 4h4" />,
   home: <><path d="m3 10 9-7 9 7v11H3Z" /><path d="M9 21v-8h6v8" /></>,
@@ -17,6 +17,7 @@ const paths: Record<IconName, ReactNode> = {
   return: <><path d="M20 5v7a4 4 0 0 1-4 4H4" /><path d="m9 11-5 5 5 5" /></>,
   check: <path d="m5 12 4 4L19 6" />,
   edit: <><path d="m15 4 5 5-11 11H4v-5Z" /><path d="m12 7 5 5" /></>,
+  copy: <><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h4" /></>,
 };
 
 export function Icon({ name, size = 20, style, className = '' }: { name: IconName; size?: number; style?: CSSProperties; className?: string }) {

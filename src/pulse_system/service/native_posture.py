@@ -25,7 +25,7 @@ from pulse_system.core.types import (
     EngramStatus, HarnessTurnState,
 )
 
-from .posture import PostureMemory
+from .posture import PostureMemory, experience_search_text
 
 NAME = "posture"
 PREFIX = "native-posture-v1:"
@@ -34,14 +34,16 @@ _REMEMBER_FIELDS = {
     "source_message_id", "feedback_message_id", "title", "lesson",
     "conditions", "counterexamples", "shift",
 }
+_EXAMPLE_FIELDS = {"source_message_id", "title", "excerpt"}
+_EXAMPLE_OPTIONAL = {"feedback_message_id", "note"}
 _FEEDBACK_FIELDS = {"experience_id", "expected_revision", "verdict", "feedback_message_id"}
 _REVISION_FIELDS = {"experience_id", "expected_revision", "feedback_message_id", "changes"}
-_REVISION_CONTENT = {"title", "lesson", "conditions", "counterexamples", "shift"}
+_REVISION_CONTENT = {"title", "lesson", "conditions", "counterexamples", "shift", "note"}
 _NATIVE_VERDICTS = {"not_useful", "harmful", "withdrawn"}
 SCHEMA = {
     "type": "object",
     "properties": {
-        "op": {"type": "string", "enum": ["list", "find", "get", "remember", "feedback", "revise"]},
+        "op": {"type": "string", "enum": ["list", "find", "get", "remember", "remember_example", "feedback", "revise"]},
         "query": {"type": "string", "minLength": 2, "maxLength": 160},
         "after_experience_id": {"type": "string", "maxLength": 160},
         "experience_id": {"type": "string", "maxLength": 160},
@@ -51,6 +53,8 @@ SCHEMA = {
         "feedback_message_id": {"type": "string", "maxLength": 160},
         "title": {"type": "string", "maxLength": 240},
         "lesson": {"type": "string", "maxLength": 4000},
+        "excerpt": {"type": "string", "minLength": 1, "maxLength": 8000},
+        "note": {"type": "string", "maxLength": 4000},
         "conditions": {
             "description": "A condition in words, or an all/any/not tree of conditions. "
                            "These are interpreted in context, not matched as keywords.",
@@ -77,8 +81,8 @@ def descriptor() -> ToolDescriptor:
         NAME,
         "Keep useful experience from this context's actual work and later user feedback. "
         "list returns a bounded newest-first view and recent original message IDs. "
-        "find(query) searches only the title, lesson, conditions, boundaries and "
-        "decision shifts of eligible active experiences by literal text (not semantic "
+        "find(query) searches only the title, lesson, conditions, boundaries, decision "
+        "shifts, and explicitly retained example passages/notes of eligible active experiences by literal text (not semantic "
         "relevance). Follow next_after_experience_id with find(query, after_experience_id) "
         "to inspect older eligible matches, including those beyond the response budget; "
         "a returned reference-only oversized record must not be treated as advice. "
@@ -95,6 +99,13 @@ def descriptor() -> ToolDescriptor:
         "not hold everywhere, and a routine approach can be correct. Remember only "
         "a useful reusable correction, not every message. A remember call stages a "
         "context-local experience; it is saved only after this turn succeeds. "
+        "Alternatively, remember_example(source_message_id, title, excerpt, optional note, "
+        "optional feedback_message_id) retains an exact passage from an earlier settled "
+        "assistant result in this context without inventing an abstract lesson. "
+        "The excerpt must occur verbatim in that result; note is your revisable interpretation. "
+        "A missing feedback_message_id is explicitly unreviewed, not a successful outcome. "
+        "When supplied, feedback must be a later actual user message visible to this turn. "
+        "Examples follow the same local scope and successful-turn admission as lessons. "
         "If a later user correction invalidates an existing local lesson, use "
         "feedback(experience_id, expected_revision, verdict, feedback_message_id). "
         "Its evidence is the attributed later user message, with your interpretation. "
@@ -104,7 +115,8 @@ def descriptor() -> ToolDescriptor:
         "award useful feedback from your own assessment. "
         "If a later correction refines a still-useful local lesson, use "
         "revise(experience_id, expected_revision, feedback_message_id, changes). "
-        "Change only title, lesson, conditions, counterexamples, or shift; keep "
+        "For a lesson change only title, lesson, conditions, counterexamples, or shift. "
+        "For an example change only title or note; its selected passage is immutable. Keep "
         "the same experience and preserve its original encounter. The feedback "
         "must be an actual user message after the lesson's latest revision. "
         "The revision and its attributed correction are saved together only "
@@ -171,6 +183,11 @@ def validate(arguments: Mapping[str, Any]) -> dict:
                 "conditions": "Validation only.", "counterexamples": ["Validation only."],
                 "shift": {key: "Validation only." for key in ("understanding", "candidates", "delivery")},
             }
+            if "note" in changes:
+                if set(changes) - {"title", "note"}:
+                    raise ValueError("example notes cannot be mixed with lesson revision fields")
+                content = {"representation": "example", "title": "Validation only.",
+                           "excerpt": "Validation only.", "note": ""}
             content.update(changes)
             PostureMemory.validate_experience(
                 subject_id="validation", context_id="", encounter={
@@ -178,18 +195,28 @@ def validate(arguments: Mapping[str, Any]) -> dict:
                 }, source={"kind": "validation_only"}, **content,
             )
         return values
-    if values.get("op") != "remember" or set(values) != _REMEMBER_FIELDS | {"op"}:
+    example = values.get("op") == "remember_example"
+    if example:
+        if (not _EXAMPLE_FIELDS <= set(values)
+                or set(values) - (_EXAMPLE_FIELDS | _EXAMPLE_OPTIONAL | {"op"})):
+            raise ValueError("incorrect example fields")
+    elif values.get("op") != "remember" or set(values) != _REMEMBER_FIELDS | {"op"}:
         raise ValueError("unknown posture operation or fields")
     for name in ("source_message_id", "feedback_message_id"):
+        if example and name not in values:
+            continue
         value = values[name]
         if not isinstance(value, str) or not value.strip() or len(value) > 160 or "\x00" in value:
             raise ValueError(f"invalid {name}")
-    # The shared validator owns all lesson, condition, and counterexample limits.
+    content = ({"representation": "example", "title": values["title"],
+                "excerpt": values["excerpt"], "note": values.get("note", "")} if example else
+               {key: values[key] for key in _REMEMBER_FIELDS - {"source_message_id", "feedback_message_id"}})
+    # The shared validator owns all representation-specific content bounds.
     PostureMemory.validate_experience(
         subject_id="validation", context_id="home", encounter={
             "situation": "Validation only.", "action": "Validation only.", "outcome": "Validation only.",
         }, source={"kind": "validation_only"},
-        **{key: values[key] for key in _REMEMBER_FIELDS - {"source_message_id", "feedback_message_id"}},
+        **content,
     )
     return values
 
@@ -308,6 +335,56 @@ def capture_encounter(runtime, subject_id: str, context_id: str,
             "record_type": "constructed_fixture" if synthetic else "observed_episode"}
 
 
+def capture_example(runtime, subject_id: str, context_id: str, source_message_id: str,
+                    excerpt: str, feedback_message_id: str | None = None,
+                    *, latest_input_id: str | None = None) -> dict:
+    """Retain an exact original passage without manufacturing an evaluation."""
+    original, prior_turn = _settled_result(runtime, subject_id, context_id, source_message_id)
+    if not isinstance(excerpt, str) or not excerpt.strip() or excerpt not in original.content:
+        raise ScopeConflict("the example must be an exact passage from the original result")
+    clean, redacted, truncated = _source_text(excerpt, 8000)
+    if redacted or truncated or clean != excerpt:
+        raise ScopeConflict("select a shorter example passage without credentials")
+    if latest_input_id is not None:
+        latest = _context_message(runtime, subject_id, context_id, latest_input_id)
+        if (latest.engram_id != subject_id or latest.seq is None
+                or not original.seq < latest.seq):
+            raise ScopeConflict("the example source was not available to the originating turn")
+    if feedback_message_id is not None:
+        captured = capture_encounter(runtime, subject_id, context_id,
+                                     source_message_id, feedback_message_id,
+                                     latest_input_id=latest_input_id)
+    else:
+        situation = _context_message(runtime, subject_id, context_id, original.parent_event_id)
+        evidence_class = str(original.metadata.get("evidence_class", "UNKNOWN"))
+        synthetic = evidence_class in {"TEST_DOUBLE", "EXPLICIT_MOCK"}
+        encounter, shortened = {}, []
+        for key, content in (("situation", situation.content), ("action", original.content)):
+            clean, redacted, truncated = _source_text(content, 12000)
+            encounter[key] = clean
+            if redacted or truncated:
+                shortened.append(key)
+        captured = {"encounter": encounter,
+                    "record_type": "constructed_fixture" if synthetic else "observed_episode",
+                    "source": {
+                        "kind": "synthetic_runtime_observation" if synthetic else "native_result_example",
+                        "provider_evidence_class": evidence_class,
+                        "feedback_evidence_class": "not_attached",
+                        "world_id": runtime.world_id, "subject_id": subject_id, "context_id": context_id,
+                        "source_subject_id": original.engram_id, "source_message_id": original.id,
+                        "original_turn_id": prior_turn.id,
+                        "content_digests": {"situation": _digest(situation.content), "action": _digest(original.content)},
+                        "bounded_encounter_fields": shortened,
+                    }}
+    offset = original.content.index(excerpt)
+    captured["source"]["selected_excerpt"] = {
+        "start": offset, "end": offset + len(excerpt), "offset_unit": "unicode_code_points",
+        "occurrence": "first_exact_match",
+        "sha256": hashlib.sha256(excerpt.encode("utf-8")).hexdigest(),
+    }
+    return captured
+
+
 class NativePosture:
     """A lifecycle-owned bridge using the existing World component state."""
 
@@ -351,21 +428,32 @@ class NativePosture:
         return turn
 
     def _capture(self, scope, values, turn, request_id, action_id) -> dict:
-        capture = capture_encounter(
-            self.runtime, scope.engram_id, scope.context_id,
-            values["source_message_id"], values["feedback_message_id"],
-            latest_input_id=turn.event_id,
-        )
+        example = values["op"] == "remember_example"
+        if example:
+            capture = capture_example(
+                self.runtime, scope.engram_id, scope.context_id, values["source_message_id"],
+                values["excerpt"], values.get("feedback_message_id"), latest_input_id=turn.event_id,
+            )
+            content = {"representation": "example", "title": values["title"],
+                       "excerpt": values["excerpt"], "note": values.get("note", "")}
+        else:
+            capture = capture_encounter(
+                self.runtime, scope.engram_id, scope.context_id,
+                values["source_message_id"], values["feedback_message_id"],
+                latest_input_id=turn.event_id,
+            )
+            content = {key: values[key] for key in _REMEMBER_FIELDS - {"source_message_id", "feedback_message_id"}}
         source = {**capture["source"], "learning_turn_id": scope.turn_id,
                   "source_action_id": action_id, "native_request_id": request_id,
                   "arguments_digest": _digest(values),
-                  "interpretation": "model_proposed_lesson_from_user_followup"}
+                  "interpretation": ("model_selected_concrete_example" if example else
+                                     "model_proposed_lesson_from_user_followup")}
         encounter = capture["encounter"]
         return {"subject_id": scope.engram_id, "context_id": scope.context_id,
                 "experience_id": "posture-native-" + request_id.split(":")[-1][:40],
                 "encounter": encounter, "source": source, "scope": "context",
                 "record_type": capture["record_type"],
-                **{key: values[key] for key in _REMEMBER_FIELDS - {"source_message_id", "feedback_message_id"}}}
+                **content}
 
     def _capture_followup(self, scope, values, turn, request_id, action_id) -> dict:
         r, memory = self.runtime, self._memory()
@@ -456,12 +544,8 @@ class NativePosture:
                             "semantic_applicability": "not_yet_assessed"}
                 if values["op"] == "find":
                     needle = values["query"].casefold()
-                    eligible = [item for item in materials["episodes"] if needle in (
-                        item["title"] + "\n" + item["lesson"] + "\n" +
-                        json.dumps(item["conditions"], ensure_ascii=False) + "\n" +
-                        json.dumps(item["counterexamples"], ensure_ascii=False) + "\n" +
-                        json.dumps(item["shift"], ensure_ascii=False)
-                    ).casefold()]
+                    eligible = [item for item in materials["episodes"]
+                                if needle in experience_search_text(item).casefold()]
                     # The order is the journal's newest-first (updated_at, id) order.
                     # A cursor is accepted only if it is still in this caller's
                     # *matching and accessible* results, so it cannot probe another
@@ -500,7 +584,7 @@ class NativePosture:
                             "more_experiences": remaining > 0,
                             "omitted_experience_count": remaining,
                             "next_after_experience_id": visible[-1]["id"] if remaining and visible else None,
-                            "retrieval": "literal_casefold_on_eligible_abstractions_only",
+                            "retrieval": "literal_casefold_on_eligible_content_only",
                             "scope": "current_context_and_explicit_subject_transfers",
                             "semantic_applicability": "not_yet_assessed"}
                 packed = pack_posture_materials(materials, byte_budget=16000)
@@ -521,7 +605,7 @@ class NativePosture:
                 return self._receipt(prior)
             if len(self._requests(pending=True, limit=MAX_PENDING + 1)) >= MAX_PENDING:
                 raise ScopeConflict("pending posture capacity reached; finish current turns")
-            if values["op"] == "remember":
+            if values["op"] in {"remember", "remember_example"}:
                 experience = self._capture(scope, values, turn, key, action_request_id)
                 memory.validate_experience(**experience)
                 payload = {"experience": experience, "experience_id": experience["experience_id"]}

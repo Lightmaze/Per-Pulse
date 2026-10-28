@@ -74,8 +74,8 @@ try {
   };
   const openLessons = async () => {
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await page.getByRole('button', { name: 'View this page’s lessons', exact: true }).click();
-    await page.getByRole('dialog', { name: 'Lessons from the work', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Lessons and examples', exact: true }).waitFor();
   };
   const closeDialog = () => page.getByRole('button', { name: 'Close dialog', exact: true }).click();
 
