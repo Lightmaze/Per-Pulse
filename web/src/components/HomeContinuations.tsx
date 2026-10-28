@@ -6,10 +6,10 @@
  */
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import { homeContinuations, homeWorkNeedsAttention } from '../homeContinuations';
+import { homeContinuations, homeWorkNeedsAttention, verifiedHomePulse } from '../homeContinuations';
 import { useLanguage } from '../i18n';
 import { pulseActivityLabel } from '../pulseActivityLabels';
-import type { PageSummary, PulseState } from '../types';
+import type { Bootstrap, PageSummary, PulseObservation } from '../types';
 import type { Navigate } from './SessionLink';
 
 export function HomeContinuations({ pages, navigate, workspaceId }: {
@@ -18,15 +18,17 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
   workspaceId: string;
 }) {
   const { t, pageTitle } = useLanguage();
-  // Keep both read models in a single World-tagged snapshot. If the local
-  // service switches Worlds, no prior Work names or Pulse events may flash
-  // into the new Home before its own bootstrap is confirmed.
+  // Foreground Work and Pulse are read independently. Do not pair their
+  // results until they agree on both the persistent World and live process.
+  // A restart can happen between the requests even within one polling tick.
   const [snapshot, setSnapshot] = useState<{
-    workspaceId: string; pulse: PulseState | null; pages: PageSummary[] | null;
+    workspaceId: string; observation: PulseObservation | null; bootstrap: Bootstrap | null;
   } | null>(null);
   const currentSnapshot = snapshot?.workspaceId === workspaceId ? snapshot : null;
-  const pulse = currentSnapshot?.pulse ?? null;
-  const freshPages = currentSnapshot?.pages ?? null;
+  const freshBootstrap = currentSnapshot?.bootstrap?.workspaceId === workspaceId
+    ? currentSnapshot.bootstrap : null;
+  const pulse = verifiedHomePulse(workspaceId, freshBootstrap, currentSnapshot?.observation ?? null);
+  const freshPages = freshBootstrap?.pages ?? null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -38,15 +40,15 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
       if (readingPulse || controller.signal.aborted) return;
       readingPulse = true;
       try {
-        const latest = await api.pulse(controller.signal);
+        const latest = await api.pulseObservation(controller.signal);
         if (!controller.signal.aborted) setSnapshot(previous => ({
-          workspaceId, pages: previous?.workspaceId === workspaceId ? previous.pages : null,
-          pulse: latest,
+          workspaceId, bootstrap: previous?.workspaceId === workspaceId ? previous.bootstrap : null,
+          observation: latest.workspaceId === workspaceId ? latest : null,
         }));
       } catch {
         if (!controller.signal.aborted) setSnapshot(previous => ({
-          workspaceId, pages: previous?.workspaceId === workspaceId ? previous.pages : null,
-          pulse: null,
+          workspaceId, bootstrap: previous?.workspaceId === workspaceId ? previous.bootstrap : null,
+          observation: null,
         }));
       } finally {
         readingPulse = false;
@@ -58,13 +60,13 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
       try {
         const latest = await api.bootstrap(controller.signal);
         if (!controller.signal.aborted) setSnapshot(previous => ({
-          workspaceId, pulse: previous?.workspaceId === workspaceId ? previous.pulse : null,
-          pages: latest.workspaceId === workspaceId ? latest.pages : null,
+          workspaceId, observation: previous?.workspaceId === workspaceId ? previous.observation : null,
+          bootstrap: latest.workspaceId === workspaceId ? latest : null,
         }));
       } catch {
         if (!controller.signal.aborted) setSnapshot(previous => ({
-          workspaceId, pulse: previous?.workspaceId === workspaceId ? previous.pulse : null,
-          pages: null,
+          workspaceId, observation: previous?.workspaceId === workspaceId ? previous.observation : null,
+          bootstrap: null,
         }));
       } finally {
         readingWorkspace = false;

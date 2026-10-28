@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { homeContinuations, homeWorkNeedsAttention } from '../src/homeContinuations.ts';
+import { homeContinuations, homeWorkNeedsAttention, verifiedHomePulse } from '../src/homeContinuations.ts';
 
 const work = (id) => ({ id, kind: 'work', title: id });
 const pages = [{ id: 'home', kind: 'home', title: 'Home' }, work('source'), work('receiver'), work('another')];
@@ -79,4 +79,24 @@ test('Home does not keep a stale approval once the live Work settles', () => {
   assert.deepEqual(homeWorkNeedsAttention([prior]).map(page => page.id), ['source']);
   assert.deepEqual(homeWorkNeedsAttention([settled]), []);
   assert.deepEqual(homeWorkNeedsAttention([prior], -1), []);
+});
+
+test('Home source links require a matched live World and process in independent reads', () => {
+  const pulse = state(event('latest-result', 'receiver'));
+  const bootstrap = { workspaceId: 'world-a', serviceInstanceId: 'process-a' };
+  const observation = { ...bootstrap, pulse };
+  assert.equal(verifiedHomePulse('world-a', bootstrap, observation), pulse);
+  assert.deepEqual(homeContinuations(verifiedHomePulse('world-a', bootstrap, observation), pages)
+    .map(row => row.receiver.messageId), ['latest-result']);
+
+  // Both endpoints can have returned successfully while the server restarted
+  // under the same persistent World, or the browser moved to another World.
+  assert.equal(verifiedHomePulse('world-a', bootstrap,
+    { ...observation, serviceInstanceId: 'process-b' }), null);
+  assert.equal(verifiedHomePulse('world-a', bootstrap,
+    { ...observation, workspaceId: 'world-b' }), null);
+  assert.equal(verifiedHomePulse('world-b', bootstrap, observation), null);
+  assert.equal(verifiedHomePulse('world-a',
+    { ...bootstrap, serviceInstanceId: '' }, observation), null);
+  assert.equal(verifiedHomePulse('world-a', bootstrap, null), null);
 });

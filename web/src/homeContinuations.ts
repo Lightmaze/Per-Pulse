@@ -6,7 +6,26 @@
  * Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
  */
 import { activationMessageTarget } from './pulseAttention.ts';
-import type { PageSummary, PulseActivation, PulseState } from './types';
+import type { Bootstrap, PageSummary, PulseActivation, PulseObservation, PulseState } from './types';
+
+/** Never join Work names and Pulse sources read across a World or service switch.
+ *
+ * Independent requests keep foreground Work review responsive, but their
+ * origin must agree before a causal event can become a Home navigation link.
+ * The native observation endpoint binds World, process and event in one read.
+ */
+export function verifiedHomePulse(
+  expectedWorldId: string,
+  workspace: Pick<Bootstrap, 'workspaceId' | 'serviceInstanceId'> | null,
+  observation: PulseObservation | null,
+): PulseState | null {
+  if (!workspace || !observation || !expectedWorldId
+      || !workspace.serviceInstanceId || !observation.serviceInstanceId
+      || workspace.workspaceId !== expectedWorldId
+      || observation.workspaceId !== expectedWorldId
+      || workspace.serviceInstanceId !== observation.serviceInstanceId) return null;
+  return observation.pulse;
+}
 
 export type HomeContinuation = {
   event: PulseActivation;

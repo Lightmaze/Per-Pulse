@@ -82,6 +82,7 @@ export type Bootstrap = {
   name: 'Per Pulse';
   version: string;
   workspaceId: string;
+  serviceInstanceId: string;
   example: boolean;
   homeId: 'home';
   provider: ProviderState;
@@ -182,4 +183,11 @@ export type PulseState = {
   contexts: { center_id: string | null; pageId: string | null; inhibition: number }[];
   connections: PulseConnection[];
   recentActivations: PulseActivation[];
+};
+
+/** One native Pulse read bound to the World and the serving process. */
+export type PulseObservation = {
+  workspaceId: string;
+  serviceInstanceId: string;
+  pulse: PulseState;
 };
