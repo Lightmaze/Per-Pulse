@@ -75,3 +75,20 @@ low-level test is not a multi-process forced-kill experiment and does not
 supersede the installed Chromium Work restart journey or the outstanding
 non-cooperative native owner acceptance in issue #32. Neither path supplies
 real-provider outcome or spending evidence.
+
+## Physical death of the lease owner
+
+`tests/per_pulse/test_runtime_lease_sigkill.py` starts a distinct Python
+process holding the real SQLite lease, confirms a simultaneous successor is
+rejected, kills the owner process without any Python cleanup, and checks that
+its durable lease remains active. It waits for the **observed** expiry,
+requires a new fenced epoch, rejects stale-owner release/ownership and checks
+that a subsequently clean close permits immediate entry. This complements
+the controlled-clock fallback test and makes the operating-system failure
+boundary observable in the standard Python CI run.
+
+This is still a **lease-only** process-kill test: the child does not own an
+in-flight Kernel turn or a live local Context Body activation. The end-to-end
+forced termination and native abort-before-turn scenario in issue #32 remains
+open; no lost action is claimed delivered or replayed. The existing Chromium
+restart journey and real-provider tests remain distinct evidence.
