@@ -130,6 +130,51 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), '',
     'Late origin save clears only its own unchanged draft');
 
+  // A transport failure on Work A must be discoverable from Work B without
+  // showing A's error in B or discarding either page's draft. An uncertain
+  // result is not automatically retried: the user returns to its source.
+  const failedText = 'Check this message before deciding whether to resend.';
+  let releaseFailure;
+  const failureGate = new Promise(resolve => { releaseFailure = resolve; });
+  let signalFailureHeld;
+  const failureHeld = new Promise(resolve => { signalFailureHeld = resolve; });
+  let signalFailureHandled;
+  const failureHandled = new Promise(resolve => { signalFailureHandled = resolve; });
+  await page.route(delayedPattern, async route => {
+    signalFailureHeld();
+    await failureGate;
+    await route.abort('failed');
+    signalFailureHandled();
+  });
+  await page.locator('.composer textarea').fill(failedText);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await failureHeld;
+  const navigation = page.getByLabel('Workspace navigation');
+  await navigation.locator('.page-nav a').filter({ hasText: 'Second independent Work' }).click();
+  await page.getByRole('heading', { name: 'Second independent Work', exact: true }).waitFor();
+  const secondDraft = 'A separate draft survives the other Work failing.';
+  await page.locator('.composer textarea').fill(secondDraft);
+  releaseFailure();
+  await failureHandled;
+  await navigation.locator('.page-nav a').filter({ hasText: 'A real disconnected Work' })
+    .locator('[aria-label="Check last message"]').waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), secondDraft,
+    'The other Work keeps its unsent draft');
+  assert.equal(await page.locator('.page-column .error-notice').count(), 0,
+    'The failed send does not display an unrelated error in the current Work');
+  await page.unroute(delayedPattern);
+  await navigation.locator('.page-nav a').filter({ hasText: 'A real disconnected Work' }).click();
+  await page.getByRole('alert').getByText('Your workspace could not be reached. Please try again.').waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), failedText,
+    'The origin Work keeps its draft after uncertain save');
+  // The controlled abort occurred before the request reached the native API.
+  // Resending here is explicit and the actual World persists the content.
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await page.getByText(failedText, { exact: true }).waitFor();
+  assert.equal(await navigation.locator('.page-nav a').filter({ hasText: 'A real disconnected Work' })
+    .locator('[aria-label="Check last message"]').count(), 0,
+    'A successful origin save clears the check-status marker');
+
   const bootstrap = await (await fetch(base + '/api/bootstrap')).json();
   assert.equal(bootstrap.provider.configured, false);
   assert.equal(bootstrap.pages.filter(item => item.kind === 'work').length, 2);
@@ -146,10 +191,11 @@ try {
   assert.equal(restored.provider.configured, false);
 
   console.log(JSON.stringify({
-    passed: 6,
+    passed: 7,
     checks: ['isolated wheel starts without credentials', 'browser offers local provider setup',
       'English/Chinese first-use instructions work', 'real disconnected Work accepts queued input',
       'two Works stay writable across a delayed origin request without losing its result or draft',
+      'late origin save failures are visible at their source without hijacking another Work',
       'original World, Work and note persist after clean restart'],
     provider: 'none; no synthetic model replies',
   }, null, 2));

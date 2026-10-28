@@ -223,7 +223,7 @@ export default function App() {
   const activity = view ? getPageActivity(view.page.status, view.provider.configured, Boolean(syncError)) : null;
 
   return <div className={`app-shell ${sidebarHidden ? 'is-sidebar-collapsed' : ''}`}>
-    <Sidebar stale={Boolean(syncError)} bootstrap={bootstrap} activePageId={route.id} open={sidebarOpen} close={() => setSidebarOpen(false)} navigate={navigate} onSearch={() => openModal({ kind: 'picker', mode: 'search' })} onCreate={() => openModal({ kind: 'create' })} onSettings={() => openModal({ kind: 'settings' })} />
+    <Sidebar stale={Boolean(syncError)} bootstrap={bootstrap} sendingPages={sendingPages} sendErrors={sendErrors} activePageId={route.id} open={sidebarOpen} close={() => setSidebarOpen(false)} navigate={navigate} onSearch={() => openModal({ kind: 'picker', mode: 'search' })} onCreate={() => openModal({ kind: 'create' })} onSettings={() => openModal({ kind: 'settings' })} />
     <div className="workspace">
       <header className="topbar">
         <button className="icon-button nav-toggle" aria-label={t('app.toggleNavigation')} onClick={() => { if (window.matchMedia('(max-width: 760px)').matches) setSidebarOpen(previous => !previous); else setSidebarHidden(previous => !previous); }}><Icon name="menu" size={20} /></button>
