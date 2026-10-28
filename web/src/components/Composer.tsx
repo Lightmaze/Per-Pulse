@@ -3,9 +3,9 @@ import type { Draft, ProviderState } from '../types';
 import { Icon } from './Icon';
 import { useLanguage } from '../i18n';
 
-export function Composer({ draft, changeDraft, send, busy, onLink, inputRef, pageTitle, pageKind = 'home', provider, onSettings }: {
+export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, inputRef, pageTitle, pageKind = 'home', provider, onSettings }: {
   draft: Draft; changeDraft: (draft: Draft) => void; send: () => void; busy: boolean; onLink: () => void; inputRef: RefObject<HTMLTextAreaElement | null>;
-  pageTitle?: string; pageKind?: 'home' | 'work'; provider?: ProviderState; onSettings?: () => void;
+  pageTitle?: string; pageKind?: 'home' | 'work'; provider?: ProviderState; onSettings?: () => void; onMaterials: () => void;
 }) {
   const { t, pageTitle: localizedPageTitle } = useLanguage();
   const composing = useRef(false);
@@ -22,7 +22,10 @@ export function Composer({ draft, changeDraft, send, busy, onLink, inputRef, pag
         if (event.key === 'Enter' && !event.shiftKey && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); if (draft.text.trim() && !busy) send(); }
       }} />
       <div className="composer-toolbar">
-        <button type="button" className="text-button link-page-button" onClick={onLink}><Icon name="link" size={17} />{t('composer.linkPage')}{draft.references.length ? <span className="reference-count">{draft.references.length}</span> : null}</button>
+        <div className="composer-tools">
+          <button type="button" className="text-button link-page-button" onClick={onLink}><Icon name="link" size={17} />{t('composer.linkPage')}{draft.references.length ? <span className="reference-count">{draft.references.length}</span> : null}</button>
+          <button type="button" className="text-button" onClick={onMaterials}><Icon name="page" size={17} />{t('materials.title')}</button>
+        </div>
         <button className="send-button" type="submit" aria-label={t('composer.send')} disabled={busy || !draft.text.trim()}><Icon name="send" size={21} /></button>
       </div>
     </form>

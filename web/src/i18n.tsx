@@ -4,14 +4,22 @@ import { commonEnglish, commonChinese } from './locales/common';
 import { workspaceEnglish, workspaceChinese } from './locales/workspace';
 import { continuityEnglish, continuityChinese } from './locales/continuity';
 import { learningEnglish, learningChinese } from './locales/learning';
+import { materialsEnglish, materialsChinese } from './locales/materials';
 import { interpolate, LANGUAGE_STORAGE_KEY, languagePreference, readLanguagePreference, resolveLocale, saveLanguagePreference, type LanguagePreference, type Locale } from './language';
 
-const english = { ...commonEnglish, ...workspaceEnglish, ...continuityEnglish, ...learningEnglish };
-const chinese: Record<keyof typeof english, string> = { ...commonChinese, ...workspaceChinese, ...continuityChinese, ...learningChinese };
+const english = { ...commonEnglish, ...workspaceEnglish, ...continuityEnglish, ...learningEnglish, ...materialsEnglish };
+const chinese: Record<keyof typeof english, string> = { ...commonChinese, ...workspaceChinese, ...continuityChinese, ...learningChinese, ...materialsChinese };
 export type MessageKey = keyof typeof english;
 export type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
 const errorKeys: Record<string, MessageKey> = {
+  workspace_changed: 'materials.workspaceChanged', file_too_large: 'materials.tooLarge',
+  empty_file: 'materials.emptyFile', text_files_only: 'materials.textOnly',
+  credential_content_blocked: 'materials.credentials', protected_or_invalid_path: 'materials.invalidPath',
+  invalid_path: 'materials.invalidPath', filename_only: 'materials.invalidPath',
+  file_changed_retry: 'materials.changed', file_unavailable: 'materials.unavailable',
+  path_unavailable: 'materials.unavailable', not_a_single_regular_file: 'materials.invalidPath',
+  upload_failed_or_unconfirmed: 'materials.uploadUnconfirmed',
   request_failed: 'error.generic',
   network_error: 'error.network', invalid_response: 'error.invalidResponse',
   workspace_load_failed: 'error.workspaceLoad', page_load_failed: 'error.pageLoad',

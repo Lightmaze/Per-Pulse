@@ -1,6 +1,6 @@
 # Per Pulse API contract (English v0.1)
 
-All endpoints are same-origin JSON under `/api`. No client-supplied model credentials. Poll page views while their status is `queued` or `working`; no fake/model output is generated offline. Session data is the inherited Pulse World/Kernel state, with lightweight page-reference metadata in the same World store.
+Endpoints are same-origin under `/api` and return JSON. Writes use JSON except for the bounded raw file upload described below. No client-supplied model credentials. Poll page views while their status is `queued` or `working`; no fake/model output is generated offline. Session data is the inherited Pulse World/Kernel state, with lightweight page-reference metadata in the same World store.
 
 ## Types
 
@@ -307,6 +307,41 @@ Errors use `{error:{code:string,message:string}}` with 400/404/409/422/503. Show
 ## Explicit example mode
 
 `per-pulse --example` uses a separate example data directory and visibly returns `example:true`. Sample content is authored example material, not AI output. Ordinary startup begins with the user's own data directory and does not seed examples.
+
+## Workspace materials
+
+All three material routes require `X-Per-Pulse-World` and
+`X-Per-Pulse-Service-Instance` from the current bootstrap. Missing, partial or
+stale identity returns `409 workspace_changed` before file access. Responses
+include both identities. Refresh bootstrap after a service restart; never
+silently retry a write against a different World.
+
+- `GET /api/workspace/files?path=` lists a bounded native workspace folder.
+  The response includes `path`, `entries` (`name`, `path`, `kind`, `bytes`),
+  `truncated`, `limit_bytes` and `scope: "shared_native_workspace"`.
+- `GET /api/workspace/files/content?path=uploads/example.txt` reads a single
+  regular UTF-8 file up to 1 MiB, returning `path`, `content`, `bytes` and
+  `sha256`. This is current file content, not a historical artifact receipt.
+- `POST /api/workspace/files?name=notes.md` accepts raw bytes with
+  `Content-Type: application/octet-stream`. Its streamed body is limited to
+  1 MiB, independent of Content-Length. Success is `201` with `path`, original
+  `name`, `bytes`, `sha256` and `source: "user_upload"`. Empty, binary,
+  oversized, protected-path and credential-shaped uploads are rejected before
+  publication. A unique native `uploads/` file is created without replacing
+  an existing file. Short extensions survive long Unicode file names.
+
+These operations reuse `WorkspaceFiles`; they create no Kernel sessions,
+turns, model read receipts or artifacts. Explicit user upload is separate
+from granting model mutation permissions. Uploaded files are shared across
+pages; page conversations remain scoped. The browser adds a reviewed path
+and observed SHA-256 as ordinary draft text, preserving existing page links.
+It does not claim that the model has read the source or enforce the observed
+version on a future model choice. Native read tools return their own observed
+digests when a configured model actually opens the file.
+
+The browser never executes file HTML. It limits previews to the first 64,000
+characters and labels shortened previews. An upload whose response is lost
+can have completed; inspect the existing uploads before choosing to repeat it.
 
 ## Native execution and file results (opt-in)
 

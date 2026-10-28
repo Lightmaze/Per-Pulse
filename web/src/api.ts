@@ -1,4 +1,5 @@
 import type { ArtifactRead, Bootstrap, DraftReference, LessonVerdict, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
+import type { WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
 export type PulseWriteIdentity = Pick<PulseObservation, 'workspaceId' | 'serviceInstanceId'>;
@@ -36,6 +37,14 @@ const pulseWriteHeaders = (identity: PulseWriteIdentity) => ({
 });
 
 export const api = {
+  files: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
+    request<WorkspaceFileList>(`/workspace/files?path=${encodeURIComponent(path)}`, { headers: pulseWriteHeaders(identity), signal }),
+  file: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
+    request<WorkspaceFile>(`/workspace/files/content?path=${encodeURIComponent(path)}`, { headers: pulseWriteHeaders(identity), signal }),
+  upload: (file: File, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
+    request<WorkspaceUpload>(`/workspace/files?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST', headers: { ...pulseWriteHeaders(identity), 'Content-Type': 'application/octet-stream' }, body: file, signal,
+    }),
   bootstrap: (signal?: AbortSignal) => request<Bootstrap>('/bootstrap', { signal }),
   settings: (signal?: AbortSignal) => request<WorkspaceSettings>('/settings', { signal }),
   updateSettings: (responseLanguage: ResponseLanguage) => request<WorkspaceSettings>('/settings', { method: 'PATCH', body: JSON.stringify({ responseLanguage }) }),

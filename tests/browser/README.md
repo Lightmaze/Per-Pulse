@@ -88,6 +88,24 @@ while new input arrives, an obsolete query response, phone layout, bilingual
 controls, Escape focus restoration, and Browser Back to another source within
 the same Work while a search is pending. Queries remain local and read-only.
 
+## Source material to continued work
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  PER_PULSE_MATERIAL_SCREENSHOTS=/tmp/per-pulse-material-screenshots \
+  node tests/browser/materials_flow.mjs
+```
+
+This actual disconnected browser flow uploads authored text only after an
+explicit action, previews it without executing HTML, and adds its exact path
+and digest while preserving an existing draft and page link. It reuses the
+same file in another Work, checks specific rejected-upload errors, delayed
+reads after navigation, process restart, phone preview focus, English/Chinese
+controls and a selected sourced return Home. It runs against the real local
+World and filesystem with no provider and no invented assistant response.
+`PER_PULSE_PYTHON` can also select an isolated wheel-installed interpreter.
+
 ## One rendered correction-to-artifact journey
 
 ```sh

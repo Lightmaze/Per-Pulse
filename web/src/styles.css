@@ -124,6 +124,8 @@ button, a, input, textarea { outline-offset: 4px; }
 .composer textarea { display: block; padding: 0 2px; min-height: 38px; width: 100%; resize: none; border: 0; outline: none; background: transparent; font-size: 16px; line-height: 1.65; max-height: 220px; scrollbar-width: thin; }
 .composer textarea::placeholder { color: var(--muted); opacity: 1; }
 .composer-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 36px; margin-top: 7px; }
+.composer-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; }
+.composer-tools .text-button { display: inline-flex; align-items: center; gap: 6px; }
 .text-button { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; padding: 4px 2px; }
 .text-button:hover { color: var(--accent); }
 .link-page-button { padding: 4px 2px; font-size: 12px; min-height: 36px; }
@@ -350,6 +352,37 @@ button, a, input, textarea { outline-offset: 4px; }
 .artifact-preview { padding: 8px 12px; font-size: 12px; line-height: 1.7; }
 .artifact-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow-y: auto; margin: 0; }
 .artifact-preview p { color: #66705f; }
+.materials-dialog { max-width: 680px; }
+.material-upload { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.material-upload .field-label { margin-top: 0; }
+.material-upload input[type=file] { min-width: 0; font-size: 12px; }
+.material-upload input[type=file]::file-selector-button { margin-right: 10px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--active); color: var(--text); cursor: pointer; }
+.material-upload .secondary-button { margin-top: 12px; }
+.material-hint { color: var(--muted); font-size: 12px; line-height: 1.65; margin: 8px 0 12px; }
+.material-selected, .material-notice { overflow-wrap: anywhere; font-size: 12px; line-height: 1.65; }
+.material-selected span { color: var(--muted); }
+.material-notice { min-height: 20px; color: var(--accent); }
+.material-browser-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.materials-dialog h3 { margin: 0; font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.material-location { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin: 10px 0; overflow-wrap: anywhere; }
+.material-location > span { min-width: 0; }
+.material-list { max-height: 220px; overflow-y: auto; list-style: none; padding: 0; margin: 0; border: 1px solid var(--border); border-radius: 6px; }
+.material-list li + li { border-top: 1px solid var(--border); }
+.material-list button { width: 100%; padding: 10px 12px; display: flex; align-items: baseline; gap: 10px; text-align: left; font-size: 12px; min-height: 44px; }
+.material-list button:hover:not(:disabled), .material-list button.selected { background: var(--active); }
+.material-list button .icon { flex-shrink: 0; align-self: center; }
+.material-list button > span { overflow-wrap: anywhere; min-width: 0; flex: 1; }
+.material-list button small { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.material-preview { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+.material-preview pre { margin: 12px 0; max-height: 320px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; border: 1px solid var(--border); border-radius: 6px; background: #fafbf8; font-size: 12px; line-height: 1.7; }
+.material-preview details { color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.material-preview summary { cursor: pointer; padding: 6px 0; }
+.material-preview .dialog-actions { margin-top: 12px; }
+@media (max-width: 600px) {
+  .composer-tools { gap: 8px 14px; }
+  .materials-dialog .text-button { min-height: 36px; }
+  .material-list button small { max-width: 60px; white-space: normal; text-align: right; }
+}
 .artifact-provenance { font-size: 10px; }
 
 /* Home opens existing local computation, without making it another feed. */

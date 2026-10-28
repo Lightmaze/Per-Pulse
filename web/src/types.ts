@@ -1,3 +1,11 @@
+export type WorkspaceFileIdentity = { workspaceId: string; serviceInstanceId: string };
+export type WorkspaceFileEntry = { name: string; path: string; kind: 'file' | 'directory'; bytes: number | null };
+export type WorkspaceFileList = WorkspaceFileIdentity & {
+  path: string; entries: WorkspaceFileEntry[]; truncated: boolean; limit_bytes: number; scope: 'shared_native_workspace';
+};
+export type WorkspaceFile = WorkspaceFileIdentity & { path: string; content: string; bytes: number; sha256: string };
+export type WorkspaceUpload = WorkspaceFileIdentity & { path: string; name: string; bytes: number; sha256: string; source: 'user_upload' };
+
 export type PageSummary = {
   id: string;
   kind: 'home' | 'work';

@@ -16,6 +16,7 @@ The alpha candidate provides English and 简体中文 interface controls, a sepa
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.
+- Open **Materials** beside the message composer to upload and preview a text file, reuse an existing file, and add its path and observed version to your draft.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
 - Enable bounded local pulses: a context can continue from its retained history, and explicit computational connections can carry its results into related contexts.
 
@@ -68,6 +69,21 @@ Replace the placeholders with your provider's values. The endpoint is a complete
 If neither endpoint nor model is set, the workspace runs disconnected. Setting only one is a configuration error. Restart after changing provider configuration. Queued input from the ordinary workspace can be processed after connecting a model, so use a separate data directory when you want a fresh conversation.
 
 Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. Per Pulse also enforces a default **8 MiB maximum serialized request body** at the outbound Chat Completions boundary, configurable with `P_PULSE_MAX_REQUEST_BYTES`. This rejects oversized requests *before network send*, including those arising from long history, side computations, tool schemas or image parts. It never silently truncates the saved context; a blocked turn remains visible for review. This byte guard is **not** a context-token limit, provider bill cap, or solution to automatic long-history management. Provider compatibility must be verified separately.
+
+### Bring source material into a conversation
+
+Open **Materials**, choose a UTF-8 text file up to 1 MiB, and select **Upload
+file**. Inspect the preview, then **Add to draft**. Your existing text and page
+links stay in place. Tell Per Pulse what you want to do with the material and
+send the message when it is ready. Existing files can be reopened from the
+same dialog without uploading them again.
+
+Files belong to the shared native workspace and can be read from any page;
+conversation histories remain separate. The draft records the file path and
+the version you previewed. Uploading or previewing does not run the model, and
+adding a reference does not mean the model has read the file. With a configured
+provider, the existing read tools can open it when working on your request.
+Uploads create new files and do not grant model write permissions.
 
 ### Learn from a correction and inspect what changed
 

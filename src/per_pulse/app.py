@@ -17,8 +17,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.concurrency import run_in_threadpool
 
 from pulse_system.service.runtime import ServiceError
+from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES
 
 from . import __version__
 from .language import ResponseLanguage
@@ -189,9 +191,13 @@ def create_app(
                 if not same_origin and not dev_origin:
                     return secure_response(_error("origin_not_allowed", "Open Per Pulse from its local address.", 403))
             if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
-                if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json":
+                upload = request.method == "POST" and request.url.path == "/api/workspace/files"
+                media_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
+                if upload and media_type != "application/octet-stream":
+                    return secure_response(_error("file_body_required", "Send the file as application/octet-stream.", 415))
+                if not upload and media_type != "application/json":
                     return secure_response(_error("json_required", "Send this request as JSON.", 415))
-                if len(await request.body()) > 128 * 1024:
+                if not upload and len(await request.body()) > 128 * 1024:
                     return secure_response(_error("request_too_large", "This request is too large.", 413))
         return secure_response(await call_next(request))
 
@@ -206,6 +212,23 @@ def create_app(
     @app.exception_handler(ServiceError)
     async def service_error(_request: Request, error: ServiceError):
         return _error(error.error, error.detail, error.status)
+
+    @app.exception_handler(FileAccessError)
+    async def file_error(_request: Request, error: FileAccessError):
+        messages = {
+            "file_too_large": "Choose a text file no larger than 1 MiB.",
+            "text_files_only": "Choose a UTF-8 text file, such as Markdown, plain text or CSV.",
+            "credential_content_blocked": "This file appears to contain a credential. Remove it before sharing the file.",
+            "protected_or_invalid_path": "This file name or location cannot be opened here.",
+            "invalid_path": "This file location is invalid.",
+            "filename_only": "Choose a file name without folders.",
+            "file_changed_retry": "The file changed while it was being read. Open it again.",
+            "file_unavailable": "This file is no longer available.",
+            "path_unavailable": "This folder is no longer available.",
+            "not_a_single_regular_file": "This file cannot be opened here.",
+            "upload_failed_or_unconfirmed": "The upload could not be confirmed. Check the uploads folder before trying again.",
+        }
+        return _error(error.code, messages.get(error.code, "This file could not be opened."), error.status)
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request: Request, error: RequestValidationError):
@@ -230,6 +253,36 @@ def create_app(
     @app.get("/api/settings")
     def settings(request: Request):
         return pages(request).settings()
+
+    def file_service(request: Request) -> PageService:
+        service = pages(request)
+        service.require_file_identity(request.headers.get("x-per-pulse-world"),
+                                      request.headers.get("x-per-pulse-service-instance"))
+        return service
+
+    @app.get("/api/workspace/files")
+    def list_files(request: Request, path: str = ""):
+        service = file_service(request)
+        return service.file_response(service.files.list(path))
+
+    @app.get("/api/workspace/files/content")
+    def read_file(request: Request, path: str):
+        service = file_service(request)
+        return service.file_response(service.files.read(path))
+
+    @app.post("/api/workspace/files", status_code=201)
+    async def upload_file(request: Request, name: str):
+        service = file_service(request)
+        # Bound streamed bodies too; Content-Length is not an authority and
+        # must not turn an oversized upload into an unbounded allocation.
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_FILE_BYTES:
+                raise FileAccessError("file_too_large", 413)
+            data.extend(chunk)
+        return await run_in_threadpool(service.upload_file, name, bytes(data),
+                                      request.headers.get("x-per-pulse-world"),
+                                      request.headers.get("x-per-pulse-service-instance"))
 
     @app.patch("/api/settings")
     def update_settings(body: SettingsInput, request: Request):

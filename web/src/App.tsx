@@ -17,6 +17,7 @@ import { HomeContinuations } from './components/HomeContinuations';
 import { LearningDialog } from './components/LearningDialog';
 import { HistoryDialog } from './components/HistoryDialog';
 import { MessageSearchDialog } from './components/MessageSearchDialog';
+import { MaterialsDialog } from './components/MaterialsDialog';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 export default function App() {
@@ -73,8 +74,8 @@ export default function App() {
   }, [view?.page.kind, view?.page.title]);
 
   useEffect(() => {
-    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' ? null : previous);
-  }, [route.id, route.serial, workspaceId]);
+    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' ? null : previous);
+  }, [route.id, route.serial, workspaceId, bootstrap?.serviceInstanceId]);
 
   useEffect(() => () => window.clearTimeout(scrollTimer.current), [route.id]);
 
@@ -266,7 +267,7 @@ export default function App() {
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <PageArtifacts key={`artifacts-${route.id}`} view={view} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
-          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
+          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
     </div>
@@ -282,5 +283,16 @@ export default function App() {
     {modal?.kind === 'learning' ? <LearningDialog key={`${workspaceId}/${route.id}`} pageId={route.id} pageTitle={view?.page.title ?? t('dialogs.thisPage')} messages={view?.messages ?? []} close={closeModal} navigate={navigate} /> : null}
     {modal?.kind === 'history' ? <HistoryDialog key={`${workspaceId}/${route.id}`} pageId={route.id} beforeMessageId={modal.beforeMessageId} close={closeModal} navigate={navigate} /> : null}
     {modal?.kind === 'message-search' ? <MessageSearchDialog key={`${workspaceId}/${route.id}`} pageId={route.id} close={closeModal} navigate={navigate} /> : null}
+    {modal?.kind === 'materials' && bootstrap ? <MaterialsDialog key={`${workspaceId}/${bootstrap.serviceInstanceId}/${route.id}/${route.serial}`} identity={bootstrap} close={closeModal} add={file => {
+      if (file.workspaceId !== workspaceId || file.serviceInstanceId !== bootstrap.serviceInstanceId) return false;
+      const latest = draftsRef.current[draftKey] ?? readDraft(workspaceId, route.id);
+      const reference = t('materials.reference', { path: JSON.stringify(file.path), sha256: file.sha256 });
+      const text = latest.text + (latest.text ? '\n\n' : '') + reference;
+      if (text.length > 32_000) return false;
+      changeDraft({ ...latest, text });
+      setModal(null);
+      requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(text.length, text.length); });
+      return true;
+    }} /> : null}
   </div>;
 }
