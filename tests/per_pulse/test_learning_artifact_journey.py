@@ -136,9 +136,15 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
 
         # Before sharing, an unrelated Work cannot access the source correction.
         baseline = create_work(client, "Practice delivery", "BUILD_PRACTICE_ARTIFACT")
+        # A pending action may be visible before its owning turn finishes the
+        # WAITING_APPROVAL transition. UI controls honor canResolve; this
+        # native API journey must wait for the same actionable state rather
+        # than racing the exact-turn approval guard.
         baseline_pending = await_view(client, f"/api/pages/{baseline}/execution",
-                                       lambda x: bool(x["pendingActions"]), "baseline approval")
-        baseline_action = baseline_pending["pendingActions"][0]
+                                       lambda x: any(a["canResolve"] for a in x["pendingActions"]),
+                                       "baseline actionable approval")
+        baseline_action = next(a for a in baseline_pending["pendingActions"] if a["canResolve"])
+        assert baseline_action["turnId"] == baseline_pending["turnId"]
         assert baseline_action["arguments"]["path"] == "intake.txt"
         assert client.get(f"/api/pages/{baseline}/posture").json()["experiences"] == []
         assert not (tmp_path / "workspace" / "intake.txt").exists()
@@ -158,8 +164,10 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         assert len(exposed) == 1 and exposed[0]["id"] == record["id"]
         assert not exposed[0]["canEdit"] and "encounter" not in exposed[0]
         approved_pending = await_view(client, f"/api/pages/{work}/execution",
-                                      lambda x: bool(x["pendingActions"]), "learned-choice approval")
-        action = approved_pending["pendingActions"][0]
+                                      lambda x: any(a["canResolve"] for a in x["pendingActions"]),
+                                      "learned-choice actionable approval")
+        action = next(a for a in approved_pending["pendingActions"] if a["canResolve"])
+        assert action["turnId"] == approved_pending["turnId"]
         assert action["arguments"]["path"] == "practice.txt"
         assert action["arguments"]["content"] == EXPERIENCE
         assert not (tmp_path / "workspace" / "practice.txt").exists()
