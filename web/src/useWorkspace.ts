@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { messageFromLocation, pageFromLocation, pageHref, readNavigationState, savePosition } from './storage';
+import { mergeWorkspaceSnapshot } from './workspaceSnapshot';
 import type { Bootstrap, NavigationOrigin, PageView } from './types';
 
 type Route = { id: string; serial: number; origin?: NavigationOrigin; targetMessageId?: string; restoreFocus?: NavigationOrigin; canGoBack: boolean };
@@ -20,6 +21,7 @@ export function useWorkspace() {
   const loading = loadedRouteSerial !== route.serial;
   const versions = useRef<Record<string, number>>({});
   const requests = useRef<Record<string, number>>({});
+  const bootstrapRequests = useRef(0);
   const routeRef = useRef(route);
   routeRef.current = route;
 
@@ -41,9 +43,16 @@ export function useWorkspace() {
     return view;
   }, [applyView]);
 
-  const refreshBootstrap = useCallback(async () => {
-    const next = await api.bootstrap();
-    setBootstrap(next);
+  const refreshBootstrap = useCallback(async (signal?: AbortSignal, expected?: Pick<Bootstrap, 'workspaceId' | 'serviceInstanceId'>) => {
+    const request = ++bootstrapRequests.current;
+    const before = { ...versions.current };
+    const next = await api.bootstrap(signal);
+    if (!signal?.aborted && bootstrapRequests.current === request) {
+      if (expected && (next.workspaceId !== expected.workspaceId || next.serviceInstanceId !== expected.serviceInstanceId)) {
+        throw new Error('The workspace restarted or changed. Refresh updates to reconnect.');
+      }
+      setBootstrap(previous => mergeWorkspaceSnapshot(previous, next, before, versions.current));
+    }
     return next;
   }, []);
 
@@ -96,11 +105,11 @@ export function useWorkspace() {
 
   useEffect(() => {
     const controller = new AbortController();
-    api.bootstrap(controller.signal).then(setBootstrap).catch(problem => {
+    refreshBootstrap(controller.signal).catch(problem => {
       if (!controller.signal.aborted) setError(problem instanceof Error ? problem.message : 'The workspace could not be loaded.');
     });
     return () => controller.abort();
-  }, []);
+  }, [refreshBootstrap]);
 
   useEffect(() => {
     if (!bootstrap?.workspaceId) return;
@@ -119,19 +128,31 @@ export function useWorkspace() {
   const cachedView = views[route.id];
   const activeView = cachedView && bootstrap ? { ...cachedView, provider: bootstrap.provider } : cachedView;
   const shouldPoll = activeView?.provider.configured && ['queued', 'working', 'needs_attention'].includes(activeView.page.status);
+  const shouldPollWorkspace = bootstrap?.provider.configured && bootstrap.pages.some(page =>
+    page.id !== route.id && ['queued', 'working', 'needs_attention'].includes(page.status));
   useEffect(() => {
-    if (!shouldPoll) return;
+    if (!shouldPoll && !shouldPollWorkspace) return;
     let pending = false;
     let cancelled = false;
+    const controller = new AbortController();
     const timer = window.setInterval(() => {
       if (pending) return;
       pending = true;
-      refreshPage(route.id).catch(problem => {
-        if (!cancelled) setSyncError(problem instanceof Error ? problem.message : 'Updates could not be checked. Please try again.');
+      // Unopened Work still finishes. Observe summaries without loading its
+      // conversation, changing the current route, or admitting model work.
+      Promise.allSettled([
+        ...(shouldPoll ? [refreshPage(route.id, controller.signal)] : []),
+        ...(shouldPollWorkspace ? [refreshBootstrap(controller.signal, bootstrapRef.current ?? undefined)] : []),
+      ]).then(results => {
+        if (cancelled) return;
+        const failure = results.find(result => result.status === 'rejected');
+        setSyncError(failure?.status === 'rejected'
+          ? failure.reason instanceof Error ? failure.reason.message : 'Updates could not be checked. Please try again.'
+          : '');
       }).finally(() => { pending = false; });
     }, 2000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [route.id, shouldPoll, refreshPage]);
+    return () => { cancelled = true; controller.abort(); window.clearInterval(timer); };
+  }, [route.id, shouldPoll, shouldPollWorkspace, refreshPage, refreshBootstrap]);
 
   return { bootstrap, route, view: activeView, loading, error, setError, syncError, isRefreshing, navigate, applyView, refreshPage, refreshBootstrap, refreshWorkspace };
 }

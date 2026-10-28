@@ -13,6 +13,7 @@ The alpha candidate provides English and 简体中文 interface controls, a sepa
 - Create a session page from Home or another page, with a focused opening instruction.
 - Insert lightweight page links directly into a message and reuse a page from several conversations.
 - Continue in the linked page and return to the source while retaining your unsent draft and reading position.
+- See a running page finish in the sidebar while you keep writing in another page.
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.

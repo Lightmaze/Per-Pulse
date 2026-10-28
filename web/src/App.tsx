@@ -42,6 +42,7 @@ export default function App() {
   const main = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const restored = useRef('');
+  const interacted = useRef('');
   const scrollTimer = useRef<number | undefined>(undefined);
   const composerSelection = useRef({ start: 0, end: 0 });
   const workspaceId = bootstrap?.workspaceId;
@@ -51,6 +52,9 @@ export default function App() {
   const draft = workspaceId ? drafts[draftKey] ?? readDraft(workspaceId, route.id) : EMPTY_DRAFT;
   const sending = sendingPages[draftKey] === true;
   const sendError = sendErrors[draftKey] ?? '';
+  const recordInteraction = () => {
+    if (workspaceId) interacted.current = `${workspaceId}-${route.id}-${route.serial}`;
+  };
 
   const navigate: Navigate = useCallback((id: string, origin?: NavigationOrigin, targetMessageId?: string) => {
     window.clearTimeout(scrollTimer.current);
@@ -64,11 +68,12 @@ export default function App() {
   const closeModal = () => { if (!busy) { setModal(null); setModalError(''); } };
   const changeDraft = useCallback((next: Draft) => {
     if (!workspaceId) return;
+    interacted.current = `${workspaceId}-${route.id}-${route.serial}`;
     const updated = { ...draftsRef.current, [draftKey]: next };
     draftsRef.current = updated;
     setDrafts(updated);
     saveDraft(workspaceId, route.id, next);
-  }, [route.id, workspaceId, draftKey]);
+  }, [route.id, route.serial, workspaceId, draftKey]);
 
   useEffect(() => {
     document.title = view?.page.kind === 'work' ? `${view.page.title} · Per Pulse` : 'Per Pulse';
@@ -86,9 +91,16 @@ export default function App() {
     if (restored.current === key) return;
     const frame = requestAnimationFrame(() => {
       const target = route.targetMessageId ? document.getElementById(`message-${route.targetMessageId}`) : null;
+      setSourceNotice(route.targetMessageId && !target && !route.restoreFocus ? t('app.sourceOutside') : '');
+      // A cached page can be edited while its fresh view is loading. Once the
+      // user starts writing or opens a dialog, delayed route restoration must
+      // not move their focus or scroll back to the earlier reading position.
+      if (interacted.current === key || document.activeElement?.closest('dialog[open]')) {
+        restored.current = key;
+        return;
+      }
       if (target && !route.restoreFocus) target.scrollIntoView({ block: 'center' });
       else if (main.current) main.current.scrollTop = readPosition(workspaceId, route.id);
-      setSourceNotice(route.targetMessageId && !target && !route.restoreFocus ? t('app.sourceOutside') : '');
       const origin = route.restoreFocus;
       const originContainer = origin?.messageId ? document.getElementById(`message-${origin.messageId}`) : main.current;
       const originLink = origin?.referenceId ? originContainer?.querySelector<HTMLElement>(`[data-reference-id="${CSS.escape(origin.referenceId)}"]`) : null;
@@ -244,7 +256,8 @@ export default function App() {
         <button className="text-button pulse-activity-trigger" onClick={() => { setModal(null); setSidebarOpen(false); setPulseOpen(true); }}>{t('pulse.title')}</button>
         {(route.id !== 'home' || Boolean(route.origin)) ? <button className="text-button return-to-thread" onClick={goBack} aria-label={t('app.back')}><Icon name="back" size={16} /><span className="return-label-long">{t('app.back')}</span><span className="return-label-short">{t('app.backShort')}</span></button> : null}
       </header>
-      <main className="workspace-main" ref={main} onScroll={() => {
+      <main className="workspace-main" ref={main} onPointerDownCapture={recordInteraction}
+        onKeyDownCapture={recordInteraction} onWheelCapture={recordInteraction} onScroll={() => {
         if (!workspaceId) return;
         window.clearTimeout(scrollTimer.current);
         const id = route.id;
