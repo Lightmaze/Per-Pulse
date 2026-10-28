@@ -23,6 +23,26 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _failed_arm_admissions(trial_dir: Path) -> dict:
+    """Recover *attempted* adapter admissions after a failed or interrupted arm.
+
+    A durable entry is written before transport. It cannot establish receipt,
+    provider-side retries, token usage, or a bill. A truncated log is unknown,
+    not silently counted as zero.
+    """
+    path = trial_dir / "provider-admissions.jsonl"
+    if not path.is_file():
+        return {"status": "unavailable", "attempted_requests": None}
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            rows = [json.loads(line) for line in stream]
+        if any(not isinstance(row, dict) or "audit" not in row or "request" not in row for row in rows):
+            raise ValueError("invalid admission row")
+    except (OSError, UnicodeError, ValueError):
+        return {"status": "incomplete_or_unreadable", "attempted_requests": None}
+    return {"status": "pre_transport_attempts_only", "attempted_requests": len(rows)}
+
+
 def _positive_integer(value: int, label: str, *, maximum: int) -> None:
     if type(value) is not int or not 1 <= value <= maximum:
         raise ValueError(f"{label} must be an integer between 1 and {maximum}")
@@ -109,7 +129,8 @@ def run_study(
             # Keep a resumable forensic pointer, not a traceback or provider
             # exception text: failures can include private request material.
             result.update(status="stopped", stop_reason="trial_runner_exception",
-                          failed_order=order, exception_type=type(exc).__name__)
+                          failed_order=order, exception_type=type(exc).__name__,
+                          failed_arm_admissions=_failed_arm_admissions(trial_dir))
             save()
             break
         arm = {
