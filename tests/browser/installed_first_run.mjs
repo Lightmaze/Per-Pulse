@@ -98,10 +98,13 @@ try {
   const delayedResponse = new Promise(resolve => { releaseOriginal = resolve; });
   let signalHeld;
   const heldRequest = new Promise(resolve => { signalHeld = resolve; });
+  let signalForwarded;
+  const forwardedRequest = new Promise(resolve => { signalForwarded = resolve; });
   await page.route(delayedPattern, async route => {
     signalHeld();
     await delayedResponse;
     await route.continue();
+    signalForwarded();
   });
   await page.locator('.composer textarea').fill('Saved in the first Work after visiting another Work.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -118,6 +121,9 @@ try {
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('The second Work is independently writable.', { exact: true }).waitFor();
   releaseOriginal();
+  // Do not unroute while Playwright still owns the paused route. Otherwise
+  // the handler can race teardown and throw "Route is already handled".
+  await forwardedRequest;
   await page.unroute(delayedPattern);
   await page.getByRole('link', { name: 'A real disconnected Work', exact: true }).click();
   await page.getByText('Saved in the first Work after visiting another Work.', { exact: true }).waitFor();
