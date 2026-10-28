@@ -106,6 +106,7 @@ def test_cold_image_refuses_live_world_and_existing_restore_destination(tmp_path
 
 def test_cold_image_carries_actual_per_pulse_file_checkpoint_evidence(tmp_path, monkeypatch, capsys):
     from test_execution import _factory, _new_page, _wait
+    from pulse_harness.adapters.workspace import WorkspaceAuthorityError
 
     home, restored, archive = tmp_path / "source", tmp_path / "carried", tmp_path / "checkpoint.zip"
     workspace = home / "workspace"
@@ -131,7 +132,9 @@ def test_cold_image_carries_actual_per_pulse_file_checkpoint_evidence(tmp_path, 
                   "SELECT count(*) FROM harness_turns WHERE state IN ('running','uncertain')"
               ).fetchone()[0] == 0)
         artifact = client.get(f"/api/pages/{page_id}").json()["artifacts"][0]
-        checkpoint_root = client.app.state.pages.runtime.kernel_service.checkpoint_root
+        kernel = client.app.state.pages.runtime.kernel_service
+        action_scope = kernel.store.action_scope_for_session(execution._scope(page_id), action["actionId"])
+        checkpoint_root = kernel.checkpoint_root
         assert checkpoint_root == home / "workspace-checkpoints"
     retained = {p.relative_to(home).as_posix(): p.read_bytes() for p in checkpoint_root.rglob("*") if p.is_file()}
     assert retained and any(artifact["checkpointId"] in name for name in retained)
@@ -148,11 +151,19 @@ def test_cold_image_carries_actual_per_pulse_file_checkpoint_evidence(tmp_path, 
     for name, content in retained.items():
         assert (restored / name).read_bytes() == content
         assert (home / name).read_bytes() == content
-    with TestClient(create_app(restored, model_factory=None), base_url="http://localhost") as client:
+    with TestClient(create_app(restored, model_factory=None, allow_workspace_actions=True), base_url="http://localhost") as client:
         carried = client.get(f"/api/pages/{page_id}").json()["artifacts"][0]
         assert carried["checkpointId"] == artifact["checkpointId"]
-        assert not client.app.state.pages.runtime.kernel_service._runtimes
+        kernel = client.app.state.pages.runtime.kernel_service
+        assert not kernel._runtimes
+        provider = kernel._provider()
+        # Copying the checkpoint preserves its evidence, but never grants the
+        # old action authority over either the new root or the original home.
+        with pytest.raises(WorkspaceAuthorityError) as refused:
+            provider.restore(action_scope, artifact["checkpointId"])
+        assert refused.value.code == "workspace_authority_mismatch"
         assert (restored / "workspace/note.txt").read_bytes() == revised
+        assert (workspace / "note.txt").read_bytes() == revised
 
 
 def test_cold_image_refuses_unbound_upstream_archive(tmp_path, monkeypatch, capsys):
