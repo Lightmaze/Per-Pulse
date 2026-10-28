@@ -31,6 +31,7 @@ export function MaterialsDialog({ identity, close, add }: {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [stale, setStale] = useState(false);
+  const [draftFull, setDraftFull] = useState(false);
   const request = useRef<{ sequence: number; controller: AbortController | null; busy: boolean }>({ sequence: 0, controller: null, busy: false });
   const input = useRef<HTMLInputElement>(null);
   const previewHeading = useRef<HTMLHeadingElement>(null);
@@ -117,6 +118,7 @@ export function MaterialsDialog({ identity, close, add }: {
     // Opening a source should take keyboard and phone users to its content,
     // rather than leaving a successful preview below the upload controls.
     if (preview) {
+      setDraftFull(false);
       previewHeading.current?.focus({ preventScroll: true });
       previewHeading.current?.scrollIntoView({ block: 'start' });
     }
@@ -152,12 +154,15 @@ export function MaterialsDialog({ identity, close, add }: {
     </section>
     {preview ? <section className="material-preview" aria-label={t('materials.preview')}>
       <h3 ref={previewHeading} tabIndex={-1}>{preview.path.split('/').at(-1)}</h3>
-      <TextDocument key={`${preview.path}/${preview.sha256}`} path={preview.path} content={preview.content.slice(0, PREVIEW_CHARS)} />
+      <TextDocument key={`${preview.path}/${preview.sha256}`} path={preview.path} content={preview.content.slice(0, PREVIEW_CHARS)} truncated={preview.content.length > PREVIEW_CHARS} />
       {preview.content.length > PREVIEW_CHARS ? <p className="material-hint">{t('materials.previewLimited')}</p> : null}
       <details><summary>{t('materials.details')}</summary><p>{preview.path}</p><p>SHA-256: {preview.sha256}</p></details>
-      <p className="material-hint">{t('materials.draftHint')}</p>
-      <div className="dialog-actions"><button className="primary-button" disabled={disabled || Boolean(selected)} onClick={() => { if (!add(preview)) setError(t('materials.draftFull')); }}>{t('materials.add')}</button></div>
     </section> : null}
     </div>
+    {preview ? <div className="material-footer">
+      <p className="material-hint">{t('materials.draftHint')}</p>
+      <button className="primary-button" disabled={disabled || Boolean(selected)} onClick={() => { if (!add(preview)) setDraftFull(true); }}>{t('materials.add')}</button>
+      {draftFull ? <p className="form-error" role="alert">{t('materials.draftFull')}</p> : null}
+    </div> : null}
   </Dialog>;
 }

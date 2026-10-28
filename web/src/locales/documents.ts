@@ -6,6 +6,13 @@ export const documentsEnglish = {
   'document.image': 'Image: {label}',
   'document.unnamedImage': 'no description',
   'document.table': 'Table in document',
+  'document.firstRowHeadings': 'First row contains headings',
+  'document.column': 'Column {number}',
+  'document.tableSize': '{rows} data rows · {columns} columns',
+  'document.tablePartial': 'Partial preview: {rows} complete data rows · {columns} columns. More content is in the file.',
+  'document.tableInvalid': 'The rows or quotes do not form a regular table. The source text is shown below.',
+  'document.tableTooWide': 'This table has more than 64 columns. The source text is shown below.',
+  'document.tableIncomplete': 'No complete table row is available in this preview. The source text is shown below.',
   'document.unavailable': 'The reading view could not be opened. The source text is available below.',
 };
 
@@ -17,5 +24,12 @@ export const documentsChinese: Record<keyof typeof documentsEnglish, string> = {
   'document.image': '图片：{label}',
   'document.unnamedImage': '没有说明',
   'document.table': '文档中的表格',
+  'document.firstRowHeadings': '首行是列名',
+  'document.column': '第 {number} 列',
+  'document.tableSize': '{rows} 行数据 · {columns} 列',
+  'document.tablePartial': '部分预览：{rows} 行完整数据 · {columns} 列。文件中还有更多内容。',
+  'document.tableInvalid': '行或引号无法组成规则表格，下方显示原文。',
+  'document.tableTooWide': '此表格超过 64 列，下方显示原文。',
+  'document.tableIncomplete': '此预览中没有完整的表格行，下方显示原文。',
   'document.unavailable': '无法打开阅读视图，下方仍可查看原文。',
 };

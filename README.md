@@ -110,6 +110,12 @@ Uploads create new files and do not grant model write permissions.
 Markdown materials and file results have **Read** and **Source** views. Headings,
 lists, tables and code are readable while the original text remains available.
 Images appear as descriptions; links to external sources open only when chosen.
+CSV and TSV files also have a table view. Values remain text, including leading
+zeros and empty cells. Use **First row contains headings** to match the file.
+The view shows up to 200 data rows and 64 columns, with keyboard scrolling for
+wide tables. A partial preview is labelled and omits an unfinished trailing
+row; irregular quotes, unequal rows or wider files fall back to source text.
+The **Add to draft** action stays visible while reading a long material.
 
 ### Keep concrete examples and learn from corrections
 

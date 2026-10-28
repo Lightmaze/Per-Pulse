@@ -69,7 +69,7 @@ export function PageArtifacts({ view }: { view: PageView }) {
         {loading ? <p role="status">{t('artifacts.reading')}</p> : null}
         {error ? <p role="alert">{errorText(error)}</p> : null}
         {result?.state === 'current' ? <>
-          <TextDocument key={artifact.id} path={artifact.path} content={result.content ?? ''} />
+          <TextDocument key={artifact.id} path={artifact.path} content={result.content ?? ''} truncated={result.truncated} />
           {result.truncated ? <p>{t('artifacts.limited')}</p> : null}
           {result.redacted ? <p>{t('artifacts.redacted')}</p> : null}
           <p className="artifact-provenance">{t('artifacts.provenance', { time: new Date(artifact.createdAt).toLocaleString() })}</p>
