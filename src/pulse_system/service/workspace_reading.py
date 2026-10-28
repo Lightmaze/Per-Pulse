@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from typing import Any
 
 from pulse_harness.adapters.workspace import (
@@ -30,15 +31,18 @@ MAX_RECENT_ACTIONS = 128
 SCHEMA = {
     "type": "object",
     "properties": {
-        "op": {"type": "string", "enum": ["open", "continue", "recent"]},
+        "op": {"type": "string", "enum": ["open", "continue", "recent", "find"]},
         "path": {"type": "string", "maxLength": 2048,
-                 "description": "Workspace-relative UTF-8 text path, for open only."},
+                 "description": "Workspace-relative UTF-8 text path, for open or find."},
         "expected_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$",
-                            "description": "Optional original SHA-256, for open only; refuse changed bytes before exposing text."},
+                            "description": "Optional original SHA-256, for open/find; refuse changed bytes before exposing text."},
         "receipt_id": {"type": "string", "maxLength": 256,
                        "description": "Exact saved receipt_id for continue; never invent offsets."},
         "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_CHARS},
         "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+        "query": {"type": "string", "minLength": 2, "maxLength": 120},
+        "case_sensitive": {"type": "boolean"},
+        "max_matches": {"type": "integer", "minimum": 1, "maximum": 8},
     },
     "required": ["op"], "additionalProperties": False,
 }
@@ -53,8 +57,11 @@ def descriptor() -> ToolDescriptor:
         "saved passage, refusing changed source content. recent(limit?) finds the "
         "latest exposed positions in THIS logical session, including after reopen, "
         "without opening files. Use an older receipt to reread its following page; "
-        "use open to deliberately start a changed version. A passage receipt is "
-        "not proof of understanding or a claim that earlier pages were read. "
+        "use open to deliberately start a changed version. "
+        "find(path, query, expected_digest?, max_matches?) locates exact literal "
+        "phrases with bounded excerpts and source coordinates in the redacted view; "
+        "it is not a semantic search or proof of reading the whole file. "
+        "A passage receipt is not proof of understanding or a claim that earlier pages were read. "
         "No automatic next step, summary, file write, or task is created. "
         "Only bounded UTF-8 files in the configured shared workspace are supported.",
         mutable=False, requires_approval=False, capability="workspace.read",
@@ -76,6 +83,7 @@ def validate(args: Mapping[str, Any]) -> str:
         "open": {"op", "path", "max_chars", "expected_digest"},
         "continue": {"op", "receipt_id", "max_chars"},
         "recent": {"op", "limit"},
+        "find": {"op", "path", "query", "expected_digest", "max_matches", "case_sensitive"},
     }
     if not isinstance(op, str) or op not in allowed or set(args) - allowed[op]:
         raise ProviderProtocolError("reading operation is invalid", code="reading_arguments_invalid")
@@ -83,13 +91,22 @@ def validate(args: Mapping[str, Any]) -> str:
         digest = args["expected_digest"]
         if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ProviderProtocolError("reading source digest is invalid", code="reading_arguments_invalid")
-    field = "path" if op == "open" else "receipt_id" if op == "continue" else None
+    field = "path" if op in ("open", "find") else "receipt_id" if op == "continue" else None
     if field:
         value = args.get(field)
         maximum = 2048 if field == "path" else 256
         if not isinstance(value, str) or not 1 <= len(value) <= maximum:
             raise ProviderProtocolError("reading reference is invalid", code="reading_arguments_invalid")
-        _integer(args.get("max_chars", 4000), 1, MAX_CHARS)
+        if op == "find":
+            query = args.get("query")
+            if (not isinstance(query, str) or not 2 <= len(query) <= 120
+                    or not query.strip() or any(ord(char) < 32 for char in query)):
+                raise ProviderProtocolError("reading query is invalid", code="reading_arguments_invalid")
+            if type(args.get("case_sensitive", False)) is not bool:
+                raise ProviderProtocolError("reading case sensitivity is invalid", code="reading_arguments_invalid")
+            _integer(args.get("max_matches", 5), 1, 8)
+        else:
+            _integer(args.get("max_chars", 4000), 1, MAX_CHARS)
     else:
         _integer(args.get("limit", 5), 1, 8)
     return op
@@ -213,7 +230,7 @@ def execute(
     snapshot = provider._snapshot(provider._safe_target(path, allow_missing=False))
     if not snapshot.exists:
         raise WorkspaceAdapterError("reading source disappeared", code="workspace_file_not_found")
-    if op == "open" and call.arguments.get("expected_digest", snapshot.digest) != snapshot.digest:
+    if op in ("open", "find") and call.arguments.get("expected_digest", snapshot.digest) != snapshot.digest:
         raise WorkspaceDigestConflict("reading source differs from the supplied version", code="reading_source_changed")
     cancellation.raise_if_cancelled()
     text, redacted = _view(snapshot.text)
@@ -226,6 +243,42 @@ def execute(
         raise WorkspaceDigestConflict(
             "reading source or text view changed; use open to inspect the new version",
             code="reading_source_changed")
+    if op == "find":
+        query = call.arguments["query"]
+        maximum = call.arguments.get("max_matches", 5)
+        flags = 0 if call.arguments.get("case_sensitive", False) else re.IGNORECASE
+        result = {
+            "kind": "pulse.reading-find.v1", "source": source,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "scope": "current_action_source", "observation_only": True,
+            "redacted": redacted, "searched_entire_redacted_view": True,
+            "coordinates": "unicode_characters_in_redacted_view",
+            "matches": [], "more_matches": False,
+        }
+        limit = provider.store.max_payload_bytes // 2
+        for found in re.finditer(re.escape(query), text, flags=flags):
+            cancellation.raise_if_cancelled()
+            if len(result["matches"]) >= maximum:
+                result["more_matches"] = True
+                break
+            left = max(0, found.start() - 72)
+            right = min(len(text), found.end() + 96)
+            excerpt, clipped = _view(text[left:right])
+            match = {
+                "start_char": found.start(), "end_char": found.end(),
+                "excerpt_start_char": left, "excerpt": excerpt,
+                "excerpt_redacted": clipped,
+            }
+            result["matches"].append(match)
+            if _size(result) > limit:
+                result["matches"].pop()
+                result["more_matches"] = True
+                break
+        if _size(result) > limit:
+            raise ProviderProtocolError("session allowance cannot fit reading search evidence",
+                                        code="reading_payload_too_small")
+        cancellation.raise_if_cancelled()
+        return result
     if type(offset) is not int or not 0 <= offset <= len(text):
         raise ScopeConflict("saved reading position is invalid")
     end = min(len(text), offset + call.arguments.get("max_chars", 4000))
