@@ -236,3 +236,43 @@ def test_invalid_bounds_are_rejected_before_provider_discovery(tmp_path, kwargs)
     with pytest.raises(ValueError):
         run_ordinary_transfer(tmp_path / "trial", **kwargs)
     assert not (tmp_path / "trial").exists()
+
+
+def test_two_independent_native_worlds_make_separately_blinded_fixture_packets(tmp_path, monkeypatch):
+    """Run the full World/Kernel/SQLite transfer in each arm, not only a mocked coordinator.
+
+    The HTTP model is intentionally synthetic. Separate factory state by
+    durable World identity so each new trial must independently capture its
+    own attributed experience. This is NOT real-provider learning evidence.
+    """
+    from per_pulse.posture_study import run_study
+
+    per_world = {}
+    requests_by_world = {}
+
+    def model_factory(scope):
+        world_id = scope.world_id
+        if world_id not in per_world:
+            captured = requests_by_world.setdefault(world_id, [])
+            per_world[world_id] = fixture_factory(monkeypatch, captured)
+        return per_world[world_id](scope)
+
+    root = tmp_path / "paired-native-worlds"
+    result = run_study(root, model_factory=model_factory,
+                       training_calls=8, trial_calls=4, stage_timeout=20,
+                       allow_fixture=True)
+    assert result["status"] == "review_packets_ready", result
+    assert result["origin"] == "synthetic_fixture"
+    assert len(result["arms"]) == 2
+    assert len({json.loads((root / arm["trial_directory"] /
+                            "ordinary-transfer.json").read_text())["world_id"]
+                for arm in result["arms"]}) == 2
+    for arm in result["arms"]:
+        assert arm["status"] == "completed"
+        assert arm["capture_status"] == "native_lesson_admitted"
+        assert arm["audit_status"] == "verified" and not arm["audit_errors"]
+        assert arm["review_items"] == 4
+        assert (root / arm["reviewer_only_directory"] / "review-packet.json").is_file()
+        assert (root / arm["blind_review_directory"] / "private" / "condition-key.json").is_file()
+        assert audit_ordinary_transfer(root / arm["trial_directory"])["status"] == "verified"
+    assert result["model_quality_reviewed"] is False
