@@ -146,7 +146,7 @@ class PageLearning:
                 raise self._invalid(error) from error
             return {"experience": self._public(updated, record["context_id"])}
 
-    def feedback(self, page_id, experience_id, revision, verdict, evidence):
+    def feedback(self, page_id, experience_id, revision, verdict, evidence, *, result_message_id=None):
         """Let a receiving Work report an outcome of shared guidance.
 
         Editing and sharing remain source-Work-only. A recipient can only rate
@@ -166,11 +166,25 @@ class PageLearning:
                     or not local and (record["scope"] != "subject" or not record["active"])):
                 raise PageError("experience_not_found",
                                 "This lesson is not available for feedback from this page.", 404)
+            source = {"kind": "operator_report", "page_id": page_id,
+                      "relation": "source" if local else "shared_recipient"}
+            if result_message_id is not None:
+                from pulse_system.service.native_posture import capture_result_anchor
+
+                # Check the complete historical scope, including sources outside
+                # the recent window. Never accept a foreign-page or queued input
+                # as an outcome, and do not copy result text into the journal.
+                self.pages._check_message(page_id, result_message_id)
+                try:
+                    source.update(capture_result_anchor(
+                        self.pages.runtime, self._subject(page_id), context_id, result_message_id,
+                    ))
+                except ScopeConflict as error:
+                    raise PageError("invalid_experience_source", str(error), 422) from error
             try:
                 updated = memory.record_feedback(
                     experience_id, expected_revision=revision, verdict=verdict, evidence=evidence,
-                    source={"kind": "operator_report", "page_id": page_id,
-                            "relation": "source" if local else "shared_recipient"},
+                    source=source,
                 )
             except (ValueError, RedactionRequired) as error:
                 raise self._invalid(error) from error

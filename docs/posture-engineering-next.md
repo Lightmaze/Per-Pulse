@@ -175,3 +175,27 @@ reporting Work" link for outcomes described in receiving Works. Navigating
 back to the actual outcome does not duplicate the receiving transcript; the
 existing per-Work navigation and draft restoration are reused. This source
 link is not exported into the receiving Work's shared material packet.
+
+### Link a report to the actual completed result
+
+The feedback editor now offers an optional result selector from the reporting
+page's loaded, completed replies. Nothing is selected automatically. A report
+without an anchor remains a valid described observation. The source history's
+**View reported result** link opens the exact native message, even after it
+falls outside the latest 500 messages, with the existing source/return and
+draft restoration behavior. Earlier page-only reports retain **View reporting
+Work**. Explicit test-provider results remain labeled as test results.
+
+The service validates the result against the same settled native Kernel-turn
+provenance used for capturing encounters. It records IDs, the UTF-8 content
+digest and evidence class without copying the receiving conversation into the
+source. This is still an operator report, not an automatic causal attribution
+or proof of real-provider learning. New interface text is English, including
+fallback text in the existing Chinese catalogue, per the repository's authoring
+rules. Full real-provider trials and independent quality review remain separate.
+
+The Lessons dialog is also scoped by World and page. Browser Back during a
+source-page write cannot repaint the receiving Work with the private source
+response. Refreshing after a concurrent revision preserves the pending report
+instead of discarding its text; the retry uses the refreshed version and still
+does not automatically repeat a failed mutation.

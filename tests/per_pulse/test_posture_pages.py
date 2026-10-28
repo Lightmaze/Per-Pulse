@@ -6,6 +6,9 @@ These checks establish plumbing and provenance, not learned model capability.
 from __future__ import annotations
 
 import json
+import hashlib
+
+import pytest
 
 from test_pages import client_for, http_factory, new_page, send, wait_for
 
@@ -319,3 +322,93 @@ def test_receiving_work_can_report_shared_lesson_outcome_without_importing_priva
         owner = client.get(f"/api/pages/{source_work}/posture").json()["experiences"][0]
         assert owner["revision"] == 4 and not owner["active"]
         assert owner["feedback"][-1]["source"]["page_id"] == receiving_work
+
+
+@pytest.mark.parametrize("from_source", [False, True])
+def test_outcome_report_links_a_native_result_without_copying_it(tmp_path, monkeypatch, from_source):
+    """An explicit result anchor survives restart and the recent-history window."""
+    with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
+        _, original, correction = observed_pair(client)
+        saved = client.post("/api/pages/home/posture/experiences", json=lesson(
+            original, correction, scope="subject",
+        )).json()["experience"]
+        report_page = "home" if from_source else new_page(client, title="Later result")["page"]["id"]
+        result_view = wait_for(client, report_page, lambda v: any(m["role"] == "assistant" for m in v["messages"]))
+        result = next(m for m in result_view["messages"] if m["role"] == "assistant")
+        endpoint = f"/api/pages/{report_page}/posture/experiences/{saved['id']}/feedback"
+        response = client.post(endpoint, json={
+            "expectedRevision": 1, "verdict": "useful", "evidence": "The first interaction was useful.",
+            "resultMessageId": result["id"],
+        })
+        assert response.status_code == 200, response.text
+        report = client.get("/api/pages/home/posture").json()["experiences"][0]["feedback"][-1]
+        assert report["source"]["result_message_id"] == result["id"]
+        assert report["source"]["result_content_sha256"] == hashlib.sha256(result["content"].encode()).hexdigest()
+        assert report["source"]["result_evidence_class"] == "TEST_DOUBLE"
+        assert report["source"]["kind"] == "operator_report"
+        assert report["source"]["page_id"] == report_page
+        assert report["source"]["relation"] == ("source" if from_source else "shared_recipient")
+        assert result["content"] not in json.dumps(report)
+        if not from_source:
+            assert all(key not in response.json()["experience"] for key in ("source", "encounter", "feedback"))
+        # The same optimistic revision check still applies to anchored reports.
+        assert client.post(endpoint, json={
+            "expectedRevision": 1, "verdict": "harmful", "evidence": "A stale report.",
+            "resultMessageId": result["id"],
+        }).status_code == 409
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        for _ in range(501):
+            send(client, report_page, "Explicit queued history fixture.")
+        recent = client.get(f"/api/pages/{report_page}").json()
+        assert all(m["id"] != result["id"] for m in recent["messages"])
+        owner = client.get("/api/pages/home/posture").json()["experiences"][0]
+        assert owner["feedback"][-1] == report
+        anchored = client.get(f"/api/pages/{report_page}", params={"sourceMessageId": result["id"]}).json()
+        assert anchored["earlierSourceMessageId"] == result["id"]
+        assert anchored["messages"][0]["content"] == result["content"]
+        assert len(anchored["messages"]) == 501
+        # Submitting an old result also resolves against durable history, not
+        # just the most recent messages supplied to the current browser.
+        older = client.post(endpoint, json={
+            "expectedRevision": 2, "verdict": "harmful", "evidence": "The later review found a problem.",
+            "resultMessageId": result["id"],
+        })
+        assert older.status_code == 200 and not older.json()["experience"]["active"]
+
+
+def test_invalid_outcome_anchors_leave_the_lesson_unchanged(tmp_path, monkeypatch):
+    with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
+        request, original, correction = observed_pair(client)
+        saved = client.post("/api/pages/home/posture/experiences", json=lesson(
+            original, correction, scope="subject",
+        )).json()["experience"]
+        page_id = new_page(client, title="Receiving Work")["page"]["id"]
+        view = wait_for(client, page_id, lambda v: any(m["role"] == "assistant" for m in v["messages"]))
+        result_id = next(m["id"] for m in view["messages"] if m["role"] == "assistant")
+        endpoint = f"/api/pages/{page_id}/posture/experiences/{saved['id']}/feedback"
+
+        def submit(result_id):
+            return client.post(endpoint, json={
+                "expectedRevision": 1, "verdict": "harmful", "evidence": "A reported problem.",
+                "resultMessageId": result_id,
+            })
+
+        for invalid in ("not-a-real-message", original, request):
+            assert submit(invalid).status_code == 404
+        local_input = next(m["id"] for m in view["messages"] if m["role"] == "user")
+        assert submit(local_input).status_code == 422
+        for invalid in ("", "x" * 161, {}, 42, False):
+            assert submit(invalid).status_code == 422
+
+        # Even a same-page assistant event must have a completed accepted native
+        # turn. Simulate corrupt/incomplete persisted provenance, then restore it.
+        storage = client.app.state.pages.runtime.storage
+        with storage._lock:
+            storage._conn.execute("UPDATE harness_turns SET prompt_accepted=0 WHERE result_event_id=?", (result_id,))
+            storage._conn.commit()
+        assert submit(result_id).status_code == 422
+        with storage._lock:
+            storage._conn.execute("UPDATE harness_turns SET prompt_accepted=1 WHERE result_event_id=?", (result_id,))
+            storage._conn.commit()
+        current = client.get("/api/pages/home/posture").json()["experiences"][0]
+        assert current == saved, "Rejected anchors must not pause or revise the lesson."

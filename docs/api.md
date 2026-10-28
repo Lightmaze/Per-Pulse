@@ -97,6 +97,41 @@ Scope browser drafts, scroll positions, and navigation history by `workspaceId`
 as well as page ID. Ordinary and example workspaces have distinct World IDs,
 even when they use the same server origin and the shared page ID `home`.
 
+## Report an outcome of a lesson
+
+`POST /api/pages/{page_id}/posture/experiences/{experience_id}/feedback`
+
+```json
+{
+  "expectedRevision": 2,
+  "verdict": "useful",
+  "evidence": "The first interaction let me finish the task without optional setup.",
+  "resultMessageId": "<completed-native-result-in-this-page>"
+}
+```
+
+`resultMessageId` is optional; omit it or send `null` for an observation with
+no linked result. A selected message must be a settled native assistant result
+in the reporting page's World, context and committed subject lineage, backed
+by its accepted, settled Kernel turn. A missing or foreign-page message gives
+404; a user input or a result without completed native provenance gives 422.
+These failures do not change the lesson. Old results outside the most recent
+500 messages remain valid. Stale `expectedRevision` gives 409.
+
+The source page may report its own lesson. Another page may report only an
+active, explicitly shared lesson of the same subject. Useful feedback leaves
+it active; harmful or withdrawn feedback pauses it. Editing, sharing and
+reactivating remain source-page operations.
+
+The response is `{experience: ...}` projected for the reporting page. Only
+the source page's private feedback history includes the report's result ID,
+native turn ID, SHA-256 of the result's UTF-8 text and provider evidence class.
+Result text is never copied into that history. Other pages receive no original
+encounter, source record or feedback history, including in the write response.
+The report retains `kind: "operator_report"`: linking a real result does not
+prove that the model used the lesson, that the lesson caused the outcome, or
+that a test transport was a real provider.
+
 ## Create a page from the current conversation
 
 `POST /api/pages`

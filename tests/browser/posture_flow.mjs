@@ -364,18 +364,30 @@ try {
   await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
   await lesson.getByText('In use · v10', { exact: true }).waitFor();
   await close();
-  await page.getByRole('button', { name: 'Registration tool', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Pages', exact: true })
+    .getByRole('link', { name: 'Registration tool', exact: true }).click();
   await page.getByRole('textbox', { name: /^Message / }).fill(unsentWorkDraft);
   await openLessons();
   await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
   await lesson.getByText('Report what happened in this Work.', { exact: false }).waitFor();
+  const receiverPages = (await (await fetch(base + '/api/bootstrap')).json()).pages;
+  const receiverId = receiverPages.find(item => item.title === 'Registration tool').id;
+  const receiverView = await (await fetch(base + '/api/pages/' + encodeURIComponent(receiverId))).json();
+  const reportedResult = receiverView.messages.find(item => item.role === 'assistant' && item.status === 'settled');
+  assert.ok(reportedResult, 'The report must point to an actual settled native result.');
+  const resultPicker = lesson.getByRole('combobox', { name: 'Link a result from this page (optional)', exact: true });
+  assert.equal(await resultPicker.inputValue(), '', 'A result must never be selected implicitly.');
+  await resultPicker.selectOption(reportedResult.id);
   const receiverOutcome = 'The shared lesson added unnecessary onboarding in this registration Work.';
   await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(receiverOutcome);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await resultPicker.scrollIntoViewIfNeeded();
+  const pickerBounds = await resultPicker.boundingBox();
+  assert.ok(pickerBounds.x >= 0 && pickerBounds.x + pickerBounds.width <= 390, 'Result picker fits the mobile dialog.');
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-result-report-mobile.png') });
   await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).click();
   await lesson.getByText('Paused · v11', { exact: true }).waitFor();
   assert.equal(await lesson.getByRole('button', { name: 'Give feedback', exact: true }).count(), 0);
-  const receiverPages = (await (await fetch(base + '/api/bootstrap')).json()).pages;
-  const receiverId = receiverPages.find(item => item.title === 'Registration tool').id;
   const receivingLesson = (await (await fetch(base + '/api/pages/' + encodeURIComponent(receiverId) + '/posture')).json()).experiences[0];
   assert.equal(receivingLesson.canEdit, false);
   assert.equal(receivingLesson.canReport, false);
@@ -387,18 +399,85 @@ try {
   assert.equal(originLesson.feedback.at(-1).evidence, receiverOutcome);
   assert.equal(originLesson.feedback.at(-1).source.page_id, receiverId);
   assert.equal(originLesson.feedback.at(-1).source.relation, 'shared_recipient');
+  assert.equal(originLesson.feedback.at(-1).source.result_message_id, reportedResult.id);
+  assert.equal(originLesson.feedback.at(-1).source.result_evidence_class, 'TEST_DOUBLE');
   await close();
+  await page.setViewportSize({ width: 1280, height: 900 });
   assert.equal(await page.getByRole('textbox', { name: /^Message / }).inputValue(), unsentWorkDraft);
+  // The report link must still open its exact result after that receiving
+  // conversation grows beyond the normal recent-message window.
+  for (let index = 0; index < 501; index += 1) {
+    const queued = await fetch(base + '/api/pages/' + encodeURIComponent(receiverId) + '/messages', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'Explicit later receiving-Work history fixture ' + index }),
+    });
+    assert.equal(queued.status, 202);
+  }
   // From the source journal, trace the later feedback to its actual Work,
   // then return to the original reading position without losing either draft.
   await page.locator('.breadcrumbs').getByRole('button', { name: 'Home', exact: true }).click();
   await openLessons();
   await lesson.getByText('Later feedback (4)', { exact: true }).click();
-  await lesson.getByRole('button', { name: 'View reporting Work', exact: true }).click();
+  await lesson.getByText('Test result', { exact: false }).waitFor();
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-result-source.png') });
+  await lesson.getByRole('button', { name: 'View reported result', exact: true }).click();
   await page.getByRole('button', { name: 'Registration tool', exact: true }).waitFor();
+  assert.equal(new URL(page.url()).hash, '#message-' + encodeURIComponent(reportedResult.id));
+  await page.locator(`[data-message-id="${reportedResult.id}"]`).waitFor();
+  await page.getByText('Showing the selected earlier source, then the most recent messages. Intervening messages are not loaded.', { exact: true }).waitFor();
+  await page.waitForFunction(id => document.activeElement?.getAttribute('data-message-id') === id, reportedResult.id);
+  assert.equal(await page.locator('.message').count(), 501);
+  assert.equal(await page.getByRole('textbox', { name: /^Message / }).inputValue(), unsentWorkDraft);
+  await page.reload();
+  await page.locator(`[data-message-id="${reportedResult.id}"]`).waitFor();
   assert.equal(await page.getByRole('textbox', { name: /^Message / }).inputValue(), unsentWorkDraft);
   await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await page.getByRole('button', { name: 'Home', exact: true }).waitFor();
+  // Browser Back can change context while a dialog's mutation is still in
+  // flight. A late source-page response must never become the recipient's
+  // projection, even when both pages contain the same shared lesson ID.
+  await openLessons();
+  let releaseSourceWrite;
+  let sourceWriteHeld = false;
+  let sourceWriteDelivered = false;
+  await page.route('**/api/pages/home/posture/experiences/*', async intercepted => {
+    if (intercepted.request().method() !== 'PATCH') { await intercepted.continue(); return; }
+    const response = await intercepted.fetch();
+    await new Promise(resolve => { releaseSourceWrite = resolve; sourceWriteHeld = true; });
+    await intercepted.fulfill({ response });
+    sourceWriteDelivered = true;
+  });
+  await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
+  await wait(() => sourceWriteHeld, 'source-page mutation response held');
+  await page.goBack();
+  await page.getByRole('button', { name: 'Registration tool', exact: true }).waitFor();
+  await lesson.getByText('In use · v12', { exact: true }).waitFor();
+  assert.equal(await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).count(), 0);
+  releaseSourceWrite();
+  await wait(() => sourceWriteDelivered, 'old source response delivered after context changed');
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).count(), 0,
+    'A late source response must not expose private source controls in a receiving Work.');
+  assert.equal(await lesson.getByText('Later feedback (4)', { exact: true }).count(), 0);
+  await page.unroute('**/api/pages/home/posture/experiences/*');
+  // Refresh after a concurrent edit must preserve the person's unsent report.
+  await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
+  const conflictDraft = 'Keep this unsent observation while I refresh the changed lesson.';
+  const reportField = lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true });
+  await reportField.fill(conflictDraft);
+  const concurrentEdit = await fetch(base + '/api/pages/home/posture/experiences/' + initialLesson.id, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expectedRevision: 12, changes: { active: true } }),
+  });
+  assert.equal(concurrentEdit.status, 200);
+  await lesson.getByRole('button', { name: 'It helped', exact: true }).click();
+  await page.getByRole('alert').getByText('This lesson changed. Refresh it before saving.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Refresh lessons', exact: true }).click();
+  await lesson.getByText('In use · v13', { exact: true }).waitFor();
+  assert.equal(await reportField.inputValue(), conflictDraft);
+  await lesson.getByRole('button', { name: 'It helped', exact: true }).click();
+  await lesson.getByText('In use · v14', { exact: true }).waitFor();
+  assert.equal(await lesson.getByText('Later feedback (5)', { exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, receiving-Work outcome feedback without private source exposure, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
 } finally {

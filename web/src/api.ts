@@ -58,9 +58,9 @@ export const api = {
     request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}`, {
       method: 'PATCH', body: JSON.stringify({ expectedRevision: experience.revision, changes, ...(evidence ? { evidence } : {}) }),
     }),
-  experienceFeedback: (pageId: string, experience: PostureExperience, verdict: 'useful' | 'harmful', evidence: string) =>
+  experienceFeedback: (pageId: string, experience: PostureExperience, verdict: 'useful' | 'harmful', evidence: string, resultMessageId?: string) =>
     request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}/feedback`, {
-      method: 'POST', body: JSON.stringify({ expectedRevision: experience.revision, verdict, evidence }),
+      method: 'POST', body: JSON.stringify({ expectedRevision: experience.revision, verdict, evidence, resultMessageId }),
     }),
   stop: (id: string, turnId: string) => request<{ accepted: boolean; repeated: boolean; view: PageView }>(`${pagePath(id)}/execution/stop`, { method: 'POST', body: JSON.stringify({ turnId }) }),
   decide: (id: string, actionId: string, decision: 'allow_once' | 'deny' | 'cancel') => request<ActionReceipt>(`${pagePath(id)}/execution/actions/${encodeURIComponent(actionId)}`, { method: 'POST', body: JSON.stringify({ decision }) }),

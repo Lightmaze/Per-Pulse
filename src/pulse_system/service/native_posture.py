@@ -209,43 +209,26 @@ def _source_text(value: str, limit: int):
         raise ScopeConflict("the selected source contains a credential and cannot enter experience memory") from error
 
 
-def capture_encounter(runtime, subject_id: str, context_id: str,
-                      source_message_id: str, feedback_message_id: str,
-                      *, latest_input_id: str | None = None) -> dict:
-    """Capture real same-context evidence for either model or operator admission.
+def _context_message(runtime, subject_id: str, context_id: str, event_id: str):
+    """Resolve a message in this World, context and committed subject lineage."""
+    event = runtime.causal_ledger.get_event(event_id)
+    lineage = runtime.causal_ledger.committed_history_lineage(runtime.world_id, subject_id)
+    if (event is None or event.world_id != runtime.world_id or event.engram_id not in lineage
+            or event.center_id != _context_center(context_id) or not event.content):
+        raise ScopeConflict("posture source is not a message in this context")
+    return event
 
-    The caller establishes ownership of the subject/context. This helper proves
-    the source is a settled native assistant result, the feedback is a later
-    attributed user stimulus, and both belong to that exact World and context. A
-    native caller bounds feedback by its current input; an operator may select
-    any already-persisted feedback in the context.
-    """
+
+def _settled_result(runtime, subject_id: str, context_id: str, event_id: str):
+    """Resolve a completed result backed by its accepted native Kernel turn."""
     r = runtime
-    center = _context_center(context_id)
-    lineage = set(r.causal_ledger.committed_history_lineage(r.world_id, subject_id))
-
-    def message(event_id):
-        event = r.causal_ledger.get_event(event_id)
-        if (event is None or event.world_id != r.world_id or event.engram_id not in lineage
-                or event.center_id != center or not event.content):
-            raise ScopeConflict("posture source is not a message in this context")
-        return event
-
-    original, feedback = message(source_message_id), message(feedback_message_id)
+    original = _context_message(r, subject_id, context_id, event_id)
     if (original.kind is not CausalEventKind.ASSISTANT_RESULT
             or original.domain is not CausalEventDomain.HARNESS
             or original.source is not CausalEventSource.SELF
             or original.status is not CausalEventStatus.SETTLED
-            or feedback.kind is not CausalEventKind.STIMULUS
-            or feedback.source is not CausalEventSource.USER
-            or original.seq is None or feedback.seq is None
-            or not original.seq < feedback.seq):
-        raise ScopeConflict("remember requires an earlier assistant result and later actual user feedback")
-    if latest_input_id is not None:
-        latest = r.causal_ledger.get_event(latest_input_id)
-        if (latest is None or latest.world_id != r.world_id or latest.engram_id != subject_id
-                or latest.center_id != center or latest.seq is None or feedback.seq > latest.seq):
-            raise ScopeConflict("feedback was not available to the originating turn")
+            or original.seq is None):
+        raise ScopeConflict("posture source requires a settled native assistant result")
     with r.storage._lock:
         previous = r.storage._conn.execute(
             "SELECT id, event_id, engram_id, state, execution_context, prompt_accepted "
@@ -259,7 +242,46 @@ def capture_encounter(runtime, subject_id: str, context_id: str,
     if (prior_turn is None or prior_turn.result_event_id != original.id
             or r._native_kernel_context_for_turn(original.engram_id, prior_turn.id) != context_id):
         raise ScopeConflict("original result has inconsistent World provenance")
-    situation = message(original.parent_event_id)
+    return original, prior_turn
+
+
+def capture_result_anchor(runtime, subject_id: str, context_id: str, result_message_id: str) -> dict:
+    """Bind an operator report to an existing result without copying its text.
+
+    This proves the result's provenance, not lesson exposure or causal benefit.
+    The caller must separately authorize access to the lesson being reported.
+    """
+    result, turn = _settled_result(runtime, subject_id, context_id, result_message_id)
+    return {
+        "result_message_id": result.id,
+        "result_turn_id": turn.id,
+        "result_content_sha256": hashlib.sha256(result.content.encode("utf-8")).hexdigest(),
+        "result_evidence_class": str(result.metadata.get("evidence_class", "UNKNOWN")),
+    }
+
+
+def capture_encounter(runtime, subject_id: str, context_id: str,
+                      source_message_id: str, feedback_message_id: str,
+                      *, latest_input_id: str | None = None) -> dict:
+    """Capture a settled native result and a later same-context user follow-up.
+
+    The caller establishes subject/context ownership. A native caller bounds
+    feedback by its current input; an operator may select persisted feedback.
+    """
+    r = runtime
+    original, prior_turn = _settled_result(r, subject_id, context_id, source_message_id)
+    feedback = _context_message(r, subject_id, context_id, feedback_message_id)
+    if (feedback.kind is not CausalEventKind.STIMULUS
+            or feedback.source is not CausalEventSource.USER
+            or feedback.seq is None or not original.seq < feedback.seq):
+        raise ScopeConflict("remember requires an earlier assistant result and later actual user feedback")
+    if latest_input_id is not None:
+        latest = r.causal_ledger.get_event(latest_input_id)
+        if (latest is None or latest.world_id != r.world_id or latest.engram_id != subject_id
+                or latest.center_id != _context_center(context_id)
+                or latest.seq is None or feedback.seq > latest.seq):
+            raise ScopeConflict("feedback was not available to the originating turn")
+    situation = _context_message(r, subject_id, context_id, original.parent_event_id)
     evidence_class = str(original.metadata.get("evidence_class", "UNKNOWN"))
     synthetic = evidence_class in {"TEST_DOUBLE", "EXPLICIT_MOCK"}
     source = {
@@ -270,7 +292,7 @@ def capture_encounter(runtime, subject_id: str, context_id: str,
         "subject_id": subject_id, "context_id": context_id,
         "source_subject_id": original.engram_id, "feedback_subject_id": feedback.engram_id,
         "source_message_id": original.id, "feedback_message_id": feedback.id,
-        "original_turn_id": previous[0][0],
+        "original_turn_id": prior_turn.id,
         "content_digests": {"situation": _digest(situation.content),
                             "action": _digest(original.content), "outcome": _digest(feedback.content)},
     }

@@ -1,8 +1,8 @@
 // Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, type Translate } from '../i18n';
-import type { LessonCondition, PostureExperience, PostureView } from '../types';
+import type { LessonCondition, Message, PostureExperience, PostureView } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
 
@@ -16,15 +16,17 @@ function describeCondition(value: LessonCondition, t: Translate): string {
 
 type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; counterexamples?: string[]; shift?: PostureExperience['shift'] };
 
-function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
+function Experience({ experience, pageId, results, busy, revise, feedback, navigate }: {
   experience: PostureExperience; pageId: string; busy: boolean;
+  results: Message[];
   revise: (experience: PostureExperience, changes: LessonRevision, evidence?: string) => Promise<void>;
-  feedback: (experience: PostureExperience, verdict: 'useful' | 'harmful', evidence: string) => Promise<void>;
+  feedback: (experience: PostureExperience, verdict: 'useful' | 'harmful', evidence: string, resultMessageId?: string) => Promise<void>;
   navigate: Navigate;
 }) {
   const { t } = useLanguage();
   const [evidence, setEvidence] = useState('');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [resultMessageId, setResultMessageId] = useState('');
   const [refineOpen, setRefineOpen] = useState(false);
   const [lessonDraft, setLessonDraft] = useState(experience.lesson);
   const [exceptionDraft, setExceptionDraft] = useState(experience.counterexamples.join('\n'));
@@ -62,8 +64,8 @@ function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
   // Same-page source links need no new return origin.
   const sourceOrigin = experience.sourcePageId && experience.sourcePageId !== pageId ? { pageId } : undefined;
   const submit = async (verdict: 'useful' | 'harmful') => {
-    await feedback(experience, verdict, evidence.trim());
-    setEvidence(''); setFeedbackOpen(false);
+    await feedback(experience, verdict, evidence.trim(), resultMessageId || undefined);
+    setEvidence(''); setResultMessageId(''); setFeedbackOpen(false);
   };
   return <article className={`lesson ${experience.active ? '' : 'lesson-paused'}`}>
     <div className="lesson-heading"><h3>{experience.title}</h3><span>{t(experience.active ? 'learning.active' : 'learning.paused')} · v{experience.revision}</span></div>
@@ -83,8 +85,12 @@ function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
       // receiving Work never receives this history or these navigation links.
       const reportedPage = entry.source?.kind === 'operator_report' && entry.source.relation === 'shared_recipient'
         && entry.source.page_id && entry.source.page_id !== pageId ? entry.source.page_id : null;
+      const resultPage = entry.source?.kind === 'operator_report' && entry.source.result_message_id
+        ? entry.source.page_id : null;
       return <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}
-        {reportedPage ? <> · <button type="button" className="text-button" onClick={() => navigate(reportedPage, { pageId })}>{t('learning.reportedWork')}</button></> : null}
+        {resultPage ? <> · <button type="button" className="text-button" onClick={() => navigate(resultPage, resultPage !== pageId ? { pageId } : undefined, entry.source!.result_message_id)}>{t('learning.reportedResult')}</button>
+          {['TEST_DOUBLE', 'EXPLICIT_MOCK'].includes(entry.source?.result_evidence_class ?? '') ? <> · {t('learning.resultFixture')}</> : null}
+        </> : reportedPage ? <> · <button type="button" className="text-button" onClick={() => navigate(reportedPage, { pageId })}>{t('learning.reportedWork')}</button></> : null}
       </p>;
     })}</details> : null}
     {experience.canEdit ? <div className="lesson-actions">
@@ -118,17 +124,31 @@ function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
       </div>
     </div> : null}
     {experience.scope === 'subject' && experience.canEdit ? <p className="lesson-note">{t('learning.sharingNote')}</p> : null}
-    {feedbackOpen && experience.canReport ? <div className="lesson-feedback">{!experience.canEdit ? <p className="lesson-note">{t('learning.receivingFeedbackNote')}</p> : null}<label className="field-label" htmlFor={`feedback-${experience.id}`}>{t('learning.changed')}</label><textarea id={`feedback-${experience.id}`} rows={3} value={evidence} maxLength={1500} onChange={event => setEvidence(event.target.value)} placeholder={t('learning.feedbackPlaceholder')} /><div className="lesson-actions"><button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button><button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t('learning.hurt')}</button></div></div> : null}
+    {feedbackOpen && experience.canReport ? <div className="lesson-feedback">
+      {!experience.canEdit ? <p className="lesson-note">{t('learning.receivingFeedbackNote')}</p> : null}
+      <label className="field-label" htmlFor={`feedback-${experience.id}`}>{t('learning.changed')}</label>
+      <textarea id={`feedback-${experience.id}`} rows={3} value={evidence} maxLength={1500} disabled={busy} onChange={event => setEvidence(event.target.value)} placeholder={t('learning.feedbackPlaceholder')} />
+      <label className="field-label" htmlFor={`feedback-result-${experience.id}`}>{t('learning.selectResult')}</label>
+      <select id={`feedback-result-${experience.id}`} value={resultMessageId} disabled={busy} aria-describedby={`feedback-result-help-${experience.id}`} onChange={event => setResultMessageId(event.target.value)}>
+        <option value="">{t('learning.noResult')}</option>
+        {results.map((message, index) => <option key={message.id} value={message.id}>{index + 1}. {message.content.replace(/\s+/g, ' ').slice(0, 120)}</option>)}
+      </select>
+      <p className="lesson-note" id={`feedback-result-help-${experience.id}`}>{t('learning.resultHelp')}</p>
+      <div className="lesson-actions"><button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button><button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t('learning.hurt')}</button></div>
+    </div> : null}
   </article>;
 }
 
-export function LearningDialog({ pageId, pageTitle, close, navigate }: { pageId: string; pageTitle: string; close: () => void; navigate: Navigate }) {
+export function LearningDialog({ pageId, pageTitle, messages, close, navigate }: { pageId: string; pageTitle: string; messages: Message[]; close: () => void; navigate: Navigate }) {
   const { t } = useLanguage();
   const [view, setView] = useState<PostureView | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const writing = useRef(false);
+  const [refreshing, setRefreshing] = useState(true);
   const [version, setVersion] = useState(0);
   const [search, setSearch] = useState('');
+  const results = messages.filter(message => message.role === 'assistant' && message.status === 'settled');
   // Search only the shareable abstraction, never private source encounters or feedback.
   const needle = search.trim().toLocaleLowerCase();
   const visibleExperiences = (view?.experiences ?? []).filter(item => !needle || [
@@ -137,15 +157,21 @@ export function LearningDialog({ pageId, pageTitle, close, navigate }: { pageId:
   ].some(value => value.toLocaleLowerCase().includes(needle)));
   useEffect(() => {
     const controller = new AbortController();
-    setView(null); setError('');
-    api.posture(pageId, controller.signal).then(setView).catch(problem => {
+    // Keep mounted editors while refreshing after a version conflict. Their
+    // typed report and selected result still belong to this page. App keys this
+    // dialog by World/page, so neither drafts nor late writes cross contexts.
+    setRefreshing(true); setError('');
+    api.posture(pageId, controller.signal).then(next => {
+      if (!controller.signal.aborted) setView(next);
+    }).catch(problem => {
       if (!controller.signal.aborted) setError(problem instanceof Error ? problem.message : t('learning.readError'));
-    });
+    }).finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
     return () => controller.abort();
   }, [pageId, version]);
 
   const update = async (operation: () => Promise<{ experience: PostureExperience }>) => {
-    if (busy) return;
+    if (writing.current || refreshing) throw new Error('Wait for the current lesson request to finish.');
+    writing.current = true;
     setBusy(true); setError('');
     try {
       const response = await operation();
@@ -153,13 +179,13 @@ export function LearningDialog({ pageId, pageTitle, close, navigate }: { pageId:
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : t('learning.updateError'));
       throw problem;
-    } finally { setBusy(false); }
+    } finally { writing.current = false; setBusy(false); }
   };
   return <Dialog title={t('learning.title')} className="learning-dialog" onClose={() => { if (!busy) close(); }}>
     <p className="dialog-description">{t('learning.description', { page: pageTitle })}</p>
-    <button className="text-button" disabled={busy || (!view && !error)} onClick={() => setVersion(value => value + 1)}>{t('learning.refresh')}</button>
+    <button className="text-button" disabled={busy || refreshing} onClick={() => { setRefreshing(true); setVersion(value => value + 1); }}>{t('learning.refresh')}</button>
     {error ? <div className="form-error" role="alert">{error}</div> : null}
-    {!view && !error ? <p role="status">{t('learning.loading')}</p> : null}
+    {refreshing ? <p role="status">{t('learning.loading')}</p> : null}
     {view && !view.enabled ? <p>{t('learning.disabled')}</p> : null}
     {view?.enabled && !view.experiences.length ? <div className="lessons-empty"><h3>{t('learning.emptyTitle')}</h3><p>{t('learning.emptyHelp')}</p><p>{t('learning.emptyModel')}</p></div> : null}
     {view?.enabled && view.experiences.length > 0 ? <div className="lesson-search">
@@ -167,8 +193,8 @@ export function LearningDialog({ pageId, pageTitle, close, navigate }: { pageId:
       <input id="lesson-search" type="search" autoComplete="off" value={search} onChange={event => setSearch(event.target.value)} placeholder={t('learning.searchHint')} />
     </div> : null}
     {view?.enabled && view.experiences.length > 0 && !visibleExperiences.length ? <p className="lesson-note" role="status">{t('learning.noMatches')}</p> : null}
-    {visibleExperiences.map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} busy={busy} navigate={navigate}
+    {visibleExperiences.map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} busy={busy || refreshing} navigate={navigate}
       revise={(item, changes, evidence) => update(() => api.reviseExperience(pageId, item, changes, evidence))}
-      feedback={(item, verdict, evidence) => update(() => api.experienceFeedback(pageId, item, verdict, evidence))} />)}
+      feedback={(item, verdict, evidence, resultMessageId) => update(() => api.experienceFeedback(pageId, item, verdict, evidence, resultMessageId))} />)}
   </Dialog>;
 }

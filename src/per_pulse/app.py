@@ -118,6 +118,7 @@ class ExperienceFeedback(Input):
     expectedRevision: int = Field(ge=1, strict=True)
     verdict: Literal["useful", "not_useful", "harmful", "withdrawn"]
     evidence: Content
+    resultMessageId: Identifier | None = None
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
@@ -299,6 +300,7 @@ def create_app(
     def experience_feedback(page_id: str, experience_id: str, body: ExperienceFeedback, request: Request):
         return pages(request).learning.feedback(
             page_id, experience_id, body.expectedRevision, body.verdict, body.evidence,
+            result_message_id=body.resultMessageId,
         )
 
     @app.get("/api/pages/{page_id}/execution")
