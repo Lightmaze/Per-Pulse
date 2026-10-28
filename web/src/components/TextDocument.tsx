@@ -14,6 +14,7 @@ export function TextDocument({ path, content, truncated = false }: { path: strin
   const { t } = useLanguage();
   const [source, setSource] = useState(false);
   const [headings, setHeadings] = useState(true);
+  const [hiddenColumns, setHiddenColumns] = useState<number[]>([]);
   const raw = <pre className="document-source" tabIndex={0}>{content}</pre>;
   const markdown = /\.(md|markdown)$/i.test(path);
   const delimited = /\.(csv|tsv)$/i.test(path);
@@ -24,7 +25,7 @@ export function TextDocument({ path, content, truncated = false }: { path: strin
       <button type="button" className="text-button" aria-pressed={source} onClick={() => setSource(true)}>{t('document.source')}</button>
     </div>
     {source ? raw : <ReadingBoundary fallback={<><p role="status">{t('document.unavailable')}</p>{raw}</>}>
-      {delimited ? <DelimitedReading content={content} delimiter={/\.tsv$/i.test(path) ? '\t' : ','} truncated={truncated} fallback={raw} headings={headings} setHeadings={setHeadings} />
+      {delimited ? <DelimitedReading content={content} delimiter={/\.tsv$/i.test(path) ? '\t' : ','} truncated={truncated} fallback={raw} headings={headings} setHeadings={setHeadings} hiddenColumns={hiddenColumns} setHiddenColumns={setHiddenColumns} />
         : <Suspense fallback={raw}><MarkdownReading content={content} /></Suspense>}
     </ReadingBoundary>}
   </div>;

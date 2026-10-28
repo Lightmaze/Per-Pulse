@@ -115,7 +115,9 @@ Images appear as descriptions; links to external sources open only when chosen.
 CSV and TSV files also have a table view. Values remain text, including leading
 zeros and empty cells. Use **First row contains headings** to match the file.
 The view shows up to 200 data rows and 64 columns, with keyboard scrolling for
-wide tables. A partial preview is labelled and omits an unfinished trailing
+wide tables. **Columns** lets you compare a subset without changing the file;
+your choices survive switching between Read and Source during that preview.
+A partial preview is labelled and omits an unfinished trailing
 row; irregular quotes, unequal rows or wider files fall back to source text.
 The **Add to draft** action stays visible while reading a long material.
 

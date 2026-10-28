@@ -454,6 +454,14 @@ button, a, input, textarea { outline-offset: 4px; }
 .document-source { white-space: pre-wrap; overflow-wrap: anywhere; }
 .table-header-option { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 0; }
 .table-header-option input { width: auto; margin: 0; }
+.table-columns { margin: 6px 0; font-size: 12px; }
+.table-columns summary { cursor: pointer; color: var(--accent); padding: 5px 0; }
+.table-columns summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.table-column-actions { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 8px 0; }
+.table-columns fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.table-column-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 2px 16px; max-height: 180px; overflow: auto; padding: 3px; }
+.table-column-options label { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 7px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.table-column-options input { flex: 0 0 auto; width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--accent); }
 .table-summary { font-size: 11px; line-height: 1.6; color: var(--muted); margin: 6px 0 10px; }
 .delimited-scroll { max-width: 100%; max-height: 360px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
 .delimited-scroll table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; line-height: 1.6; }
