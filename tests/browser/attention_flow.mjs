@@ -312,7 +312,8 @@ try {
   await page.locator('.composer textarea').fill(sourceDraft);
   await page.getByRole('button', { name: '活动', exact: true }).click();
   await page.getByRole('heading', { name: '其他局部工作进度', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Actual receiving Work', exact: true }).click();
+  await page.getByRole('region', { name: '其他局部工作进度', exact: true })
+    .getByRole('button', { name: 'Actual receiving Work', exact: true }).click();
   await wait(async () => new URL(page.url()).pathname === '/page/' + localReceiver,
     'native queued receiver opens from source Work Activity');
   assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
