@@ -16,7 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -25,6 +25,7 @@ from pulse_system.service.runtime import ServiceError
 from . import __version__
 from .language import ResponseLanguage
 from .execution import ExecutionError
+from .materials import MaterialError, MAX_FILE_BYTES
 from .service import PageError, PageService, PulseSettings, _ENV_PROVIDER
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
@@ -50,8 +51,15 @@ class NewPage(Input):
 
 
 class NewMessage(Input):
-    content: Content
+    content: Annotated[str, StringConstraints(strip_whitespace=True, max_length=32_000)]
     references: list[ReferenceInput] = Field(default_factory=list, max_length=20)
+    materials: list[Identifier] = Field(default_factory=list, max_length=5)
+
+    @model_validator(mode="after")
+    def has_content(self):
+        if not self.content and not self.materials:
+            raise ValueError("Enter a message or attach a source file.")
+        return self
 
 
 class NewReference(ReferenceInput):
@@ -59,8 +67,15 @@ class NewReference(ReferenceInput):
 
 
 class ReturnHome(Input):
-    content: Content
+    content: Annotated[str, StringConstraints(strip_whitespace=True, max_length=32_000)]
     messageId: Identifier | None = None
+    includeMaterials: bool = False
+
+    @model_validator(mode="after")
+    def has_content(self):
+        if not self.content and not self.includeMaterials:
+            raise ValueError("Select text or include the attached source files.")
+        return self
 
 
 class Rename(Input):
@@ -201,9 +216,15 @@ def create_app(
                 if not same_origin and not dev_origin:
                     return secure_response(_error("origin_not_allowed", "Open Per Pulse from its local address.", 403))
             if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
-                if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json":
+                content_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
+                is_upload = request.method == "POST" and re.fullmatch(r"/api/pages/[^/]+/materials", request.url.path)
+                if is_upload and content_type == "application/octet-stream":
+                    # The upload route streams its own strict byte bound. Do
+                    # not decode/re-encode a File or allocate an unbounded body.
+                    pass
+                elif content_type != "application/json":
                     return secure_response(_error("json_required", "Send this request as JSON.", 415))
-                if len(await request.body()) > 128 * 1024:
+                elif len(await request.body()) > 128 * 1024:
                     return secure_response(_error("request_too_large", "This request is too large.", 413))
         return secure_response(await call_next(request))
 
@@ -213,6 +234,10 @@ def create_app(
 
     @app.exception_handler(ExecutionError)
     async def execution_error(_request: Request, error: ExecutionError):
+        return _error(error.code, error.message, error.status)
+
+    @app.exception_handler(MaterialError)
+    async def material_error(_request: Request, error: MaterialError):
         return _error(error.code, error.message, error.status)
 
     @app.exception_handler(ServiceError)
@@ -291,7 +316,33 @@ def create_app(
 
     @app.post("/api/pages/{page_id}/messages", status_code=202)
     def message(page_id: str, body: NewMessage, request: Request):
-        return pages(request).send(page_id, body.content, [r.model_dump() for r in body.references])
+        return pages(request).send(page_id, body.content, [r.model_dump() for r in body.references], body.materials)
+
+    @app.get("/api/pages/{page_id}/materials")
+    def materials(page_id: str, request: Request):
+        return pages(request).materials.listing(page_id)
+
+    @app.get("/api/pages/{page_id}/materials/{material_id}")
+    def material(page_id: str, material_id: str, request: Request):
+        return pages(request).materials.read(page_id, material_id)
+
+    @app.post("/api/pages/{page_id}/materials", status_code=201)
+    async def upload_material(page_id: str, request: Request, name: str):
+        if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/octet-stream":
+            raise MaterialError("material_bytes_required", "Send the original file bytes.", 415)
+        service = pages(request)
+        service.execution._scope(page_id)
+        if request.headers.get("x-per-pulse-world") != service.runtime.world_id:
+            raise MaterialError("material_workspace_changed", "The workspace changed. Refresh before uploading.")
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_FILE_BYTES:
+                raise MaterialError("material_too_large", "Choose a text file of at most 1 MiB.", 413)
+            data.extend(chunk)
+        return await asyncio.to_thread(service.materials.upload, page_id, name, bytes(data),
+            upload_id=request.headers.get("x-per-pulse-upload-id"),
+            world_id=request.headers.get("x-per-pulse-world"),
+            expected_digest=request.headers.get("x-per-pulse-file-sha256"))
 
     @app.get("/api/pages/{page_id}/messages")
     def earlier_messages(page_id: str, request: Request, beforeMessageId: Identifier):
@@ -307,7 +358,7 @@ def create_app(
 
     @app.post("/api/pages/{page_id}/return", status_code=201)
     def return_home(page_id: str, body: ReturnHome, request: Request):
-        return pages(request).return_home(page_id, body.content, body.messageId)
+        return pages(request).return_home(page_id, body.content, body.messageId, include_materials=body.includeMaterials)
 
     @app.patch("/api/pages/{page_id}")
     def rename(page_id: str, body: Rename, request: Request):

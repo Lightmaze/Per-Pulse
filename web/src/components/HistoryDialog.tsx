@@ -5,6 +5,7 @@ import type { MessageHistory } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
 import { ReplayOrigin } from './ReplayOrigin';
+import { messageBody } from '../messageBody';
 
 export function HistoryDialog({ pageId, beforeMessageId, close, navigate }: {
   pageId: string; beforeMessageId: string; close: () => void; navigate: Navigate;
@@ -48,7 +49,8 @@ export function HistoryDialog({ pageId, beforeMessageId, close, navigate }: {
       {history?.messages.map(message => <article className="history-message" key={message.id} data-history-message-id={message.id}>
         <div className="history-message-heading"><strong>{message.role === 'assistant' ? 'Per Pulse' : t(message.role === 'user' ? 'conversation.you' : 'conversation.workspace')}</strong><time dateTime={message.createdAt}>{date.format(new Date(message.createdAt))}</time></div>
         <ReplayOrigin message={message} pageId={pageId} navigate={navigate} />
-        <p className="history-message-content">{message.content.slice(message.replay?.contentOffset ?? 0)}</p>
+        <p className="history-message-content">{messageBody(message)}</p>
+        {message.materials?.length ? <p className="lesson-note">{t('materials.attached')}: {message.materials.map(item => item.name).join(', ')}</p> : null}
         <button className="text-button" onClick={() => navigate(pageId, undefined, message.id)}>{t('history.open')}</button>
       </article>)}
       {history && !history.hasMore ? <p className="conversation-note">{t('history.beginning')}</p> : null}

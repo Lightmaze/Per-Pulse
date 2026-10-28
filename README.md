@@ -204,6 +204,32 @@ This works for existing results while disconnected and after restart. File
 access remains limited to text up to 1 MiB; the native write path currently
 has a separate 64 KiB output bound. It does not restore older overwritten bytes.
 
+**Attach a file** supplies your own UTF-8 text, Markdown, CSV, JSON or code to
+an existing Home or Work. Uploading puts the exact bytes in the native shared
+workspace and adds a file reference to the draft; only **Send** submits it to
+the conversation. Text and file-only drafts survive browser refresh. Each
+message can include up to five files of at most 1 MiB each. PDF, images and
+other binary files are not supported. A source chip opens its original text
+preview; **Bring to Home** lets you include the source files with your selected
+message while preserving their original page links.
+
+The native input carries paths and recorded digests, not a claim that a model
+read the files. `reading.open` can check that expected version before returning
+its first passage, and continuation verifies the same source. Changed or
+missing selected files are refused before sending; replacement bytes are not
+silently substituted. Upload receipts and files persist across restart and
+the existing stopped Pulse Image transfer. The source list shows the latest
+100 uploads per page, with a workspace limit of 1,024 receipts; older message
+attachments remain accessible. Previews are bounded to 64 KiB and redact
+sensitive values. Files are shared native workspace material, not isolated
+per-page filesystem permissions.
+
+A lost upload response is shown as unconfirmed and never retried automatically.
+Refresh the source list to recover a saved receipt. The native file creation
+and receipt storage are separate durable effects: a process or storage failure
+between them can leave an unlisted file in `workspace/uploads`. Inspect that
+directory before manually uploading again when no receipt can be recovered.
+
 ### Carry a stopped workspace to another directory (POSIX alpha)
 
 Per Pulse uses the **existing native cold Pulse Image** format, not a second

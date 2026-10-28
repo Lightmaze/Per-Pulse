@@ -1,4 +1,4 @@
-import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonShift, LessonVerdict, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
+import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
 export type PulseWriteIdentity = Pick<PulseObservation, 'workspaceId' | 'serviceInstanceId'>;
@@ -53,12 +53,29 @@ export const api = {
     request<MessageHistory>(`${pagePath(id)}/messages/search?q=${encodeURIComponent(query)}${beforeMessageId ? `&beforeMessageId=${encodeURIComponent(beforeMessageId)}` : ''}`, { signal }),
   createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null }) =>
     request<{ page: PageSummary; reference: PageReference; initialMessageId: string; view: PageView }>('/pages', { method: 'POST', body: JSON.stringify(data) }),
-  send: (id: string, content: string, references: DraftReference[]) =>
-    request<{ messageId: string; view: PageView }>(`${pagePath(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, references }) }),
+  send: (id: string, content: string, references: DraftReference[], materials: string[] = []) =>
+    request<{ messageId: string; view: PageView }>(`${pagePath(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, references, materials }) }),
+  materials: (id: string, signal?: AbortSignal) => request<MaterialList>(`${pagePath(id)}/materials`, { signal }),
+  material: (id: string, materialId: string, signal?: AbortSignal) => request<MaterialRead>(`${pagePath(id)}/materials/${encodeURIComponent(materialId)}`, { signal }),
+  uploadMaterial: async (pageId: string, workspaceId: string, uploadId: string, file: File) => {
+    if (file.size > 1024 * 1024) throw new ApiError('Choose a text file of at most 1 MiB.', 'material_too_large', 413);
+    const bytes = await file.arrayBuffer();
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), value => value.toString(16).padStart(2, '0')).join('');
+    const result = await request<{ material: Material; repeated: boolean }>(`${pagePath(pageId)}/materials?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST', body: bytes, headers: {
+        'Content-Type': 'application/octet-stream', 'X-Per-Pulse-World': workspaceId,
+        'X-Per-Pulse-Upload-Id': uploadId, 'X-Per-Pulse-File-SHA256': digest,
+      },
+    });
+    if (!result.material || result.material.id !== uploadId || result.material.pageId !== pageId || result.material.sha256 !== digest || result.material.bytes !== file.size) {
+      throw new ApiError('The uploaded file could not be verified. Refresh source files before trying again.', 'material_upload_unconfirmed', 0);
+    }
+    return result;
+  },
   reference: (id: string, data: { targetPageId: string; label: string; sourceMessageId?: string | null }) =>
     request<{ reference: PageReference; view: PageView }>(`${pagePath(id)}/references`, { method: 'POST', body: JSON.stringify(data) }),
-  bringHome: (id: string, content: string, messageId?: string) =>
-    request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/return`, { method: 'POST', body: JSON.stringify({ content, messageId }) }),
+  bringHome: (id: string, content: string, messageId?: string, includeMaterials = false) =>
+    request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/return`, { method: 'POST', body: JSON.stringify({ content, messageId, includeMaterials }) }),
   pulse: (signal?: AbortSignal) => request<PulseState>('/pulse', { signal }),
   pulseObservation: (signal?: AbortSignal) => request<PulseObservation>('/pulse/observation', { signal }),
   setPulsePaused: (paused: boolean, identity: PulseWriteIdentity) =>

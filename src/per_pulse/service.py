@@ -28,6 +28,7 @@ from . import __version__
 from .execution import PageExecution
 from .artifacts import PageArtifacts
 from .replay import PageReplay, RETURN_PREFIX
+from .materials import PageMaterials, material_footer
 from .language import RESPONSE_LANGUAGES, ResponseLanguage, install_language_advisor
 
 MAX_MESSAGES = 500
@@ -132,6 +133,7 @@ class PageService:
                 "Use a separate data directory for the example workspace.", 409,
             )
         self.example = example
+        self.materials = PageMaterials(self)
         # Reuse the native TurnAdvisor seam, never a second model loop.
         # Bind before running a session so each new turn snapshots its language.
         install_language_advisor(self.runtime.kernel_service, self._response_language)
@@ -476,6 +478,7 @@ class PageService:
                 "sourceMessageId": origin.get("messageId"),
                 "activation": activation,
                 "replay": self.replay.message(page_id, row, origin),
+                **self.materials.message(page_id, row),
                 "references": [r for r in refs if r["sourceMessageId"] == row["event_id"]],
             })
         return messages
@@ -596,17 +599,22 @@ class PageService:
             view = self.view(page_id)
             return {"page": view["page"], "reference": ref, "initialMessageId": created["event_id"], "view": view}
 
-    def send(self, page_id: str, content: str, references: list[dict] | None = None) -> dict:
+    def send(self, page_id: str, content: str, references: list[dict] | None = None,
+             materials: list[str] | None = None) -> dict:
         with self._lock:
             self._front(page_id)
             for ref in references or []:
                 self._front(ref["targetPageId"])
+            selected = self.materials.selected(page_id, materials or [])
+            content += material_footer(selected)
             message_id = (
                 self.runtime.inject(self.runtime.continuity_engram_id, content, source="user")
                 if page_id == "home" else self.runtime.send_task_front_message(page_id, content)
             )
             for ref in references or []:
                 self._reference(page_id, ref["targetPageId"], message_id, ref.get("label"))
+            if selected:
+                self._state.setdefault("messageMaterials", {})[message_id] = [record["id"] for record in selected]
             self._save()
             return {"messageId": message_id, "view": self.view(page_id)}
 
@@ -619,11 +627,23 @@ class PageService:
             # linking an earlier message collapses the UI to the last 500 rows.
             return {"reference": ref, "view": self.view(page_id, source_message_id=source_message_id)}
 
-    def return_home(self, page_id: str, content: str, message_id: str | None = None) -> dict:
+    def return_home(self, page_id: str, content: str, message_id: str | None = None,
+                    *, include_materials: bool = False) -> dict:
         with self._lock:
             if page_id == "home":
                 raise PageError("already_home", "Choose a session page to bring a result home.")
             self._check_message(page_id, message_id)
+            if include_materials:
+                from .materials import MaterialError
+
+                source = self._rows(page_id, limit=1, event_id=message_id) if message_id else []
+                attached = self.materials.message(page_id, source[0])["materials"] if source else []
+                if not attached:
+                    raise MaterialError("material_selection_invalid", "The selected message has no attached source files.", 422)
+                records = self.materials.selected(page_id, [record["id"] for record in attached])
+                suffix = material_footer(records)
+                if not content.endswith(suffix):
+                    content += suffix
             if message_id is not None:
                 from pulse_system.service.native_replay import result_origin
 

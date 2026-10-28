@@ -12,6 +12,15 @@ export type MessageKey = keyof typeof english;
 export type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
 const errorKeys: Record<string, MessageKey> = {
+  material_too_large: 'materials.tooLarge', material_file_too_large: 'materials.tooLarge',
+  material_changed: 'materials.changed', material_unavailable: 'materials.unavailable',
+  material_not_found: 'materials.wrongPage', material_workspace_changed: 'materials.workspaceChanged',
+  material_text_files_only: 'materials.invalidFile', material_credential_content_blocked: 'materials.invalidFile',
+  material_protected_or_invalid_path: 'materials.invalidFile', material_invalid_path: 'materials.invalidFile',
+  material_filename_only: 'materials.invalidFile', material_upload_failed_or_unconfirmed: 'materials.unconfirmed',
+  material_upload_unconfirmed: 'materials.unconfirmed', material_upload_changed: 'materials.unconfirmed',
+  material_upload_conflict: 'materials.unconfirmed', material_selection_invalid: 'materials.selectionFull',
+  material_capacity: 'materials.capacity',
   request_failed: 'error.generic',
   network_error: 'error.network', invalid_response: 'error.invalidResponse',
   workspace_load_failed: 'error.workspaceLoad', page_load_failed: 'error.pageLoad',

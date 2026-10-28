@@ -8,7 +8,8 @@ export function readDraft(workspaceId: string, pageId: string): Draft {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey(workspaceId, 'draft', pageId)) ?? 'null');
     if (saved && typeof saved.text === 'string' && Array.isArray(saved.references)) {
-      return { text: saved.text, references: saved.references.filter((r: unknown) => typeof r === 'object' && r !== null && 'targetPageId' in r && typeof r.targetPageId === 'string' && 'label' in r && typeof r.label === 'string') };
+      const materials = Array.isArray(saved.materials) ? saved.materials.filter((item: unknown) => typeof item === 'object' && item !== null && 'id' in item && typeof item.id === 'string' && /^[a-f0-9]{32}$/.test(item.id) && 'name' in item && typeof item.name === 'string').slice(0, 5) : [];
+      return { text: saved.text, references: saved.references.filter((r: unknown) => typeof r === 'object' && r !== null && 'targetPageId' in r && typeof r.targetPageId === 'string' && 'label' in r && typeof r.label === 'string'), ...(materials.length ? { materials } : {}) };
     }
   } catch { /* A restricted or full browser storage must not break the workspace. */ }
   return { ...EMPTY_DRAFT, references: [] };
@@ -16,7 +17,7 @@ export function readDraft(workspaceId: string, pageId: string): Draft {
 
 export function saveDraft(workspaceId: string, pageId: string, draft: Draft) {
   try {
-    if (!draft.text && !draft.references.length) localStorage.removeItem(storageKey(workspaceId, 'draft', pageId));
+    if (!draft.text && !draft.references.length && !draft.materials?.length) localStorage.removeItem(storageKey(workspaceId, 'draft', pageId));
     else localStorage.setItem(storageKey(workspaceId, 'draft', pageId), JSON.stringify(draft));
   } catch { /* Draft editing remains available when browser storage is unavailable. */ }
 }

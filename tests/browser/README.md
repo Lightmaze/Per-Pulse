@@ -134,3 +134,22 @@ The model and post-write barrier are explicitly synthetic. Actual native
 approval, file mutation, Kernel recovery, World persistence and OS process
 termination are exercised. This is delayed crash recovery, not proof of
 graceful shutdown or a general exactly-once guarantee for external tools.
+
+## Supply a file and take a sourced report away
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_MATERIAL_SCREENSHOTS=/tmp/per-pulse-material-screenshots \
+  node tests/browser/material_flow.mjs
+```
+
+This flow selects a real BOM/CRLF/Unicode CSV in the browser, preserves its
+original bytes, restores its draft, links another page, and submits its native
+file reference. A deliberately scripted provider follows actual `reading`
+passage receipts and computes the report from those returned CSV rows. The
+browser approves the native file write and downloads the exact result. It also
+checks raw message copying, explicit source-file return to Home, recovery of a
+dropped successful upload response, unsupported files, changed-version refusal,
+offline restart, file-only messages, and Chinese phone layout. Upload, reading,
+approval and filesystem effects are real; semantic choices and arithmetic are
+fixture code and do not establish real-model performance.

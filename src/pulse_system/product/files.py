@@ -128,7 +128,9 @@ class WorkspaceFiles:
         if len(data) > MAX_FILE_BYTES:
             raise FileAccessError("file_too_large", 413)
         _text(data)
-        safe_name = re.sub(r"[^\w. -]", "_", name, flags=re.UNICODE)[:160]
+        # Common filesystems limit a basename in bytes, not Unicode characters.
+        # Leave room for the native create-only prefix without breaking UTF-8.
+        safe_name = re.sub(r"[^\w. -]", "_", name, flags=re.UNICODE).encode("utf-8")[:200].decode("utf-8", errors="ignore")
         target = f"{uuid4().hex[:12]}-{safe_name}"
         with self.directory() as root:
             try:
