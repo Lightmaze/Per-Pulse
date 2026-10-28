@@ -92,3 +92,22 @@ in-flight Kernel turn or a live local Context Body activation. The end-to-end
 forced termination and native abort-before-turn scenario in issue #32 remains
 open; no lost action is claimed delivered or replayed. The existing Chromium
 restart journey and real-provider tests remain distinct evidence.
+
+## Physical death with an active Kernel turn
+
+`tests/per_pulse/test_runtime_inflight_sigkill.py` starts a full native
+Per Pulse HTTP/World/Kernel/Pulse service in a separate OS process. A real Work
+reaches an intentionally **blocked synthetic model transport**, then the
+operating system kills the server before that in-flight request completes.
+After the observed durable lease expires, a new server opens the same World
+and checks that the original user Work survives without a fabricated answer
+or an automatic duplicate model request. A different Work must still complete
+a new, explicitly submitted foreground task. The separate fixture request
+journal distinguishes old replay from legitimate new input.
+
+This checks physical mid-turn crash/reentry, unlike the earlier lease-only
+process death test. It does **not** claim graceful shutdown, tool side-effect
+exactly-once delivery, paid provider behavior, or uninterrupted process
+activity; the pre-create race has its own regression. The browser journey is
+still a separate acceptance check. Keep issue #32 open until its entire
+lifecycle and effect/reentry acceptance is reviewed together.
