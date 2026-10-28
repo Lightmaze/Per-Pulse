@@ -72,7 +72,15 @@ export type PageView = {
   provider: ProviderState;
   execution: PageExecution; artifacts: Artifact[]; artifactsTruncated: boolean;
   hasMore: boolean;
+  historyBeforeMessageId: string | null;
   earlierSourceMessageId?: string | null;
+};
+
+export type MessageHistory = {
+  pageId: string;
+  messages: Message[];
+  hasMore: boolean;
+  beforeMessageId: string | null;
 };
 
 export type ResponseLanguage = 'auto' | 'en' | 'zh-CN';

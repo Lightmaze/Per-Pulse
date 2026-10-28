@@ -99,6 +99,19 @@ button, a, input, textarea { outline-offset: 4px; }
 .source-line .session-link .icon { width: 13px; height: 13px; top: 2px; }
 .conversation-note, .empty-conversation { color: var(--muted); font-size: 14px; line-height: 1.75; margin: 0 0 20px; }
 .conversation-note { font-size: 12px; }
+.conversation-history { margin: -10px 0 24px; }
+.history-dialog[open] { display: flex; flex-direction: column; max-width: 700px; height: min(760px, calc(100dvh - 60px)); overflow: hidden; }
+.history-dialog .dialog-heading, .history-dialog .dialog-description, .history-pagination { flex-shrink: 0; }
+.history-dialog .dialog-description { margin-bottom: 16px; }
+.history-messages { overflow-y: auto; overscroll-behavior: contain; min-height: 80px; flex: 1; padding-right: 8px; }
+.history-message { padding: 20px 0; border-bottom: 1px solid var(--border); }
+.history-message:first-child { padding-top: 4px; }
+.history-message-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 14px; font-size: 12px; }
+.history-message-heading time { color: var(--muted); }
+.history-message-content { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.75; }
+.history-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding-top: 16px; }
+.history-pagination p { color: var(--muted); font-size: 12px; margin: 0; }
+.history-pagination button { min-height: 44px; }
 .composer-wrap { margin-top: auto; padding-top: 64px; }
 .composer { padding: 17px 20px 14px; border: 1px solid #d7d9d3; border-radius: 12px; background: white; min-height: 112px; transition: border-color .15s ease; }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }

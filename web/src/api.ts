@@ -1,4 +1,4 @@
-import type { ArtifactRead, Bootstrap, DraftReference, LessonVerdict, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
+import type { ArtifactRead, Bootstrap, DraftReference, LessonVerdict, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
 
@@ -36,6 +36,8 @@ export const api = {
   updateSettings: (responseLanguage: ResponseLanguage) => request<WorkspaceSettings>('/settings', { method: 'PATCH', body: JSON.stringify({ responseLanguage }) }),
   page: (id: string, signal?: AbortSignal, sourceMessageId?: string) =>
     request<PageView>(pagePath(id) + (sourceMessageId ? `?sourceMessageId=${encodeURIComponent(sourceMessageId)}` : ''), { signal }),
+  history: (id: string, beforeMessageId: string, signal?: AbortSignal) =>
+    request<MessageHistory>(`${pagePath(id)}/messages?beforeMessageId=${encodeURIComponent(beforeMessageId)}`, { signal }),
   createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null }) =>
     request<{ page: PageSummary; reference: PageReference; initialMessageId: string; view: PageView }>('/pages', { method: 'POST', body: JSON.stringify(data) }),
   send: (id: string, content: string, references: DraftReference[]) =>

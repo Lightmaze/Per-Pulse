@@ -9300,6 +9300,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         session_admitted: bool = False,
         limit: int = 100,
         event_id: str | None = None,
+        before_seq: int | None = None,
     ) -> list[dict[str, Any]]:
         clauses = [
             "world_id = ?",
@@ -9345,6 +9346,12 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             # never replace the scoped predicate with an unguarded ID lookup.
             clauses.append("id = ?")
             params.append(event_id)
+        if before_seq is not None:
+            # A bounded, stable read of older conversation. Sequence belongs to
+            # the native ledger; the existing World/Center/lineage predicates
+            # still decide which messages this projection may expose.
+            clauses.append("seq < ?")
+            params.append(before_seq)
         params.append(limit)
         with self._storage._lock:
             rows = self._storage._conn.execute(

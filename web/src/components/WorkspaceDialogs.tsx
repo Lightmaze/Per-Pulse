@@ -11,6 +11,7 @@ export type Modal =
   | { kind: 'return'; message: Message; content: string }
   | { kind: 'settings' }
   | { kind: 'learning' }
+  | { kind: 'history'; beforeMessageId: string }
   | { kind: 'rename' };
 
 export function CreatePageDialog({ initial, busy, error, close, create }: { initial?: Message; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string) => void }) {

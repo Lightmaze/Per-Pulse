@@ -71,3 +71,20 @@ the later Work. This is mechanism and user-interface acceptance, **not**
 evidence that a real model independently learned a new default behavior.
 It does not establish a hard spending cap or long-duration autonomous Pulse.
 `PER_PULSE_JOURNEY_SCREENSHOTS` optionally records an approval/artifact screenshot.
+
+## Browse an older conversation
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  PER_PULSE_HISTORY_SCREENSHOTS=/tmp/per-pulse-history-screenshots \
+  node tests/browser/history_flow.mjs
+```
+
+This offline flow seeds an explicitly authored long conversation in the native
+World, with separate Home and sibling Work histories. It browses every older
+message across stable ranges while new input arrives, retries a failed read,
+opens an old message's original source, follows its reference and returns,
+and verifies the draft after reload. It also checks phone layout, keyboard
+focus, English/Chinese controls and a delayed response after Browser Back.
+No model is configured; no assistant response or learning outcome is invented.

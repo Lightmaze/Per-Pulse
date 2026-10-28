@@ -33,14 +33,15 @@ function MessageContent({ message, pageId, navigate }: { message: Message; pageI
   </div>;
 }
 
-export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, stale = false }: {
-  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string) => void; stale?: boolean;
+export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onHistory, stale = false }: {
+  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string) => void; onHistory: (beforeMessageId: string) => void; stale?: boolean;
 }) {
   const { t, pageTitle } = useLanguage();
   const pageMap = new Map(pages.map(page => [page.id, page]));
   const pageReferences = view.references.filter(reference => !reference.sourceMessageId);
   return <div className="conversation" aria-label={t("conversation.label")}>
     {view.hasMore ? <p className="conversation-note">{view.earlierSourceMessageId ? t('conversation.earlierSource') : t('conversation.recentMessages')}</p> : null}
+    {view.historyBeforeMessageId ? <button className="text-button conversation-history" onClick={() => onHistory(view.historyBeforeMessageId!)}>{t('history.title')}</button> : null}
     {view.messages.map(message => { const activity = getMessageActivity(message.status, view.provider.configured, stale); return <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id} key={message.id} tabIndex={-1} aria-label={t(message.role === 'user' ? 'conversation.yourMessage' : message.role === 'assistant' ? 'conversation.assistantMessage' : 'conversation.workspaceMessage')}>
       <div className="message-label">{message.role === 'user' ? t('conversation.you') : message.role === 'assistant' ? 'Per Pulse' : t('conversation.workspace')}</div>
       {message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">{t("conversation.from")} <SessionLink pageId={message.sourcePageId} label={pageMap.get(message.sourcePageId) ? pageTitle(pageMap.get(message.sourcePageId)!) : t('conversation.sourcePage')} targetMessageId={message.sourceMessageId ?? undefined} navigate={navigate} /></div> : null}

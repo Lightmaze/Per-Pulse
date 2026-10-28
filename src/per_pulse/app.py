@@ -272,6 +272,10 @@ def create_app(
     def message(page_id: str, body: NewMessage, request: Request):
         return pages(request).send(page_id, body.content, [r.model_dump() for r in body.references])
 
+    @app.get("/api/pages/{page_id}/messages")
+    def earlier_messages(page_id: str, request: Request, beforeMessageId: Identifier):
+        return pages(request).history(page_id, before_message_id=beforeMessageId)
+
     @app.post("/api/pages/{page_id}/references", status_code=201)
     def reference(page_id: str, body: NewReference, request: Request):
         return pages(request).add_reference(page_id, body.targetPageId, body.sourceMessageId, body.label)
