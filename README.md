@@ -16,10 +16,19 @@ The alpha candidate provides English and 简体中文 interface controls, a sepa
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.
+- Read structured replies and notes with headings, lists, tables, and code blocks. Copy a code block or the original Markdown, and keep native page links connected to their source.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
 - Enable bounded local pulses: a context can continue from its retained history, and explicit computational connections can carry its results into related contexts.
 
 The server stores pages, messages, and references in the existing Pulse persistence layer. Browser storage holds only local drafts and navigation positions, scoped to the persistent workspace and page. When no model is configured, the interface says **AI disconnected** and saves messages as queued input. It never substitutes a scripted answer for a model response.
+
+Message formatting uses CommonMark with GitHub-style tables and task lists.
+Raw HTML remains text, and image references open only when selected; reading a
+message does not automatically fetch a remote image. Code stays literal, even
+when it contains the name of a linked page. A reference that appears only in
+code or across separate formatting spans keeps a separate page link below the
+message. **Copy** preserves the original message text, including Markdown;
+**Copy code** preserves the displayed code's spacing and line breaks.
 
 ## Run from source
 
