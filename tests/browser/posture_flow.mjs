@@ -73,6 +73,17 @@ try {
     await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
   };
+  const changeInterfaceLanguage = async locale => {
+    // A preference changed in another tab must update an open editor without
+    // recreating its report or submitting anything on the person's behalf.
+    const settingsTab = await context.newPage();
+    await settingsTab.goto(base);
+    await settingsTab.getByRole('button', { name: /^(Settings|设置)$/ }).click();
+    await settingsTab.locator('#interface-language').selectOption(locale);
+    await wait(async () => await page.locator('html').getAttribute('lang') === locale,
+      'open report follows the explicit interface preference');
+    await settingsTab.close();
+  };
   const send = async (text, count) => {
     await page.getByRole('textbox', { name: /^Message / }).fill(text);
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -392,11 +403,27 @@ try {
   await resultPicker.selectOption(reportedResult.id);
   const receiverOutcome = 'The shared lesson added unnecessary onboarding in this registration Work.';
   await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(receiverOutcome);
+  await page.getByRole('searchbox', { name: 'Find a lesson', exact: true }).fill('unmatched-draft-check-817');
+  await page.getByText('No lessons match this search.', { exact: true }).waitFor();
+  assert.equal(await lesson.count(), 0);
+  await page.getByRole('searchbox', { name: 'Find a lesson', exact: true }).fill('');
+  assert.equal(await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).inputValue(), receiverOutcome,
+    'Filtering a lesson out and back must preserve the unsent report.');
+  assert.equal(await resultPicker.inputValue(), reportedResult.id,
+    'Filtering must also preserve the explicitly selected result.');
+  await changeInterfaceLanguage('zh-CN');
+  const chinesePicker = lesson.getByRole('combobox', { name: '关联此页面中的一条结果（可选）', exact: true });
+  assert.equal(await chinesePicker.inputValue(), reportedResult.id);
+  assert.equal(await lesson.getByRole('textbox', { name: '结果发生了什么变化？', exact: true }).inputValue(), receiverOutcome);
+  await lesson.getByRole('button', { name: '没有明显帮助', exact: true }).waitFor();
+  await lesson.getByText('可选择此页面已加载的一条完整回复。关联会保留结果来源，但不代表已证明经验导致了该结果。', { exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
-  await resultPicker.scrollIntoViewIfNeeded();
-  const pickerBounds = await resultPicker.boundingBox();
+  await chinesePicker.scrollIntoViewIfNeeded();
+  const pickerBounds = await chinesePicker.boundingBox();
   assert.ok(pickerBounds.x >= 0 && pickerBounds.x + pickerBounds.width <= 390, 'Result picker fits the mobile dialog.');
-  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-result-report-mobile.png') });
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-result-report-mobile-zh.png') });
+  await changeInterfaceLanguage('en');
+  assert.equal(await resultPicker.inputValue(), reportedResult.id);
   await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).click();
   await lesson.getByText('Paused · v11', { exact: true }).waitFor();
   assert.equal(await lesson.getByRole('button', { name: 'Give feedback', exact: true }).count(), 0);
@@ -484,6 +511,11 @@ try {
   assert.equal(concurrentEdit.status, 200);
   await lesson.getByRole('button', { name: 'It helped', exact: true }).click();
   await page.getByRole('alert').getByText('This lesson changed. Refresh it before saving.', { exact: true }).waitFor();
+  await changeInterfaceLanguage('zh-CN');
+  await page.getByRole('alert').getByText('这条经验已被修改。请先刷新，再保存你的反馈。', { exact: true }).waitFor();
+  assert.equal(await lesson.getByRole('textbox', { name: '结果发生了什么变化？', exact: true }).inputValue(), conflictDraft);
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-conflict-draft-zh.png') });
+  await changeInterfaceLanguage('en');
   await page.getByRole('button', { name: 'Refresh lessons', exact: true }).click();
   await lesson.getByText('In use · v13', { exact: true }).waitFor();
   assert.equal(await reportField.inputValue(), conflictDraft);

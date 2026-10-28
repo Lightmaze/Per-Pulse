@@ -21,6 +21,8 @@ const errorKeys: Record<string, MessageKey> = {
   request_too_large: 'error.requestTooLarge', workspace_mode_mismatch: 'error.workspaceMode',
   home_title_fixed: 'error.homeRename', already_home: 'error.homeReturn',
   not_found: 'error.notFound', frontend_not_built: 'error.frontendBuild',
+  experience_revision_conflict: 'learning.revisionConflict',
+  experience_not_found: 'learning.notAvailable', posture_disabled: 'learning.disabled',
 };
 
 type LanguageContext = {

@@ -16,8 +16,8 @@ function describeCondition(value: LessonCondition, t: Translate): string {
 
 type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; counterexamples?: string[]; shift?: PostureExperience['shift'] };
 
-function Experience({ experience, pageId, results, busy, revise, feedback, navigate }: {
-  experience: PostureExperience; pageId: string; busy: boolean;
+function Experience({ experience, pageId, results, busy, hidden, revise, feedback, navigate }: {
+  experience: PostureExperience; pageId: string; busy: boolean; hidden: boolean;
   results: Message[];
   revise: (experience: PostureExperience, changes: LessonRevision, evidence?: string) => Promise<void>;
   feedback: (experience: PostureExperience, verdict: LessonVerdict, evidence: string, resultMessageId?: string) => Promise<void>;
@@ -67,7 +67,7 @@ function Experience({ experience, pageId, results, busy, revise, feedback, navig
     await feedback(experience, verdict, evidence.trim(), resultMessageId || undefined);
     setEvidence(''); setResultMessageId(''); setFeedbackOpen(false);
   };
-  return <article className={`lesson ${experience.active ? '' : 'lesson-paused'}`}>
+  return <article hidden={hidden} className={`lesson ${experience.active ? '' : 'lesson-paused'}`}>
     <div className="lesson-heading"><h3>{experience.title}</h3><span>{t(experience.active ? 'learning.active' : 'learning.paused')} · v{experience.revision}</span></div>
     <p>{experience.lesson}</p>
     <p className="lesson-scope">{t(experience.scope === 'subject' ? 'learning.shared' : 'learning.local')}{experience.record_type === 'constructed_fixture' ? ` · ${t('learning.fixture')}` : ''}</p>
@@ -87,7 +87,7 @@ function Experience({ experience, pageId, results, busy, revise, feedback, navig
         && entry.source.page_id && entry.source.page_id !== pageId ? entry.source.page_id : null;
       const resultPage = entry.source?.kind === 'operator_report' && entry.source.result_message_id
         ? entry.source.page_id : null;
-      return <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'not_useful' ? t('learning.verdictNotUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}
+      return <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'not_useful' ? t('learning.verdictNotUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict === 'withdrawn' ? t('learning.verdictWithdrawn') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}
         {resultPage ? <> · <button type="button" className="text-button" onClick={() => navigate(resultPage, resultPage !== pageId ? { pageId } : undefined, entry.source!.result_message_id)}>{t('learning.reportedResult')}</button>
           {['TEST_DOUBLE', 'EXPLICIT_MOCK'].includes(entry.source?.result_evidence_class ?? '') ? <> · {t('learning.resultFixture')}</> : null}
         </> : reportedPage ? <> · <button type="button" className="text-button" onClick={() => navigate(reportedPage, { pageId })}>{t('learning.reportedWork')}</button></> : null}
@@ -144,9 +144,11 @@ function Experience({ experience, pageId, results, busy, revise, feedback, navig
 }
 
 export function LearningDialog({ pageId, pageTitle, messages, close, navigate }: { pageId: string; pageTitle: string; messages: Message[]; close: () => void; navigate: Navigate }) {
-  const { t } = useLanguage();
+  const { t, errorText } = useLanguage();
   const [view, setView] = useState<PostureView | null>(null);
-  const [error, setError] = useState('');
+  // Keep the error code so an interface-language switch updates the message
+  // without refetching, retrying a write, or clearing a person's report.
+  const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const writing = useRef(false);
   const [refreshing, setRefreshing] = useState(true);
@@ -159,6 +161,7 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate }:
     item.title, item.lesson, JSON.stringify(item.conditions), ...item.counterexamples,
     item.shift.understanding, item.shift.candidates, item.shift.delivery,
   ].some(value => value.toLocaleLowerCase().includes(needle)));
+  const visibleIds = new Set(visibleExperiences.map(item => item.id));
   useEffect(() => {
     const controller = new AbortController();
     // Keep mounted editors while refreshing after a version conflict. Their
@@ -168,7 +171,7 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate }:
     api.posture(pageId, controller.signal).then(next => {
       if (!controller.signal.aborted) setView(next);
     }).catch(problem => {
-      if (!controller.signal.aborted) setError(problem instanceof Error ? problem.message : t('learning.readError'));
+      if (!controller.signal.aborted) setError(problem instanceof Error ? problem : t('learning.readError'));
     }).finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
     return () => controller.abort();
   }, [pageId, version]);
@@ -181,14 +184,14 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate }:
       const response = await operation();
       setView(current => current ? { ...current, experiences: current.experiences.map(item => item.id === response.experience.id ? response.experience : item) } : current);
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : t('learning.updateError'));
+      setError(problem instanceof Error ? problem : t('learning.updateError'));
       throw problem;
     } finally { writing.current = false; setBusy(false); }
   };
   return <Dialog title={t('learning.title')} className="learning-dialog" onClose={() => { if (!busy) close(); }}>
     <p className="dialog-description">{t('learning.description', { page: pageTitle })}</p>
     <button className="text-button" disabled={busy || refreshing} onClick={() => { setRefreshing(true); setVersion(value => value + 1); }}>{t('learning.refresh')}</button>
-    {error ? <div className="form-error" role="alert">{error}</div> : null}
+    {error ? <div className="form-error" role="alert">{errorText(error)}</div> : null}
     {refreshing ? <p role="status">{t('learning.loading')}</p> : null}
     {view && !view.enabled ? <p>{t('learning.disabled')}</p> : null}
     {view?.enabled && !view.experiences.length ? <div className="lessons-empty"><h3>{t('learning.emptyTitle')}</h3><p>{t('learning.emptyHelp')}</p><p>{t('learning.emptyModel')}</p></div> : null}
@@ -197,7 +200,9 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate }:
       <input id="lesson-search" type="search" autoComplete="off" value={search} onChange={event => setSearch(event.target.value)} placeholder={t('learning.searchHint')} />
     </div> : null}
     {view?.enabled && view.experiences.length > 0 && !visibleExperiences.length ? <p className="lesson-note" role="status">{t('learning.noMatches')}</p> : null}
-    {visibleExperiences.map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} busy={busy || refreshing} navigate={navigate}
+    {/* Filtering only hides authorized lessons; unmounting their editors would
+        discard unsent reports and refinements when the search changes. */}
+    {(view?.experiences ?? []).map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} busy={busy || refreshing} hidden={!visibleIds.has(experience.id)} navigate={navigate}
       revise={(item, changes, evidence) => update(() => api.reviseExperience(pageId, item, changes, evidence))}
       feedback={(item, verdict, evidence, resultMessageId) => update(() => api.experienceFeedback(pageId, item, verdict, evidence, resultMessageId))} />)}
   </Dialog>;

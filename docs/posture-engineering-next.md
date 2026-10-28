@@ -93,7 +93,12 @@ encounter or private feedback. Filtering happens within the already authorized
 page projection; it makes no provider request, changes no lesson permissions,
 and does not disturb the original source/return journey. The English/简体中文
 browser regression checks matching, empty results, and a private-encounter
-phrase that must not match. This helps a person locate an old judgment before
+phrase that must not match. Filtering hides already authorized lesson editors
+without unmounting them, so clearing a search restores unsent feedback,
+refinement drafts, and the explicitly selected result. Changing Work or World
+still resets those editors at the existing dialog boundary. The browser flow
+checks this preservation before submitting a receiving-Work report.
+This helps a person locate an old judgment before
 refining or pausing it; it is not itself model learning or retrieval.
 
 ## Checkpoint verification
@@ -190,9 +195,12 @@ The service validates the result against the same settled native Kernel-turn
 provenance used for capturing encounters. It records IDs, the UTF-8 content
 digest and evidence class without copying the receiving conversation into the
 source. This is still an operator report, not an automatic causal attribution
-or proof of real-provider learning. New interface text is English, including
-fallback text in the existing Chinese catalogue, per the repository's authoring
-rules. Full real-provider trials and independent quality review remain separate.
+or proof of real-provider learning. The English and Simplified Chinese interfaces
+both describe the result selector, neutral outcome and source links. Switching
+the interface language keeps the selected result and unsent feedback intact;
+known revision-conflict errors update their language without retrying the write.
+Original lesson and result content remain literal. Full real-provider trials
+and independent quality review remain separate.
 
 The Lessons dialog is also scoped by World and page. Browser Back during a
 source-page write cannot repaint the receiving Work with the private source
