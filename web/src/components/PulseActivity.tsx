@@ -5,6 +5,7 @@ import { PulseActivityRequestGate } from '../pulseActivityRequestGate';
 import { activationMessageTarget, attentionSourceTarget, localRetainedAttention } from '../pulseAttention';
 import { pulseActivityLabel } from '../pulseActivityLabels';
 import { pulseAdmissionHold } from '../pulseAdmission';
+import { otherPendingPulseContexts, pulseQueueForPage } from '../pulseQueue';
 import type { PageSummary, PulseState } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
@@ -120,6 +121,8 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
   const recent = pulse?.recentActivations ?? [];
   const thisPageHeld = pulse?.heldContexts.some(held => held.pageId === pageId) ?? false;
   const admissionHold = pulse ? pulseAdmissionHold(pulse) : null;
+  const localBacklog = pulseQueueForPage(pulse, pageId);
+  const otherBacklogs = otherPendingPulseContexts(pulse, pageId);
   // Older servers do not have partial-failure usage receipts. A receipt is a
   // proven lower bound, not a full provider bill or a released reservation.
   const budgetEvidence = pulse?.providerTokenBudget;
@@ -156,6 +159,9 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
           {thisPageHeld ? t('pulse.held') : t('pulse.holdInfo')}
         </p>
         <p className="pulse-activity-summary" role="status">{pulse.paused && pulse.enabled ? t('pulse.paused') : pulse.running ? t('pulse.continuing') : pulse.enabled ? t('pulse.enabled') : t('pulse.disabled')} · {t('pulse.queue', { queued: pulse.queue.queued, running: pulse.queue.running })}</p>
+        <p className="pulse-activity-detail">{t('pulse.localQueue', {
+          queued: localBacklog?.queued ?? 0, running: localBacklog?.running ?? 0,
+        })}</p>
         <p className="pulse-activity-detail">{t('pulse.budget', { remaining: pulse.budget.remaining, limit: pulse.budget.limit })}</p>
         {admissionHold ? <p className="pulse-activity-detail">{t(admissionHold === 'hourly_count' ? 'pulse.admissionCountHeld' : 'pulse.admissionTokensHeld')}</p> : null}
         {pulse.providerTokenBudget ? <>
@@ -176,6 +182,23 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
         {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">{t('pulse.oldest', { time: eventTime(pulse.queue.oldestQueuedAt) })}</p> : null}
         {!pulse.providerConfigured ? <p className="pulse-activity-detail">{t('pulse.noProvider')}</p> : null}
       </section>
+      {otherBacklogs.length ? <section className="pulse-activity-section" aria-label={t('pulse.otherBacklogs')}>
+        <h3>{t('pulse.otherBacklogs')}</h3>
+        <p className="pulse-activity-detail">{t('pulse.otherBacklogsInfo')}</p>
+        <ul className="pulse-activity-list">{otherBacklogs.map(entry =>
+          <li key={entry.center_id ?? 'home'}>
+            {entry.pageId && validIds.has(entry.pageId)
+              ? <button className="pulse-activity-link" type="button"
+                  onClick={() => jump(entry.pageId)}>{nameFor(entry.pageId)}</button>
+              : <span>{nameFor(entry.pageId, entry.center_id)}</span>}
+            <span className="pulse-activity-detail"> · {t('pulse.queue', {
+              queued: entry.queued, running: entry.running,
+            })}</span>
+            {entry.oldestQueuedAt ? <span className="pulse-activity-detail">
+              {t('pulse.oldest', { time: eventTime(entry.oldestQueuedAt) })}
+            </span> : null}
+          </li>)}</ul>
+      </section> : null}
       <section className="pulse-activity-section" aria-label={t('pulse.thoughts')}>
         <h3>{t('pulse.thoughts')}</h3>
         <p className="pulse-activity-detail">{t('pulse.thoughtsInfo')}</p>

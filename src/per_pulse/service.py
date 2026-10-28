@@ -205,6 +205,10 @@ class PageService:
                 context["pageId"] = page_id_for(context["center_id"])
             for held in state["heldContexts"]:
                 held["pageId"] = page_id_for(held["center_id"])
+            for backlog in state.get("queueByContext", []):
+                # Raw center IDs remain available for historical, non-navigable
+                # Work; only a known actual Work can receive a page link.
+                backlog["pageId"] = page_id_for(backlog["center_id"])
             for retained in state.get("retainedAttention", []):
                 # A model's retained local thought has its own original causal
                 # source. Do not infer a navigable message from a turn/action

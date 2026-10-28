@@ -125,3 +125,21 @@ Partial or mismatched identities receive a typed HTTP 409
 Legacy native clients that omit *both* headers keep their existing contract.
 This is a stale-tab safety fence, not authentication, a new scheduler, or an
 expanded model permission boundary. It does not establish provider costs.
+
+
+## Inspect a particular Work's durable background backlog
+
+The existing native status now groups the *full queued/running Pulse backlog*
+by original center. Global counts and the per-context figures are computed
+from the same World-scoped SQL rows, rather than attributing only the latest
+20 events. The PageService projects each center to an actual page when still
+available; an older/hidden Work remains a non-navigable historical center,
+never an invented Home link. The Activity panel shows the current page's
+counts and offers direct navigation to other Works with pending activity,
+while preserving the existing return position and identity fence.
+
+A queued local activation is not an awaiting user approval, and this adds no
+scheduler, provider invocation or authority. Native World/SQLite/Kernel tests
+use an explicit synthetic model transport; browser and full-tree CI results
+must be checked on the exact integrated commit. Real-model usefulness,
+wall-clock autonomy and provider billing remain separate acceptance items.
