@@ -390,3 +390,75 @@ def test_failure_without_known_usage_keeps_reservation_and_rejects_invalid_recei
         assert budget["partialKnownExcessTokens"] == 0
     finally:
         service.runtime.close()
+
+
+def test_native_kernel_failure_after_completed_request_keeps_partial_usage(tmp_path, monkeypatch):
+    """Exercise the original World -> Kernel -> failure receipt with synthetic HTTP.
+
+    The first model round completes and records 145 tokens. The subsequent
+    continuation fails; its unknown usage is deliberately not fabricated.
+    """
+    import json
+    import httpx
+    from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
+    from pulse_system.agent.harness.base import HarnessError
+    from pulse_system.core.pulse.engine import PulseEvent
+
+    monkeypatch.setenv("PER_PULSE_PARTIAL_USAGE_TEST_KEY", "synthetic-test-credential")
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        if len(requests) > 1:
+            return httpx.Response(503, text="Explicit synthetic continuation failure")
+        # A real tool dispatch forces a second model round after the first
+        # provider response has been durably committed in native Kernel.
+        chunks = [
+            {"choices": [{"index": 0, "delta": {"tool_calls": [{
+                "index": 0, "id": "synthetic-read", "type": "function",
+                "function": {"name": "read_file", "arguments": json.dumps({
+                    "path": "missing-readonly.txt",
+                })},
+            }]}, "finish_reason": None}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+            {"choices": [], "usage": {
+                "prompt_tokens": 120, "completion_tokens": 25, "total_tokens": 145,
+            }},
+        ]
+        body = "".join("data: " + json.dumps(chunk) + "\\n\\n" for chunk in chunks)
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"},
+            content=body + "data: [DONE]\\n\\n",
+        )
+
+    def factory(_scope):
+        return ChatHTTPModelAdapter(
+            ChatHTTPConfig(
+                "https://fixture.invalid/chat/completions", "partial-usage-fixture",
+                credential_env="PER_PULSE_PARTIAL_USAGE_TEST_KEY",
+            ),
+            transport=httpx.MockTransport(respond),
+        )
+
+    service = PageService(tmp_path, model_factory=factory,
+                          pulse=settings(limit=150, reservation=60))
+    try:
+        runtime = service.runtime
+        root = queue_background(runtime, seed_source(runtime))
+        pulse_event = PulseEvent.from_causal_event(root)
+        with pytest.raises(HarnessError):
+            runtime._mgr.pulse(
+                runtime.continuity_engram_id,
+                pulse_event=pulse_event,
+                execution_context=runtime._native_kernel_execution_context(pulse_event),
+                runtime_fence=runtime._current_runtime_fence(),
+            )
+        assert len(requests) >= 2, "The synthetic first round must request continuation"
+        assert runtime.causal_ledger.get_event(root.id).status.value == "uncertain"
+        budget = runtime.context_pulse.snapshot()["providerTokenBudget"]
+        assert budget["partialKnownTokens"] == 145
+        assert budget["partialKnownExcessTokens"] == 85
+        assert budget["charged"] == 145
+        assert budget["unaccountedReservations"] == 60
+    finally:
+        service.runtime.close()
