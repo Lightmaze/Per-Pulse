@@ -90,14 +90,15 @@ def test_focused_requests_exclude_unselected_material_and_resume_context_next_tu
             native_replay.project_model_messages(store, scope, ({"role": "user", "content": UNRELATED},))
 
         send(client, page_id, "TRY_ORDINARY_ACTION")
-        pending = wait_for(client, page_id, lambda v: bool(v["execution"]["pendingActions"]))
+        pending = wait_for(client, page_id, lambda v: any(
+            action["canResolve"] for action in v["execution"]["pendingActions"]))
         assert pending["execution"]["replay"] is None
         body = next(b for b in reversed(fixture.requests) if b.get("tools"))
         assert UNRELATED in json.dumps(body)
         assert ADVICE in json.dumps(body)
         assert "mutate_file" in {t["function"]["name"] for t in body["tools"]}
         assert len(fixture.auxiliary_requests) > before_auxiliary
-        action = pending["execution"]["pendingActions"][0]
+        action = next(action for action in pending["execution"]["pendingActions"] if action["canResolve"])
         allowed = client.post(f"/api/pages/{page_id}/execution/actions/{action['actionId']}", json={"decision": "allow_once"})
         assert allowed.status_code == 200, allowed.text
         wait_for(client, page_id, lambda v: len([m for m in v["messages"] if m["role"] == "assistant"]) == 3)
