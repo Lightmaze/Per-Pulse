@@ -278,7 +278,23 @@ experimental action, not a claim that the model spontaneously shared it.
 promotion revisions, settled response artifacts, per-stage usage, and the
 fixed baseline-first ordering. `provider-requests.json` preserves the actual
 credential-free model requests, including posture computations, for exposure
-inspection. Both files are private trial output under a generated `.gitignore`.
+inspection. New trials also fsync a private `provider-admissions.jsonl` entry
+**before** each adapter stream attempt, including auxiliary posture calls. A
+journal storage failure stops outbound dispatch instead of silently sending an
+unrecorded request. The native auditor compares this admission journal with the
+later request snapshot; missing, truncated or altered admissions invalidate
+a new completed trial. Older trials without this journal retain their original
+snapshot-based audit semantics.
+
+The journal is useful after an interrupted experiment: it reports *admitted
+pre-transport attempts*, not necessarily requests received or billed by the
+provider. HTTP retries, token totals and dollar charges still need separately
+verified provider evidence. The study coordinator reports any readable failed
+arm admissions without copying private request bodies into `study.json`; an
+unreadable journal is recorded as unknown, never interpreted as zero.
+All trial files can contain private prompts and outputs and remain under a
+0700 local directory with a generated `.gitignore`. Never upload the journal
+or the parent study directory to a reviewer.
 
 `audit-ordinary-transfer` reconciles the original World and Kernel traces,
 request digests and multiplicity, per-stage scopes, budgets, response bytes,
