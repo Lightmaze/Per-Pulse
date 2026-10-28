@@ -68,7 +68,7 @@ def test_pulse_activity_write_fence_across_service_restart(tmp_path):
         assert reopened["serviceInstanceId"] != observation["serviceInstanceId"]
         assert client.patch("/api/pulse", json={"paused": False},
                             headers=valid).status_code == 409
-        assert client.delete("/api/pulse/connections", json={
+        assert client.request("DELETE", "/api/pulse/connections", json={
             "sourcePageId": source, "targetPageId": target,
         }, headers=valid).status_code == 409
         retained = client.get("/api/pulse").json()
@@ -77,7 +77,7 @@ def test_pulse_activity_write_fence_across_service_restart(tmp_path):
         fresh = _headers(reopened)
         assert client.patch("/api/pulse", json={"paused": False},
                             headers=fresh).status_code == 200
-        assert client.delete("/api/pulse/connections", json={
+        assert client.request("DELETE", "/api/pulse/connections", json={
             "sourcePageId": source, "targetPageId": target,
         }, headers=fresh).status_code == 200
         final = client.get("/api/pulse").json()
