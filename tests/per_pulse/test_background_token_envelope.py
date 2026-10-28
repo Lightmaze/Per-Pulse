@@ -425,10 +425,10 @@ def test_native_kernel_failure_after_completed_request_keeps_partial_usage(tmp_p
                 "prompt_tokens": 120, "completion_tokens": 25, "total_tokens": 145,
             }},
         ]
-        body = "".join("data: " + json.dumps(chunk) + "\\n\\n" for chunk in chunks)
+        body = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks)
         return httpx.Response(
             200, headers={"content-type": "text/event-stream"},
-            content=body + "data: [DONE]\\n\\n",
+            content=body + "data: [DONE]\n\n",
         )
 
     def factory(_scope):
