@@ -168,8 +168,9 @@ def test_actual_native_reading_continues_passages_then_writes_a_downloadable_rep
         assert fixture.requests == []
         sent = client.post("/api/pages/home/messages", json={"content": "PROCESS_ATTACHED_CSV", "materials": [record["id"]]})
         assert sent.status_code == 202
-        pending = wait_for(client, "home", lambda v: any(a["canResolve"] for a in v["execution"]["pendingActions"]))
-        action = next(a for a in pending["execution"]["pendingActions"] if a["canResolve"])
+        pending = wait_for(client, "home", lambda v: any(
+            action["canResolve"] for action in v["execution"]["pendingActions"]))
+        action = next(action for action in pending["execution"]["pendingActions"] if action["canResolve"])
         assert action["toolName"] == "mutate_file"
         assert fixture.reads[0]["passages"] > 1
         assert fixture.reads[0]["content"].encode() == content[3:]
