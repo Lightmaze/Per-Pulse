@@ -142,7 +142,36 @@ def test_runner_exception_preserves_private_status_without_error_text(tmp_path, 
     assert result["stop_reason"] == "trial_runner_exception"
     assert result["exception_type"] == "RuntimeError"
     assert seen == ["notice-first"]
+    assert result["failed_arm_admissions"] == {"status": "unavailable", "attempted_requests": None}
     assert "SECRET" not in (root / "study.json").read_text()
+
+
+def test_runner_failure_recovers_only_pretransport_admission_count(tmp_path, monkeypatch):
+    def interrupted_run(path, **_kwargs):
+        path.mkdir()
+        entries = [
+            {"stage": "source", "request": {"messages": []}, "audit": {"request_sha256": "a"}},
+            {"stage": "feedback", "request": {"messages": []}, "audit": {"request_sha256": "b"}},
+        ]
+        (path / "provider-admissions.jsonl").write_text(
+            "".join(json.dumps(entry) + "\\n" for entry in entries)
+        )
+        raise ConnectionError("private remote request body")
+
+    monkeypatch.setattr(posture_study, "run_ordinary_transfer", interrupted_run)
+    root = tmp_path / "interrupted-study"
+    result = posture_study.run_study(root, model_factory=fake_factory)
+    assert result["status"] == "stopped"
+    assert result["failed_arm_admissions"] == {
+        "status": "pre_transport_attempts_only", "attempted_requests": 2,
+    }
+    assert "private remote request body" not in (root / "study.json").read_text()
+    assert result.get("observed_requests", 0) == 0  # no completed audited arm
+    journal = root / "trial-notice-first" / "provider-admissions.jsonl"
+    journal.write_text(journal.read_text() + "{")
+    assert posture_study._failed_arm_admissions(journal.parent) == {
+        "status": "incomplete_or_unreadable", "attempted_requests": None,
+    }
 
 
 def test_blind_packet_exception_stops_second_arm(tmp_path, monkeypatch):
