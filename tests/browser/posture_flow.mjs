@@ -40,6 +40,7 @@ const stopServer = async child => {
 };
 let server = startServer();
 let browser;
+let activePage;
 const errors = [];
 const wait = async (condition, description) => {
   const deadline = Date.now() + 15000;
@@ -56,6 +57,7 @@ try {
     args: process.env.PLAYWRIGHT_CHROMIUM_ARGS ? JSON.parse(process.env.PLAYWRIGHT_CHROMIUM_ARGS) : undefined });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
+  activePage = page;
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(base);
   await page.getByRole('textbox', { name: /^Message / }).waitFor();
@@ -67,7 +69,10 @@ try {
     await page.getByRole('button', { name: 'View this page’s lessons', exact: true }).click();
     await page.getByRole('dialog', { name: 'Lessons from the work', exact: true }).waitFor();
   };
-  const close = () => page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  const close = async () => {
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  };
   const send = async (text, count) => {
     await page.getByRole('textbox', { name: /^Message / }).fill(text);
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -204,6 +209,7 @@ try {
   await page.getByRole('textbox', { name: 'Where should we begin?', exact: true }).fill('Maintain the standard registration fields.');
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
   await page.getByRole('button', { name: 'Registration tool', exact: true }).waitFor();
+  await page.locator('.message-assistant').waitFor();
   const unsentWorkDraft = 'Keep registration simple; review the original correction before changing the form.';
   await page.getByRole('textbox', { name: /^Message / }).fill(unsentWorkDraft);
   await openLessons();
@@ -364,8 +370,14 @@ try {
   await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
   await lesson.getByText('In use · v10', { exact: true }).waitFor();
   await close();
+  const pageNavigation = page.getByRole('navigation', { name: 'Pages', exact: true });
+  if (!(await pageNavigation.isVisible())) {
+    await page.getByRole('button', { name: 'Toggle navigation', exact: true }).click();
+  }
+  await pageNavigation.waitFor();
   await page.getByRole('navigation', { name: 'Pages', exact: true })
-    .getByRole('link', { name: 'Registration tool', exact: true }).click();
+    // Status badges also contribute to this link's accessible name.
+    .getByRole('link', { name: /^Registration tool/ }).click();
   await page.getByRole('textbox', { name: /^Message / }).fill(unsentWorkDraft);
   await openLessons();
   await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
@@ -489,6 +501,17 @@ try {
   assert.equal(await lesson.getByText('Later feedback (6)', { exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, receiving-Work outcome feedback without private source exposure, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
+} catch (error) {
+  if (activePage && !activePage.isClosed()) {
+    console.error('Failure navigation state:', JSON.stringify({
+      url: activePage.url(),
+      sidebarVisible: await activePage.locator('.sidebar').isVisible(),
+      navigation: await activePage.locator('.page-nav').innerText(),
+      dialogs: await activePage.getByRole('dialog').count(),
+    }));
+    if (screenshots) await activePage.screenshot({ path: join(screenshots, 'posture-failure.png') });
+  }
+  throw error;
 } finally {
   await browser?.close();
   await stopServer(server);
