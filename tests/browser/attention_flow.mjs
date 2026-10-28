@@ -280,6 +280,15 @@ try {
   await page.unroute('**/api/pages/**/messages');
   checks.push('Chinese recovery message preserves an unsent Work draft after a known API error');
 
+  // A held local Work must remain discoverable from another Work even when
+  // a short Recent activity sample is not enough. Native World/Kernel still
+  // owns the pending propagation; this UI never claims to approve or run it.
+  const holdReceiver = await fetch(base + '/api/pulse/contexts/' + localReceiver, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paused: true }),
+  });
+  assert.equal(holdReceiver.status, 200, await holdReceiver.text());
+
   // Exhaust the actual native hourly admission count, not a mocked React
   // status. A second original Work result schedules the second local
   // influence through the same World/Kernel budget.
@@ -288,6 +297,39 @@ try {
     body: JSON.stringify({ content: 'Another distinct source finding for the receiving Work.' }),
   });
   assert.equal(anotherSource.status, 202, await anotherSource.text());
+  await wait(async () => {
+    const observation = (await (await fetch(base + '/api/pulse/observation')).json()).pulse;
+    return observation.queueByContext?.some(entry =>
+      entry.pageId === localReceiver && entry.queued === 1 && entry.running === 0);
+  }, 'held receiver retains native queued propagation', 20000);
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByText('此页面：1 项后台排队 · 0 项运行中。', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+
+  await page.goto(base + '/page/' + encodeURIComponent(localSource));
+  await page.locator('.composer textarea').waitFor();
+  const sourceDraft = 'Preserve this source draft while inspecting the other queued Work.';
+  await page.locator('.composer textarea').fill(sourceDraft);
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByRole('heading', { name: '其他局部工作进度', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Actual receiving Work', exact: true }).click();
+  await wait(async () => new URL(page.url()).pathname === '/page/' + localReceiver,
+    'native queued receiver opens from source Work Activity');
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
+  await page.locator('.return-to-thread').click();
+  await wait(async () => new URL(page.url()).pathname === '/page/' + localSource,
+    'back to Work that inspected the waiting receiver');
+  assert.equal(await page.locator('.composer textarea').inputValue(), sourceDraft);
+  checks.push('durable per-Work backlog opens held receiver and returns with both drafts');
+
+  const releaseReceiver = await fetch(base + '/api/pulse/contexts/' + localReceiver, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paused: false }),
+  });
+  assert.equal(releaseReceiver.status, 200, await releaseReceiver.text());
+  await page.goto(base + '/page/' + encodeURIComponent(localReceiver));
+  await page.locator('.composer textarea').waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
   await wait(async () => {
     const budget = (await (await fetch(base + '/api/pulse')).json()).budget;
     return budget.used === budget.limit && budget.limit === 2;
