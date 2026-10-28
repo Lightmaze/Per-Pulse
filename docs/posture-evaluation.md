@@ -367,7 +367,17 @@ condition key to reviewers.
 
 The comparison reports human judgments and whether provider usage was accounted,
 not a bill, statistically significant advantage, or independently authenticated
-blinding. The baseline still precedes sharing and conditional stages can incur
+blinding. For each blinded task pair, `usage_observed` now exposes the native
+main-round count, observed main input/output tokens and separately recorded
+auxiliary posture requests and token/cache fields for both conditions.
+`reported_token_lower_bound` sums only known nonnegative main and auxiliary
+input/output counts; absent or malformed counts remain null rather than becoming
+fabricated zeroes. `token_evidence_complete` requires both the native
+`accounted` receipt and all expected numeric fields. Cached-token fields are
+metadata about the auxiliary input, **not extra input to add again**. These
+observations do not establish billable requests, provider prices or a complete
+invoice, especially for failures, retries or missing usage.
+The baseline still precedes sharing and conditional stages can incur
 additional computation. Counterbalanced replications and independently reviewed
 outcomes are needed before attributing changes to learned experience.
 

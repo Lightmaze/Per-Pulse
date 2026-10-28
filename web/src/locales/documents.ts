@@ -7,12 +7,6 @@ export const documentsEnglish = {
   'document.unnamedImage': 'no description',
   'document.table': 'Table in document',
   'document.unavailable': 'The reading view could not be opened. The source text is available below.',
-  'document.save': 'Save file',
-  'document.saving': 'Saving…',
-  'document.changed': 'This file has changed since this result was produced. Open its current result before saving it.',
-  'document.downloadUnavailable': 'This result is no longer available as a complete text file. Open its preview for details.',
-  'document.downloadProtected': 'Only a protected preview is available for this file. Its complete contents cannot be saved here.',
-  'document.wrongVersion': 'The returned file does not match this result. Open the result again before saving it.',
 };
 
 export const documentsChinese: Record<keyof typeof documentsEnglish, string> = {
@@ -24,10 +18,4 @@ export const documentsChinese: Record<keyof typeof documentsEnglish, string> = {
   'document.unnamedImage': '没有说明',
   'document.table': '文档中的表格',
   'document.unavailable': '无法打开阅读视图，下方仍可查看原文。',
-  'document.save': '保存文件',
-  'document.saving': '正在保存…',
-  'document.changed': '文件已在此成果生成后发生变化。请打开当前成果再保存。',
-  'document.downloadUnavailable': '此成果的完整文本文件已不可用，请打开预览查看详情。',
-  'document.downloadProtected': '此文件只能查看保护后的预览，无法在这里保存完整内容。',
-  'document.wrongVersion': '返回的文件与此成果不匹配，请重新打开成果后再保存。',
 };

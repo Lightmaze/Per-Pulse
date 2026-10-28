@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-The web distribution includes third-party components under their own licenses.
-Their copyright and license notices are bundled in static/third-party-notices.txt
-(available at /third-party-notices.txt in the local application). This includes
-React, react-markdown, remark-gfm and their production dependencies.
+The built browser client includes third-party software under its respective
+licenses. Its accompanying THIRD_PARTY_NOTICES.txt contains the notices and
+license texts for bundled dependencies, including React, react-markdown,
+remark-gfm and their bundled dependencies.

@@ -33,11 +33,21 @@ feedback. The tool lets the model discover real message IDs; the model cannot
 supply an invented original encounter. Learning remains optional: not every
 message warrants a lesson.
 
-Open **Settings → View this page's lessons** to inspect saved lessons and their
+Open **Settings → View this page’s experience** to inspect saved lessons and their
 conditions, pause one, record what changed in the result, or explicitly make
 the lesson available across pages. A lesson is local to its source page until
 that transfer is requested. The shared abstraction can travel; the original
 conversation and raw feedback remain at the source.
+
+**Save example** on a completed reply retains an exact selected passage without
+requiring a conditional lesson. It can be captured before evaluation, with an
+optional note and optional later user message. It is local until explicitly
+shared. A shared example carries the selected passage and note; its surrounding
+conversation and private feedback remain at the source. The original passage
+cannot be edited in place. A later interpretation changes the note with the
+same revision and feedback history used by lessons. Existing completed replies
+can be captured while disconnected; generating replies and model-chosen learning
+still require a provider.
 
 For a later ordinary task, active eligible experiences enter the existing
 semantic work path within its material budget before an action and at a bounded
@@ -66,9 +76,10 @@ lost ownership, and unavailable durable state still stop the affected work.
 | Operation | Input | Effect |
 | --- | --- | --- |
 | `list` | `op` | Return bounded current-scope experiences and recent original message IDs |
-| `find` | `query` (2–160 printable characters), optional `after_experience_id` from a prior result | Case-insensitive literal search through eligible active experience abstractions, with bounded oldest-page continuation via `next_after_experience_id`; not a semantic relevance judgment |
+| `find` | `query` (2–160 printable characters), optional `after_experience_id` from a prior result | Case-insensitive literal search through eligible lesson content or example passages/notes, with bounded continuation via `next_after_experience_id`; not a semantic relevance judgment |
 | `get` | `experience_id` | Retrieve one eligible active experience by its stable identity even if an earlier listing omitted it; inaccessible and unknown IDs are indistinguishable |
 | `remember` | Original assistant result ID, later user feedback ID, title, lesson, conditions, counterexamples, and understanding/candidates/delivery shifts | Stage one context-local experience |
+| `remember_example` | Earlier settled assistant result ID, title, exact excerpt; optional note and later user feedback ID | Stage a concrete context-local example without a required abstraction or evaluation |
 | `revise` | Experience ID, expected revision, later user feedback ID, and changed lesson fields | Refine the existing experience in place, with attributed correction evidence |
 | `feedback` | Experience ID, expected revision, later user feedback ID, and `not_useful`, `harmful`, or `withdrawn` | Stage attributed correction of an existing local experience |
 
@@ -143,6 +154,25 @@ recognized credential values are rejected or redacted before journal admission.
 
 ## Capacity and continued use
 
+Lessons and examples occupy the same native World journal. The payload schema
+is `per-pulse.posture.v2`; its existing component identity remains unchanged.
+Version 1 lessons are read without rewriting their IDs, sources, or history,
+and the next successful journal mutation writes version 2. There is no separate
+example index or authoritative transcript store. Older software that only
+accepts version 1 cannot read a journal after this upgrade.
+
+An example excerpt is bounded to 8,000 UTF-8 bytes and its optional note to
+4,000 bytes. The host verifies that the excerpt occurs verbatim in the original
+settled native result, retaining its content digest and character offsets.
+When the same passage occurs more than once, those offsets identify the first
+exact match; they do not claim to reconstruct the browser's selection position.
+An optional follow-up must be an actual later user message in that context;
+its attribution does not verify the reported outcome. No follow-up means no
+outcome was attached, not that the example succeeded. During material packing
+an excerpt remains intact or the whole record is explicitly omitted. The
+existing packet budget can therefore omit a large example. `find` and `get`
+retain their bounded, explicitly reported omission behavior.
+
 A workspace's main experience journal holds at most 128 records and 4 MiB of
 stored JSON, including original encounters, feedback, and revision history.
 These limits cover all its pages and generations, including paused records.
@@ -180,6 +210,7 @@ recent messages; it does not imply that all intervening history is visible.
 | --- | --- |
 | `GET /api/pages/{pageId}/posture` | Enabled state and experiences visible in this page |
 | `POST /api/pages/{pageId}/posture/experiences` | Create from `sourceMessageId`, `feedbackMessageId`, `title`, `lesson`, `conditions`, `counterexamples`, `shift`, and optional `scope` |
+| `POST /api/pages/{pageId}/posture/examples` | Create a local example from `sourceMessageId`, `title`, exact `excerpt`, optional `note`, and optional `feedbackMessageId`; sharing requires a separate revision |
 | `PATCH /api/pages/{pageId}/posture/experiences/{experienceId}` | `expectedRevision` and `changes` |
 | `POST /api/pages/{pageId}/posture/experiences/{experienceId}/feedback` | `expectedRevision`, `verdict`, and concrete `evidence` |
 
@@ -190,7 +221,7 @@ They identify how experience can affect work, rather than an obligatory set of
 steps for every task. `scope` defaults to `context`; an explicit `subject`
 setting makes the abstraction available in other pages of the same subject.
 A shared experience includes `sourcePageId` and, when native source identities
-are present, `sourceAnchor` with `resultMessageId` and `feedbackMessageId`.
+are present, `sourceAnchor` with `resultMessageId` and an optional `feedbackMessageId`.
 These are navigation-only IDs for opening the exact original result or correction.
 The original encounter, raw source record and feedback history are not copied
 into another Work. Source deep links use the existing page history window and
@@ -205,7 +236,10 @@ For example, pausing an experience at revision 1 sends:
 Revising its lesson or applicable conditions uses the same endpoint. The source
 encounter remains intact, and each update retains the previous revision.
 Stale revision writes return a conflict; refresh the record before deciding
-what to change. Edit a transferred lesson from its source page.
+what to change. Edit a transferred lesson or example from its source page.
+An example allows title and note revisions, together with the same activation
+and scope controls. It does not accept lesson fields, replacement excerpt text,
+or a change of representation.
 
 Operator feedback accepts `useful`, `not_useful`, `harmful`, and `withdrawn`:
 

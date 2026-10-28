@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from pulse_harness.core import ToolCall, ToolDescriptor, ActionStatus
+from pulse_harness.core import ToolCall, ToolDescriptor, ActionStatus, TurnStatus
 from pulse_harness.core.errors import ScopeConflict, ProviderProtocolError
 
 NAME = 'replay'
@@ -154,9 +154,55 @@ def annotate_history(provider, scope, result):
     return result
 
 
+def result_origin(runtime, event_id):
+    """Verify a settled World result against its original Kernel replay entry.
+
+    This describes provenance, not permission to read a page. Callers must
+    authorize the causal message in their own context before using this helper.
+    A prefix or model-supplied metadata never establishes a replay boundary.
+    """
+    from pulse_system.core.causality import (
+        CausalEventDomain, CausalEventKind, CausalEventSource, CausalEventStatus,
+        HarnessTurnState,
+    )
+
+    event = runtime.causal_ledger.get_event(event_id)
+    if (event is None or event.world_id != runtime.world_id
+            or event.kind is not CausalEventKind.ASSISTANT_RESULT
+            or event.domain is not CausalEventDomain.HARNESS
+            or event.source is not CausalEventSource.SELF
+            or event.status is not CausalEventStatus.SETTLED
+            or runtime.kernel_service is None):
+        return None
+    with runtime.storage._lock:
+        turns = runtime.storage._conn.execute(
+            "SELECT id, event_id, engram_id, state, prompt_accepted "
+            "FROM harness_turns WHERE result_event_id=?", (event.id,),
+        ).fetchall()
+    if (len(turns) != 1 or turns[0][1] != event.parent_event_id
+            or turns[0][2] != event.engram_id
+            or turns[0][3] != HarnessTurnState.SETTLED.value or turns[0][4] != 1):
+        return None
+    context = runtime._native_kernel_context_for_turn(event.engram_id, turns[0][0])
+    scope = runtime.harness.scope_for(event.engram_id, context).for_turn(turns[0][0])
+    store = runtime.kernel_service.store
+    try:
+        if store.get_turn(scope).status is not TurnStatus.SUCCEEDED:
+            return None
+        entry = mode(store, scope)
+    except ScopeConflict:
+        # Legacy World-only history cannot establish a native replay entry.
+        return None
+    return entry
+
+
+def text_prefix(entry):
+    return ('[Replay: tentative reconsideration, not a new external observation; '
+            'original sources: ' + ', '.join(entry['message_ids']) + ']\n')
+
+
 def project_text(store, scope, text):
     entry = mode(store, scope)
     if entry is None:
         return text, 'ordinary'
-    return ('[Replay: tentative reconsideration, not a new external observation; '
-            'original sources: ' + ', '.join(entry['message_ids']) + ']\n' + text), 'replay'
+    return text_prefix(entry) + text, 'replay'

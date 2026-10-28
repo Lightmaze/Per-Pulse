@@ -11,6 +11,7 @@ export type Modal =
   | { kind: 'return'; message: Message; content: string }
   | { kind: 'settings' }
   | { kind: 'learning' }
+  | { kind: 'save-example'; message: Message; content: string }
   | { kind: 'history'; beforeMessageId: string }
   | { kind: 'message-search' }
   | { kind: 'materials' }

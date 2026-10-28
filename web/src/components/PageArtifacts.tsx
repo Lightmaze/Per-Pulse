@@ -17,46 +17,45 @@ export function PageArtifacts({ view }: { view: PageView }) {
   const [opened, setOpened] = useState<string | null>(null);
   const [result, setResult] = useState<ArtifactRead | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const download = useRef<AbortController | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [downloadState, setDownloadState] = useState<'ready' | 'loading' | 'started'>('ready');
+  const downloadRequest = useRef<AbortController | null>(null);
   const requestId = useRef(0);
-  useEffect(() => () => { ++requestId.current; download.current?.abort(); }, []);
+  useEffect(() => () => { requestId.current++; downloadRequest.current?.abort(); }, []);
   if (!view.artifacts?.length && !view.artifactsTruncated) return null;
 
-  const read = async (artifact: Artifact) => {
+  const read = async (artifact: Artifact, refresh = false) => {
     const current = ++requestId.current;
-    download.current?.abort(); download.current = null; setSaving(false);
-    if (opened === artifact.id) { setOpened(null); setResult(null); setLoading(false); return; }
+    downloadRequest.current?.abort(); downloadRequest.current = null;
+    setDownloadState('ready');
+    if (opened === artifact.id && !refresh) { setOpened(null); setResult(null); setLoading(false); return; }
     setOpened(artifact.id); setResult(null); setLoading(true); setError('');
     try {
       const next = await api.artifact(view.page.id, artifact.id);
       if (current === requestId.current) setResult(next);
     } catch (problem) {
-      if (current === requestId.current) setError(problem instanceof Error ? problem.message : t('artifacts.error'));
+      if (current === requestId.current) setError(problem);
     } finally { if (current === requestId.current) setLoading(false); }
   };
 
-  const save = async (artifact: Artifact) => {
-    if (download.current) return;
-    const current = requestId.current;
+  const download = async (artifact: Artifact) => {
+    if (downloadRequest.current) return;
     const controller = new AbortController();
-    download.current = controller;
-    setSaving(true); setError('');
+    downloadRequest.current = controller; setDownloadState('loading'); setError(null);
     try {
-      const file = await api.downloadArtifact(view.page.id, artifact.id, controller.signal);
-      if (current !== requestId.current || controller.signal.aborted) return;
-      if (file.sha256 !== artifact.sha256) throw new Error(t('document.wrongVersion'));
+      const file = await api.downloadArtifact(view.page.id, artifact, controller.signal);
+      // Leaving this page, closing the preview or opening another result
+      // cancels a pending download before any browser-side file action.
+      if (controller.signal.aborted) return;
       const url = URL.createObjectURL(file.blob);
-      const link = document.createElement('a');
-      link.href = url; link.download = artifact.path.split('/').at(-1) || 'result.txt';
-      document.body.append(link); link.click(); link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = file.filename;
+      document.body.append(anchor); anchor.click(); anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setDownloadState('started');
     } catch (problem) {
-      if (current === requestId.current && !controller.signal.aborted) setError(errorText(problem));
-    } finally {
-      if (download.current === controller) { download.current = null; setSaving(false); }
-    }
+      if (!controller.signal.aborted) { setError(problem); setDownloadState('ready'); }
+    } finally { if (downloadRequest.current === controller) downloadRequest.current = null; }
   };
 
   return <section className="page-artifacts" aria-label={t('artifacts.title')}>
@@ -68,14 +67,18 @@ export function PageArtifacts({ view }: { view: PageView }) {
       </button>
       {opened === artifact.id ? <div className="artifact-preview">
         {loading ? <p role="status">{t('artifacts.reading')}</p> : null}
-        {error ? <p role="alert">{error}</p> : null}
+        {error ? <p role="alert">{errorText(error)}</p> : null}
         {result?.state === 'current' ? <>
           <TextDocument key={artifact.id} path={artifact.path} content={result.content ?? ''} />
           {result.truncated ? <p>{t('artifacts.limited')}</p> : null}
           {result.redacted ? <p>{t('artifacts.redacted')}</p> : null}
           <p className="artifact-provenance">{t('artifacts.provenance', { time: new Date(artifact.createdAt).toLocaleString() })}</p>
-          <button className="secondary-button" disabled={saving} onClick={() => save(artifact)}>{t(saving ? 'document.saving' : 'document.save')}</button>
+          {!result.redacted ? <div className="artifact-actions">
+            <button type="button" className="secondary-button" disabled={downloadState === 'loading'} onClick={() => void download(artifact)}>{t(downloadState === 'loading' ? 'artifacts.downloading' : 'artifacts.download')}</button>
+            {downloadState === 'started' ? <span role="status">{t('artifacts.downloadStarted')}</span> : null}
+          </div> : null}
         </> : result?.state === 'changed' ? <p role="status">{t('artifacts.changed')}</p> : result ? <p role="status">{unavailableReason(result.reason, t)}</p> : null}
+        {!loading ? <button type="button" className="text-button" onClick={() => void read(artifact, true)}>{t('artifacts.refresh')}</button> : null}
       </div> : null}
     </li>)}</ul>
     {view.artifactsTruncated ? <p className="artifact-intro">{t('artifacts.more')}</p> : null}

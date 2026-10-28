@@ -4,6 +4,7 @@ import { useLanguage } from '../i18n';
 import type { MessageHistory } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
+import { ReplayOrigin } from './ReplayOrigin';
 
 export function HistoryDialog({ pageId, beforeMessageId, close, navigate }: {
   pageId: string; beforeMessageId: string; close: () => void; navigate: Navigate;
@@ -46,7 +47,8 @@ export function HistoryDialog({ pageId, beforeMessageId, close, navigate }: {
       {error ? <div className="error-notice" role="alert"><span>{errorText(error)}</span><button onClick={() => setRetry(value => value + 1)}>{t('app.retry')}</button></div> : null}
       {history?.messages.map(message => <article className="history-message" key={message.id} data-history-message-id={message.id}>
         <div className="history-message-heading"><strong>{message.role === 'assistant' ? 'Per Pulse' : t(message.role === 'user' ? 'conversation.you' : 'conversation.workspace')}</strong><time dateTime={message.createdAt}>{date.format(new Date(message.createdAt))}</time></div>
-        <p className="history-message-content">{message.content}</p>
+        <ReplayOrigin message={message} pageId={pageId} navigate={navigate} />
+        <p className="history-message-content">{message.content.slice(message.replay?.contentOffset ?? 0)}</p>
         <button className="text-button" onClick={() => navigate(pageId, undefined, message.id)}>{t('history.open')}</button>
       </article>)}
       {history && !history.hasMore ? <p className="conversation-note">{t('history.beginning')}</p> : null}

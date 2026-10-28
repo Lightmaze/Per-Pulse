@@ -62,7 +62,7 @@ const create = async (page, title, instruction) => {
 };
 const save = async (page, expected) => {
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  await page.getByRole('button', { name: 'Download file', exact: true }).click();
   const file = await download;
   assert.equal(file.suggestedFilename(), expected.path);
   const bytes = await readFile(await file.path());
@@ -83,7 +83,7 @@ try {
   await page.goto(base);
   await page.locator('.composer textarea').waitFor();
   const firstId = await create(page, 'Readable result', 'WRITE_DOCUMENT');
-  assert.equal(await page.getByRole('button', { name: 'Save file', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Download file', exact: true }).count(), 0);
   await page.getByRole('button', { name: 'Allow once', exact: true }).click();
   await page.locator('.artifact-open').filter({ hasText: fixture.path }).click();
   await page.locator('.markdown-document').getByRole('heading', { name: 'A field note', exact: true }).waitFor();
@@ -138,7 +138,7 @@ try {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.locator('#interface-language').selectOption('zh-CN');
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
-  await page.getByRole('button', { name: '保存文件', exact: true }).waitFor();
+  await page.getByRole('button', { name: '下载文件', exact: true }).waitFor();
   await page.getByRole('button', { name: '原文', exact: true }).click();
   assert.equal(await page.locator('.document-source').textContent(), fixture.content);
   await page.getByRole('button', { name: '设置', exact: true }).click();
@@ -157,7 +157,7 @@ try {
   await other.locator('.markdown-document').getByRole('heading', { name: 'A later version', exact: true }).waitFor();
   let downloadsAfterChange = 0;
   page.on('download', () => { ++downloadsAfterChange; });
-  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  await page.getByRole('button', { name: 'Download file', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'This file has changed' }).waitFor();
   assert.equal(downloadsAfterChange, 0);
   assert.equal(await page.getByText(/PRIVATE_LATER_WORK_RESULT/).count(), 0);

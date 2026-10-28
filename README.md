@@ -17,10 +17,32 @@ The alpha candidate provides English and 简体中文 interface controls, a sepa
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.
 - Open **Materials** beside the message composer to upload and preview a text file, reuse an existing file, and add its path and observed version to your draft.
+- Read structured replies and notes with headings, lists, tables, and code blocks. Copy a code block or the original Markdown, and keep native page links connected to their source.
+- Recognize a native selected-history replay while it runs, inspect its original messages, and retain the interpretation's provenance when saving an example or bringing it Home.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
 - Enable bounded local pulses: a context can continue from its retained history, and explicit computational connections can carry its results into related contexts.
 
 The server stores pages, messages, and references in the existing Pulse persistence layer. Browser storage holds only local drafts and navigation positions, scoped to the persistent workspace and page. When no model is configured, the interface says **AI disconnected** and saves messages as queued input. It never substitutes a scripted answer for a model response.
+
+Message formatting uses CommonMark with GitHub-style tables and task lists.
+Raw HTML remains text, and image references open only when selected; reading a
+message does not automatically fetch a remote image. Code stays literal, even
+when it contains the name of a linked page. A reference that appears only in
+code or across separate formatting spans keeps a separate page link below the
+message. **Copy** preserves the original message text, including Markdown;
+**Copy code** preserves the displayed code's spacing and line breaks.
+
+The existing `replay` tool lets the model reconsider one to four saved messages
+within its current turn. After its successful native entry, only the selected
+history reader remains available for that turn; finishing restores ordinary
+tools for the next turn. The interface shows this activity and provides verified
+links to the original input or reply. The raw message keeps its full provenance
+prefix when copied. Saved examples and lessons retain the replay origin even
+when the selected passage omits that prefix; shared experience exposes its
+tentative nature without copying the private source material. Bringing a
+selected interpretation Home also preserves its nature in the actual input.
+This bounded regime retains the original conversation. It is not memory
+isolation, sleep scheduling, new external evidence, or proof of model learning.
 
 ## Run from source
 
@@ -89,33 +111,41 @@ Markdown materials and file results have **Read** and **Source** views. Headings
 lists, tables and code are readable while the original text remains available.
 Images appear as descriptions; links to external sources open only when chosen.
 
-### Learn from a correction and inspect what changed
+### Keep concrete examples and learn from corrections
 
-With a model configured, enable attributed experience learning when starting
-the same workspace:
+Enable attributed experience when starting the same workspace:
 
 ```sh
 per-pulse --posture
 ```
 
-After a reply, explain what worked or what should change in the conversation.
-The model may save a conditional lesson with its original result and your
-correction. **Settings → View this page’s lessons** lets you inspect that
-source, refine the guidance and its exceptions, pause it, or explicitly make
-it available in other pages. Capture is model-chosen: a correction does not
-guarantee that a lesson will be saved.
+Use **Save example** on a completed reply to retain an exact passage, an optional
+note, and optionally a later message from that page. Selecting text first fills
+the passage editor when that selection matches the original text. An example
+can stand on its own without a rule or evaluation. You can save one from a
+previous reply even while the model is disconnected. The source passage stays
+intact when you later edit its note.
 
-In a later Work, **Give feedback** records the outcome of a shared lesson.
+With a model connected, explain what worked or what should change after a reply.
+The model may save a conditional lesson with its original result and your
+correction. **Settings → View this page’s experience** lets you inspect that
+source, refine the guidance and its exceptions, pause it, or explicitly make
+it available in other pages. The model can also retain a concrete example.
+Model capture is optional: a correction does not guarantee that anything is saved.
+
+In a later Work, **Give feedback** records your observation of a shared lesson or example.
 You can optionally link a completed reply from that Work; the source page's
 feedback history then opens the exact result, including older messages outside
 the recent window. A described observation can also stand without a linked
-reply. **No clear benefit** records a neutral observation and keeps the lesson's
-current active state. Harmful feedback pauses the shared lesson; only its source page can
-edit or reactivate it. The lesson's abstraction can travel, while the original
-conversation and private feedback stay at the source.
+reply. **No clear benefit** records a neutral observation and keeps the experience's
+current active state. Harmful feedback pauses it; only its source page can
+edit or reactivate it. A lesson's abstraction or an example's selected passage
+and note can travel, while the surrounding conversation and private feedback
+stay at the source.
 
-Linking a result establishes where to inspect it, not that the lesson caused
-it. Real-provider learning benefits still need output comparison and review.
+Linking a result establishes where to inspect it, not that the experience caused
+it. Saving an example does not certify its success or future applicability.
+Real-provider learning benefits still need output comparison and review.
 Example mode remains model-free and does not enable experience learning.
 
 ### Enable local pulse computation
@@ -184,10 +214,15 @@ new outcomes; do not use a short synthetic CI run as that evidence.
 
 Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. Example mode keeps model requests and model file changes disabled. See [Core Harness](docs/harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
 
-Use **Save file** on an opened result to download its complete verified text.
-Saving checks the native write record again. If another Work has changed the
-file since the preview opened, the old result cannot download the replacement.
-A file that needs content redaction is available only as a protected preview.
+**Download file** takes the complete verified text result out of the workspace.
+It checks the file again when requested and verifies the received bytes before
+starting the browser download. A later overwrite, protected content, or missing
+file produces an explanation; **Refresh file preview** checks its current state.
+Downloads preserve UTF-8 text, line endings and the original filename, including
+non-ASCII names. Redacted previews cannot be downloaded as original files.
+This works for existing results while disconnected and after restart. File
+access remains limited to text up to 1 MiB; the native write path currently
+has a separate 64 KiB output bound. It does not restore older overwritten bytes.
 
 ### Carry a stopped workspace to another directory (POSIX alpha)
 

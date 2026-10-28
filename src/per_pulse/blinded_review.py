@@ -146,6 +146,54 @@ def prepare(trial: Path, output: Path, *, allow_fixture: bool = False) -> dict:
             "private_key_file": "private/condition-key.json"}
 
 
+def _nonnegative_int(value):
+    """Reject booleans, malformed and negative reported token counts."""
+    return value if type(value) is int and value >= 0 else None
+
+
+def _usage_evidence(usage):
+    """Preserve observed main/sidecar usage without inventing missing costs.
+
+    Known provider-reported token counts form a lower bound even if one round
+    failed to report usage. Cache figures are subsets/metadata, not extra
+    tokens to add to total input. This does not certify a provider invoice.
+    """
+    data = usage if isinstance(usage, dict) else {}
+    side = data.get("posture")
+    side = side if isinstance(side, dict) else {}
+    main = {
+        "provider_rounds": _nonnegative_int(data.get("main_provider_rounds")),
+        "input_tokens": _nonnegative_int(data.get("main_input_tokens")),
+        "output_tokens": _nonnegative_int(data.get("main_output_tokens")),
+    }
+    auxiliary = {
+        "provider_requests": _nonnegative_int(side.get("provider_requests")),
+        "input_tokens": _nonnegative_int(side.get("input_tokens")),
+        "output_tokens": _nonnegative_int(side.get("output_tokens")),
+        "cached_tokens": _nonnegative_int(side.get("cached_tokens")),
+        "cache_write_tokens": _nonnegative_int(side.get("cache_write_tokens")),
+    }
+
+    def observed_lower_bound(field):
+        known = [group[field] for group in (main, auxiliary) if group[field] is not None]
+        return sum(known) if known else None
+
+    recorded = data.get("accounted") if type(data.get("accounted")) is bool else None
+    complete = (recorded is True and all(value is not None for value in main.values())
+                and all(value is not None for value in auxiliary.values()))
+    return {
+        "native_accounted": recorded,
+        "token_evidence_complete": complete,
+        "main": main,
+        "auxiliary_posture": auxiliary,
+        "reported_token_lower_bound": {
+            "input_tokens": observed_lower_bound("input_tokens"),
+            "output_tokens": observed_lower_bound("output_tokens"),
+        },
+        "limits": "Provider-reported observations only; missing rounds, retries, prices and invoices are not inferred.",
+    }
+
+
 def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = False,
           allow_legacy_uncommitted: bool = False) -> dict:
     """Reveal descriptive differences after checking each rating's packet identity."""
@@ -194,8 +242,10 @@ def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = 
                              "observed_checks": {check: {"baseline": ratings["ratings"][b][check],
                                                         "conditional": ratings["ratings"][c][check]}
                                                  for check in CHECKS[task]},
-                             "usage_accounted": {condition: key["mapping"][label]["usage"].get("accounted")
-                                                 for condition, label in (("baseline", b), ("conditional", c))}}
+                             "usage_accounted": {condition: _usage_evidence(key["mapping"][label].get("usage"))["native_accounted"]
+                                                 for condition, label in (("baseline", b), ("conditional", c))},
+                             "usage_observed": {condition: _usage_evidence(key["mapping"][label].get("usage"))
+                                                for condition, label in (("baseline", b), ("conditional", c))}}
     return {"schema": SCHEMA, "reviewer": ratings["reviewer"], "trial_origin": key["trial_origin"],
             "ratings_packet_bound": rating_digest == packet_digest,
             "condition_mapping_bound": commitment is not None,

@@ -145,12 +145,6 @@ def test_successful_file_result_has_native_source_and_survives_restart(tmp_path,
         opened = client.get(f"/api/pages/{page_id}/artifacts/{action_id}")
         assert opened.status_code == 200 and opened.json() == preview
         assert opened.headers["cache-control"] == "no-store"
-        saved = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
-        assert saved.status_code == 200 and saved.content == content.encode()
-        assert saved.headers["content-type"] == "application/octet-stream"
-        assert saved.headers["content-disposition"] == "attachment; filename*=UTF-8''report.txt"
-        assert saved.headers["x-per-pulse-content-sha256"] == _sha(content)
-        assert saved.headers["cache-control"] == "no-store"
         assert artifacts.snapshot("home")["artifacts"] == []
         second_page = _page(client, "No file request.")
         for wrong_page in ("home", second_page):
@@ -158,7 +152,6 @@ def test_successful_file_result_has_native_source_and_survives_restart(tmp_path,
                 artifacts.read(wrong_page, action_id)
             assert mismatch.value.status == 404
             assert client.get(f"/api/pages/{wrong_page}/artifacts/{action_id}").status_code == 404
-            assert client.get(f"/api/pages/{wrong_page}/artifacts/{action_id}/download").status_code == 404
 
     round_count = len(requests)
     with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
@@ -343,15 +336,14 @@ def test_other_page_overwrite_marks_the_original_version_changed(tmp_path, monke
         assert stale["artifact"]["sha256"] == _sha(first)
         assert stale["observedSha256"] == _sha(second)
         assert stale["content"] is None
-        saved = client.get(f"/api/pages/{first_page}/artifacts/{first_id}/download")
-        assert saved.status_code == 409
-        assert saved.json()["error"]["code"] == "artifact_version_changed"
-        assert second not in saved.text
-        assert artifacts.download(second_page, second_id)["data"] == second.encode()
         assert second not in json.dumps(stale)
         response = client.get(f"/api/pages/{first_page}/artifacts/{first_id}")
         assert response.status_code == 200 and response.json()["state"] == "changed"
         assert response.json()["content"] is None
+        denied_download = client.get(f"/api/pages/{first_page}/artifacts/{first_id}/download")
+        assert denied_download.status_code == 409
+        assert denied_download.json()["error"]["code"] == "artifact_version_changed"
+        assert second not in denied_download.text
         assert artifacts.read(second_page, second_id)["content"] == second
         assert artifacts.snapshot(first_page)["artifacts"][0]["id"] == first_id
         with pytest.raises(ArtifactError):
@@ -374,10 +366,12 @@ def test_preview_uses_existing_path_file_type_and_size_guards(tmp_path, monkeypa
         target.symlink_to(outside)
         linked = artifacts.read(page_id, action_id)
         assert linked["state"] == "unavailable" and linked["content"] is None
+        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").status_code == 404
         target.unlink()
         os.link(outside, target)
         linked = artifacts.read(page_id, action_id)
         assert linked["reason"] == "not_a_single_regular_file" and linked["content"] is None
+        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").status_code == 403
         target.unlink()
         for data, reason in (
             (b"\xff\x00", "text_files_only"),
@@ -388,6 +382,9 @@ def test_preview_uses_existing_path_file_type_and_size_guards(tmp_path, monkeypa
             preview = artifacts.read(page_id, action_id)
             assert preview["state"] == "unavailable" and preview["content"] is None
             assert preview["reason"] == reason
+            denied = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+            assert denied.status_code in {403, 413, 415}
+            assert denied.json()["error"]["code"] == reason
         workspace = tmp_path / "workspace"
         original_workspace = tmp_path / "original-workspace"
         replacement = tmp_path / "replacement"
@@ -443,64 +440,83 @@ def test_preview_redacts_and_bounds_text_after_verifying_original_bytes(tmp_path
         assert "password=abc" not in preview["content"]
         assert len(preview["content"].encode("utf-8")) <= 256
         assert preview["bytes"] == len(after.encode("utf-8"))
-        saved = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
-        assert saved.status_code == 409
-        assert saved.json()["error"]["code"] == "artifact_download_redacted"
-        assert "password=abc" not in saved.text
+        denied = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert denied.status_code == 422
+        assert denied.json()["error"]["code"] == "artifact_download_redacted"
+        assert "password=abc" not in denied.text
 
 
-def test_download_preserves_complete_file_when_the_preview_is_shortened(tmp_path, monkeypatch):
-    import per_pulse.artifacts as module
+def test_download_keeps_complete_utf8_bytes_and_filename_after_restart(tmp_path, monkeypatch):
+    from urllib.parse import quote
+    import per_pulse.artifacts as artifact_module
 
-    # Exercise a shortened preview without relaxing the native write limit.
-    monkeypatch.setattr(module, "MAX_PREVIEW_BYTES", 256)
-    before = "# Draft field note\n" + "Evidence remains available in context.\n" * 100
-    after = before.replace("# Draft field note", "# Final field note", 1)
+    # Exercise preview clipping independently of the native write ceiling.
+    # The real adapter currently admits file writes up to its 64 KiB payload
+    # bound; increasing that is a separate file-lifecycle decision.
+    monkeypatch.setattr(artifact_module, "MAX_PREVIEW_BYTES", 4096)
+    before = "\ufeffDRAFT\r\n" + "Café and 文本 retain  two spaces.\r\n" * 1200
+    after = before.replace("DRAFT", "FINAL", 1)
+    filename = "Café 100% 文本.txt"
+    relative = "results/" + filename
     requests = []
-    factory = _factory(monkeypatch, {"PATCH_DOWNLOAD": {
-        "path": "complete-note.md", "expected_digest": _sha(before),
-        "patch": {"edits": [{"old": "# Draft field note", "new": "# Final field note"}]},
+    factory = _factory(monkeypatch, {"PATCH_FULL_REPORT": {
+        "path": relative, "expected_digest": _sha(before),
+        "patch": {"edits": [{"old": "DRAFT", "new": "FINAL"}]},
     }}, requests)
     with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
-        (tmp_path / "workspace" / "complete-note.md").write_text(before)
-        service = client.app.state.pages
-        page_id = _page(client, "PATCH_DOWNLOAD")
-        action_id = _approve(service.execution, page_id)
-        preview = service.artifacts.read(page_id, action_id)
-        assert preview["truncated"] and len(preview["content"].encode()) <= 256
-        response = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
-        assert response.status_code == 200
-        assert response.content == after.encode()
-        assert hashlib.sha256(response.content).hexdigest() == response.headers["x-per-pulse-content-sha256"]
+        (tmp_path / "workspace" / "results").mkdir()
+        (tmp_path / "workspace" / relative).write_bytes(before.encode("utf-8"))
+        page_id = _page(client, "PATCH_FULL_REPORT")
+        action_id = _approve(PageExecution(client.app.state.pages.runtime), page_id)
+        preview = client.get(f"/api/pages/{page_id}/artifacts/{action_id}").json()
+        assert preview["state"] == "current" and preview["truncated"]
+        download = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert download.status_code == 200, download.text
+        assert download.content == after.encode("utf-8")
+        assert len(download.content) > len(preview["content"].encode("utf-8"))
+        assert download.headers["etag"] == '"' + _sha(after) + '"'
+        assert download.headers["x-per-pulse-content-sha256"] == _sha(after)
+        assert download.headers["content-type"] == "application/octet-stream"
+        assert download.headers["content-length"] == str(len(after.encode("utf-8")))
+        disposition = download.headers["content-disposition"]
+        assert disposition.startswith('attachment; filename="Caf_ 100_ __.txt";')
+        assert "filename*=UTF-8''" + quote(filename, safe="") in disposition
+        assert "results/" not in disposition
+        assert download.headers["cache-control"] == "no-store"
+        assert download.headers["x-content-type-options"] == "nosniff"
+        assert client.get(f"/api/pages/home/artifacts/{action_id}/download").status_code == 404
+    round_count = len(requests)
+    with _client(tmp_path, model_factory=None) as client:
+        download = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert download.status_code == 200 and download.content == after.encode("utf-8")
+        assert len(requests) == round_count
+        assert not client.app.state.pages.runtime.kernel_service._runtimes
 
 
-def test_download_uses_captured_verified_bytes_even_if_the_path_changes_after_read(tmp_path, monkeypatch):
+def test_download_serves_verified_snapshot_without_reopening_a_replaced_path(tmp_path, monkeypatch):
     from pulse_system.product.files import WorkspaceFiles
 
-    content = "The original confirmed version.\n"
-    name = "notes-\u6e90.md"
+    original = "The exact recorded file.\r\n"
+    replacement = "A later writer's different file.\n"
     factory = _factory(monkeypatch, {"WRITE_REPORT": {
-        "path": name, "expected_digest": None, "content": content,
+        "path": "report.txt", "expected_digest": None, "content": original,
     }}, [])
     with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
-        service = client.app.state.pages
         page_id = _page(client)
-        action_id = _approve(service.execution, page_id)
-        original_read = WorkspaceFiles.read
+        action_id = _approve(PageExecution(client.app.state.pages.runtime), page_id)
+        read = WorkspaceFiles.read
 
-        def replaced_after_read(files, path):
-            captured = original_read(files, path)
-            (tmp_path / "workspace" / path).write_text("A later writer's private replacement.")
-            return captured
+        def replace_after_read(files, path):
+            snapshot = read(files, path)
+            (tmp_path / "workspace" / path).write_text(replacement)
+            return snapshot
 
-        monkeypatch.setattr(WorkspaceFiles, "read", replaced_after_read)
-        response = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
-        assert response.status_code == 200
-        assert response.content == content.encode()
-        assert response.headers["content-disposition"] == "attachment; filename*=UTF-8''notes-%E6%BA%90.md"
-        assert "private replacement" not in response.text
-        monkeypatch.setattr(WorkspaceFiles, "read", original_read)
-        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").status_code == 409
+        monkeypatch.setattr(WorkspaceFiles, "read", replace_after_read)
+        downloaded = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert downloaded.status_code == 200 and downloaded.content == original.encode()
+        assert (tmp_path / "workspace" / "report.txt").read_text() == replacement
+        refused = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert refused.status_code == 409 and replacement not in refused.text
 
 
 def test_artifact_identity_survives_event_retention_and_list_bounds(tmp_path, monkeypatch):

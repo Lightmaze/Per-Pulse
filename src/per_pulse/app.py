@@ -7,7 +7,9 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+import re
 from typing import Annotated, Any, Literal
+import unicodedata
 from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Request
@@ -115,6 +117,16 @@ class ReviseExperience(Input):
     changes: dict[str, Any]
     # Operator-authored evidence, not a purported new native user message.
     evidence: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1500)] | None = None
+
+
+class NewExample(Input):
+    sourceMessageId: Identifier
+    feedbackMessageId: Identifier | None = None
+    title: Title
+    # Preserve original whitespace; the native source validator checks exact
+    # membership and the stricter UTF-8 byte bound before journal admission.
+    excerpt: Annotated[str, StringConstraints(min_length=1, max_length=8000)]
+    note: Annotated[str, StringConstraints(max_length=4000)] = ""
 
 
 class ExperienceFeedback(Input):
@@ -362,6 +374,10 @@ def create_app(
     def learn(page_id: str, body: NewExperience, request: Request):
         return pages(request).learning.create(page_id, body.model_dump())
 
+    @app.post("/api/pages/{page_id}/posture/examples", status_code=201)
+    def create_example(page_id: str, body: NewExample, request: Request):
+        return pages(request).learning.create_example(page_id, body.model_dump())
+
     @app.patch("/api/pages/{page_id}/posture/experiences/{experience_id}")
     def revise_experience(page_id: str, experience_id: str, body: ReviseExperience, request: Request):
         return pages(request).learning.revise(page_id, experience_id, body.expectedRevision, body.changes, body.evidence)
@@ -389,9 +405,16 @@ def create_app(
              responses={200: {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})
     def download_artifact(page_id: str, artifact_id: str, request: Request):
         result = pages(request).artifacts.download(page_id, artifact_id)
-        return Response(result["data"], media_type="application/octet-stream", headers={
-            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(result["name"], safe=""),
-            "X-Per-Pulse-Content-SHA256": result["sha256"],
+        # RFC 6266: offer only a basename, with UTF-8 filename* and an ASCII
+        # fallback. The browser controls the destination; no file is served by
+        # reopening a path after the version/content checks above.
+        filename = "".join("_" if unicodedata.category(c).startswith("C") else c
+                           for c in result["artifact"]["path"].rsplit("/", 1)[-1]).strip(" .") or "result.txt"
+        fallback = re.sub(r"[^A-Za-z0-9._ -]", "_", filename)
+        return Response(result["content"], media_type="application/octet-stream", headers={
+            "Content-Disposition": f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(filename, safe="")}',
+            "ETag": '"' + result["artifact"]["sha256"] + '"',
+            "X-Per-Pulse-Content-SHA256": result["artifact"]["sha256"],
         })
 
     @app.post("/api/pages/{page_id}/execution/stop")

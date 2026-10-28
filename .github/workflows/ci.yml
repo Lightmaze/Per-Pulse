@@ -91,6 +91,50 @@ jobs:
       - name: Verify original message search in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-search-screenshots" node tests/browser/message_search_flow.mjs
+      - name: Verify structured result reading, copying and source return in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_RESULT_SCREENSHOTS="$RUNNER_TEMP/per-pulse-result-screenshots" node tests/browser/result_reading_flow.mjs
+      - name: Verify concrete example capture, native retrieval and later feedback in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_EXAMPLE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-example-screenshots" node tests/browser/example_flow.mjs
+      - name: Verify exact native file downloads in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_DOWNLOAD_SCREENSHOTS="$RUNNER_TEMP/per-pulse-download-screenshots" node tests/browser/download_flow.mjs
+      - name: Keep file download browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: file-download-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-download-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Verify native replay provenance and ordinary continuation in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_REPLAY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-replay-screenshots" node tests/browser/replay_flow.mjs
+      - name: Keep replay browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-replay-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Keep concrete example browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: concrete-example-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-example-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Keep structured result browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-reading-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-result-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Keep message search browser evidence
         if: always()
         uses: actions/upload-artifact@v4

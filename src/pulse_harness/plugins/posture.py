@@ -12,7 +12,7 @@ from pulse_harness.core.replay import bound_text
 
 POSTURE_INSTRUCTION = """The posture experiences below are attributed, revisable task material.
 They are offered by ownership and transfer scope, NOT classified as applicable.
-Interpret their all/any/not conditions and counterexamples against this task.
+For lessons, interpret their all/any/not conditions and counterexamples against this task.
 Use an experience only when the actual situation supports its distinction;
 preserve an adequate approach when it serves the user's purpose and constraints.
 Extra exploration or reformulation is not automatically useful. A shared
@@ -26,6 +26,17 @@ principle, planning a review, or quoting the lesson is not a changed
 artifact or action. Keep the original encounter distinct from its abstraction,
 respect later counterevidence, and do not elevate synthetic fixtures or model
 summaries into observed external feedback. Transfer only the visible material.
+
+A record with representation "example" preserves an exact selected passage,
+not an extracted rule. It can stand alone without lesson/condition/shift fields.
+Compare its concrete details and optional note with the current situation;
+adapt or decline it when the purpose or constraints differ. A saved example
+is not a certified success. Missing outcome/feedback means it was not attached,
+and an attached user follow-up is attributed testimony, not independent proof.
+Do not invent the omitted private context of an example shared from another page.
+When source.execution_regime is "replay", the retained passage or lesson came
+from tentative reconsideration of old material, not a new external observation.
+Keep that origin when adapting or testing it; retrieval cannot certify it.
 
 If no offered experience changes a warranted decision, reply exactly PASS.
 Otherwise give the concrete contribution and its consequence for the next
@@ -67,6 +78,8 @@ def pack_posture_materials(materials: dict | None, *, byte_budget: int = 16000) 
         item = deepcopy(record)
         clipped_fields = []
         for key in ("lesson",):
+            if key not in item:
+                continue
             item[key], _, clipped = bound_text(item[key], 1800)
             if clipped:
                 clipped_fields.append(key)
@@ -79,6 +92,8 @@ def pack_posture_materials(materials: dict | None, *, byte_budget: int = 16000) 
             if clipped:
                 clipped_fields.append("encounter." + key)
         item["clipped_fields"] = clipped_fields
+        # A concrete passage is either offered intact or omitted by the whole
+        # record budget below. Truncating it could destroy the example itself.
         size = len(_canonical(item).encode())
         ref = {"id": record["id"], "revision": record["revision"]}
         if used + size > byte_budget:

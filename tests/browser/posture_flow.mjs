@@ -66,8 +66,8 @@ try {
       await page.getByRole('button', { name: 'Toggle navigation', exact: true }).click();
     }
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await page.getByRole('button', { name: 'View this page’s lessons', exact: true }).click();
-    await page.getByRole('dialog', { name: 'Lessons from the work', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Lessons and examples', exact: true }).waitFor();
   };
   const close = async () => {
     await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
@@ -90,11 +90,11 @@ try {
     await wait(async () => await page.locator('.message-assistant').count() === count, 'assistant fixture response');
   };
   await openLessons();
-  await page.getByText('No saved lessons in this page yet.', { exact: true }).waitFor();
+  await page.getByText('No saved experience in this page yet.', { exact: true }).waitFor();
   await close();
   await send('Build a practice product a visitor can try immediately.', 1);
   await openLessons();
-  await page.getByText('No saved lessons in this page yet.', { exact: true }).waitFor();
+  await page.getByText('No saved experience in this page yet.', { exact: true }).waitFor();
   const learningTab = await context.newPage();
   await learningTab.goto(base);
   await learningTab.getByRole('textbox', { name: /^Message / }).fill('Let me try the interaction before asking for a profile.');
@@ -102,13 +102,13 @@ try {
   await wait(async () => await learningTab.locator('.message-assistant').count() === 2, 'background correction result');
   await learningTab.close();
   await wait(async () => (await (await fetch(base + '/api/pages/home/posture')).json()).experiences.length === 1, 'settled learning');
-  await page.getByRole('button', { name: 'Refresh lessons', exact: true }).click();
+  await page.getByRole('button', { name: 'Refresh experience', exact: true }).click();
   const lesson = page.getByRole('article').filter({ has: page.getByRole('heading', { name: 'Direct interaction before optional setup', exact: true }) });
   await lesson.getByText('In use · v1', { exact: true }).waitFor();
   // Only the shareable abstraction is searchable: original encounters stay private.
-  const finder = page.getByRole('searchbox', { name: 'Find a lesson', exact: true });
+  const finder = page.getByRole('searchbox', { name: 'Find experience', exact: true });
   await finder.fill('absent-lesson-marker-817');
-  await page.getByText('No lessons match this search.', { exact: true }).waitFor();
+  await page.getByText('No experience matches this search.', { exact: true }).waitFor();
   assert.equal(await lesson.count(), 0);
   await finder.fill('optional setup');
   await lesson.getByText('In use · v1', { exact: true }).waitFor();
@@ -259,13 +259,13 @@ try {
   const other = await page.context().newPage();
   await other.goto(base);
   await other.getByRole('button', { name: 'Settings', exact: true }).click();
-  await other.getByRole('button', { name: 'View this page’s lessons', exact: true }).click();
+  await other.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
   await other.getByRole('button', { name: 'Pause lesson', exact: true }).click();
   await other.getByText('Paused · v7', { exact: true }).waitFor();
   await other.close();
   await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).click();
-  await page.getByRole('alert').getByText('This lesson changed. Refresh it before saving.', { exact: false }).waitFor();
-  await page.getByRole('button', { name: 'Refresh lessons', exact: true }).click();
+  await page.getByRole('alert').getByText('This experience changed. Refresh it before saving.', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Refresh experience', exact: true }).click();
   await lesson.getByText('Paused · v7', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
   await lesson.getByText('In use · v8', { exact: true }).waitFor();
@@ -403,10 +403,10 @@ try {
   await resultPicker.selectOption(reportedResult.id);
   const receiverOutcome = 'The shared lesson added unnecessary onboarding in this registration Work.';
   await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(receiverOutcome);
-  await page.getByRole('searchbox', { name: 'Find a lesson', exact: true }).fill('unmatched-draft-check-817');
-  await page.getByText('No lessons match this search.', { exact: true }).waitFor();
+  await page.getByRole('searchbox', { name: 'Find experience', exact: true }).fill('unmatched-draft-check-817');
+  await page.getByText('No experience matches this search.', { exact: true }).waitFor();
   assert.equal(await lesson.count(), 0);
-  await page.getByRole('searchbox', { name: 'Find a lesson', exact: true }).fill('');
+  await page.getByRole('searchbox', { name: 'Find experience', exact: true }).fill('');
   assert.equal(await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).inputValue(), receiverOutcome,
     'Filtering a lesson out and back must preserve the unsent report.');
   assert.equal(await resultPicker.inputValue(), reportedResult.id,
@@ -510,13 +510,13 @@ try {
   });
   assert.equal(concurrentEdit.status, 200);
   await lesson.getByRole('button', { name: 'It helped', exact: true }).click();
-  await page.getByRole('alert').getByText('This lesson changed. Refresh it before saving.', { exact: true }).waitFor();
+  await page.getByRole('alert').getByText('This experience changed. Refresh it before saving.', { exact: true }).waitFor();
   await changeInterfaceLanguage('zh-CN');
   await page.getByRole('alert').getByText('这条经验已被修改。请先刷新，再保存你的反馈。', { exact: true }).waitFor();
   assert.equal(await lesson.getByRole('textbox', { name: '结果发生了什么变化？', exact: true }).inputValue(), conflictDraft);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-conflict-draft-zh.png') });
   await changeInterfaceLanguage('en');
-  await page.getByRole('button', { name: 'Refresh lessons', exact: true }).click();
+  await page.getByRole('button', { name: 'Refresh experience', exact: true }).click();
   await lesson.getByText('In use · v13', { exact: true }).waitFor();
   assert.equal(await reportField.inputValue(), conflictDraft);
   await lesson.getByRole('button', { name: 'It helped', exact: true }).click();

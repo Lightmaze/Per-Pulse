@@ -14,15 +14,6 @@ export type MessageKey = keyof typeof english;
 export type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
 const errorKeys: Record<string, MessageKey> = {
-  artifact_version_changed: 'document.changed', artifact_download_unavailable: 'document.downloadUnavailable',
-  artifact_download_redacted: 'document.downloadProtected',
-  workspace_changed: 'materials.workspaceChanged', file_too_large: 'materials.tooLarge',
-  empty_file: 'materials.emptyFile', text_files_only: 'materials.textOnly',
-  credential_content_blocked: 'materials.credentials', protected_or_invalid_path: 'materials.invalidPath',
-  invalid_path: 'materials.invalidPath', filename_only: 'materials.invalidPath',
-  file_changed_retry: 'materials.changed', file_unavailable: 'materials.unavailable',
-  path_unavailable: 'materials.unavailable', not_a_single_regular_file: 'materials.invalidPath',
-  upload_failed_or_unconfirmed: 'materials.uploadUnconfirmed',
   request_failed: 'error.generic',
   network_error: 'error.network', invalid_response: 'error.invalidResponse',
   workspace_load_failed: 'error.workspaceLoad', page_load_failed: 'error.pageLoad',
@@ -34,6 +25,12 @@ const errorKeys: Record<string, MessageKey> = {
   not_found: 'error.notFound', frontend_not_built: 'error.frontendBuild',
   experience_revision_conflict: 'learning.revisionConflict',
   experience_not_found: 'learning.notAvailable', posture_disabled: 'learning.disabled',
+  artifact_version_changed: 'artifacts.changed', artifact_download_redacted: 'artifacts.downloadRedacted',
+  artifact_download_unverified: 'artifacts.downloadUnverified',
+  file_too_large: 'artifacts.tooLarge', text_files_only: 'artifacts.nonText',
+  credential_content_blocked: 'artifacts.sensitive', file_changed_retry: 'artifacts.retry',
+  file_unavailable: 'artifacts.missing', path_unavailable: 'artifacts.missing',
+  not_a_single_regular_file: 'artifacts.missing', artifact_not_found: 'artifacts.missing',
 };
 
 type LanguageContext = {

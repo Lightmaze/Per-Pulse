@@ -234,3 +234,77 @@ def test_historical_uncommitted_packet_requires_explicit_grading_exception(trial
     result = review.grade(folder, rating_file, allow_legacy_uncommitted=True)
     assert result["ratings_packet_bound"] is True
     assert result["condition_mapping_bound"] is False
+
+
+def test_grade_preserves_main_and_auxiliary_usage_without_inventing_costs(trial, tmp_path):
+    root, record = trial
+    stages = {item["stage"]: item for item in record["stages"]}
+    stages["bare_transfer"]["usage"] = {
+        "main_provider_rounds": 2, "main_input_tokens": 120,
+        "main_output_tokens": 44,
+        "posture": {"provider_requests": 1, "input_tokens": 30,
+                    "output_tokens": 9, "cached_tokens": 4,
+                    "cache_write_tokens": 0},
+        "accounted": True,
+    }
+    stages["conditional_transfer"]["usage"] = {
+        "main_provider_rounds": 2, "main_input_tokens": None,
+        "main_output_tokens": 50,
+        "posture": {"provider_requests": 2, "input_tokens": 35,
+                    "output_tokens": None, "cached_tokens": 2,
+                    "cache_write_tokens": 1},
+        "accounted": False,
+    }
+    # A historical arm can lack the usage object entirely. Keep that
+    # distinction visible after grading rather than raising a KeyError.
+    del stages["bare_negative"]["usage"]
+    (root / "ordinary-transfer.json").write_text(json.dumps(record))
+    folder = tmp_path / "blind-usage"
+    review.prepare(root, folder)
+    ratings = review._load_json(folder / "reviewer" / "ratings-template.json")
+    ratings["reviewer"] = "usage-auditor"
+    for checks in ratings["ratings"].values():
+        for check in checks:
+            checks[check] = True
+    path = tmp_path / "ratings-usage.json"
+    path.write_text(json.dumps(ratings))
+    report = review.grade(folder, path)
+    observed = report["comparisons"]["notice"]["usage_observed"]
+    baseline = observed["baseline"]
+    assert baseline["native_accounted"] is True
+    assert baseline["token_evidence_complete"] is True
+    assert baseline["main"] == {"provider_rounds": 2, "input_tokens": 120, "output_tokens": 44}
+    assert baseline["auxiliary_posture"]["provider_requests"] == 1
+    assert baseline["auxiliary_posture"]["cached_tokens"] == 4
+    assert baseline["reported_token_lower_bound"] == {"input_tokens": 150, "output_tokens": 53}
+    conditional = observed["conditional"]
+    assert conditional["native_accounted"] is False
+    assert conditional["token_evidence_complete"] is False
+    assert conditional["main"]["input_tokens"] is None
+    assert conditional["auxiliary_posture"]["output_tokens"] is None
+    assert conditional["reported_token_lower_bound"] == {"input_tokens": 35, "output_tokens": 50}
+    assert report["comparisons"]["outline"]["usage_accounted"]["baseline"] is None
+    outline_unknown = report["comparisons"]["outline"]["usage_observed"]["baseline"]
+    assert outline_unknown["native_accounted"] is None
+    assert outline_unknown["reported_token_lower_bound"] == {
+        "input_tokens": None, "output_tokens": None,
+    }
+    assert "bill" not in json.dumps(report).lower()
+
+
+def test_unknown_or_malformed_usage_is_not_reported_as_zero():
+    unknown = review._usage_evidence(None)
+    assert unknown["native_accounted"] is None
+    assert unknown["reported_token_lower_bound"] == {"input_tokens": None, "output_tokens": None}
+    assert unknown["token_evidence_complete"] is False
+    bad = review._usage_evidence({
+        "main_provider_rounds": True, "main_input_tokens": -2,
+        "main_output_tokens": "12", "accounted": True,
+        "posture": {"provider_requests": False, "input_tokens": 8, "output_tokens": 3,
+                    "cached_tokens": None, "cache_write_tokens": 0},
+    })
+    assert bad["main"]["provider_rounds"] is None
+    assert bad["main"]["input_tokens"] is None
+    assert bad["auxiliary_posture"]["provider_requests"] is None
+    assert bad["token_evidence_complete"] is False
+    assert bad["reported_token_lower_bound"] == {"input_tokens": 8, "output_tokens": 3}

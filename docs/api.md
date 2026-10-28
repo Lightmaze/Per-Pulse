@@ -373,12 +373,12 @@ as `application/octet-stream` with attachment `Content-Disposition` and
 to reopen after checking. The existing 1 MiB read ceiling and native mutation
 durable-content limit remain unchanged. Download does not create a model turn.
 
-An overwritten file returns `409 artifact_version_changed`; an unavailable,
-binary, oversized or protected file returns `409 artifact_download_unavailable`.
-If redaction or truncation would change the downloaded bytes, the route returns
-`409 artifact_download_redacted`. A literal redaction marker already present in
-the original file is acceptable when the complete bytes still match its recorded
-digest. Wrong-page and unconfirmed action IDs remain `404 artifact_not_found`.
+An overwritten file returns `409 artifact_version_changed`. Unavailable,
+binary, oversized or protected files preserve the native file error code and
+status. Files needing redaction or containing stored redaction/truncation
+markers return `422 artifact_download_redacted`. Wrong-page and unconfirmed
+action IDs remain `404 artifact_not_found`. The response also carries the exact
+digest as an ETag; the browser checks the received bytes before saving them.
 
 File and uncertainty observation follows only the native committed generation
 lineage in the same World and page context. Prepared or ambiguous transitions,

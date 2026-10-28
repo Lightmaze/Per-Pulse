@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { api, ApiError } from '../api';
-import { useLanguage } from '../i18n';
+import { useLanguage, type MessageKey } from '../i18n';
 import type { WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList } from '../types';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
@@ -8,6 +8,17 @@ import { TextDocument } from './TextDocument';
 
 const MAX_BYTES = 1024 * 1024;
 const PREVIEW_CHARS = 64_000;
+// The same native file errors also serve result downloads. Keep upload advice
+// in this flow rather than replacing their explanations across the product.
+const materialErrors: Record<string, MessageKey> = {
+  workspace_changed: 'materials.workspaceChanged', file_too_large: 'materials.tooLarge',
+  empty_file: 'materials.emptyFile', text_files_only: 'materials.textOnly',
+  credential_content_blocked: 'materials.credentials', protected_or_invalid_path: 'materials.invalidPath',
+  invalid_path: 'materials.invalidPath', filename_only: 'materials.invalidPath',
+  file_changed_retry: 'materials.changed', file_unavailable: 'materials.unavailable',
+  path_unavailable: 'materials.unavailable', not_a_single_regular_file: 'materials.invalidPath',
+  upload_failed_or_unconfirmed: 'materials.uploadUnconfirmed',
+};
 
 export function MaterialsDialog({ identity, close, add }: {
   identity: WorkspaceFileIdentity; close: () => void; add: (file: WorkspaceFile) => boolean;
@@ -47,8 +58,9 @@ export function MaterialsDialog({ identity, close, add }: {
       if (problem instanceof ApiError && problem.code === 'workspace_changed') {
         setStale(true); setPreview(null); setError(t('materials.workspaceChanged'));
       } else {
+        const key = problem instanceof ApiError ? materialErrors[problem.code] : undefined;
         setError(uploading && problem instanceof ApiError && problem.code === 'network_error'
-          ? t('materials.uploadUnconfirmed') : errorText(problem));
+          ? t('materials.uploadUnconfirmed') : key ? t(key) : errorText(problem));
       }
     } finally {
       if (current()) { request.current.busy = false; setBusy(false); }

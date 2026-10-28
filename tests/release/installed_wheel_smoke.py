@@ -117,9 +117,9 @@ def run_workspace(root: Path, *, example: bool, fake_provider: bool,
             assert assets, "Wheel served source HTML instead of compiled JS"
             asset_body, _ = request(port, assets[0])
             assert len(asset_body) > 100, "Compiled JS asset is empty"
-            notices, notices_type = request(port, "/third-party-notices.txt")
+            notices, notices_type = request(port, "/THIRD_PARTY_NOTICES.txt")
             assert "text/plain" in notices_type
-            assert b"react-markdown@" in notices and b"remark-gfm@" in notices
+            assert b"react-markdown " in notices and b"remark-gfm " in notices
             assert b"Permission is hereby granted" in notices
             if exercise:
                 # A user can perform a complete offline Home -> Work -> sourced
