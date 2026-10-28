@@ -102,6 +102,15 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
   const recent = pulse?.recentActivations ?? [];
   const thisPageHeld = pulse?.heldContexts.some(held => held.pageId === pageId) ?? false;
   const admissionHold = pulse ? pulseAdmissionHold(pulse) : null;
+  // Older servers do not have partial-failure usage receipts. A receipt is a
+  // proven lower bound, not a full provider bill or a released reservation.
+  const budgetEvidence = pulse?.providerTokenBudget;
+  const partialKnown = budgetEvidence && 'partialKnownTokens' in budgetEvidence
+    && typeof budgetEvidence.partialKnownTokens === 'number'
+    ? budgetEvidence.partialKnownTokens : 0;
+  const partialExcess = budgetEvidence && 'partialKnownExcessTokens' in budgetEvidence
+    && typeof budgetEvidence.partialKnownExcessTokens === 'number'
+    ? budgetEvidence.partialKnownExcessTokens : 0;
 
   return <Dialog title={t('pulse.title')} onClose={() => { if (!busy) onClose(); }} className="pulse-activity-dialog">
     <p className="dialog-description">{t('pulse.description')}</p>
@@ -137,6 +146,9 @@ export function PulseActivity({ pageId, pages, navigate, onClose }: {
             reserved: pulse.providerTokenBudget.unaccountedReservations,
             remaining: pulse.providerTokenBudget.remaining,
           })}</p>
+          {partialKnown > 0 ? <p className="pulse-activity-detail">{t('pulse.tokensPartial', {
+            known: partialKnown, extra: partialExcess,
+          })}</p> : null}
           {pulse.providerTokenBudget.overrunTokens > 0 ?
             <p className="pulse-activity-detail">{t('pulse.tokensOverrun', { overrun: pulse.providerTokenBudget.overrunTokens })}</p> : null}
           <p className="pulse-activity-detail">{t('pulse.tokensCaveat')}</p>

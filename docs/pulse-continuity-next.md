@@ -153,3 +153,29 @@ Node regressions cover count exhaustion during already-running work, the
 one-reservation token boundary, absent optional token envelope, and pause /
 disconnect precedence. Neither a successful build nor synthetic HTTP
 regressions prove a real provider charge limit or useful independent activity.
+
+
+## Interrupted turns keep their completed-provider lower bound
+
+An accepted native Kernel turn may finish one or more primary, CoverMe, or
+expert provider requests and then fail on a later request/tool. It has no
+settled assistant result, so the original background admission used to retain
+only one nominal token reservation even when earlier completed usage already
+exceeded that reservation. The original Kernel now carries the aggregate
+completed-request *lower bound* through its typed Harness failure into the
+same fenced World failure transaction. The existing Pulse admission read
+charges the **maximum of its full unknown reservation and that observed
+lower bound**; it never treats partial usage as a complete provider bill.
+
+`providerTokenBudget.partialKnownTokens` reports the observed lower bounds
+for unresolved failures, and `partialKnownExcessTokens` is the increment
+beyond their original reservations. The Activity panel explains both values
+in English and Chinese. These numbers do not include unreported/unfinished
+provider requests; the reservation is not released. They also are not a
+per-request, account-wide, or monetary hard cap. Failure before Kernel can
+produce a durable completed-round receipt remains reservation-only.
+
+The native World/Kernel/SQLite regression checks that this accounting remains
+in force after restart and cannot consume the human's foreground allowance.
+It uses synthetic fixtures; it does not establish real-provider token rates,
+billing, or benefit from continued local thought.

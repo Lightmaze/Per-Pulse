@@ -533,7 +533,7 @@ class ContextPulseController:
                         root_detail = None
                     if (isinstance(root_detail, dict)
                             and root_detail.get("kernel_partial_usage_evidence") == "completed_rounds_v1"):
-                        lower = root_detail.get("kernel_partial_provider_tokens")
+                        lower = root_detail.get("kernel_partial_provider_units")
                         if type(lower) is int and lower >= 0:
                             partial_known += lower
                             excess = max(0, lower - reservation)

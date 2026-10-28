@@ -3059,7 +3059,7 @@ class CausalLedger:
             if acceptance is not False and known_provider_tokens is not None:
                 detail = dict(event.metadata)
                 detail["kernel_partial_usage_evidence"] = "completed_rounds_v1"
-                detail["kernel_partial_provider_tokens"] = known_provider_tokens
+                detail["kernel_partial_provider_units"] = known_provider_tokens
                 amended = json.dumps(_metadata(detail), ensure_ascii=False, sort_keys=True)
             updated_event = conn.execute(
                 "UPDATE causal_events SET status = ?, updated_at = ?, "
