@@ -304,6 +304,8 @@ try {
   }, 'held receiver retains native queued propagation', 20000);
   await page.getByRole('button', { name: '活动', exact: true }).click();
   await page.getByText('此页面：1 项后台排队 · 0 项运行中。', { exact: true }).waitFor();
+  await page.locator('.pulse-activity-section').first()
+    .getByText('等待：此处的局部关注已暂停', { exact: true }).waitFor();
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
 
   await page.goto(base + '/page/' + encodeURIComponent(localSource));
@@ -312,8 +314,9 @@ try {
   await page.locator('.composer textarea').fill(sourceDraft);
   await page.getByRole('button', { name: '活动', exact: true }).click();
   await page.getByRole('heading', { name: '其他局部工作进度', exact: true }).waitFor();
-  await page.getByRole('region', { name: '其他局部工作进度', exact: true })
-    .getByRole('button', { name: 'Actual receiving Work', exact: true }).click();
+  const otherWorkBacklog = page.getByRole('region', { name: '其他局部工作进度', exact: true });
+  await otherWorkBacklog.getByText('等待：此处的局部关注已暂停', { exact: true }).waitFor();
+  await otherWorkBacklog.getByRole('button', { name: 'Actual receiving Work', exact: true }).click();
   await wait(async () => new URL(page.url()).pathname === '/page/' + localReceiver,
     'native queued receiver opens from source Work Activity');
   assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);

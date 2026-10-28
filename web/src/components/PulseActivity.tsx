@@ -162,6 +162,9 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
         <p className="pulse-activity-detail">{t('pulse.localQueue', {
           queued: localBacklog?.queued ?? 0, running: localBacklog?.running ?? 0,
         })}</p>
+        {localBacklog?.oldestQueuedDeferredReason ? <p className="pulse-activity-detail">
+          {t('pulse.waiting', { reason: pulseActivityLabel(t, 'reason', localBacklog.oldestQueuedDeferredReason) })}
+        </p> : null}
         <p className="pulse-activity-detail">{t('pulse.budget', { remaining: pulse.budget.remaining, limit: pulse.budget.limit })}</p>
         {admissionHold ? <p className="pulse-activity-detail">{t(admissionHold === 'hourly_count' ? 'pulse.admissionCountHeld' : 'pulse.admissionTokensHeld')}</p> : null}
         {pulse.providerTokenBudget ? <>
@@ -194,6 +197,9 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
             <span className="pulse-activity-detail"> · {t('pulse.queue', {
               queued: entry.queued, running: entry.running,
             })}</span>
+            {entry.oldestQueuedDeferredReason ? <span className="pulse-activity-detail">
+              {t('pulse.waiting', { reason: pulseActivityLabel(t, 'reason', entry.oldestQueuedDeferredReason) })}
+            </span> : null}
             {entry.oldestQueuedAt ? <span className="pulse-activity-detail">
               {t('pulse.oldest', { time: eventTime(entry.oldestQueuedAt) })}
             </span> : null}

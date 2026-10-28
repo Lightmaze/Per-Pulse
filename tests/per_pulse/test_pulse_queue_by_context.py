@@ -43,6 +43,9 @@ def test_held_receiver_retains_its_own_visible_backlog(tmp_path, monkeypatch):
         receiver_entry = next(entry for entry in entries if entry["pageId"] == receiver)
         assert receiver_entry["running"] == 0
         assert receiver_entry["oldestQueuedAt"]
+        # This Work can disappear from the latest twenty events but its
+        # oldest durable delivery still explains why it cannot run.
+        assert receiver_entry["oldestQueuedDeferredReason"] == "attention_held"
         assert all(entry["pageId"] != other for entry in entries)
         assert all(entry["center_id"] is not None for entry in entries)
         assert state["queue"]["oldestQueuedAt"] == min(

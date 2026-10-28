@@ -138,6 +138,15 @@ never an invented Home link. The Activity panel shows the current page's
 counts and offers direct navigation to other Works with pending activity,
 while preserving the existing return position and identity fence.
 
+For each local backlog the current native observation also checks the oldest
+queued event's *actual admission gate*. Activity shows its reason in English
+or Chinese even when that event has fallen outside the twenty-item recent
+sample. A missing reason means the gate is clear at observation time, **not**
+that the turn will start immediately: worker availability, Dendrite formation
+and foreground priority still apply. Running work has no waiting reason.
+These are read-only projections; pausing or resuming still uses the same
+World-owned operator controls.
+
 A queued local activation is not an awaiting user approval, and this adds no
 scheduler, provider invocation or authority. Native World/SQLite/Kernel tests
 use an explicit synthetic model transport; browser and full-tree CI results

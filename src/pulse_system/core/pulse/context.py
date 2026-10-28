@@ -900,7 +900,8 @@ class ContextPulseController:
             queue_rows = self.storage._conn.execute(
                 "SELECT center_id, COUNT(CASE WHEN status = 'queued' THEN 1 END), "
                 "COUNT(CASE WHEN status = 'running' THEN 1 END), "
-                "MIN(CASE WHEN status = 'queued' THEN created_at END) "
+                "MIN(CASE WHEN status = 'queued' THEN created_at END), "
+                "MIN(CASE WHEN status = 'queued' THEN seq END) "
                 "FROM causal_events WHERE world_id = ? AND status IN ('queued', 'running') "
                 "AND kind IN ('spontaneous', 'propagation', 'pulse') "
                 "AND (json_extract(metadata, '$.context_pulse') IN ('reentry', 'convergence') "
@@ -908,11 +909,30 @@ class ContextPulseController:
                 "GROUP BY center_id",
                 (self.world_id,),
             ).fetchall()
-            queue_by_context = [
-                {"center_id": row[0], "queued": row[1], "running": row[2],
-                 "oldestQueuedAt": row[3]}
-                for row in queue_rows
-            ]
+            # The most recent twenty activations can omit an older Work's
+            # entire backlog. Read the oldest queued event in each center to
+            # explain its *current* native admission gate, not to promise when
+            # a worker will execute it. Running turns have no waiting reason.
+            from pulse_system.core.pulse.engine import PulseEvent
+            queue_by_context = []
+            for center_id, queued, running, oldest_at, oldest_seq in queue_rows:
+                reason = None
+                if oldest_seq is not None:
+                    oldest_row = self.storage._conn.execute(
+                        "SELECT id FROM causal_events WHERE world_id = ? AND seq = ?",
+                        (self.world_id, oldest_seq),
+                    ).fetchone()
+                    if oldest_row is not None:
+                        oldest_event = self.ledger.get_event(oldest_row[0])
+                        if oldest_event is not None:
+                            reason = self.deferred_reason(
+                                PulseEvent.from_causal_event(oldest_event), now,
+                            )
+                queue_by_context.append({
+                    "center_id": center_id, "queued": queued, "running": running,
+                    "oldestQueuedAt": oldest_at,
+                    "oldestQueuedDeferredReason": reason,
+                })
             queue_by_context.sort(key=lambda item: (
                 -(item["queued"] + item["running"]), item["center_id"] or "",
             ))
@@ -923,9 +943,8 @@ class ContextPulseController:
                      if item["oldestQueuedAt"] is not None), default=None),
             )
             activations = []
-            # Import only at observation time to avoid a context/engine module
-            # dependency during construction. The sample stays bounded at 20.
-            from pulse_system.core.pulse.engine import PulseEvent
+            # Recent activity remains a bounded sample, separate from the
+            # complete durable per-context backlog and its oldest-event gate.
             for row in recent:
                 item = dict(zip(("eventId", "centerId", "kind", "status", "createdAt", "sourceEventId"), row))
                 if item["status"] == "queued":
