@@ -106,7 +106,7 @@ try {
   await page.locator('.composer textarea').fill('Saved in the first Work after visiting another Work.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await heldRequest;
-  await page.getByRole('link', { name: 'Home', exact: true }).click();
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Home', exact: true }).click();
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Second independent Work');
   await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
