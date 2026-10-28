@@ -141,6 +141,23 @@ evidence that a real model independently learned a new default behavior.
 It does not establish a hard spending cap or long-duration autonomous Pulse.
 `PER_PULSE_JOURNEY_SCREENSHOTS` optionally records an approval/artifact screenshot.
 
+## Retain an example and inspect its later feedback
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  node tests/browser/example_flow.mjs
+```
+
+The concrete-example journey keeps an exact passage, explicitly shares it,
+reports counterevidence, and exercises native example capture and refinement.
+Later feedback includes an actual uploaded source: its readable projection
+opens the original message, retains the draft and downloads the complete file.
+Restart preserves these links. Phone layout and the Chinese interface retain
+the original English text. `PER_PULSE_EXAMPLE_SCREENSHOTS` records images.
+Semantic choices are an explicit synthetic HTTP fixture; persistence, source
+verification and browser actions are real.
+
 ## Recover the original Work after a process dies during a file write
 
 ```sh

@@ -181,6 +181,17 @@ The report retains `kind: "operator_report"`: linking a real result does not
 prove that the model used the lesson, that the lesson caused the outcome, or
 that a test transport was a real provider.
 
+In the source page's `GET /api/pages/{id}/posture` projection, exact native
+feedback or revision entries can include `evidenceSource` with `pageId`,
+`messageId`, `materials` and `materialSuffixLength`. The World, context,
+committed subject lineage, user-message kind and complete evidence text must
+match. The client uses this metadata to show readable feedback and open its
+original message; stored evidence and attachment envelopes are not rewritten.
+Bounded or altered evidence, authored reports and invalid attribution receive
+no such projection. A pasted attachment envelope remains literal unless that
+message actually owns the corresponding canonical attachment. This metadata,
+like the private feedback itself, is absent in receiving pages.
+
 ## Create a page from the current conversation
 
 `POST /api/pages`

@@ -24,7 +24,10 @@ FORMAT = 'p-pulse-cold-image.v1'
 DATABASES = ('world.db', 'kernel.db', 'kernel.db.coverme.sqlite3',
              'kernel.db.expert.sqlite3', 'kernel.db.expert.sqlite3.trace',
              'kernel.db.cognition.sqlite3')
-ROOTS = ('workspace', 'checkpoints')
+# Keep both native layouts: the product launcher supplies ``checkpoints``;
+# Per Pulse uses Kernel's workspace-relative default ``workspace-checkpoints``.
+# These are retained evidence, not transferable write/restore authority.
+ROOTS = ('workspace', 'checkpoints', 'workspace-checkpoints')
 INCOMPLETE = '.image-restore-incomplete'
 MAX_ENTRIES = 4096
 MAX_FILE = 256 * 1024 * 1024

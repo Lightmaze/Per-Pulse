@@ -130,6 +130,9 @@ export type Bootstrap = {
 export type LessonCondition = string | { all: LessonCondition[] } | { any: LessonCondition[] } | { not: LessonCondition };
 export type LessonVerdict = 'useful' | 'not_useful' | 'harmful';
 export type LessonShift = { understanding: string; candidates: string; delivery: string };
+export type ExperienceMessageSource = {
+  pageId: string; messageId: string; materials: Material[]; materialSuffixLength: number;
+};
 type ExperienceBase = {
   id: string;
   revision: number;
@@ -143,11 +146,9 @@ type ExperienceBase = {
   sourceAnchor?: { resultMessageId: string; feedbackMessageId?: string };
   record_type: 'observed_episode' | 'constructed_fixture';
   encounter?: { situation: string; action: string; outcome?: string };
-  encounterSources?: Partial<Record<'situation' | 'action' | 'outcome', {
-    pageId: string; messageId: string; materials: Material[]; materialSuffixLength: number;
-  }>>;
+  encounterSources?: Partial<Record<'situation' | 'action' | 'outcome', ExperienceMessageSource>>;
   source?: { source_message_id?: string; feedback_message_id?: string };
-  feedback?: { verdict: string; evidence: string; source?: {
+  feedback?: { verdict: string; evidence: string; evidenceSource?: ExperienceMessageSource; source?: {
     kind?: string; page_id?: string; relation?: string;
     result_message_id?: string; result_evidence_class?: string;
     result_execution_regime?: 'ordinary' | 'replay';

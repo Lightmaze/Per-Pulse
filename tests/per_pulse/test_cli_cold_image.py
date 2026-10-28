@@ -6,8 +6,10 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import zipfile
 
 from fastapi.testclient import TestClient
 import pytest
@@ -100,6 +102,57 @@ def test_cold_image_refuses_live_world_and_existing_restore_destination(tmp_path
         main(["image", "restore", str(archive), "--data-dir", str(home)])
     assert stopped.value.code == 2
     assert archive.exists()
+
+
+def test_cold_image_carries_actual_per_pulse_file_checkpoint_evidence(tmp_path, monkeypatch, capsys):
+    from test_execution import _factory, _new_page, _wait
+
+    home, restored, archive = tmp_path / "source", tmp_path / "carried", tmp_path / "checkpoint.zip"
+    workspace = home / "workspace"
+    workspace.mkdir(parents=True)
+    original, revised = b"Original retained file bytes.\n", b"Revised through an approved native action.\n"
+    (workspace / "note.txt").write_bytes(original)
+    factory = _factory(monkeypatch, [], tool=("mutate_file", {
+        "path": "note.txt", "expected_digest": hashlib.sha256(original).hexdigest(),
+        "content": revised.decode(),
+    }))
+    with TestClient(create_app(home, model_factory=factory, allow_workspace_actions=True),
+                    base_url="http://localhost") as client:
+        page_id = _new_page(client)
+        execution = client.app.state.pages.execution
+        waiting = _wait(execution, page_id, lambda value: any(a["canResolve"] for a in value["pendingActions"]))
+        action = next(a for a in waiting["pendingActions"] if a["canResolve"])
+        approved = execution.resolve_approval(page_id, action["actionId"], "allow_once")
+        assert approved["actionCompleted"]
+        # Kernel completion precedes the World worker recording its result.
+        # Export only after both original native stores have settled.
+        _wait(execution, page_id, lambda value: value["status"] == "idle" and
+              client.app.state.pages.runtime.storage._conn.execute(
+                  "SELECT count(*) FROM harness_turns WHERE state IN ('running','uncertain')"
+              ).fetchone()[0] == 0)
+        artifact = client.get(f"/api/pages/{page_id}").json()["artifacts"][0]
+        checkpoint_root = client.app.state.pages.runtime.kernel_service.checkpoint_root
+        assert checkpoint_root == home / "workspace-checkpoints"
+    retained = {p.relative_to(home).as_posix(): p.read_bytes() for p in checkpoint_root.rglob("*") if p.is_file()}
+    assert retained and any(artifact["checkpointId"] in name for name in retained)
+    assert (workspace / "note.txt").read_bytes() == revised
+
+    main(["image", "save", str(archive), "--data-dir", str(home)])
+    assert json.loads(capsys.readouterr().out)["model_calls"] == 0
+    with zipfile.ZipFile(archive) as saved:
+        for name, content in retained.items():
+            assert name in saved.namelist(), f"The native checkpoint was omitted: {name}"
+            assert saved.read(name) == content
+    main(["image", "restore", str(archive), "--data-dir", str(restored)])
+    assert json.loads(capsys.readouterr().out)["model_calls"] == 0
+    for name, content in retained.items():
+        assert (restored / name).read_bytes() == content
+        assert (home / name).read_bytes() == content
+    with TestClient(create_app(restored, model_factory=None), base_url="http://localhost") as client:
+        carried = client.get(f"/api/pages/{page_id}").json()["artifacts"][0]
+        assert carried["checkpointId"] == artifact["checkpointId"]
+        assert not client.app.state.pages.runtime.kernel_service._runtimes
+        assert (restored / "workspace/note.txt").read_bytes() == revised
 
 
 def test_cold_image_refuses_unbound_upstream_archive(tmp_path, monkeypatch, capsys):

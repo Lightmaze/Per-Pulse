@@ -156,6 +156,8 @@ When that experience began with an attached file, **Source experience** shows
 the readable message and an **Open source message** link to its original file
 references. The stored encounter retains its exact input. Shared experiences
 keep that private input and its file references in the source page.
+Later feedback used by a native refinement also links back to its exact
+message and attached files. Its original evidence remains unchanged.
 
 With a model connected, explain what worked or what should change after a reply.
 The model may save a conditional lesson with its original result and your
@@ -308,6 +310,12 @@ is not assumed to be interchangeable. Save refuses an active World or
 unfinished Kernel turns/actions. Restore checks member digests and the
 matching Python implementation before writing, preserves the native
 World/Kernel identities and source links, and does not start any model.
+Historical World turns marked uncertain after process recovery also block
+export in this alpha. Cancelling the corresponding Kernel turn does not erase
+that recovery record; a completed Stop is not proof that this home can export.
+Native file checkpoints, including retained pre-write bytes, are carried with
+their original workspace provenance. Moving those records does not authorize
+an old write or checkpoint restore against the new workspace root.
 If a restore fails, do not start its incomplete destination. The archive
 contains **private conversations, histories and workspace files**: do not
 publish or share it. Model credentials and external tool/resource bindings

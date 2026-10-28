@@ -91,6 +91,36 @@ class PageLearning:
                 result[field] = {"pageId": source_page, "messageId": message_id, **projection}
         return result
 
+    def _feedback_source(self, entry, source_page):
+        """Link exact native feedback without treating an authored report as a message."""
+        source = entry.get("source", {})
+        if (not source_page or source.get("kind") not in {
+                "model_interpreted_user_revision", "model_interpreted_user_feedback"}
+                or source.get("world_id") != self.pages.runtime.world_id
+                or source.get("context_id") != self._context(source_page)
+                or source.get("bounded_evidence") is not False):
+            return None
+        message_id = source.get("feedback_message_id")
+        if not isinstance(message_id, str) or not message_id:
+            return None
+        from pulse_system.core.types import CausalEventKind, CausalEventSource
+        from pulse_system.service.native_posture import _context_message
+
+        try:
+            event = _context_message(self.pages.runtime, self._subject(source_page),
+                                     self._context(source_page), message_id)
+        except ScopeConflict:
+            return None
+        if (event.kind is not CausalEventKind.STIMULUS or event.source is not CausalEventSource.USER
+                or event.engram_id != source.get("feedback_subject_id")
+                or event.content != entry.get("evidence")):
+            return None
+        rows = self.pages._rows(source_page, limit=1, event_id=message_id)
+        if not rows or rows[0]["content"] != entry["evidence"]:
+            return None
+        return {"pageId": source_page, "messageId": message_id,
+                **self.pages.materials.message(source_page, rows[0])}
+
     def _public(self, record, context_id):
         local = record["context_id"] == context_id
         result = {key: deepcopy(record[key]) for key in (
@@ -121,6 +151,10 @@ class PageLearning:
             result["encounter"] = deepcopy(record["encounter"])
             result["source"] = deepcopy(record["source"])
             result["feedback"] = deepcopy(record["feedback"])
+            for entry in result["feedback"]:
+                evidence_source = self._feedback_source(entry, source_page)
+                if evidence_source:
+                    entry["evidenceSource"] = evidence_source
             sources = self._encounter_sources(record, source_page)
             if sources:
                 result["encounterSources"] = sources

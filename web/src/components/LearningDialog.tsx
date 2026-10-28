@@ -2,11 +2,21 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, type Translate } from '../i18n';
-import type { LessonCondition, LessonShift, LessonVerdict, Message, PostureExperience, PostureView } from '../types';
+import type { ExperienceMessageSource, LessonCondition, LessonShift, LessonVerdict, Message, PostureExperience, PostureView } from '../types';
 import { Dialog } from './Dialog';
 import { CopyButton } from './CopyButton';
 import type { Navigate } from './SessionLink';
 import { messageBody } from '../messageBody';
+
+function ExperienceSourceLink({ source, pageId, navigate }: {
+  source: ExperienceMessageSource; pageId: string; navigate: Navigate;
+}) {
+  const { t } = useLanguage();
+  return <div className="encounter-files">
+    {source.materials.length ? <p className="lesson-note">{t('materials.attached')}: {source.materials.map(material => material.name).join(', ')}</p> : null}
+    <button className="text-button" onClick={() => navigate(source.pageId, source.pageId !== pageId ? { pageId } : undefined, source.messageId)}>{t('learning.openSourceMessage')}</button>
+  </div>;
+}
 
 function SourceEncounter({ experience, pageId, navigate }: {
   experience: PostureExperience; pageId: string; navigate: Navigate;
@@ -18,10 +28,7 @@ function SourceEncounter({ experience, pageId, navigate }: {
     const source = experience.encounterSources?.[field];
     return <Fragment key={field}><dt>{t(label)}</dt><dd>
       {content === undefined ? t('learning.noFollowup') : messageBody({ content, materialSuffixLength: source?.materialSuffixLength })}
-      {source ? <div className="encounter-files">
-        <p className="lesson-note">{t('materials.attached')}: {source.materials.map(material => material.name).join(', ')}</p>
-        <button className="text-button" onClick={() => navigate(source.pageId, source.pageId !== pageId ? { pageId } : undefined, source.messageId)}>{t('learning.openSourceMessage')}</button>
-      </div> : null}
+      {source ? <ExperienceSourceLink source={source} pageId={pageId} navigate={navigate} /> : null}
     </dd></Fragment>;
   })}</dl>;
 }
@@ -118,12 +125,12 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
         && entry.source.page_id && entry.source.page_id !== pageId ? entry.source.page_id : null;
       const resultPage = entry.source?.kind === 'operator_report' && entry.source.result_message_id
         ? entry.source.page_id : null;
-      return <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'not_useful' ? t('learning.verdictNotUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict === 'withdrawn' ? t('learning.verdictWithdrawn') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}
+      return <div key={index} className="lesson-feedback-evidence"><p><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'not_useful' ? t('learning.verdictNotUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict === 'withdrawn' ? t('learning.verdictWithdrawn') : entry.verdict.replaceAll('_', ' ')}</strong> · {messageBody({ content: entry.evidence, materialSuffixLength: entry.evidenceSource?.materialSuffixLength })}
         {resultPage ? <> · <button type="button" className="text-button" onClick={() => navigate(resultPage, resultPage !== pageId ? { pageId } : undefined, entry.source!.result_message_id)}>{t('learning.reportedResult')}</button>
           {['TEST_DOUBLE', 'EXPLICIT_MOCK'].includes(entry.source?.result_evidence_class ?? '') ? <> · {t('learning.resultFixture')}</> : null}
           {entry.source?.result_execution_regime === 'replay' ? <> · {t('replay.result')}</> : null}
         </> : reportedPage ? <> · <button type="button" className="text-button" onClick={() => navigate(reportedPage, { pageId })}>{t('learning.reportedWork')}</button></> : null}
-      </p>;
+      </p>{entry.evidenceSource ? <ExperienceSourceLink source={entry.evidenceSource} pageId={pageId} navigate={navigate} /> : null}</div>;
     })}</details> : null}
     {experience.canEdit ? <div className="lesson-actions">
       <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { active: !experience.active }).catch(() => {}); }}>{t(experience.active ? (example ? 'learning.pauseExample' : 'learning.pause') : 'learning.resume')}</button>
