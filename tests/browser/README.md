@@ -64,6 +64,30 @@ It adds a page link without losing that source, then deliberately delivers a
 stale background-read response before a new navigation response in both
 directions. The current source or recent view must win the race.
 
+## Browse an older conversation
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  PER_PULSE_HISTORY_SCREENSHOTS=/tmp/per-pulse-history-screenshots \
+  node tests/browser/history_flow.mjs
+```
+
+This offline flow seeds an explicitly authored long conversation in the native
+World, with separate Home and sibling Work histories. It browses every older
+message across stable ranges while new input arrives, retries a failed read,
+opens an old message's original source, follows its reference and returns,
+and verifies the draft after reload. It also checks phone layout, keyboard
+focus, English/Chinese controls and a delayed response after Browser Back.
+No model is configured; no assistant response or learning outcome is invented.
+
+Run `node tests/browser/message_search_flow.mjs` with the same environment to
+verify **Find a message** against this long native fixture. It covers failed-read
+retry, old-source focus and reload, private-context isolation, stable ranges
+while new input arrives, an obsolete query response, phone layout, bilingual
+controls, Escape focus restoration, and Browser Back to another source within
+the same Work while a search is pending. Queries remain local and read-only.
+
 ## One rendered correction-to-artifact journey
 
 ```sh

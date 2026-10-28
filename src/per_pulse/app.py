@@ -28,6 +28,7 @@ from .service import PageError, PageService, PulseSettings, _ENV_PROVIDER
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
 Content = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32_000)]
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
+MessageQuery = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class Input(BaseModel):
@@ -279,6 +280,14 @@ def create_app(
     @app.post("/api/pages/{page_id}/messages", status_code=202)
     def message(page_id: str, body: NewMessage, request: Request):
         return pages(request).send(page_id, body.content, [r.model_dump() for r in body.references])
+
+    @app.get("/api/pages/{page_id}/messages")
+    def earlier_messages(page_id: str, request: Request, beforeMessageId: Identifier):
+        return pages(request).history(page_id, before_message_id=beforeMessageId)
+
+    @app.get("/api/pages/{page_id}/messages/search")
+    def find_messages(page_id: str, request: Request, q: MessageQuery, beforeMessageId: Identifier | None = None):
+        return pages(request).search_messages(page_id, q, before_message_id=beforeMessageId)
 
     @app.post("/api/pages/{page_id}/references", status_code=201)
     def reference(page_id: str, body: NewReference, request: Request):

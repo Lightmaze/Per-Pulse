@@ -66,6 +66,28 @@ jobs:
           path: ${{ runner.temp }}/per-pulse-attention-screenshots
           if-no-files-found: ignore
           retention-days: 7
+      - name: Verify earlier conversation browsing in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-history-screenshots" node tests/browser/history_flow.mjs
+      - name: Keep conversation history browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversation-history-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-history-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Verify original message search in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-search-screenshots" node tests/browser/message_search_flow.mjs
+      - name: Keep message search browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: message-search-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-search-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build the distributable package
         run: python -m build --no-isolation
       - name: Verify first run from an installed wheel outside the checkout

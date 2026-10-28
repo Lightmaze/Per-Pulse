@@ -14,7 +14,10 @@ export function useWorkspace() {
   const [syncError, setSyncError] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const refreshRequest = useRef<Promise<void> | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadedRouteSerial, setLoadedRouteSerial] = useState<number | null>(null);
+  // A new route is loading in the very render that changes it. Waiting for
+  // an effect to set a boolean lets source restoration run on the old view.
+  const loading = loadedRouteSerial !== route.serial;
   const versions = useRef<Record<string, number>>({});
   const requests = useRef<Record<string, number>>({});
   const routeRef = useRef(route);
@@ -107,10 +110,9 @@ export function useWorkspace() {
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
     refreshPage(route.id, controller.signal).catch(problem => {
       if (!controller.signal.aborted) setError(problem instanceof Error ? problem.message : 'This page could not be loaded.');
-    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    }).finally(() => { if (!controller.signal.aborted) setLoadedRouteSerial(route.serial); });
     return () => controller.abort();
   }, [route.id, route.serial, refreshPage]);
 

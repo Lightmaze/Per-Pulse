@@ -15,6 +15,7 @@ The alpha candidate provides English and 简体中文 interface controls, a sepa
 - Continue in the linked page and return to the source while retaining your unsent draft and reading position.
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
+- Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
 - Enable bounded local pulses: a context can continue from its retained history, and explicit computational connections can carry its results into related contexts.
 
@@ -236,7 +237,7 @@ See [the API contract](docs/api.md), [pulse core](docs/pulse-core.md) and [sourc
 
 ## Current scope
 
-This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The page view shows the latest 500 messages; older events remain in the durable store. The first UI does not expose the inherited runtime's full operational or approval console.
+This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The main conversation shows the latest 500 messages. **Earlier messages** reads older native history in groups of 100; **Find a message** searches the whole current conversation. Opening a result retains its original source and the current draft. The first UI does not expose the inherited runtime's full operational or approval console.
 
 Workspace mutation remains disabled by default and requires an explicit `--allow-workspace-actions` opt-in plus approval of each actionable proposal. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality.
 

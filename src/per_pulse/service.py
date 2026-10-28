@@ -30,6 +30,7 @@ from .artifacts import PageArtifacts
 from .language import RESPONSE_LANGUAGES, ResponseLanguage, install_language_advisor
 
 MAX_MESSAGES = 500
+HISTORY_MESSAGES = 100
 _ENV_PROVIDER = object()
 
 
@@ -353,7 +354,8 @@ class PageService:
         return front
 
     def _rows(self, page_id: str, *, limit: int = MAX_MESSAGES + 1,
-              event_id: str | None = None) -> list[dict]:
+              event_id: str | None = None, before_seq: int | None = None,
+              content_query: str | None = None) -> list[dict]:
         front = self._front(page_id)
         return self.runtime._causal_message_projection(
             center_id=front.center_id if front else None,
@@ -361,7 +363,8 @@ class PageService:
             unattributed=front is None,
             # Offline input is real queued input. Do not hide it until a
             # provider admits a Kernel turn, and do not fabricate a transcript.
-            session_admitted=False, limit=limit, event_id=event_id,
+            session_admitted=False, limit=limit, event_id=event_id, before_seq=before_seq,
+            content_query=content_query,
         )
 
     def _check_message(self, page_id: str, message_id: str | None) -> None:
@@ -435,6 +438,86 @@ class PageService:
                 "postureEnabled": self.learning.enabled,
             }
 
+    def _messages(self, page_id: str, rows: list[dict], refs: list[dict]) -> list[dict]:
+        messages = []
+        center_pages = {front["center_id"]: front["id"] for front in self.runtime.list_task_fronts()}
+        for row in rows:
+            origin = self._state["messageOrigins"].get(row["event_id"], {})
+            activation = None
+            if row["kind"] == "propagation" and row["metadata"].get("context_connection_id"):
+                # A propagation's reported source center is metadata, not
+                # proof that its parent can be opened from that Work.
+                # Match the actual native causal parent to the advertised
+                # center before exposing even a page-level attribution.
+                source_center = row["metadata"].get("source_center_id")
+                source_page = "home" if source_center is None else center_pages.get(source_center)
+                parent_id = row["parent_event_id"]
+                parent = self.runtime.causal_ledger.get_event(parent_id) if parent_id else None
+                origin = {"pageId": None, "messageId": None}
+                if (source_page is not None and parent is not None
+                        and parent.world_id == self.runtime.world_id
+                        and parent.center_id == source_center):
+                    origin["pageId"] = source_page
+                    try:
+                        # The complete historical scope, not the recent 500
+                        # messages, decides whether this is a real link.
+                        self._check_message(source_page, parent_id)
+                    except PageError:
+                        pass
+                    else:
+                        origin["messageId"] = parent_id
+                activation = "propagation"
+            messages.append({
+                "id": row["event_id"], "role": "system" if activation else row["role"], "content": row["content"],
+                "createdAt": row["timestamp"], "status": row["status"],
+                "sourcePageId": origin.get("pageId"),
+                "sourceMessageId": origin.get("messageId"),
+                "activation": activation,
+                "references": [r for r in refs if r["sourceMessageId"] == row["event_id"]],
+            })
+        return messages
+
+    def history(self, page_id: str, *, before_message_id: str) -> dict:
+        """Read older native messages without changing the active conversation."""
+        with self._lock:
+            self._check_message(page_id, before_message_id)
+            anchor = self._rows(page_id, limit=1, event_id=before_message_id)
+            if not anchor:
+                raise PageError("message_not_found", "The selected message does not belong to this page.", 404)
+            rows = self._rows(page_id, limit=HISTORY_MESSAGES + 1, before_seq=anchor[0]["seq"])
+            has_more = len(rows) > HISTORY_MESSAGES
+            rows = rows[-HISTORY_MESSAGES:]
+            refs = [dict(r) for r in self._state["references"] if r["sourcePageId"] == page_id]
+            return {
+                "pageId": page_id,
+                "messages": self._messages(page_id, rows, refs),
+                "hasMore": has_more,
+                "beforeMessageId": rows[0]["event_id"] if has_more else None,
+            }
+
+    def search_messages(self, page_id: str, query: str, *, before_message_id: str | None = None) -> dict:
+        """Find original native messages in this conversation, including old ones."""
+        query = query.strip()
+        if not query or len(query) > 200:
+            raise PageError("message_search_invalid", "Enter between 1 and 200 characters to find a message.", 422)
+        with self._lock:
+            self._check_message(page_id, before_message_id)
+            before_seq = None
+            if before_message_id is not None:
+                anchor = self._rows(page_id, limit=1, event_id=before_message_id)
+                if not anchor:
+                    raise PageError("message_not_found", "The selected message does not belong to this page.", 404)
+                before_seq = anchor[0]["seq"]
+            rows = self._rows(page_id, limit=HISTORY_MESSAGES + 1,
+                              before_seq=before_seq, content_query=query)
+            has_more = len(rows) > HISTORY_MESSAGES
+            rows = rows[-HISTORY_MESSAGES:]
+            refs = [dict(r) for r in self._state["references"] if r["sourcePageId"] == page_id]
+            return {"pageId": page_id, "query": query,
+                    "messages": list(reversed(self._messages(page_id, rows, refs))),
+                    "hasMore": has_more,
+                    "beforeMessageId": rows[0]["event_id"] if has_more else None}
+
     def view(self, page_id: str, *, source_message_id: str | None = None) -> dict:
         with self._lock:
             self._check_message(page_id, source_message_id)
@@ -443,6 +526,7 @@ class PageService:
             has_more = len(rows) > MAX_MESSAGES
             rows = rows[-MAX_MESSAGES:]
             summary_rows = rows
+            history_before = rows[0]["event_id"] if has_more else None
             earlier_source_id = None
             if source_message_id and not any(row["event_id"] == source_message_id for row in rows):
                 # A source link into old history must survive the bounded recent
@@ -453,42 +537,7 @@ class PageService:
                 rows = source_rows + rows
                 earlier_source_id = source_message_id
             refs = [dict(r) for r in self._state["references"] if r["sourcePageId"] == page_id]
-            messages = []
-            center_pages = {front["center_id"]: front["id"] for front in self.runtime.list_task_fronts()}
-            for row in rows:
-                origin = self._state["messageOrigins"].get(row["event_id"], {})
-                activation = None
-                if row["kind"] == "propagation" and row["metadata"].get("context_connection_id"):
-                    # A propagation's reported source center is metadata, not
-                    # proof that its parent can be opened from that Work.
-                    # Match the actual native causal parent to the advertised
-                    # center before exposing even a page-level attribution.
-                    source_center = row["metadata"].get("source_center_id")
-                    source_page = "home" if source_center is None else center_pages.get(source_center)
-                    parent_id = row["parent_event_id"]
-                    parent = self.runtime.causal_ledger.get_event(parent_id) if parent_id else None
-                    origin = {"pageId": None, "messageId": None}
-                    if (source_page is not None and parent is not None
-                            and parent.world_id == self.runtime.world_id
-                            and parent.center_id == source_center):
-                        origin["pageId"] = source_page
-                        try:
-                            # The complete historical scope, not the recent 500
-                            # messages, decides whether this is a real link.
-                            self._check_message(source_page, parent_id)
-                        except PageError:
-                            pass
-                        else:
-                            origin["messageId"] = parent_id
-                    activation = "propagation"
-                messages.append({
-                    "id": row["event_id"], "role": "system" if activation else row["role"], "content": row["content"],
-                    "createdAt": row["timestamp"], "status": row["status"],
-                    "sourcePageId": origin.get("pageId"),
-                    "sourceMessageId": origin.get("messageId"),
-                    "activation": activation,
-                    "references": [r for r in refs if r["sourceMessageId"] == row["event_id"]],
-                })
+            messages = self._messages(page_id, rows, refs)
             crumbs, seen, cursor = [], set(), page_id
             while cursor and cursor not in seen:
                 seen.add(cursor)
@@ -505,6 +554,7 @@ class PageService:
                 "execution": self.execution.snapshot(page_id),
                 "artifacts": artifacts["artifacts"], "artifactsTruncated": artifacts["truncated"],
                 "hasMore": has_more,
+                "historyBeforeMessageId": history_before,
                 "earlierSourceMessageId": earlier_source_id,
             }
 

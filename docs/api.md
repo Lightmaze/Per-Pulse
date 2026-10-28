@@ -50,7 +50,14 @@ type PageView = {
   breadcrumbs: { id: string; title: string }[];
   provider: ProviderState;
   hasMore: boolean;
+  historyBeforeMessageId: string | null; // oldest recent message, when older history exists
   earlierSourceMessageId: string | null; // one older selected source, separate from recent messages
+};
+type MessageHistory = {
+  pageId: string;
+  messages: Message[]; // at most 100, in native chronological sequence
+  hasMore: boolean;
+  beforeMessageId: string | null; // pass this to read the next older range
 };
 type Bootstrap = {
   name: "Per Pulse";
@@ -67,6 +74,25 @@ type Bootstrap = {
 
 - `GET /api/bootstrap` -> `Bootstrap`.
 - `GET /api/pages/{id}` -> `PageView` (latest bounded messages).
+- `GET /api/pages/{id}/messages?beforeMessageId=<native-event-id>` ->
+  `MessageHistory`, containing up to 100 messages strictly before that message.
+  Start with `PageView.historyBeforeMessageId`, then use each returned
+  `beforeMessageId` until it is null. The native sequence cursor remains stable
+  when newer messages arrive; timestamps and offsets are not pagination keys.
+  The cursor must itself be a visible message in the same page's authorized
+  World/Center/committed-Engram lineage. Missing or foreign messages give 404;
+  an omitted or empty cursor gives 422. The earliest message returns an empty
+  history range. Every read retains current statuses, references and source
+  identities, without admitting a turn or changing the main page's status.
+- `GET /api/pages/{id}/messages/search?q=<text>&beforeMessageId=<optional-id>`
+  returns the same bounded shape plus `query`, with up to 100 matches **newest
+  first**. The trimmed query is 1–200 characters. Matching is a literal Unicode
+  case-insensitive substring; `%`, `_`, backslashes and quotes have no wildcard
+  or SQL meaning. Recent and older conversation share the same native
+  World/Center/committed-lineage predicates. Older ranges use the last returned
+  `beforeMessageId`; foreign/missing cursors give 404. No match returns an empty
+  list, and reading never starts a model or creates a session. The browser's
+  **Find a message** opens each result at its original message and retains drafts.
 - `GET /api/pages/{id}?sourceMessageId=<native-event-id>` -> the same recent bounded
   window, plus one selected older message if it is in this page's authorized
   World/Center/committed-Engram lineage. This is a read-only source anchor, not
@@ -75,6 +101,9 @@ type Bootstrap = {
   message returns 404. Intervening messages are not implied or copied.
   Home/Work deep links pass this native message ID without changing identity,
   stored drafts, route, or the user's return position.
+  A pinned older source does not change `historyBeforeMessageId`: history
+  browsing still begins before the recent window, so intervening messages
+  remain reachable.
 - `GET /api/health` -> `{status:"ok", providerConfigured:boolean}`.
 - `GET /api/pulse` -> local pulse settings, rolling admission budget, context
   activity, directed connections, full durable `queue` totals, and the most
@@ -96,6 +125,26 @@ type Bootstrap = {
 Scope browser drafts, scroll positions, and navigation history by `workspaceId`
 as well as page ID. Ordinary and example workspaces have distinct World IDs,
 even when they use the same server origin and the shared page ID `home`.
+
+Schema 10 adds `(world_id, center_id, seq)` to the existing causal ledger for
+these bounded recent/older reads. The normal migration boundary backs up an
+older database before applying this index-only upgrade; message rows, turn
+receipts and identities are unchanged. Versions 7, 8 and 9 are covered by
+preservation and idempotent-reopen tests. Downgrading the application to a
+version that only understands schema 9 is not supported.
+
+The optional `python tests/per_pulse/benchmark_message_history.py` compares the
+actual native page queries with and without this index in a disposable
+100,000-row fixture. On the development host, median bootstrap time fell from
+237 ms to 7 ms, and a 100-message older range from 18 ms to 1 ms (20 measured
+reads after five warmups). These are local synthetic measurements, not a
+latency guarantee for other hardware or histories.
+
+Message search scans matching-context native text; it is not a separate search
+index or transcript copy. `python tests/per_pulse/benchmark_message_search.py`
+measures common, old-only and absent queries in a disposable dense 100,000-row
+fixture. An absent query must inspect the whole selected context, so its cost
+grows with conversation size even though the returned range is bounded.
 
 ## Report an outcome of a lesson
 

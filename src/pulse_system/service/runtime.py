@@ -9304,6 +9304,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         session_admitted: bool = False,
         limit: int = 100,
         event_id: str | None = None,
+        before_seq: int | None = None,
+        content_query: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = [
             "world_id = ?",
@@ -9349,8 +9351,25 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             # never replace the scoped predicate with an unguarded ID lookup.
             clauses.append("id = ?")
             params.append(event_id)
+        if before_seq is not None:
+            # A bounded, stable read of older conversation. Sequence belongs to
+            # the native ledger; the existing World/Center/lineage predicates
+            # still decide which messages this projection may expose.
+            clauses.append("seq < ?")
+            params.append(before_seq)
+        if content_query is not None:
+            # Literal Unicode case-insensitive substring matching. User text is
+            # always a parameter, so '%' and '_' never become SQL wildcards.
+            clauses.append("instr(pulse_casefold(content), ?) > 0")
+            params.append(content_query.casefold())
         params.append(limit)
         with self._storage._lock:
+            if content_query is not None:
+                self._storage._conn.create_function(
+                    "pulse_casefold", 1,
+                    lambda value: value.casefold() if isinstance(value, str) else "",
+                    deterministic=True,
+                )
             rows = self._storage._conn.execute(
                 "SELECT seq, id, causal_id, parent_event_id, engram_id, "
                 "center_id, kind, source, status, content, metadata, "

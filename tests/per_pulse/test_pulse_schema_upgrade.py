@@ -16,9 +16,10 @@ NEW_INDEXES = (
 )
 WINDOW_INDEX = "idx_causal_events_world_subject_queue_time"
 QUEUE_INDEX = "idx_causal_events_world_status_seq"
+MESSAGE_INDEX = "idx_causal_events_world_center_seq"
 
 
-@pytest.mark.parametrize("old_version", [7, 8])
+@pytest.mark.parametrize("old_version", [7, 8, 9])
 def test_upgrade_preserves_history_and_uses_bounded_query_paths(tmp_path, old_version):
     path = tmp_path / "world.db"
     original = Storage(path)
@@ -34,10 +35,13 @@ def test_upgrade_preserves_history_and_uses_bounded_query_paths(tmp_path, old_ve
     before_events = original._conn.execute("SELECT * FROM causal_events ORDER BY seq").fetchall()
     before_turns = original._conn.execute("SELECT * FROM harness_turns ORDER BY id").fetchall()
     original.close()
-    # Both upgrades are index-only. Reconstruct the earlier populated body
+    # These upgrades are index-only. Reconstruct the earlier populated body
     # without changing its native causal rows or turn receipts.
     with sqlite3.connect(path) as previous:
-        for name in ((NEW_INDEXES if old_version == 7 else ()) + (WINDOW_INDEX, QUEUE_INDEX)):
+        obsolete = ((NEW_INDEXES if old_version == 7 else ())
+                    + ((WINDOW_INDEX, QUEUE_INDEX) if old_version < 9 else ())
+                    + (MESSAGE_INDEX,))
+        for name in obsolete:
             previous.execute(f"DROP INDEX {name}")
         previous.execute("DELETE FROM schema_migrations WHERE version > ?", (old_version,))
         previous.execute(f"PRAGMA user_version = {old_version}")
@@ -45,8 +49,8 @@ def test_upgrade_preserves_history_and_uses_bounded_query_paths(tmp_path, old_ve
     try:
         migration = reopened.schema_migration_result
         assert migration.from_version == old_version
-        assert migration.to_version == 9
-        assert migration.applied_versions == tuple(range(old_version + 1, 10))
+        assert migration.to_version == 10
+        assert migration.applied_versions == tuple(range(old_version + 1, 11))
         assert migration.backup_path is not None
         with sqlite3.connect(migration.backup_path) as backup:
             assert backup.execute("PRAGMA user_version").fetchone()[0] == old_version
@@ -81,6 +85,16 @@ def test_upgrade_preserves_history_and_uses_bounded_query_paths(tmp_path, old_ve
             ("world", 0),
         ).fetchall()
         assert any(QUEUE_INDEX in row[-1] for row in queue_plan)
+        for center in (None, "an-existing-work-center"):
+            message_plan = reopened._conn.execute(
+                "EXPLAIN QUERY PLAN SELECT id, content FROM causal_events "
+                "WHERE world_id = ? AND center_id IS ? AND seq < ? "
+                "AND content IS NOT NULL AND kind IN ('stimulus', 'spontaneous', "
+                "'propagation', 'assistant_result', 'delegation_result') "
+                "ORDER BY seq DESC LIMIT 101", ("world", center, 100000),
+            ).fetchall()
+            assert any(MESSAGE_INDEX in row[-1] for row in message_plan)
+            assert not any("TEMP B-TREE" in row[-1] for row in message_plan)
         assert CausalLedger(reopened).get_event(background.id).status.value == "queued"
     finally:
         reopened.close()
