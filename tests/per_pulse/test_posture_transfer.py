@@ -100,6 +100,11 @@ def test_ordinary_feedback_keeps_native_capture_and_fresh_transfer_separate(tmp_
     assert result["provider_requests"] == {"training": 4, "bare_transfer": 1, "bare_negative": 1,
                                             "conditional_transfer": 3, "conditional_negative": 3}
     assert sum(result["provider_requests"].values()) == len(requests)
+    # The pre-transport log is durable, private and matches the later export.
+    admission_file = output / "provider-admissions.jsonl"
+    admission_rows = [json.loads(line) for line in admission_file.read_text().splitlines()]
+    assert admission_rows == json.loads((output / "provider-requests.json").read_text())
+    assert admission_file.stat().st_mode & 0o777 == 0o600
     assert "Posture trial:" not in json.dumps(requests)
     assert all(name not in json.dumps(requests) for name, _, _ in STAGES[2:])
     assert all(value["source_transcript_absent"] and value["expected_memory_exposure"]
@@ -111,6 +116,16 @@ def test_ordinary_feedback_keeps_native_capture_and_fresh_transfer_separate(tmp_
     audit = audit_ordinary_transfer(output)
     assert audit["status"] == "verified", audit
     assert not audit["eligible_for_behavior_comparison"]
+
+    # A corrupt, missing or truncated pre-transport admission journal cannot
+    # masquerade as a reconciled provider request history.
+    original_admissions = admission_file.read_bytes()
+    admission_file.write_bytes(original_admissions[:len(original_admissions) // 2])
+    assert "provider_admission_journal_unreadable" in audit_ordinary_transfer(output)["errors"] or (
+        "provider_admission_journal_mismatch" in audit_ordinary_transfer(output)["errors"]
+    )
+    admission_file.write_bytes(original_admissions)
+    assert audit_ordinary_transfer(output)["status"] == "verified"
 
     # Export consistency must reject substituted response bytes and repeated
     # request snapshots, even after rebinding host-generated record checksums.
@@ -220,6 +235,20 @@ def test_request_budget_failure_does_not_turn_into_capture_absent(tmp_path, monk
     assert len(requests) == sum(result["provider_requests"].values()) == 1
     assert result["capture_status"] == "pending"
     assert result["learned_lessons"] == result["shared_lessons"] == []
+    assert len((tmp_path / "trial" / "provider-admissions.jsonl").read_text().splitlines()) == 1
+
+
+def test_pre_transport_journal_failure_blocks_external_model_call(tmp_path, monkeypatch):
+    requests = []
+    factory = fixture_factory(monkeypatch, requests)
+
+    def rejected_sync(_fd):
+        raise OSError("simulated admission log storage failure")
+
+    monkeypatch.setattr("per_pulse.posture_transfer.os.fsync", rejected_sync)
+    result = run_ordinary_transfer(tmp_path / "trial", model_factory=factory, stage_timeout=10)
+    assert result["status"] == "failed"
+    assert requests == [], "provider must never receive a request without a durable admission"
 
 
 def test_unconfigured_ordinary_transfer_makes_no_trial_directory(tmp_path, monkeypatch, capsys):
