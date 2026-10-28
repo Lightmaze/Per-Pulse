@@ -36,6 +36,7 @@ export const learningEnglish = {
   'learning.correction': "Go to correction",
   'learning.later': "Later feedback ({count})",
   'learning.verdictUseful': "useful",
+  'learning.verdictNotUseful': "no clear benefit",
   'learning.verdictHarmful': "harmful",
   'learning.verdictRevised': "revised",
   'learning.pause': "Pause lesson",
@@ -65,6 +66,7 @@ export const learningEnglish = {
   'learning.changed': "What changed in the result?",
   'learning.feedbackPlaceholder': "Describe the actual result, including where this lesson was unhelpful.",
   'learning.helped': "It helped",
+  'learning.noBenefit': "No clear benefit",
   'learning.hurt': "It hurt · pause",
 } as const;
 export const learningChinese: Record<keyof typeof learningEnglish, string> = {
@@ -104,6 +106,7 @@ export const learningChinese: Record<keyof typeof learningEnglish, string> = {
   'learning.correction': "查看纠正",
   'learning.later': "后续反馈（{count} 条）",
   'learning.verdictUseful': "有效",
+  'learning.verdictNotUseful': learningEnglish['learning.verdictNotUseful'],
   'learning.verdictHarmful': "有害",
   'learning.verdictRevised': "已修订",
   'learning.pause': "暂停此经验",
@@ -133,5 +136,6 @@ export const learningChinese: Record<keyof typeof learningEnglish, string> = {
   'learning.changed': "结果发生了什么变化？",
   'learning.feedbackPlaceholder': "描述实际结果，以及这条经验在哪些地方没有帮助。",
   'learning.helped': "确实有帮助",
+  'learning.noBenefit': learningEnglish['learning.noBenefit'],
   'learning.hurt': "造成了负面结果 · 暂停",
 };

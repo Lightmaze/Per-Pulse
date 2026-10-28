@@ -92,6 +92,7 @@ export type Bootstrap = {
 };
 
 export type LessonCondition = string | { all: LessonCondition[] } | { any: LessonCondition[] } | { not: LessonCondition };
+export type LessonVerdict = 'useful' | 'not_useful' | 'harmful';
 export type PostureExperience = {
   id: string;
   revision: number;

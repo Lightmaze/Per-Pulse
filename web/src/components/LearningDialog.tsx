@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, type Translate } from '../i18n';
-import type { LessonCondition, Message, PostureExperience, PostureView } from '../types';
+import type { LessonCondition, LessonVerdict, Message, PostureExperience, PostureView } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
 
@@ -20,7 +20,7 @@ function Experience({ experience, pageId, results, busy, revise, feedback, navig
   experience: PostureExperience; pageId: string; busy: boolean;
   results: Message[];
   revise: (experience: PostureExperience, changes: LessonRevision, evidence?: string) => Promise<void>;
-  feedback: (experience: PostureExperience, verdict: 'useful' | 'harmful', evidence: string, resultMessageId?: string) => Promise<void>;
+  feedback: (experience: PostureExperience, verdict: LessonVerdict, evidence: string, resultMessageId?: string) => Promise<void>;
   navigate: Navigate;
 }) {
   const { t } = useLanguage();
@@ -63,7 +63,7 @@ function Experience({ experience, pageId, results, busy, revise, feedback, navig
   // Inspect the original Work without losing the receiving Work's place or draft.
   // Same-page source links need no new return origin.
   const sourceOrigin = experience.sourcePageId && experience.sourcePageId !== pageId ? { pageId } : undefined;
-  const submit = async (verdict: 'useful' | 'harmful') => {
+  const submit = async (verdict: LessonVerdict) => {
     await feedback(experience, verdict, evidence.trim(), resultMessageId || undefined);
     setEvidence(''); setResultMessageId(''); setFeedbackOpen(false);
   };
@@ -87,7 +87,7 @@ function Experience({ experience, pageId, results, busy, revise, feedback, navig
         && entry.source.page_id && entry.source.page_id !== pageId ? entry.source.page_id : null;
       const resultPage = entry.source?.kind === 'operator_report' && entry.source.result_message_id
         ? entry.source.page_id : null;
-      return <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}
+      return <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'not_useful' ? t('learning.verdictNotUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}
         {resultPage ? <> · <button type="button" className="text-button" onClick={() => navigate(resultPage, resultPage !== pageId ? { pageId } : undefined, entry.source!.result_message_id)}>{t('learning.reportedResult')}</button>
           {['TEST_DOUBLE', 'EXPLICIT_MOCK'].includes(entry.source?.result_evidence_class ?? '') ? <> · {t('learning.resultFixture')}</> : null}
         </> : reportedPage ? <> · <button type="button" className="text-button" onClick={() => navigate(reportedPage, { pageId })}>{t('learning.reportedWork')}</button></> : null}
@@ -134,7 +134,11 @@ function Experience({ experience, pageId, results, busy, revise, feedback, navig
         {results.map((message, index) => <option key={message.id} value={message.id}>{index + 1}. {message.content.replace(/\s+/g, ' ').slice(0, 120)}</option>)}
       </select>
       <p className="lesson-note" id={`feedback-result-help-${experience.id}`}>{t('learning.resultHelp')}</p>
-      <div className="lesson-actions"><button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button><button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t('learning.hurt')}</button></div>
+      <div className="lesson-actions">
+        <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button>
+        <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('not_useful').catch(() => {})}>{t('learning.noBenefit')}</button>
+        <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t('learning.hurt')}</button>
+      </div>
     </div> : null}
   </article>;
 }

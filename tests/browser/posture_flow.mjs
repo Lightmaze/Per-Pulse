@@ -478,6 +478,15 @@ try {
   await lesson.getByRole('button', { name: 'It helped', exact: true }).click();
   await lesson.getByText('In use · v14', { exact: true }).waitFor();
   assert.equal(await lesson.getByText('Later feedback (5)', { exact: true }).count(), 0);
+  await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
+  await reportField.fill('The result was adequate, but I saw no clear benefit from this guidance.');
+  await lesson.getByRole('button', { name: 'No clear benefit', exact: true }).click();
+  await lesson.getByText('In use · v15', { exact: true }).waitFor();
+  const neutralReport = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
+  assert.equal(neutralReport.active, true);
+  assert.equal(neutralReport.feedback.at(-1).verdict, 'not_useful');
+  assert.equal(neutralReport.feedback.at(-1).source.page_id, receiverId);
+  assert.equal(await lesson.getByText('Later feedback (6)', { exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, receiving-Work outcome feedback without private source exposure, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
 } finally {

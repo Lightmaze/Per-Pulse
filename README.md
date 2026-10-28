@@ -68,6 +68,35 @@ If neither endpoint nor model is set, the workspace runs disconnected. Setting o
 
 Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. Per Pulse also enforces a default **8 MiB maximum serialized request body** at the outbound Chat Completions boundary, configurable with `P_PULSE_MAX_REQUEST_BYTES`. This rejects oversized requests *before network send*, including those arising from long history, side computations, tool schemas or image parts. It never silently truncates the saved context; a blocked turn remains visible for review. This byte guard is **not** a context-token limit, provider bill cap, or solution to automatic long-history management. Provider compatibility must be verified separately.
 
+### Learn from a correction and inspect what changed
+
+With a model configured, enable attributed experience learning when starting
+the same workspace:
+
+```sh
+per-pulse --posture
+```
+
+After a reply, explain what worked or what should change in the conversation.
+The model may save a conditional lesson with its original result and your
+correction. **Settings → View this page’s lessons** lets you inspect that
+source, refine the guidance and its exceptions, pause it, or explicitly make
+it available in other pages. Capture is model-chosen: a correction does not
+guarantee that a lesson will be saved.
+
+In a later Work, **Give feedback** records the outcome of a shared lesson.
+You can optionally link a completed reply from that Work; the source page's
+feedback history then opens the exact result, including older messages outside
+the recent window. A described observation can also stand without a linked
+reply. **No clear benefit** records a neutral observation and keeps the lesson's
+current active state. Harmful feedback pauses the shared lesson; only its source page can
+edit or reactivate it. The lesson's abstraction can travel, while the original
+conversation and private feedback stay at the source.
+
+Linking a result establishes where to inspect it, not that the lesson caused
+it. Real-provider learning benefits still need output comparison and review.
+Example mode remains model-free and does not enable experience learning.
+
 ### Enable local pulse computation
 
 ```sh
