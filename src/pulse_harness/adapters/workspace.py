@@ -163,6 +163,7 @@ class _FileSnapshot:
 @dataclass(frozen=True, slots=True)
 class _MutationPlan:
     action_request_id: str
+    tool_call_id: str
     relative_path: str
     target: Path
     before: _FileSnapshot
@@ -1063,7 +1064,7 @@ class StructuredWorkspaceToolProvider:
             raise ProviderProtocolError("workspace adapter received an invalid ToolCall")
         cancellation.raise_if_cancelled()
         if call.name == "read_file":
-            return self._read(scope, call, cancellation)
+            return self._read(scope, call, cancellation, action_request_id=action_request_id)
         if call.name == "mutate_file":
             return self._mutate(scope, call, cancellation, action_request_id=action_request_id)
         raise ProviderProtocolError(
@@ -1292,6 +1293,8 @@ class StructuredWorkspaceToolProvider:
         scope: HarnessScope,
         call: ToolCall,
         cancellation: CancellationToken,
+        *,
+        action_request_id: str | None = None,
     ) -> Mapping[str, Any]:
         self.store.get_session(scope.session_scope())
         arguments = dict(call.arguments)
@@ -1301,18 +1304,19 @@ class StructuredWorkspaceToolProvider:
         target = self._safe_target(relative_path, allow_missing=False)
         cancellation.raise_if_cancelled()
         snapshot = self._snapshot(target)
-        content, redacted, truncated = _safe_observer_text(snapshot.text, self.store.max_payload_bytes)
-        return {
+        output = {
             "path": relative_path,
-            "content": content,
             "digest": snapshot.digest,
-            "redacted": redacted,
-            "truncated": truncated,
             "workspace_provenance": {
                 "adapter": "pulse_harness.workspace.v1",
                 "workspace_digest": self._workspace_provenance,
             },
         }
+        return self._bounded_text_output(
+            output, snapshot.text, text_key="content", redacted_key="redacted",
+            truncated_key="truncated", tool_call_id=call.tool_call_id,
+            action_request_id=action_request_id, status="succeeded",
+        )
 
     def _mutate(
         self,
@@ -1388,6 +1392,10 @@ class StructuredWorkspaceToolProvider:
             # never recreate the physical effect or a second checkpoint.
             return dict(stored_output)
         plan = self._plan(scope, call, action_request_id=action_request_id)
+        # A large diff is an optional preview, not permission to discard the
+        # receipt's source/version identity. Verify that the compact result can
+        # fit before checkpointing or replacing the file.
+        output = self._mutation_output(scope, plan, status="succeeded")
         cancellation.raise_if_cancelled()
         operation = self.store.create_operation(
             scope,
@@ -1477,7 +1485,6 @@ class StructuredWorkspaceToolProvider:
                     status="checkpointed",
                 )
             )
-            output = self._mutation_output(scope, plan, status="succeeded")
             self.store.terminal_operation(
                 scope,
                 plan.operation_id,
@@ -1592,17 +1599,13 @@ class StructuredWorkspaceToolProvider:
         status: str,
         error_code: str | None = None,
     ) -> Mapping[str, Any]:
-        diff, redacted, truncated = _safe_observer_text(plan.diff, self.store.max_payload_bytes)
         output: dict[str, Any] = {
             "status": status,
             "action_request_id": plan.action_request_id,
             "path": plan.relative_path,
             "before_digest": plan.before.digest,
             "after_digest": plan.after_digest,
-            "diff": diff,
             "diff_digest": plan.diff_digest,
-            "diff_redacted": redacted,
-            "diff_truncated": truncated,
             "change_id": plan.change_id,
             "checkpoint_id": plan.checkpoint_id,
             "operation_id": plan.operation_id,
@@ -1616,7 +1619,49 @@ class StructuredWorkspaceToolProvider:
         }
         if error_code is not None:
             output["error_code"] = error_code
-        return output
+        return self._bounded_text_output(
+            output, plan.diff, text_key="diff", redacted_key="diff_redacted",
+            truncated_key="diff_truncated", tool_call_id=plan.tool_call_id,
+            action_request_id=plan.action_request_id, status=status,
+            error_code=error_code,
+        )
+
+    def _bounded_text_output(
+        self,
+        metadata: Mapping[str, Any],
+        text: str,
+        *,
+        text_key: str,
+        redacted_key: str,
+        truncated_key: str,
+        tool_call_id: str,
+        action_request_id: str | None,
+        status: str,
+        error_code: str | None = None,
+    ) -> Mapping[str, Any]:
+        """Keep exact metadata while fitting the complete Kernel tool result.
+
+        A UTF-8 text bound alone cannot bound JSON: quotes, backslashes and control
+        characters expand when escaped. Include the normal transcript envelope
+        and reduce only the observer text, retaining its digest/visibility
+        marker. Never raise the store's bound or truncate authority fields.
+        """
+        budget = self.store.max_payload_bytes
+        while True:
+            preview, redacted, truncated = _safe_observer_text(text, budget)
+            output = {**metadata, text_key: preview,
+                      redacted_key: redacted, truncated_key: truncated}
+            envelope = {"tool_call_id": tool_call_id,
+                        "action_request_id": action_request_id, "status": status,
+                        "output": output, "error_code": error_code}
+            if len(_canonical_json(envelope).encode("utf-8")) <= self.store.max_payload_bytes:
+                return output
+            if budget == 128:
+                raise ProviderProtocolError(
+                    "workspace result metadata exceeds the durable bound",
+                    code="payload_too_large",
+                )
+            budget = max(128, budget // 2)
 
     def _emit(
         self,
@@ -1707,6 +1752,7 @@ class StructuredWorkspaceToolProvider:
         identity = hashlib.sha256(seed).hexdigest()
         return _MutationPlan(
             action_request_id=stable_action,
+            tool_call_id=call.tool_call_id,
             relative_path=relative_path,
             target=target,
             before=before,

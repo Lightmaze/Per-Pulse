@@ -197,6 +197,28 @@ try {
   await page.getByRole('button',{name:/redacted.txt/}).click();
   await page.getByText('Sensitive values have been hidden.',{exact:true}).waitFor();
   check('completed effect survives continuation failure with truthful UI and redacted preview',!(await page.textContent('body')).includes('password=abc'));
+  await create('Long report','WRITE_LARGE');
+  const largeId = new URL(page.url()).pathname.split('/').pop();
+  await page.getByRole('button',{name:'Allow once',exact:true}).click();
+  await page.locator('.message-assistant').getByText('Synthetic model fixture: this page has finished its turn.',{exact:true}).waitFor();
+  const largeArtifact = page.getByRole('button',{name:/large-report.txt/});
+  await largeArtifact.waitFor();
+  await largeArtifact.click();
+  await page.getByText(/^FINAL An explicitly synthetic long report/).waitFor();
+  const largeSnapshot = await (await fetch(base+'/api/pages/'+largeId+'/artifacts')).json();
+  check('large native diff preserves a complete file receipt and successful continuation',
+    largeSnapshot.artifacts.length===1 && !largeSnapshot.truncated
+    && !(await page.textContent('body')).includes('follow-up response could not finish'));
+  await page.screenshot({path:output+'/qa-large-artifact-desktop.png',fullPage:false});
+  const largeDraft = 'Keep this draft beside the confirmed long report.';
+  await page.locator('.composer textarea').fill(largeDraft);
+  await page.reload();
+  await page.getByRole('heading',{name:'Long report',exact:true}).waitFor();
+  await page.getByRole('button',{name:/large-report.txt/}).click();
+  await page.getByText(/^FINAL An explicitly synthetic long report/).waitFor();
+  check('large result retains its exact action and Work draft after reload',
+    (await (await fetch(base+'/api/pages/'+largeId+'/artifacts')).json()).artifacts[0].id===largeSnapshot.artifacts[0].id
+    && await page.locator('.composer textarea').inputValue()===largeDraft);
   const mobile=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1,isMobile:true,hasTouch:true});
   await mobile.goto(base+'/page/'+approvedId);
   await mobile.getByRole('heading',{name:'Approved note',exact:true}).waitFor();
@@ -204,6 +226,12 @@ try {
   await mobile.getByText('A real file from a synthetic model fixture.',{exact:true}).waitFor();
   check('mobile has no horizontal clipping',await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await mobile.screenshot({path:output+'/qa-artifact-mobile.png',fullPage:false});
+  await mobile.goto(base+'/page/'+largeId);
+  await mobile.getByRole('heading',{name:'Long report',exact:true}).waitFor();
+  await mobile.getByRole('button',{name:/large-report.txt/}).click();
+  await mobile.getByText(/^FINAL An explicitly synthetic long report/).waitFor();
+  check('large file preview fits the mobile page',await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await mobile.screenshot({path:output+'/qa-large-artifact-mobile.png',fullPage:false});
   check('no relevant console errors or framework overlays',errors.length===0);
   await fs.writeFile(output+'/qa-browser-results.json',JSON.stringify({checks,errors,viewports:['1440x1000','390x844'],provider:'explicit synthetic HTTP transport; real World, Kernel, approval and file effects',browser:await browser.version()},null,2));
   console.log(JSON.stringify({passed:checks.length,checks,output}));

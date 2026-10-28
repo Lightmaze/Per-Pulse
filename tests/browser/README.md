@@ -23,6 +23,20 @@ select another Python environment; it defaults to `.venv/bin/python`.
 `PER_PULSE_SCREENSHOTS` selects an optional output directory for desktop and
 mobile screenshots. Test data and images should stay outside the repository.
 
+## Native approvals and file results
+
+```sh
+PER_PULSE_PLAYWRIGHT_PATH=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_TEST_PYTHON=python \
+  node tests/browser/harness_smoke.mjs
+```
+
+The Harness smoke flow also approves a small patch whose resulting diff exceeds
+the native result limit. It opens the confirmed long report, checks successful
+model continuation, exact action identity and draft retention after reload,
+and previews the same file on a phone viewport. The model is explicitly
+synthetic; approval, file replacement, receipt and digest verification are real.
+
 A separate native attention-to-source flow uses the same Chromium dependency:
 ```sh
 PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \

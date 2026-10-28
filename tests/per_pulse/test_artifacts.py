@@ -29,7 +29,7 @@ def _sha(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _factory(monkeypatch, plans, requests):
+def _factory(monkeypatch, plans, requests, *, tool_name="mutate_file", tool_call_id="synthetic-file-request"):
     monkeypatch.setenv("PER_PULSE_ARTIFACT_TEST_KEY", "synthetic-test-credential")
 
     def handler(request):
@@ -41,8 +41,8 @@ def _factory(monkeypatch, plans, requests):
         prompt = json.dumps(current)
         selected = next((value for marker, value in plans.items() if marker in prompt), None)
         if selected is not None and not any(message.get("role") == "tool" for message in current):
-            delta = {"tool_calls": [{"index": 0, "id": "synthetic-file-request", "type": "function", "function": {
-                "name": "mutate_file", "arguments": json.dumps(selected),
+            delta = {"tool_calls": [{"index": 0, "id": tool_call_id, "type": "function", "function": {
+                "name": tool_name, "arguments": json.dumps(selected),
             }}]}
             finish = "tool_calls"
         else:
@@ -337,8 +337,9 @@ def test_artifact_identity_survives_event_retention_and_list_bounds(tmp_path, mo
         assert artifacts.read(page_id, action_id)["content"] == "A report."
 
 
-def test_large_native_receipt_is_not_misrepresented_as_a_complete_artifact_list(tmp_path, monkeypatch):
-    before = "DRAFT " + "x" * 50_000 + "\n"
+@pytest.mark.parametrize("body", ["x" * 50_000, '\\"\t' * 7_000, "💡" * 12_000], ids=["plain", "escaped", "multibyte"])
+def test_large_native_diff_preserves_compact_receipt_artifact_and_continuation(tmp_path, monkeypatch, body):
+    before = "DRAFT " + body + "\n"
     after = before.replace("DRAFT", "FINAL")
     requests = []
     factory = _factory(monkeypatch, {"PATCH_LARGE": {
@@ -353,13 +354,125 @@ def test_large_native_receipt_is_not_misrepresented_as_a_complete_artifact_list(
         page_id = _page(client, "PATCH_LARGE")
         waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
         action_id = waiting["pendingActions"][0]["actionId"]
-        try:
-            execution.resolve_approval(page_id, action_id, "allow_once")
-        except ExecutionError as error:
-            assert error.code == "payload_too_large"
+        execution.resolve_approval(page_id, action_id, "allow_once")
+        _wait(execution, page_id, lambda view: view["status"] == "idle")
         assert target.read_text() == after
         snapshot = artifacts.snapshot(page_id)
-        assert snapshot["artifacts"] == []
-        assert snapshot["truncated"]
+        item, = snapshot["artifacts"]
+        assert item["id"] == action_id and item["sha256"] == _sha(after)
+        assert not snapshot["truncated"]
+        assert artifacts.read(page_id, action_id)["content"] == after
+        store = runtime.kernel_service.store
+        action_scope = store.action_scope_for_session(execution._scope(page_id), action_id)
+        action = store.get_action(action_scope, action_id)
+        assert action.status.value == "succeeded"
+        assert action.result.get("_truncated") is not True
+        output = action.result["output"]
+        assert output["diff_truncated"] and not output["diff_redacted"]
+        assert output["before_digest"] == _sha(before) and output["after_digest"] == _sha(after)
+        assert output["action_request_id"] == action_id
+        assert output["operation_id"] == action.operation_id
+        assert output["workspace_provenance"]["adapter"] == "pulse_harness.workspace.v1"
+        delivered = [message for message in requests[-1]["messages"] if message["role"] == "tool"]
+        assert len(delivered) == 1
+        assert len(delivered[0]["content"].encode()) <= store.max_payload_bytes
+        assert json.loads(delivered[0]["content"])["output"] == output
+        mtime = target.stat().st_mtime_ns
+        request_count = len(requests)
+        execution.resolve_approval(page_id, action_id, "allow_once")
+        assert len(requests) == request_count and target.stat().st_mtime_ns == mtime
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        artifacts = client.app.state.pages.artifacts
+        assert artifacts.snapshot(page_id)["artifacts"] == [item]
+        assert artifacts.read(page_id, action_id)["content"] == after
+        assert target.stat().st_mtime_ns == mtime
+
+
+@pytest.mark.parametrize("body", ['A quoted line: "text" with a tab\tand slash \\\n' * 5_000,
+                                  "A multibyte document: 💡 café.\n" * 5_000], ids=["escaped", "multibyte"])
+def test_large_native_read_reaches_continuation_with_bounded_text_and_exact_digest(tmp_path, monkeypatch, body):
+    requests = []
+    factory = _factory(monkeypatch, {"READ_LARGE": {"path": "large.txt"}}, requests,
+                       tool_name="read_file", tool_call_id="fixture-read-" * 250)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        target = tmp_path / "workspace" / "large.txt"
+        target.write_text(body)
+        runtime = client.app.state.pages.runtime
+        execution = client.app.state.pages.execution
+        page_id = _page(client, "READ_LARGE")
+        _wait(execution, page_id, lambda view: len(requests) == 2 and view["status"] == "idle")
+        delivered = [message for message in requests[-1]["messages"] if message["role"] == "tool"]
+        assert len(delivered) == 1
+        assert len(delivered[0]["content"].encode()) <= runtime.kernel_service.store.max_payload_bytes
+        result = json.loads(delivered[0]["content"])
+        assert result["status"] == "succeeded"
+        output = result["output"]
+        assert output["path"] == "large.txt" and output["digest"] == _sha(body)
+        assert output["truncated"] and not output["redacted"]
+        assert output["content"].startswith("[TRUNCATED sha256=")
+        assert output["workspace_provenance"]["adapter"] == "pulse_harness.workspace.v1"
+        assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
+        assert target.read_text() == body
+
+
+def test_unrepresentable_receipt_metadata_rejects_before_the_file_effect(tmp_path, monkeypatch):
+    requests = []
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {
+        "path": "report.txt", "expected_digest": None, "content": "A short report.\n",
+    }}, requests, tool_call_id="fixture-wide-" * 1_900)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        runtime = client.app.state.pages.runtime
+        execution = client.app.state.pages.execution
+        page_id = _page(client)
+        waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action_id = waiting["pendingActions"][0]["actionId"]
+        execution.resolve_approval(page_id, action_id, "allow_once")
+        _wait(execution, page_id, lambda view: view["status"] == "idle")
+        store = runtime.kernel_service.store
+        scope = store.action_scope_for_session(execution._scope(page_id), action_id)
+        action = store.get_action(scope, action_id)
+        assert action.status.value == "failed" and action.error_code == "payload_too_large"
+        assert action.operation_id is None
+        assert not (tmp_path / "workspace" / "report.txt").exists()
+        assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
+
+
+def test_legacy_truncated_receipt_is_not_reconstructed_from_file_existence(tmp_path, monkeypatch):
+    from pulse_harness.adapters.workspace import StructuredWorkspaceToolProvider, _safe_observer_text
+
+    before = "DRAFT " + "x" * 50_000 + "\n"
+    after = before.replace("DRAFT", "FINAL")
+    requests = []
+    factory = _factory(monkeypatch, {"PATCH_LEGACY": {
+        "path": "legacy.txt", "expected_digest": _sha(before),
+        "patch": {"edits": [{"old": "DRAFT", "new": "FINAL"}]},
+    }}, requests)
+
+    def old_text_only_bound(self, metadata, text, *, text_key, redacted_key, truncated_key, **_kwargs):
+        # Explicit legacy adapter fixture: each text field fits, but its JSON
+        # envelope exceeds the store bound and loses the full receipt identity.
+        preview, redacted, truncated = _safe_observer_text(text, self.store.max_payload_bytes)
+        return {**metadata, text_key: preview, redacted_key: redacted, truncated_key: truncated}
+
+    with monkeypatch.context() as legacy:
+        legacy.setattr(StructuredWorkspaceToolProvider, "_bounded_text_output", old_text_only_bound)
+        with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+            target = tmp_path / "workspace" / "legacy.txt"
+            target.write_text(before)
+            execution = client.app.state.pages.execution
+            page_id = _page(client, "PATCH_LEGACY")
+            waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+            action_id = waiting["pendingActions"][0]["actionId"]
+            receipt = execution.resolve_approval(page_id, action_id, "allow_once")
+            assert receipt["actionCompleted"]
+            assert receipt["continuationError"]["code"] == "payload_too_large"
+            assert target.read_text() == after
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        artifacts = client.app.state.pages.artifacts
+        snapshot = artifacts.snapshot(page_id)
+        assert snapshot["artifacts"] == [] and snapshot["truncated"]
         with pytest.raises(ArtifactError):
             artifacts.read(page_id, action_id)
+        assert target.read_text() == after

@@ -90,6 +90,23 @@ The shared resource registry coordinates a workspace's participating file writes
 
 If an approved write succeeds and the following model response fails, the receipt reports `actionCompleted: true` and a separate continuation error. Users must not be invited to repeat a completed external effect to repair a conversational failure.
 
+## Bounded native file receipts
+
+Large file diffs used to consume the entire native payload allowance before
+the receipt's metadata and JSON escaping were counted. A successful write could
+therefore lose its file source and block model continuation. The workspace
+adapter now bounds only the diff preview against the complete tool-result
+envelope. Exact action, operation, change, checkpoint, workspace and file
+digests remain intact. The diff has explicit truncation/redaction flags and
+its full digest; the original approved file remains digest-verifiable.
+
+The same bound applies to `read_file` excerpts, including multibyte characters,
+escaped text and long provider call IDs. If even a compact mutation receipt
+cannot fit, the adapter rejects it before creating an operation or writing a
+file. Store limits, approvals, credential checks and file-size limits retain
+their existing semantics. Earlier already-truncated receipts are not repaired
+from current file contents, and uncertain effects are not upgraded to success.
+
 ## Preserve what makes Pulse different
 
 Per Pulse aims at a globally continuous Context Body with local activation across different timescales. Durable transcripts, scheduled jobs and crash recovery are useful operational components; they alone do not define that continuity. Home is a foreground projection of the same evolving world, not an unbounded master prompt. A local activation should retain subject lineage, causal input, selected evidence, dependencies and current intent; its result can change later routing, memory, practice and work.
@@ -101,7 +118,7 @@ The next substantive test is a shared ongoing goal with two focused contexts: on
 1. Run an explicitly configured real-provider acceptance task through approval, artifact readback, concurrent Home and restart; record actual usage and model/tool protocol failures. Synthetic transports prove control contracts, not model performance.
 2. Add durable budget reservations and exhaustion behavior before exposing unattended recurring work. Reserve across concurrent contexts before dispatch; settle actual usage and retain uncertainty after interruption.
 3. Expose genuine input revision/steering and queued-input controls, with safe-point acknowledgement and invalidation of stale unexecuted proposals.
-4. Extend artifacts through native change APIs: compact receipt metadata independent of large diffs, immutable selected versions, binary delivery and explicit acceptance.
+4. Extend artifacts through native change APIs: immutable selected versions, binary delivery and explicit acceptance.
 5. Implement one native browser or connector broker, then event/routine adapters on the same World admission path. Keep resource ownership, credentials, grants and work identity distinct.
 
 Cloud account hosting, rich remote desktop, marketplaces, avatars and broad channel parity can follow these contracts. They are not prerequisites for shipping this local phase.
