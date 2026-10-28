@@ -207,6 +207,19 @@ try {
   await page.setViewportSize({ width: 1280, height: 900 });
   checks.push('Native file and draft survive service restart; phone layout and Escape focus work');
 
+  await page.locator(`[data-message-id="${first.messages.at(-1).id}"]`).getByRole('button', { name: filename, exact: true }).click();
+  const originalDialog = page.getByRole('dialog', { name: 'Source files', exact: true });
+  const savedSource = page.waitForEvent('download');
+  await originalDialog.getByRole('button', { name: 'Download original', exact: true }).click();
+  const downloadedSource = await savedSource;
+  assert.equal(downloadedSource.suggestedFilename(), filename);
+  await downloadedSource.saveAs(join(directory, 'exported-source.md'));
+  assert.equal(await readFile(join(directory, 'exported-source.md'), 'utf8'), source);
+  assert.equal(await page.evaluate(() => window.materialExecuted), undefined);
+  await close();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'This draft must stay in the first Work.');
+  checks.push('The original source downloads after a disconnected restart with its original name, exact bytes and retained draft');
+
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.locator('#interface-language').selectOption('zh-CN');
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();

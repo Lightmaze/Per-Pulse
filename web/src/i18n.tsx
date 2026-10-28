@@ -23,6 +23,8 @@ const errorKeys: Record<string, MessageKey> = {
   material_upload_unconfirmed: 'materials.unconfirmed', material_upload_changed: 'materials.unconfirmed',
   material_upload_conflict: 'materials.unconfirmed', material_selection_invalid: 'materials.selectionFull',
   material_capacity: 'materials.capacity',
+  material_download_redacted: 'library.downloadRedacted',
+  material_download_unverified: 'artifacts.downloadUnverified',
   request_failed: 'error.generic',
   network_error: 'error.network', invalid_response: 'error.invalidResponse',
   workspace_load_failed: 'error.workspaceLoad', page_load_failed: 'error.pageLoad',

@@ -115,6 +115,11 @@ Files belong to the shared native workspace and can be read from any page;
 conversation histories remain separate. Each Work keeps its own attachment
 record without copying the shared file. A source chip identifies the original
 name and version; reopening or sending it checks that the bytes still match.
+Open a source chip and choose **Download original** to save its complete uploaded
+bytes and original filename, including content beyond the preview. The source
+is checked again when requested; a changed file cannot replace the selected
+version. Closing its preview cancels a pending download. This also works after
+restart with the model disconnected.
 Remove the chip to leave the file out of a message. Uploading or previewing does
 not run the model, and adding a reference does not mean the model has read the file. With a configured
 provider, the existing read tools can open it when working on your request.

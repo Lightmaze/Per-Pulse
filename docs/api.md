@@ -354,9 +354,20 @@ their own observations when a configured model actually opens the file.
   verifies an existing file and creates or reuses that page's own receipt.
   It copies neither file bytes nor another page's conversation.
 - `GET /api/pages/{id}/materials/{materialId}` verifies ownership and current
-  version, then returns `material`, bounded `content`, `redacted`, `truncated`
-  and `previewLimitBytes`. A changed or missing source is refused. The preview
+  version, then returns `material`, bounded `content`, `redacted`, `truncated`,
+  `downloadable` and `previewLimitBytes`. A changed or missing source is refused. The preview
   limit is 64 KiB, independently of the 1 MiB original-file limit.
+- `GET /api/pages/{id}/materials/{materialId}/download` requires the current
+  World/instance headers, resolves the original page receipt and rechecks the
+  complete file. It returns `application/octet-stream`, the receipt's source
+  name in UTF-8 `filename*`, SHA-256 ETag, and the observed World/instance in
+  response headers. The browser verifies both identity and actual bytes before
+  saving. Changed or missing files return 409; a file needing fresh redaction
+  returns `422 material_download_redacted`. An already-hidden marker can be
+  literal uploaded text and remains downloadable as those exact bytes, without
+  claiming to recover anything omitted before upload. No preview is exported
+  as though it were the complete source. Upload receipts retain the supplied
+  filename; existing-workspace references use the selected file's basename.
 
 Upload and reference responses contain `material` and `repeated`; first-party
 responses also carry World/instance identity. A material has `id`, `pageId`,

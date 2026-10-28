@@ -36,6 +36,21 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+async function verifiedDownload(response: Response, expectedDigest: string, errorCode: string) {
+  if (response.headers.get('content-type') !== 'application/octet-stream'
+    || response.headers.get('etag') !== `"${expectedDigest}"`) {
+    throw new ApiError('The downloaded version could not be verified.', errorCode, 0);
+  }
+  const encodedName = response.headers.get('content-disposition')?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (!encodedName) throw new ApiError('The workspace returned an unreadable download.', 'invalid_response', response.status);
+  const filename = decodeURIComponent(encodedName);
+  const bytes = await response.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const actual = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+  if (actual !== expectedDigest) throw new ApiError('The downloaded version could not be verified.', errorCode, 0);
+  return { blob: new Blob([bytes], { type: 'application/octet-stream' }), filename };
+}
+
 const pagePath = (id: string) => `/pages/${encodeURIComponent(id)}`;
 const pulseWriteHeaders = (identity: PulseWriteIdentity) => ({
   'X-Per-Pulse-World': identity.workspaceId,
@@ -66,6 +81,16 @@ export const api = {
     request<{ messageId: string; view: PageView }>(`${pagePath(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, references, materials }) }),
   materials: (id: string, signal?: AbortSignal) => request<MaterialList>(`${pagePath(id)}/materials`, { signal }),
   material: (id: string, materialId: string, signal?: AbortSignal) => request<MaterialRead>(`${pagePath(id)}/materials/${encodeURIComponent(materialId)}`, { signal }),
+  downloadMaterial: async (pageId: string, material: Material, identity: WorkspaceFileIdentity, signal: AbortSignal) => {
+    const response = await fetchResponse(`${pagePath(pageId)}/materials/${encodeURIComponent(material.id)}/download`, {
+      headers: pulseWriteHeaders(identity), signal,
+    });
+    if (response.headers.get('x-per-pulse-world') !== identity.workspaceId
+      || response.headers.get('x-per-pulse-service-instance') !== identity.serviceInstanceId) {
+      throw new ApiError('The workspace changed. Reload before downloading the source.', 'workspace_changed', 409);
+    }
+    return verifiedDownload(response, material.sha256, 'material_download_unverified');
+  },
   uploadMaterial: async (pageId: string, identity: WorkspaceFileIdentity, uploadId: string, file: File, signal?: AbortSignal) => {
     if (file.size > 1024 * 1024) throw new ApiError('Choose a text file of at most 1 MiB.', 'material_too_large', 413);
     const bytes = await file.arrayBuffer();
@@ -116,18 +141,7 @@ export const api = {
   artifact: (id: string, artifactId: string) => request<ArtifactRead>(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}`),
   downloadArtifact: async (id: string, artifact: Artifact, signal: AbortSignal) => {
     const response = await fetchResponse(`${pagePath(id)}/artifacts/${encodeURIComponent(artifact.id)}/download`, { signal });
-    if (response.headers.get('content-type') !== 'application/octet-stream'
-      || response.headers.get('etag') !== `"${artifact.sha256}"`) {
-      throw new ApiError('The downloaded version could not be verified.', 'artifact_download_unverified', 0);
-    }
-    const encodedName = response.headers.get('content-disposition')?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-    if (!encodedName) throw new ApiError('The workspace returned an unreadable download.', 'invalid_response', response.status);
-    const filename = decodeURIComponent(encodedName);
-    const bytes = await response.arrayBuffer();
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    const actual = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
-    if (actual !== artifact.sha256) throw new ApiError('The downloaded version could not be verified.', 'artifact_download_unverified', 0);
-    return { blob: new Blob([bytes], { type: 'application/octet-stream' }), filename };
+    return verifiedDownload(response, artifact.sha256, 'artifact_download_unverified');
   },
   rename: (id: string, title: string) => request<PageView>(pagePath(id), { method: 'PATCH', body: JSON.stringify({ title }) }),
 };
