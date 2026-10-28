@@ -40,9 +40,11 @@ from . import workspace_index, workspace_reading, native_replay
 _TERMINAL = {TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED, TurnStatus.BLOCKED}
 
 
-def _error(code: str, detail: str, *, accepted: bool | None = False) -> HarnessError:
+def _error(code: str, detail: str, *, accepted: bool | None = False,
+           known_provider_tokens: int | None = None) -> HarnessError:
     return HarnessError(code, detail, "inspect the Kernel session and retry through the world input API",
-                        phase="kernel", prompt_accepted=accepted)
+                        phase="kernel", prompt_accepted=accepted,
+                        known_provider_tokens=known_provider_tokens)
 
 
 class _GuardedStream:
@@ -898,7 +900,18 @@ class KernelHarnessRuntime:
             accounted = accounted and expert_accounted
             if result.status is not TurnStatus.SUCCEEDED or not result.assistant_text.strip():
                 code = "world_turn_timeout" if expired.is_set() else result.error_code or f"kernel_turn_{result.status.value}"
-                raise _error(code, "Kernel turn did not produce a settled final response", accepted=True)
+                # A later model/tool failure does not erase *completed* main,
+                # CoverMe or expert provider usage. Keep the known lower bound
+                # while the incomplete request remains unaccounted for.
+                completed_requests = usage["provider_requests"]
+                known_tokens = (
+                    usage["input_tokens"] + usage["output_tokens"]
+                    if completed_requests else None
+                )
+                raise _error(
+                    code, "Kernel turn did not produce a settled final response",
+                    accepted=True, known_provider_tokens=known_tokens,
+                )
             projected, regime = native_replay.project_text(self.kernel.store, scope, result.assistant_text)
             return HarnessTurnResult(
                 execution_regime=regime,
@@ -916,7 +929,10 @@ class KernelHarnessRuntime:
                 ),
             )
         except KernelError as exc:
-            raise _error(exc.code, str(exc), accepted=accepted) from exc
+            raise _error(
+                exc.code, str(exc), accepted=accepted,
+                known_provider_tokens=getattr(exc, "known_provider_tokens", None),
+            ) from exc
         finally:
             if timer is not None:
                 timer.cancel()

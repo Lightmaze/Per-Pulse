@@ -2969,8 +2969,13 @@ class CausalLedger:
         phase: str | None = None,
         retry_allowed: bool = False,
         runtime_fence: RuntimeFence | None = None,
+        known_provider_tokens: int | None = None,
     ) -> CausalEvent:
         turn_id = _require_id(turn_id, "turn_id")
+        if known_provider_tokens is not None and (
+            type(known_provider_tokens) is not int or known_provider_tokens < 0
+        ):
+            raise ValueError("known_provider_tokens must be a nonnegative integer or null")
         if acceptance is not None and not isinstance(acceptance, bool):
             raise ValueError("acceptance must be true, false, or null")
         if not isinstance(retry_allowed, bool):
@@ -3046,10 +3051,21 @@ class CausalLedger:
                 raise CausalTransitionError(
                     f"turn {turn_id} changed before failure handling"
                 )
+            # Only native failure settlement may attach already-completed
+            # provider usage to this original causal root. This numeric lower
+            # bound does not certify the total (a failed round can still bill).
+            # Rejected/retryable preflights never receive a charge here.
+            amended = None
+            if acceptance is not False and known_provider_tokens is not None:
+                detail = dict(event.metadata)
+                detail["kernel_partial_usage_evidence"] = "completed_rounds_v1"
+                detail["kernel_partial_provider_tokens"] = known_provider_tokens
+                amended = json.dumps(_metadata(detail), ensure_ascii=False, sort_keys=True)
             updated_event = conn.execute(
                 "UPDATE causal_events SET status = ?, updated_at = ?, "
-                "settled_at = ? WHERE id = ? AND status = 'running'",
-                (event_status.value, _ts(now), event_settled_at, event.id),
+                "settled_at = ?, metadata = COALESCE(?, metadata) "
+                "WHERE id = ? AND status = 'running'",
+                (event_status.value, _ts(now), event_settled_at, amended, event.id),
             )
             if updated_event.rowcount != 1:
                 raise CausalTransitionError(

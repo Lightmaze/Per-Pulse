@@ -75,6 +75,7 @@ class HarnessError(Exception):
         prompt_accepted: bool | None = False,
         partial_output: str = "",
         trace: list[dict[str, Any]] | None = None,
+        known_provider_tokens: int | None = None,
     ) -> None:
         if not all(isinstance(value, str) and value for value in (
             code,
@@ -93,6 +94,14 @@ class HarnessError(Exception):
         self.prompt_accepted = prompt_accepted
         self.partial_output = partial_output if isinstance(partial_output, str) else ""
         self.trace = list(trace or [])
+        # A lower bound from already-completed durable provider rounds, *not*
+        # a complete bill. Unknown/failed requests must still keep admission
+        # reservations; never expose the raw provider transcript here.
+        if known_provider_tokens is not None and (
+            type(known_provider_tokens) is not int or known_provider_tokens < 0
+        ):
+            raise ValueError("known_provider_tokens must be a nonnegative integer or null")
+        self.known_provider_tokens = known_provider_tokens
         super().__init__(f"{code}: {detail}\n  remedy: {remedy}")
 
     def to_dict(self) -> dict[str, Any]:

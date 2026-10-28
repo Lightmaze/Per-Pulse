@@ -319,3 +319,74 @@ def test_http_kernel_usage_releases_only_a_proven_background_reservation(tmp_pat
         assert budget["remaining"] == 50
         assert budget["trackedAdmissions"] == 1
         assert assistant_count(view(client, target)) == 2
+
+def test_uncertain_kernel_failure_keeps_known_overrun_and_unknown_reservation(tmp_path):
+    """Completed rounds are not free after a later failure; the rest is unknown."""
+    profile = settings(limit=150, reservation=60)
+    service = PageService(tmp_path, model_factory=None, pulse=profile)
+    try:
+        runtime = service.runtime
+        parent = seed_source(runtime)
+        root = queue_background(runtime, parent)
+        turn = runtime.causal_ledger.begin_turn(
+            root.id, runtime.continuity_engram_id, "Continue local work.",
+            runtime_fence=runtime._current_runtime_fence(),
+        )
+        runtime.causal_ledger.fail_turn(
+            turn.id, acceptance=None, code="later_model_round_failed", phase="kernel",
+            known_provider_tokens=145, runtime_fence=runtime._current_runtime_fence(),
+        )
+        saved = runtime.context_pulse.snapshot()["providerTokenBudget"]
+        assert runtime.causal_ledger.get_event(root.id).status.value == "uncertain"
+        assert saved["charged"] == 145
+        assert saved["accountedTokens"] == 0  # Total provider usage is unknown.
+        assert saved["unaccountedReservations"] == 60
+        assert saved["partialKnownTokens"] == 145
+        assert saved["partialKnownExcessTokens"] == saved["overrunTokens"] == 85
+        assert saved["remaining"] == 5
+        other = seed_source(runtime)
+        with pytest.raises(_QuotaReached):
+            queue_background(runtime, other)
+        # The same admission envelope must not block the human's foreground.
+        foreground = runtime.inject(runtime.continuity_engram_id, "Please check this.")
+        assert runtime.causal_ledger.get_event(foreground).source.value == "user"
+    finally:
+        service.runtime.close()
+
+    reopened = PageService(tmp_path, model_factory=None, pulse=profile)
+    try:
+        saved = reopened.runtime.context_pulse.snapshot()["providerTokenBudget"]
+        assert saved["charged"] == 145
+        assert saved["partialKnownTokens"] == 145
+        assert saved["trackedAdmissions"] == 1
+        with pytest.raises(_QuotaReached):
+            queue_background(reopened.runtime, other)
+    finally:
+        reopened.runtime.close()
+
+
+def test_failure_without_known_usage_keeps_reservation_and_rejects_invalid_receipts(tmp_path):
+    service = PageService(tmp_path, model_factory=None, pulse=settings(limit=90))
+    try:
+        runtime = service.runtime
+        root = queue_background(runtime, seed_source(runtime))
+        turn = runtime.causal_ledger.begin_turn(
+            root.id, runtime.continuity_engram_id, "Continue.",
+            runtime_fence=runtime._current_runtime_fence(),
+        )
+        for invalid in (-1, True, 1.5):
+            with pytest.raises(ValueError, match="known_provider_tokens"):
+                runtime.causal_ledger.fail_turn(
+                    turn.id, acceptance=None, known_provider_tokens=invalid,
+                    runtime_fence=runtime._current_runtime_fence(),
+                )
+        runtime.causal_ledger.fail_turn(
+            turn.id, acceptance=None, code="provider_usage_unknown", phase="kernel",
+            runtime_fence=runtime._current_runtime_fence(),
+        )
+        budget = runtime.context_pulse.snapshot()["providerTokenBudget"]
+        assert budget["charged"] == 60
+        assert budget["partialKnownTokens"] == 0
+        assert budget["partialKnownExcessTokens"] == 0
+    finally:
+        service.runtime.close()

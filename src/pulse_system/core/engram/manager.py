@@ -633,6 +633,7 @@ class EngramManager:
                     and exc.prompt_accepted is False
                 ),
                 runtime_fence=runtime_fence,
+                known_provider_tokens=exc.known_provider_tokens,
             )
             self._notify_turn_terminal(turn.id)
             if exc.prompt_accepted is not False:

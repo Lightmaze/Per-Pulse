@@ -478,9 +478,11 @@ class ContextPulseController:
         # single durable aggregate instead (kind='pulse', marker='convergence'),
         # including when its queued execution outlives the admission hour.
         rows = conn.execute(
-            "SELECT root.id, result.metadata FROM causal_events root "
+            "SELECT root.id, root.metadata, result.metadata, failed.id FROM causal_events root "
             "LEFT JOIN harness_turns turn ON turn.event_id = root.id "
             "AND turn.state = 'settled' AND turn.prompt_accepted = 1 "
+            "LEFT JOIN harness_turns failed ON failed.event_id = root.id "
+            "AND failed.state = 'uncertain' "
             "LEFT JOIN causal_events result ON result.id = turn.result_event_id "
             "AND result.parent_event_id = root.id AND result.world_id = root.world_id "
             "AND result.kind = 'assistant_result' AND result.status = 'settled' "
@@ -498,7 +500,8 @@ class ContextPulseController:
         ).fetchall()
         reservation = self.config.background_provider_token_reservation
         accounted = unaccounted = synthetic = overrun = 0
-        for _event_id, raw_metadata in rows:
+        partial_known = partial_excess = 0
+        for _event_id, root_metadata, raw_metadata, failed_turn_id in rows:
             tokens = None
             if isinstance(raw_metadata, str):
                 try:
@@ -518,13 +521,32 @@ class ContextPulseController:
                                 synthetic += tokens
             if tokens is None:
                 unaccounted += reservation
+                # A terminal/uncertain native Kernel turn may have completed
+                # model rounds before a later round or tool failed. The root's
+                # typed failure receipt is a lower bound, never an exact bill.
+                # Require a matching durable uncertain turn, not just caller-
+                # controlled enqueue metadata. Keep the full unknown reserve.
+                if failed_turn_id is not None and isinstance(root_metadata, str):
+                    try:
+                        root_detail = json.loads(root_metadata)
+                    except (ValueError, TypeError):
+                        root_detail = None
+                    if (isinstance(root_detail, dict)
+                            and root_detail.get("kernel_partial_usage_evidence") == "completed_rounds_v1"):
+                        lower = root_detail.get("kernel_partial_provider_tokens")
+                        if type(lower) is int and lower >= 0:
+                            partial_known += lower
+                            excess = max(0, lower - reservation)
+                            partial_excess += excess
+                            overrun += excess
             else:
                 accounted += tokens
                 overrun += max(0, tokens - reservation)
-        charged = accounted + unaccounted
+        charged = accounted + unaccounted + partial_excess
         return {
             "limit": limit, "charged": charged, "remaining": max(0, limit - charged),
             "accountedTokens": accounted, "unaccountedReservations": unaccounted,
+            "partialKnownTokens": partial_known, "partialKnownExcessTokens": partial_excess,
             "syntheticTokens": synthetic, "overrunTokens": overrun,
             "trackedAdmissions": len(rows), "reservationPerAdmission": reservation,
             "windowSeconds": 3600, "unit": "nominal input + output tokens",
