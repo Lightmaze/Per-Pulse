@@ -169,3 +169,9 @@ interface languages distinguishes observation from verified learning; the
 real-provider output/control study remains the quality gate. This is a
 user-facing feedback path in the existing Posture journal, not an additional
 reward model or Runtime.
+
+The source-Work's private later-feedback history now has a direct "View
+reporting Work" link for outcomes described in receiving Works. Navigating
+back to the actual outcome does not duplicate the receiving transcript; the
+existing per-Work navigation and draft restoration are reused. This source
+link is not exported into the receiving Work's shared material packet.

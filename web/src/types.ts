@@ -109,7 +109,7 @@ export type PostureExperience = {
   record_type: 'observed_episode' | 'constructed_fixture';
   encounter?: { situation: string; action: string; outcome: string };
   source?: { source_message_id?: string; feedback_message_id?: string };
-  feedback?: { verdict: string; evidence: string }[];
+  feedback?: { verdict: string; evidence: string; source?: { kind?: string; page_id?: string; relation?: string } }[];
 };
 export type PostureView = { enabled: boolean; experiences: PostureExperience[] };
 

@@ -389,6 +389,16 @@ try {
   assert.equal(originLesson.feedback.at(-1).source.relation, 'shared_recipient');
   await close();
   assert.equal(await page.getByRole('textbox', { name: /^Message / }).inputValue(), unsentWorkDraft);
+  // From the source journal, trace the later feedback to its actual Work,
+  // then return to the original reading position without losing either draft.
+  await page.locator('.breadcrumbs').getByRole('button', { name: 'Home', exact: true }).click();
+  await openLessons();
+  await lesson.getByText('Later feedback (4)', { exact: true }).click();
+  await lesson.getByRole('button', { name: 'View reporting Work', exact: true }).click();
+  await page.getByRole('button', { name: 'Registration tool', exact: true }).waitFor();
+  assert.equal(await page.getByRole('textbox', { name: /^Message / }).inputValue(), unsentWorkDraft);
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await page.getByRole('button', { name: 'Home', exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, receiving-Work outcome feedback without private source exposure, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
 } finally {

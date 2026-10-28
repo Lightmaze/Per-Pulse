@@ -78,7 +78,15 @@ function Experience({ experience, pageId, busy, revise, feedback, navigate }: {
         {correctionId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, correctionId)}>{t('learning.correction')}</button> : null}
       </div> : null}
     </details> : null}
-    {experience.feedback?.length ? <details><summary>{t('learning.later', { count: experience.feedback.length })}</summary>{experience.feedback.map((entry, index) => <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}</p>)}</details> : null}
+    {experience.feedback?.length ? <details><summary>{t('learning.later', { count: experience.feedback.length })}</summary>{experience.feedback.map((entry, index) => {
+      // Only original-owner feedback includes the private report source. A
+      // receiving Work never receives this history or these navigation links.
+      const reportedPage = entry.source?.kind === 'operator_report' && entry.source.relation === 'shared_recipient'
+        && entry.source.page_id && entry.source.page_id !== pageId ? entry.source.page_id : null;
+      return <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}
+        {reportedPage ? <> · <button type="button" className="text-button" onClick={() => navigate(reportedPage, { pageId })}>{t('learning.reportedWork')}</button></> : null}
+      </p>;
+    })}</details> : null}
     {experience.canEdit ? <div className="lesson-actions">
       <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { active: !experience.active }).catch(() => {}); }}>{t(experience.active ? 'learning.pause' : 'learning.resume')}</button>
       <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { scope: experience.scope === 'context' ? 'subject' : 'context' }).catch(() => {}); }}>{t(experience.scope === 'context' ? 'learning.share' : 'learning.keepLocal')}</button>
