@@ -278,6 +278,22 @@ class PageService:
                 "pulse": self.pulse_status(),
             }
 
+    def require_pulse_identity(self, world_id: str | None, instance_id: str | None) -> None:
+        """Fence first-party Activity edits to their observed World and process.
+
+        Legacy clients may omit both headers; partial or mismatched identities
+        are rejected before any native pause, resume or connection change.
+        """
+        if world_id is None and instance_id is None:
+            return
+        with self._lock:
+            if world_id != self.runtime.world_id or instance_id != self.service_instance_id:
+                raise PageError(
+                    "pulse_workspace_changed",
+                    "The workspace changed while Activity was open. Reload before changing its activity.",
+                    409,
+                )
+
     def set_pulse_paused(self, paused: bool) -> dict:
         with self._lock:
             self.runtime._require_runtime_owner()

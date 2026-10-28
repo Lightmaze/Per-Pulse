@@ -301,6 +301,29 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
   checks.push('real native exhausted admission renders Chinese reason without losing foreground draft');
 
+  // One World can keep its identity while its service process is replaced.
+  // Do not expose stale source links or old operator controls after that.
+  // This intercept changes only the observation envelope, never World state.
+  await page.route('**/api/pulse/observation', async route => {
+    const current = await route.fetch();
+    const observation = await current.json();
+    await route.fulfill({
+      response: current, contentType: 'application/json',
+      body: JSON.stringify({ ...observation, serviceInstanceId: 'synthetic-restarted-service' }),
+    });
+  });
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByRole('alert').getByText(
+    '活动面板打开后，工作区或服务实例已改变。请重新加载并检查当前活动，再执行修改。',
+    { exact: true },
+  ).waitFor();
+  await page.getByRole('button', { name: '重新加载工作区', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '暂停后台' }).count(), 0);
+  await page.unroute('**/api/pulse/observation');
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
+  checks.push('restarted-service observation blocks stale controls and preserves Work draft');
+
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks,
     provider: 'explicit synthetic HTTP transport; real local World/Kernel/SQLite' }));

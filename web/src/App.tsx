@@ -264,7 +264,9 @@ export default function App() {
         </div>
       </main>
     </div>
-    {pulseOpen ? <PulseActivity pageId={route.id} pages={pages} navigate={navigate} onClose={() => setPulseOpen(false)} /> : null}
+    {pulseOpen && bootstrap ? <PulseActivity pageId={route.id} pages={pages}
+      workspaceId={bootstrap.workspaceId} serviceInstanceId={bootstrap.serviceInstanceId}
+      navigate={navigate} onClose={() => setPulseOpen(false)} /> : null}
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
     {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}

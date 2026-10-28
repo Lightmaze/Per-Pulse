@@ -242,21 +242,29 @@ def create_app(
     def pulse_observation(request: Request):
         return pages(request).pulse_observation()
 
+    def pulse_write_service(request: Request) -> PageService:
+        service = pages(request)
+        service.require_pulse_identity(
+            request.headers.get("x-per-pulse-world"),
+            request.headers.get("x-per-pulse-service-instance"),
+        )
+        return service
+
     @app.patch("/api/pulse")
     def set_pulse_paused(body: PulseControlInput, request: Request):
-        return pages(request).set_pulse_paused(body.paused)
+        return pulse_write_service(request).set_pulse_paused(body.paused)
 
     @app.patch("/api/pulse/contexts/{page_id}")
     def set_pulse_context_paused(page_id: Identifier, body: PulseControlInput, request: Request):
-        return pages(request).set_context_paused(page_id, body.paused)
+        return pulse_write_service(request).set_context_paused(page_id, body.paused)
 
     @app.post("/api/pulse/connections", status_code=201)
     def connect_contexts(body: ContextConnectionInput, request: Request):
-        return pages(request).connect_pages(body.sourcePageId, body.targetPageId, body.weight, body.kind)
+        return pulse_write_service(request).connect_pages(body.sourcePageId, body.targetPageId, body.weight, body.kind)
 
     @app.delete("/api/pulse/connections")
     def disconnect_contexts(body: ConnectionPages, request: Request):
-        return pages(request).disconnect_pages(body.sourcePageId, body.targetPageId)
+        return pulse_write_service(request).disconnect_pages(body.sourcePageId, body.targetPageId)
 
     @app.get("/api/pages/{page_id}")
     def page(page_id: str, request: Request, sourceMessageId: Identifier | None = None):

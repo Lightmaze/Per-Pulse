@@ -109,3 +109,19 @@ operator write, overlapping GETs, duplicate clicks, and reading again after
 an uncertain response. Native persistence, browser interaction and actual
 model usefulness remain separate checks; this regression exercises only
 the client-side ordering rule.
+
+## Activity is bound to one World and one service instance
+
+The first-party Activity dialog reads the atomic native `GET /api/pulse/observation`
+response and checks both the persistent `workspaceId` and live
+`serviceInstanceId` against the current workspace bootstrap before exposing
+source navigation or operator controls. Mismatches offer a full workspace
+reload; the current unsent Work draft remains in its browser-local scope.
+
+First-party pause/resume and connection writes carry the
+`X-Per-Pulse-World` and `X-Per-Pulse-Service-Instance` headers.
+Partial or mismatched identities receive a typed HTTP 409
+`pulse_workspace_changed` without editing the original Context Body.
+Legacy native clients that omit *both* headers keep their existing contract.
+This is a stale-tab safety fence, not authentication, a new scheduler, or an
+expanded model permission boundary. It does not establish provider costs.

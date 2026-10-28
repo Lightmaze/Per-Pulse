@@ -1,6 +1,7 @@
 import type { ArtifactRead, Bootstrap, DraftReference, LessonVerdict, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
+export type PulseWriteIdentity = Pick<PulseObservation, 'workspaceId' | 'serviceInstanceId'>;
 
 export class ApiError extends Error {
   constructor(message: string, public readonly code: string, public readonly status: number) {
@@ -29,6 +30,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 const pagePath = (id: string) => `/pages/${encodeURIComponent(id)}`;
+const pulseWriteHeaders = (identity: PulseWriteIdentity) => ({
+  'X-Per-Pulse-World': identity.workspaceId,
+  'X-Per-Pulse-Service-Instance': identity.serviceInstanceId,
+});
 
 export const api = {
   bootstrap: (signal?: AbortSignal) => request<Bootstrap>('/bootstrap', { signal }),
@@ -46,13 +51,14 @@ export const api = {
     request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/return`, { method: 'POST', body: JSON.stringify({ content, messageId }) }),
   pulse: (signal?: AbortSignal) => request<PulseState>('/pulse', { signal }),
   pulseObservation: (signal?: AbortSignal) => request<PulseObservation>('/pulse/observation', { signal }),
-  setPulsePaused: (paused: boolean) => request<{ pulse: PulseState }>('/pulse', { method: 'PATCH', body: JSON.stringify({ paused }) }),
-  setPulseContextPaused: (pageId: string, paused: boolean) =>
-    request<{ pulse: PulseState }>(`/pulse/contexts/${encodeURIComponent(pageId)}`, { method: 'PATCH', body: JSON.stringify({ paused }) }),
-  connectPulse: (sourcePageId: string, targetPageId: string, kind: 'excitatory' | 'inhibitory') =>
-    request<{ pulse: PulseState }>('/pulse/connections', { method: 'POST', body: JSON.stringify({ sourcePageId, targetPageId, kind, weight: 0.6 }) }),
-  disconnectPulse: (sourcePageId: string, targetPageId: string) =>
-    request<{ pulse: PulseState }>('/pulse/connections', { method: 'DELETE', body: JSON.stringify({ sourcePageId, targetPageId }) }),
+  setPulsePaused: (paused: boolean, identity: PulseWriteIdentity) =>
+    request<{ pulse: PulseState }>('/pulse', { method: 'PATCH', headers: pulseWriteHeaders(identity), body: JSON.stringify({ paused }) }),
+  setPulseContextPaused: (pageId: string, paused: boolean, identity: PulseWriteIdentity) =>
+    request<{ pulse: PulseState }>(`/pulse/contexts/${encodeURIComponent(pageId)}`, { method: 'PATCH', headers: pulseWriteHeaders(identity), body: JSON.stringify({ paused }) }),
+  connectPulse: (sourcePageId: string, targetPageId: string, kind: 'excitatory' | 'inhibitory', identity: PulseWriteIdentity) =>
+    request<{ pulse: PulseState }>('/pulse/connections', { method: 'POST', headers: pulseWriteHeaders(identity), body: JSON.stringify({ sourcePageId, targetPageId, kind, weight: 0.6 }) }),
+  disconnectPulse: (sourcePageId: string, targetPageId: string, identity: PulseWriteIdentity) =>
+    request<{ pulse: PulseState }>('/pulse/connections', { method: 'DELETE', headers: pulseWriteHeaders(identity), body: JSON.stringify({ sourcePageId, targetPageId }) }),
   posture: (id: string, signal?: AbortSignal) => request<PostureView>(`${pagePath(id)}/posture`, { signal }),
   reviseExperience: (pageId: string, experience: PostureExperience, changes: { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; counterexamples?: string[]; shift?: PostureExperience['shift'] }, evidence?: string) =>
     request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}`, {
