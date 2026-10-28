@@ -376,6 +376,75 @@ def test_outcome_report_links_a_native_result_without_copying_it(tmp_path, monke
         assert older.status_code == 200 and not older.json()["experience"]["active"]
 
 
+def test_outcome_anchor_keeps_original_result_across_native_succession(tmp_path, monkeypatch):
+    """A successor can report an original Work result without copying its history."""
+    from per_pulse.service import PageService
+    from test_pulse_integration import TransportFixture
+
+    fixture = TransportFixture(monkeypatch)
+    pages = PageService(tmp_path, posture=True, model_factory=fixture.factory)
+
+    def execute(page_id, message_id):
+        runtime = pages.runtime
+        context = "work:" + runtime.world.get_task_front(page_id).center_id
+        return runtime._mgr.pulse(
+            runtime.continuity_engram_id,
+            pulse_event=runtime.causal_ledger.get_event(message_id),
+            execution_context=context, runtime_fence=runtime._current_runtime_fence(),
+        )
+
+    try:
+        source = pages.create_page("Original lesson", "A_LOCAL_HISTORY")
+        source_id = source["page"]["id"]
+        original = execute(source_id, source["initialMessageId"])
+        correction = pages.send(source_id, "Offer a playable moment before optional setup.")
+        execute(source_id, correction["messageId"])
+        saved = pages.learning.create(source_id, lesson(
+            original.result_event_id, correction["messageId"], scope="subject",
+        ))["experience"]
+        receiver = pages.create_page("Later result", "B_LOCAL_HISTORY")
+        receiver_id = receiver["page"]["id"]
+        result = execute(receiver_id, receiver["initialMessageId"])
+        runtime = pages.runtime
+        predecessor = runtime.continuity_engram_id
+        preparation = runtime._mgr.prepare_succession(
+            predecessor, parent_event_id=result.result_event_id,
+            runtime_fence=runtime._current_runtime_fence(),
+        )
+        successor = runtime._mgr.commit_succession(
+            preparation, runtime_fence=runtime._current_runtime_fence(),
+        ).new_id
+        assert successor != predecessor
+        execute(source_id, pages.send(source_id, "Continue in the original lesson Work.")["messageId"])
+        response = pages.learning.feedback(
+            receiver_id, saved["id"], 1, "useful", "The earlier result provided a usable first step.",
+            result_message_id=result.result_event_id,
+        )["experience"]
+        assert all(key not in response for key in ("source", "encounter", "feedback"))
+        owner = pages.learning.view(source_id)["experiences"][0]
+        report = owner["feedback"][-1]
+        assert report["source"]["result_message_id"] == result.result_event_id
+        assert report["source"]["result_turn_id"] == result.turn_id
+        original_result = runtime.causal_ledger.get_event(result.result_event_id)
+        assert original_result.engram_id == predecessor
+        assert report["source"]["result_content_sha256"] == hashlib.sha256(original_result.content.encode()).hexdigest()
+        assert owner["source"] == saved["source"]
+        assert owner["encounter"] == saved["encounter"]
+
+        assert pages.runtime.close().clean
+        pages = PageService(tmp_path, posture=True, model_factory=None)
+        assert pages.runtime.continuity_engram_id == successor
+        assert pages.learning.view(source_id)["experiences"][0]["feedback"][-1] == report
+        repeated = pages.learning.feedback(
+            receiver_id, saved["id"], 2, "not_useful", "A later review found no clear benefit.",
+            result_message_id=result.result_event_id,
+        )["experience"]
+        assert repeated["revision"] == 3 and repeated["active"]
+        assert all(key not in repeated for key in ("source", "encounter", "feedback"))
+    finally:
+        pages.runtime.close()
+
+
 def test_invalid_outcome_anchors_leave_the_lesson_unchanged(tmp_path, monkeypatch):
     with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
         request, original, correction = observed_pair(client)
