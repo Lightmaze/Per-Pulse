@@ -63,10 +63,10 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(base);
   const close = () => page.getByRole('button', { name: /^(Close dialog|关闭对话框)$/ }).click();
-  const dialog = () => page.getByRole('dialog', { name: 'Source files', exact: true });
+  const dialog = () => page.getByRole('dialog', { name: /^(Materials|Source files)$/ });
   const input = () => page.getByRole('textbox', { name: 'Message Inventory review', exact: true });
-  const attach = () => page.getByRole('button', { name: 'Attach a file', exact: true }).click();
-  const choose = (name, buffer, mimeType = 'text/plain') => dialog().getByLabel('Choose a file', { exact: true }).setInputFiles({ name, mimeType, buffer });
+  const attach = () => page.getByRole('button', { name: 'Materials', exact: true }).click();
+  const choose = (name, buffer, mimeType = 'text/plain') => dialog().getByLabel('Choose a text file', { exact: true }).setInputFiles({ name, mimeType, buffer });
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Inventory review');
   await page.getByRole('textbox', { name: 'Where should we begin?', exact: true }).fill('Prepare to inspect a supplied CSV. [Explicit synthetic fixture]');
@@ -79,7 +79,8 @@ try {
   const draft = 'PROCESS_ATTACHED_CSV — inspect the original bytes 🌍';
   await input().fill(draft);
   await attach(); await choose(filename, bytes, 'text/csv');
-  await dialog().getByRole('button', { name: 'Upload and attach', exact: true }).click();
+  await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
+  await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
   await page.getByRole('button', { name: `Remove ${filename} from this message`, exact: true }).waitFor();
   const material = (await data('/api/pages/' + origin + '/materials')).materials[0];
   assert.equal(material.name, filename);
@@ -144,7 +145,8 @@ try {
 
   await article.getByRole('button', { name: filename, exact: true }).click();
   await dialog().getByRole('region', { name: 'Source file preview', exact: true }).waitFor();
-  assert.equal(await dialog().getByLabel('Source file text', { exact: true }).textContent(), bytes.toString('utf8'));
+  await dialog().getByRole('button', { name: 'Source', exact: true }).click();
+  assert.equal(await dialog().locator('.document-source').textContent(), bytes.toString('utf8'));
   await close();
   await article.getByRole('button', { name: 'New page', exact: true }).click();
   const newPage = page.getByRole('dialog', { name: 'Give this a little room.', exact: true });
@@ -163,9 +165,10 @@ try {
   assert.deepEqual(home.materials, [material]);
   await page.locator('[data-message-id="' + home.id + '"]').getByRole('button', { name: filename, exact: true }).click();
   await dialog().getByText('Inspect the original file from the source page. Its upload and message stay in that page.', { exact: true }).waitFor();
-  assert.equal(await dialog().getByLabel('Choose a file', { exact: true }).count(), 0);
-  assert.equal(await dialog().getByRole('button', { name: 'Attach to message', exact: true }).count(), 0);
-  assert.equal(await dialog().getByLabel('Source file text', { exact: true }).textContent(), bytes.toString('utf8'));
+  assert.equal(await dialog().getByLabel('Choose a text file', { exact: true }).count(), 0);
+  assert.equal(await dialog().getByRole('button', { name: 'Add to draft', exact: true }).count(), 0);
+  await dialog().getByRole('button', { name: 'Source', exact: true }).click();
+  assert.equal(await dialog().locator('.document-source').textContent(), bytes.toString('utf8'));
   await close();
   checks.push('bringing source files Home is explicit and keeps previews attached to their original page without silently transferring upload ownership');
 
@@ -180,28 +183,29 @@ try {
     assert.equal(actual.status(), 201);
     await route.abort('failed');
   });
-  await dialog().getByRole('button', { name: 'Upload and attach', exact: true }).click();
-  await dialog().getByRole('alert').getByText('The upload was not confirmed. Refresh source files before trying again.', { exact: true }).waitFor();
-  await dialog().getByRole('button', { name: 'Unconfirmed.txt', exact: true }).waitFor();
+  await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
+  await dialog().getByRole('alert').getByText('The upload could not be confirmed. Open the uploads folder and check before trying again.', { exact: true }).waitFor();
   await page.unroute(uploadUrl);
-  await dialog().getByRole('button', { name: 'Unconfirmed.txt', exact: true }).click();
-  await dialog().getByRole('button', { name: 'Attach to message', exact: true }).click();
+  await dialog().locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();
+  await dialog().locator('.material-list button').filter({ hasText: 'Unconfirmed.txt' }).click();
+  await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
   assert.equal((await data('/api/pages/' + origin + '/materials')).materials.length, 2);
   assert.equal((await readdir(join(directory, 'workspace', 'uploads'))).length, 2);
   checks.push('a dropped successful upload response remains uncertain and can be recovered from the actual saved file without automatic duplication');
 
   await page.getByRole('button', { name: 'Remove Unconfirmed.txt from this message', exact: true }).click();
   await attach(); await choose('binary.bin', Buffer.from([0xff, 0xfe, 0x00]), 'application/octet-stream');
-  await dialog().getByRole('button', { name: 'Upload and attach', exact: true }).click();
+  await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
   await dialog().getByRole('alert').waitFor();
   assert.equal((await data('/api/pages/' + origin + '/materials')).materials.length, 2);
   await choose('too-large.txt', Buffer.alloc(1024 * 1024 + 1, 97));
-  assert.ok(await dialog().getByRole('button', { name: 'Upload and attach', exact: true }).isDisabled());
-  await dialog().getByText('Choose a text file of at most 1 MiB.', { exact: true }).waitFor();
+  await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
+  await dialog().getByText('Choose a text file no larger than 1 MiB.', { exact: true }).waitFor();
   await close();
   await attach();
-  await dialog().getByRole('button', { name: 'Unconfirmed.txt', exact: true }).click();
-  await dialog().getByRole('button', { name: 'Attach to message', exact: true }).click();
+  await dialog().locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();
+  await dialog().locator('.material-list button').filter({ hasText: 'Unconfirmed.txt' }).click();
+  await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
   await input().fill('Keep this draft if its file has changed.');
   const other = (await data('/api/pages/' + origin + '/materials')).materials.find(item => item.name === 'Unconfirmed.txt');
   await writeFile(join(directory, 'workspace', other.path), 'REPLACEMENT_BYTES_NOT_SELECTED');
@@ -216,7 +220,8 @@ try {
   await page.getByRole('button', { name: 'Remove Unconfirmed.txt from this message', exact: true }).click();
   await input().fill('');
   await attach(); await choose('Only a source.md', Buffer.from('# Source only\n\nA durable file-only draft.\n'));
-  await dialog().getByRole('button', { name: 'Upload and attach', exact: true }).click();
+  await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
+  await dialog().getByRole('button', { name: 'Add to draft', exact: true }).click();
   await page.getByRole('button', { name: 'Remove Only a source.md from this message', exact: true }).waitFor();
   await stop(server); server = start(true);
   await wait(async () => (await fetch(base + '/api/health')).ok, 'offline restart');
@@ -243,7 +248,8 @@ try {
   await page.getByRole('dialog', { name: '来源文件', exact: true }).waitFor();
   await page.getByLabel('来源文件文本', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  assert.equal(await page.getByLabel('来源文件文本', { exact: true }).textContent(), '# Source only\n\nA durable file-only draft.\n');
+  await page.getByRole('button', { name: '原文', exact: true }).click();
+  assert.equal(await page.locator('.document-source').textContent(), '# Source only\n\nA durable file-only draft.\n');
   if (screenshots) await page.screenshot({ path: join(screenshots, 'materials-mobile-chinese.png') });
   checks.push('the Chinese phone view preserves original source text and fits within the viewport');
   assert.deepEqual(errors, []);

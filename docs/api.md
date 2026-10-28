@@ -1,6 +1,6 @@
 # Per Pulse API contract (English v0.1)
 
-All endpoints are same-origin JSON under `/api`. No client-supplied model credentials. Poll page views while their status is `queued` or `working`; no fake/model output is generated offline. Session data is the inherited Pulse World/Kernel state, with lightweight page-reference metadata in the same World store.
+Endpoints are same-origin under `/api` and return JSON. Writes use JSON except for the bounded raw file upload described below. No client-supplied model credentials. Poll page views while their status is `queued` or `working`; no fake/model output is generated offline. Session data is the inherited Pulse World/Kernel state, with lightweight page-reference metadata in the same World store.
 
 ## Types
 
@@ -308,6 +308,45 @@ Errors use `{error:{code:string,message:string}}` with 400/404/409/422/503. Show
 
 `per-pulse --example` uses a separate example data directory and visibly returns `example:true`. Sample content is authored example material, not AI output. Ordinary startup begins with the user's own data directory and does not seed examples.
 
+## Workspace materials
+
+All three material routes require `X-Per-Pulse-World` and
+`X-Per-Pulse-Service-Instance` from the current bootstrap. Missing, partial or
+stale identity returns `409 workspace_changed` before file access. Responses
+include both identities. Refresh bootstrap after a service restart; never
+silently retry a write against a different World.
+
+- `GET /api/workspace/files?path=` lists a bounded native workspace folder.
+  The response includes `path`, `entries` (`name`, `path`, `kind`, `bytes`),
+  `truncated`, `limit_bytes` and `scope: "shared_native_workspace"`.
+- `GET /api/workspace/files/content?path=uploads/example.txt` reads a single
+  regular UTF-8 file up to 1 MiB, returning `path`, `content`, `bytes` and
+  `sha256`. This is current file content, not a historical artifact receipt.
+- `POST /api/workspace/files?name=notes.md` accepts raw bytes with
+  `Content-Type: application/octet-stream`. Its streamed body is limited to
+  1 MiB, independent of Content-Length. Success is `201` with `path`, original
+  `name`, `bytes`, `sha256` and `source: "user_upload"`. Empty, binary,
+  oversized, protected-path and credential-shaped uploads are rejected before
+  publication. A unique native `uploads/` file is created without replacing
+  an existing file. Short extensions survive long Unicode file names.
+
+These operations reuse `WorkspaceFiles`; they create no Kernel sessions,
+turns, model read receipts or artifacts. Explicit user upload is separate
+from granting model mutation permissions. Uploaded files are shared across
+pages; page conversations remain scoped. The browser adds a reviewed path
+and observed SHA-256 as ordinary draft text, preserving existing page links.
+It does not claim that the model has read the source or enforce the observed
+version on a future model choice. Native read tools return their own observed
+digests when a configured model actually opens the file.
+
+The browser never executes file HTML. It limits previews to the first 64,000
+characters and labels shortened previews. An upload whose response is lost
+can have completed; inspect the existing uploads before choosing to repeat it.
+Markdown uses a lazy reading view with a source-text toggle. Raw HTML stays
+escaped, images become descriptions without remote requests, and only explicit
+absolute HTTP(S) links become external navigation. Relative and executable URLs
+remain text. The same reading component presents confirmed Markdown artifacts.
+
 ## Native execution and file results (opt-in)
 
 `GET /api/pages/{id}/execution` observes a native turn with exact-action approvals. `POST /api/pages/{id}/execution/stop` takes `{turnId}`; `POST /api/pages/{id}/execution/actions/{actionId}` takes `{decision: 'allow_once'|'deny'|'cancel'}`. Each returns a source-bound receipt and current page view. Scope is derived from the page server-side. Completed effects are preserved separately from a failed continuation.
@@ -326,6 +365,20 @@ an effect. The UI exposes them in **Actions with unconfirmed outcomes** only
 on their originating page, without a retry or approval button.
 
 `GET /api/pages/{id}/artifacts` projects bounded successful native `mutate_file` receipts; `GET /api/pages/{id}/artifacts/{artifactId}` verifies original action/page, regular text file and content SHA-256 before presenting a bounded redacted preview. A changed or missing file has no substitute preview. Page view includes `execution`, `artifacts`, `artifactsTruncated`; provider includes `workspaceActions`. See [Harness foundation](harness-foundation.md) for exact contracts.
+
+`GET /api/pages/{id}/artifacts/{artifactId}/download` repeats that same exact
+action/page and file-version verification, then returns complete captured bytes
+as `application/octet-stream` with attachment `Content-Disposition` and
+`X-Per-Pulse-Content-SHA256`. It never gives the HTTP server a mutable file path
+to reopen after checking. The existing 1 MiB read ceiling and native mutation
+durable-content limit remain unchanged. Download does not create a model turn.
+
+An overwritten file returns `409 artifact_version_changed`. Unavailable,
+binary, oversized or protected files preserve the native file error code and
+status. Files needing redaction or containing stored redaction/truncation
+markers return `422 artifact_download_redacted`. Wrong-page and unconfirmed
+action IDs remain `404 artifact_not_found`. The response also carries the exact
+digest as an ETag; the browser checks the received bytes before saving them.
 
 File and uncertainty observation follows only the native committed generation
 lineage in the same World and page context. Prepared or ambiguous transitions,

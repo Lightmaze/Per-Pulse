@@ -3,10 +3,10 @@ import type { Draft, ProviderState } from '../types';
 import { Icon } from './Icon';
 import { useLanguage } from '../i18n';
 
-export function Composer({ draft, changeDraft, send, busy, onLink, onAttach, inputRef, pageTitle, pageKind = 'home', provider, onSettings }: {
+export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, inputRef, pageTitle, pageKind = 'home', provider, onSettings }: {
   draft: Draft; changeDraft: (draft: Draft) => void; send: () => void; busy: boolean; onLink: () => void; inputRef: RefObject<HTMLTextAreaElement | null>;
   pageTitle?: string; pageKind?: 'home' | 'work'; provider?: ProviderState; onSettings?: () => void;
-  onAttach?: () => void;
+  onMaterials?: () => void;
 }) {
   const { t, pageTitle: localizedPageTitle } = useLanguage();
   const composing = useRef(false);
@@ -25,8 +25,9 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onAttach, inp
         if (event.key === 'Enter' && !event.shiftKey && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); if (canSend && !busy) send(); }
       }} />
       <div className="composer-toolbar">
-        <button type="button" className="text-button link-page-button" onClick={onLink}><Icon name="link" size={17} />{t('composer.linkPage')}{draft.references.length ? <span className="reference-count">{draft.references.length}</span> : null}</button>
-        {onAttach ? <button type="button" className="text-button attach-file-button" onClick={onAttach}><Icon name="page" size={17} />{t('materials.attachFile')}</button> : null}
+        <div className="composer-tools"><button type="button" className="text-button link-page-button" onClick={onLink}><Icon name="link" size={17} />{t('composer.linkPage')}{draft.references.length ? <span className="reference-count">{draft.references.length}</span> : null}</button>
+        {onMaterials ? <button type="button" className="text-button attach-file-button" onClick={onMaterials}><Icon name="page" size={17} />{t('library.title')}</button> : null}
+        </div>
         <button className="send-button" type="submit" aria-label={t('composer.send')} disabled={busy || !canSend}><Icon name="send" size={21} /></button>
       </div>
     </form>

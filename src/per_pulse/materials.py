@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import re
+from pathlib import PurePosixPath
+from uuid import uuid4
 
 from pulse_harness.adapters.resources import workspace_write_resource
 from pulse_harness.core.errors import HarnessError
@@ -121,6 +123,50 @@ class PageMaterials:
         if current["sha256"] != record["sha256"] or current["bytes"] != record["bytes"]:
             raise MaterialError("material_changed", "This source file changed. Upload the version you want to use.")
         return current
+
+    def reference_existing(self, page_id, path, expected_digest, *, world_id, service_instance_id):
+        """Attach an explicitly selected workspace version without copying bytes.
+
+        Each Work retains its own native material receipt. Sharing a file does
+        not copy the source Work's messages or transfer its upload ownership.
+        """
+        pages = self.pages
+        with pages._lock:
+            pages.execution._scope(page_id)
+            pages.require_file_identity(world_id, service_instance_id)
+            pages.runtime._require_runtime_owner()
+            try:
+                with self.writer.write(timeout=5), pages.runtime._publication_permit.transaction_guard():
+                    pages.require_file_identity(world_id, service_instance_id)
+                    pages.runtime._require_runtime_owner()
+                    current = self.files.read(path)
+                    if current["sha256"] != expected_digest:
+                        raise MaterialError("material_changed", "This source file changed. Open the version you want to use.")
+                    matching = [record for record in self._records().values()
+                                if record["path"] == path and record["sha256"] == expected_digest
+                                and record["bytes"] == current["bytes"]]
+                    existing = next((record for record in matching if record["pageId"] == page_id), None)
+                    if existing:
+                        return {"material": dict(existing), "repeated": True}
+                    if len(self._records()) >= MAX_MATERIALS:
+                        raise MaterialError("material_capacity", "This workspace has reached its source-file limit.")
+                    record = {"id": uuid4().hex, "pageId": page_id, "path": path,
+                              "name": matching[0]["name"] if matching else PurePosixPath(path).name,
+                              "sha256": expected_digest, "bytes": current["bytes"],
+                              "source": "workspace_reference", "createdAt": datetime.now(timezone.utc).isoformat()}
+                    state = deepcopy(pages._state)
+                    state.setdefault("materials", {})[record["id"]] = record
+                    try:
+                        pages.runtime.storage.save_component_state(pages._state_key, state)
+                    except Exception as error:
+                        raise MaterialError("material_reference_unconfirmed",
+                            "The file reference was not confirmed. Reopen the material before trying again.", 503) from error
+                    pages._state = state
+            except FileAccessError as error:
+                raise MaterialError("material_" + error.code, "The source file could not be attached.", error.status) from error
+            except HarnessError as error:
+                raise pages.execution._translate(error) from error
+            return {"material": dict(record), "repeated": False}
 
     def read(self, page_id, material_id):
         with self.pages._lock:

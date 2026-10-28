@@ -4,10 +4,12 @@ import { commonEnglish, commonChinese } from './locales/common';
 import { workspaceEnglish, workspaceChinese } from './locales/workspace';
 import { continuityEnglish, continuityChinese } from './locales/continuity';
 import { learningEnglish, learningChinese } from './locales/learning';
+import { materialsEnglish, materialsChinese } from './locales/materials';
+import { documentsEnglish, documentsChinese } from './locales/documents';
 import { interpolate, LANGUAGE_STORAGE_KEY, languagePreference, readLanguagePreference, resolveLocale, saveLanguagePreference, type LanguagePreference, type Locale } from './language';
 
-const english = { ...commonEnglish, ...workspaceEnglish, ...continuityEnglish, ...learningEnglish };
-const chinese: Record<keyof typeof english, string> = { ...commonChinese, ...workspaceChinese, ...continuityChinese, ...learningChinese };
+const english = { ...commonEnglish, ...workspaceEnglish, ...continuityEnglish, ...learningEnglish, ...materialsEnglish, ...documentsEnglish };
+const chinese: Record<keyof typeof english, string> = { ...commonChinese, ...workspaceChinese, ...continuityChinese, ...learningChinese, ...materialsChinese, ...documentsChinese };
 export type MessageKey = keyof typeof english;
 export type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 

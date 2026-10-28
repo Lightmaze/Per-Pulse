@@ -1,3 +1,11 @@
+export type WorkspaceFileIdentity = { workspaceId: string; serviceInstanceId: string };
+export type WorkspaceFileEntry = { name: string; path: string; kind: 'file' | 'directory'; bytes: number | null };
+export type WorkspaceFileList = WorkspaceFileIdentity & {
+  path: string; entries: WorkspaceFileEntry[]; truncated: boolean; limit_bytes: number; scope: 'shared_native_workspace';
+};
+export type WorkspaceFile = WorkspaceFileIdentity & { path: string; content: string; bytes: number; sha256: string };
+export type WorkspaceUpload = WorkspaceFileIdentity & { path: string; name: string; bytes: number; sha256: string; source: 'user_upload' };
+
 export type PageSummary = {
   id: string;
   kind: 'home' | 'work';
@@ -78,7 +86,7 @@ export type ArtifactRead = {
 
 export type Material = {
   id: string; pageId: string; name: string; path: string; bytes: number; sha256: string;
-  createdAt: string; source: 'user_upload';
+  createdAt: string; source: 'user_upload' | 'workspace_reference';
 };
 export type MaterialList = { pageId: string; materials: Material[]; truncated: boolean; limitBytes: number };
 export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number };

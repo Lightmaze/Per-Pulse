@@ -166,6 +166,39 @@ jobs:
           path: ${{ runner.temp }}/per-pulse-search-screenshots
           if-no-files-found: ignore
           retention-days: 7
+      - name: Verify materials, native files and draft continuity in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_MATERIAL_SCREENSHOTS="$RUNNER_TEMP/per-pulse-material-screenshots" node tests/browser/materials_flow.mjs
+      - name: Verify bounded table reading and source fidelity in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TABLE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-table-screenshots" node tests/browser/table_flow.mjs
+      - name: Keep table browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: table-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-table-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Keep material browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: material-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-material-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Verify readable documents and exact native file downloads
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_DOCUMENT_SCREENSHOTS="$RUNNER_TEMP/per-pulse-document-screenshots" node tests/browser/documents_flow.mjs
+      - name: Keep document browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: document-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-document-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build the distributable package
         run: python -m build --no-isolation
       - name: Verify first run from an installed wheel outside the checkout
@@ -181,6 +214,11 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" \
           PER_PULSE_INSTALLED_PYTHON="$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" \
           node tests/browser/installed_first_run.mjs
+      - name: Verify materials from the installed wheel
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" \
+          PER_PULSE_PYTHON="$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" \
+          node tests/browser/materials_flow.mjs
 
   browser-journey:
     runs-on: ubuntu-latest

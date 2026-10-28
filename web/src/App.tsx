@@ -18,6 +18,7 @@ import { LearningDialog } from './components/LearningDialog';
 import { SaveExampleDialog } from './components/SaveExampleDialog';
 import { HistoryDialog } from './components/HistoryDialog';
 import { MessageSearchDialog } from './components/MessageSearchDialog';
+import { MaterialsDialog } from './components/MaterialsDialog';
 import { MaterialDialog } from './components/MaterialDialog';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
@@ -80,8 +81,8 @@ export default function App() {
   }, [view?.page.kind, view?.page.title]);
 
   useEffect(() => {
-    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'save-example' || previous?.kind === 'materials' ? null : previous);
-  }, [route.id, route.serial, workspaceId]);
+    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' || previous?.kind === 'save-example' ? null : previous);
+  }, [route.id, route.serial, workspaceId, bootstrap?.serviceInstanceId]);
 
   useEffect(() => () => window.clearTimeout(scrollTimer.current), [route.id]);
 
@@ -281,7 +282,7 @@ export default function App() {
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onSaveExample={bootstrap?.postureEnabled ? (message, content) => openModal({ kind: 'save-example', message, content }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
-          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onAttach={() => openModal({ kind: 'materials' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
+          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
     </div>
@@ -298,12 +299,18 @@ export default function App() {
     {modal?.kind === 'save-example' ? <SaveExampleDialog key={`${workspaceId}/${route.id}/${modal.message.id}`} pageId={route.id} message={modal.message} initial={modal.content} messages={view?.messages ?? []} close={closeModal} saved={() => openModal({ kind: 'learning' })} /> : null}
     {modal?.kind === 'history' ? <HistoryDialog key={`${workspaceId}/${route.id}`} pageId={route.id} beforeMessageId={modal.beforeMessageId} close={closeModal} navigate={navigate} /> : null}
     {modal?.kind === 'message-search' ? <MessageSearchDialog key={`${workspaceId}/${route.id}`} pageId={route.id} close={closeModal} navigate={navigate} /> : null}
-    {modal?.kind === 'materials' && workspaceId ? <MaterialDialog key={`${workspaceId}/${modal.pageId ?? route.id}`} pageId={modal.pageId ?? route.id} readOnly={!!modal.pageId && modal.pageId !== route.id} workspaceId={workspaceId} initialId={modal.materialId} selectedIds={draft.materials?.map(item => item.id) ?? []} close={closeModal} attach={material => {
-      if (material.pageId !== route.id) return;
+    {modal?.kind === 'materials' && modal.materialId && workspaceId ? <MaterialDialog key={`${workspaceId}/${bootstrap?.serviceInstanceId}/${modal.pageId ?? route.id}/${modal.materialId}`} pageId={modal.pageId ?? route.id} materialId={modal.materialId} close={closeModal} browse={() => openModal({ kind: 'materials' })} /> : null}
+    {modal?.kind === 'materials' && !modal.materialId && bootstrap && workspaceId ? <MaterialsDialog key={`${workspaceId}/${bootstrap.serviceInstanceId}/${route.id}/${route.serial}`} pageId={route.id} identity={bootstrap} selectedIds={draft.materials?.map(item => item.id) ?? []} close={closeModal} add={material => {
+      if (material.pageId !== route.id) return false;
       const current = draftsRef.current[draftKey] ?? readDraft(workspaceId, route.id);
       const materials = current.materials ?? [];
-      if (!materials.some(item => item.id === material.id) && materials.length < 5) changeDraft({ ...current, materials: [...materials, { id: material.id, name: material.name }] });
-      setModal(null); input.current?.focus();
+      if (!materials.some(item => item.id === material.id)) {
+        if (materials.length >= 5) return false;
+        changeDraft({ ...current, materials: [...materials, { id: material.id, name: material.name }] });
+      }
+      setModal(null);
+      requestAnimationFrame(() => input.current?.focus());
+      return true;
     }} /> : null}
   </div>;
 }

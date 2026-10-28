@@ -17,6 +17,7 @@ The alpha candidate provides English and 简体中文 interface controls, a sepa
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.
+- Open **Materials** beside the message composer to upload and preview a text file, reuse an existing file, and attach the version you inspected to your draft.
 - Read structured replies and notes with headings, lists, tables, and code blocks. Copy a code block or the original Markdown, and keep native page links connected to their source.
 - Recognize a native selected-history replay while it runs, inspect its original messages, and retain the interpretation's provenance when saving an example or bringing it Home.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
@@ -101,6 +102,35 @@ Replace the placeholders with your provider's values. The endpoint is a complete
 If neither endpoint nor model is set, the workspace runs disconnected. Setting only one is a configuration error. Restart after changing provider configuration. Queued input from the ordinary workspace can be processed after connecting a model, so use a separate data directory when you want a fresh conversation.
 
 Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. Per Pulse also enforces a default **8 MiB maximum serialized request body** at the outbound Chat Completions boundary, configurable with `P_PULSE_MAX_REQUEST_BYTES`. This rejects oversized requests *before network send*, including those arising from long history, side computations, tool schemas or image parts. It never silently truncates the saved context; a blocked turn remains visible for review. This byte guard is **not** a context-token limit, provider bill cap, or solution to automatic long-history management. Provider compatibility must be verified separately.
+
+### Bring source material into a conversation
+
+Open **Materials**, choose a UTF-8 text file up to 1 MiB, and select **Upload
+file**. Inspect the preview, then **Add to draft**. Your existing text and page
+links stay in place. Tell Per Pulse what you want to do with the material and
+send the message when it is ready. Existing files can be reopened from the
+same dialog without uploading them again.
+
+Files belong to the shared native workspace and can be read from any page;
+conversation histories remain separate. Each Work keeps its own attachment
+record without copying the shared file. A source chip identifies the original
+name and version; reopening or sending it checks that the bytes still match.
+Remove the chip to leave the file out of a message. Uploading or previewing does
+not run the model, and adding a reference does not mean the model has read the file. With a configured
+provider, the existing read tools can open it when working on your request.
+Uploads create new files and do not grant model write permissions.
+
+Markdown materials and file results have **Read** and **Source** views. Headings,
+lists, tables and code are readable while the original text remains available.
+Images appear as descriptions; links to external sources open only when chosen.
+CSV and TSV files also have a table view. Values remain text, including leading
+zeros and empty cells. Use **First row contains headings** to match the file.
+The view shows up to 200 data rows and 64 columns, with keyboard scrolling for
+wide tables. **Columns** lets you compare a subset without changing the file;
+your choices survive switching between Read and Source during that preview.
+A partial preview is labelled and omits an unfinished trailing
+row; irregular quotes, unequal rows or wider files fall back to source text.
+The **Add to draft** action stays visible while reading a long material.
 
 ### Keep concrete examples and learn from corrections
 
@@ -208,7 +238,7 @@ new outcomes; do not use a short synthetic CI run as that evidence.
 
 ### Native workspace actions and sourced file results
 
-Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. The example workspace is always read-only. See [Core Harness](docs/harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
+Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. Example mode keeps model requests and model file changes disabled. See [Core Harness](docs/harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
 
 **Download file** takes the complete verified text result out of the workspace.
 It checks the file again when requested and verifies the received bytes before
@@ -220,10 +250,10 @@ This works for existing results while disconnected and after restart. File
 access remains limited to text up to 1 MiB; the native write path currently
 has a separate 64 KiB output bound. It does not restore older overwritten bytes.
 
-**Attach a file** supplies your own UTF-8 text, Markdown, CSV, JSON or code to
-an existing Home or Work. Uploading puts the exact bytes in the native shared
-workspace and adds a file reference to the draft; only **Send** submits it to
-the conversation. Text and file-only drafts survive browser refresh. Each
+The **Materials** flow accepts UTF-8 text, Markdown, CSV, JSON or code in
+Home or Work. **Upload file** saves the original bytes; **Add to draft** selects
+the inspected version; only **Send** submits it to the conversation.
+Text and file-only drafts survive browser refresh. Each
 message can include up to five files of at most 1 MiB each. PDF, images and
 other binary files are not supported. A source chip opens its original text
 preview; **Bring to Home** lets you include the source files with your selected
@@ -234,14 +264,16 @@ read the files. `reading.open` can check that expected version before returning
 its first passage, and continuation verifies the same source. Changed or
 missing selected files are refused before sending; replacement bytes are not
 silently substituted. Upload receipts and files persist across restart and
-the existing stopped Pulse Image transfer. The source list shows the latest
-100 uploads per page, with a workspace limit of 1,024 receipts; older message
-attachments remain accessible. Previews are bounded to 64 KiB and redact
-sensitive values. Files are shared native workspace material, not isolated
+the existing stopped Pulse Image transfer. The native source API lists the latest
+100 receipts per page, with a workspace limit of 1,024 receipts; older message
+attachments remain accessible. Source-chip previews are bounded to 64 KiB and
+redact sensitive values. The workspace library previews up to 64,000 characters.
+Files are shared native workspace material, not isolated
 per-page filesystem permissions.
 
 A lost upload response is shown as unconfirmed and never retried automatically.
-Refresh the source list to recover a saved receipt. The native file creation
+Open **Materials → uploads/** to inspect the saved file and add it to the draft.
+The native file creation
 and receipt storage are separate durable effects: a process or storage failure
 between them can leave an unlisted file in `workspace/uploads`. Inspect that
 directory before manually uploading again when no receipt can be recovered.
