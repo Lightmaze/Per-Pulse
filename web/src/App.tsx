@@ -136,10 +136,15 @@ export default function App() {
   }, []);
 
   const sendMessage = async () => {
-    if ((!draft.text.trim() && !draft.materials?.length) || !workspaceId || pendingSends.current.has(draftKey)) return;
+    // A send can race a recently edited controlled textarea and a pending
+    // workspace refresh. The visible unsent input is authoritative for this
+    // foreground submit; preserve it before any network request can fail.
+    const currentText = currentPage.current === route.id ? input.current?.value : undefined;
+    const outgoing = currentText !== undefined && currentText !== draft.text ? { ...draft, text: currentText } : draft;
+    if ((!outgoing.text.trim() && !outgoing.materials?.length) || !workspaceId || pendingSends.current.has(draftKey)) return;
+    if (outgoing !== draft) changeDraft(outgoing);
     const id = route.id;
     const key = draftKey;
-    const outgoing = draft;
     // Only this local context is saving. Another Work remains usable while
     // this request is awaiting the native World/Kernel response.
     pendingSends.current.add(key);
