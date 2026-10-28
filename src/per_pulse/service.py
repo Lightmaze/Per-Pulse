@@ -439,9 +439,27 @@ class PageService:
                 origin = self._state["messageOrigins"].get(row["event_id"], {})
                 activation = None
                 if row["kind"] == "propagation" and row["metadata"].get("context_connection_id"):
+                    # A propagation's reported source center is metadata, not
+                    # proof that its parent can be opened from that Work.
+                    # Match the actual native causal parent to the advertised
+                    # center before exposing even a page-level attribution.
                     source_center = row["metadata"].get("source_center_id")
-                    origin = {"pageId": "home" if source_center is None else center_pages.get(source_center),
-                              "messageId": row["parent_event_id"]}
+                    source_page = "home" if source_center is None else center_pages.get(source_center)
+                    parent_id = row["parent_event_id"]
+                    parent = self.runtime.causal_ledger.get_event(parent_id) if parent_id else None
+                    origin = {"pageId": None, "messageId": None}
+                    if (source_page is not None and parent is not None
+                            and parent.world_id == self.runtime.world_id
+                            and parent.center_id == source_center):
+                        origin["pageId"] = source_page
+                        try:
+                            # The complete historical scope, not the recent 500
+                            # messages, decides whether this is a real link.
+                            self._check_message(source_page, parent_id)
+                        except PageError:
+                            pass
+                        else:
+                            origin["messageId"] = parent_id
                     activation = "propagation"
                 messages.append({
                     "id": row["event_id"], "role": "system" if activation else row["role"], "content": row["content"],

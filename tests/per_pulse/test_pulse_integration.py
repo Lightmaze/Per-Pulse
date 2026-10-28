@@ -143,6 +143,28 @@ def test_native_context_diffusion_preserves_subject_history_and_causal_parent(tm
         assert visible["sourcePageId"] == source
         assert visible["sourceMessageId"] == parent.id
         assert visible["activation"] == "propagation"
+
+        # This uses the same live World and Kernel response projection, while
+        # simulating inconsistent causal metadata at the presentation seam.
+        # An apparent source page may not mint a false message link.
+        project = runtime._causal_message_projection
+
+        def inconsistent_source(*args, **kwargs):
+            rows = project(*args, **kwargs)
+            return [
+                {**row, "metadata": {**row["metadata"], "source_center_id": target_center}}
+                if row["event_id"] == propagated.id else row
+                for row in rows
+            ]
+
+        with monkeypatch.context() as patch:
+            patch.setattr(runtime, "_causal_message_projection", inconsistent_source)
+            incorrect = next(message for message in view(client, target)["messages"]
+                             if message["id"] == propagated.id)
+            assert incorrect["sourcePageId"] is None
+            assert incorrect["sourceMessageId"] is None
+            assert incorrect["activation"] == "propagation"
+
         assert not view(client, "home")["messages"]
         result_ids = [message["id"] for message in result["messages"]]
 
