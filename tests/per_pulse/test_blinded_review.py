@@ -255,6 +255,9 @@ def test_grade_preserves_main_and_auxiliary_usage_without_inventing_costs(trial,
                     "cache_write_tokens": 1},
         "accounted": False,
     }
+    # A historical arm can lack the usage object entirely. Keep that
+    # distinction visible after grading rather than raising a KeyError.
+    del stages["bare_negative"]["usage"]
     (root / "ordinary-transfer.json").write_text(json.dumps(record))
     folder = tmp_path / "blind-usage"
     review.prepare(root, folder)
@@ -280,6 +283,12 @@ def test_grade_preserves_main_and_auxiliary_usage_without_inventing_costs(trial,
     assert conditional["main"]["input_tokens"] is None
     assert conditional["auxiliary_posture"]["output_tokens"] is None
     assert conditional["reported_token_lower_bound"] == {"input_tokens": 35, "output_tokens": 50}
+    assert report["comparisons"]["outline"]["usage_accounted"]["baseline"] is None
+    outline_unknown = report["comparisons"]["outline"]["usage_observed"]["baseline"]
+    assert outline_unknown["native_accounted"] is None
+    assert outline_unknown["reported_token_lower_bound"] == {
+        "input_tokens": None, "output_tokens": None,
+    }
     assert "bill" not in json.dumps(report).lower()
 
 
