@@ -276,3 +276,40 @@ def test_two_independent_native_worlds_make_separately_blinded_fixture_packets(t
         assert (root / arm["blind_review_directory"] / "private" / "condition-key.json").is_file()
         assert audit_ordinary_transfer(root / arm["trial_directory"])["status"] == "verified"
     assert result["model_quality_reviewed"] is False
+
+    # QA ratings are authored fixtures, not an independent human assessment.
+    # Real sealed private keys and audited native World traces are used.
+    import hashlib
+    from per_pulse.blinded_review import SCHEMA as REVIEW_SCHEMA
+    from per_pulse.posture_study import summarize_reviews
+    ratings = {}
+    for arm in result["arms"]:
+        packet_file = root / arm["reviewer_only_directory"] / "review-packet.json"
+        packet = json.loads(packet_file.read_text())
+        ratings_file = root / arm["reviewer_only_directory"] / "qa-ratings.json"
+        ratings_file.write_text(json.dumps({
+            "schema": REVIEW_SCHEMA,
+            "reviewer": "synthetic-qa-reviewer",
+            "review_packet_sha256": hashlib.sha256(packet_file.read_bytes()).hexdigest(),
+            "ratings": {item["label"]: {check: True for check in item["checks"]}
+                        for item in packet["items"]},
+        }))
+        ratings[arm["task_order"]] = ratings_file
+    with pytest.raises(ValueError, match="synthetic fixture"):
+        summarize_reviews(root, ratings)
+    reviewed = summarize_reviews(root, ratings, allow_fixture=True)
+    assert reviewed["review_status"] == "synthetic_qa_only"
+    assert reviewed["observed_provider_requests"] == result["observed_requests"]
+    assert reviewed["provider_usage_accounted"]
+    assert len(reviewed["arms"]) == 2
+    assert reviewed["checks"]["notice"]["availability_first"] == {
+        "n": 2, "baseline_passes": 2, "conditional_passes": 2,
+        "improved_pairs": 0, "regressed_pairs": 0, "unchanged_pairs": 2,
+    }
+
+    # Stale ratings are rejected even though the native audits still pass.
+    stale = json.loads(ratings["notice-first"].read_text())
+    stale["review_packet_sha256"] = "0" * 64
+    ratings["notice-first"].write_text(json.dumps(stale))
+    with pytest.raises(ValueError, match="ratings are not bound"):
+        summarize_reviews(root, ratings, allow_fixture=True)

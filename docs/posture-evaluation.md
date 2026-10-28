@@ -440,3 +440,38 @@ real-provider results.
 ~~~sh
 python -m pytest tests/per_pulse/test_posture_study.py -q
 ~~~
+
+
+## Complete the two-arm blind review
+
+After a run of the posture_study module with --output PRIVATE_NEW_DIRECTORY
+has produced review_packets_ready, give an independent reviewer ONLY the
+review-notice-first/reviewer and review-outline-first/reviewer subtrees.
+Never give them the trial directories, private condition keys or study.json.
+The reviewer fills every boolean check in each ratings-template.json, including
+the outline negative control, without seeing condition labels.
+
+On the experimenter's private machine, after both rating files are complete:
+
+    python -m per_pulse.posture_study summarize \
+      --study /private/study \
+      --notice-ratings /private/ratings-notice.json \
+      --outline-ratings /private/ratings-outline.json \
+      --output /private/study/review-summary.json
+
+This command re-audits both original native World/Kernel/SQLite trials,
+checks distinct World and provider identities, exact request counts, response
+hashes, salted blind commitments and ratings-to-packet digests. It does not
+trust a saved "audit_status" or success label. The summary is private and
+create-only. Do not publish native trial files or private condition keys.
+Synthetic HTTP fixture QA requires --allow-fixture and is explicitly labelled
+synthetic_qa_only.
+
+The result retains both orders, availability-first and facts-preserved checks,
+outline negative controls, positive/negative paired changes, and completeness
+of reported provider usage. It makes no causal learning assertion: baseline
+always preceded sharing, extra conditional computation is not matched,
+reviewers are self-identified, and the two Worlds are not longitudinal repeats
+of one subject. Missing captured lessons, incomplete reviews, invalid native
+audits or mismatched identities produce no summary. Provider call counts do
+not establish a billed-dollar hard cap.

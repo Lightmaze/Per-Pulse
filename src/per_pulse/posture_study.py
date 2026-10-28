@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 import sys
 
-from .blinded_review import prepare
+from .blinded_review import CHECKS, grade, prepare
 from .posture_transfer import TASK_ORDERS, audit_ordinary_transfer, run_ordinary_transfer
 
 SCHEMA = "per_pulse.ordinary_posture_study.v1"
@@ -182,7 +182,163 @@ def run_study(
     return result
 
 
+
+def summarize_reviews(study: Path, ratings_by_order: dict[str, Path], *,
+                      allow_fixture: bool = False) -> dict:
+    """Reaudit both native Worlds, then reveal bound human check judgments.
+
+    Descriptive paired review, not a causal benefit, verified reviewer
+    identity, or estimate of billed money.
+    """
+    if set(ratings_by_order) != set(TASK_ORDERS):
+        raise ValueError("ratings are required for every registered task order")
+    state_path = study / "study.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    if state.get("schema") != SCHEMA or state.get("status") != "review_packets_ready":
+        raise ValueError("both native trial arms and blind packets must be ready")
+    if state.get("origin") != "real_provider" and not allow_fixture:
+        raise ValueError("synthetic fixture cannot establish real-provider model benefit")
+    arms = state.get("arms", [])
+    if (len(arms) != len(TASK_ORDERS)
+            or {arm.get("task_order") for arm in arms} != set(TASK_ORDERS)
+            or state.get("predeclared_orders") != list(TASK_ORDERS)):
+        raise ValueError("study arms do not match the predeclared protocol")
+
+    worlds: set[str] = set()
+    request_total = 0
+    accounted = True
+    reviewed = []
+    paired = {task: {check: [] for check in checks} for task, checks in CHECKS.items()}
+    for arm in arms:
+        order = arm["task_order"]
+        trial_dir = study / ("trial-" + order)
+        review_dir = study / ("review-" + order)
+        if (arm.get("trial_directory") != trial_dir.name
+                or arm.get("blind_review_directory") != review_dir.name
+                or arm.get("reviewer_only_directory") != review_dir.name + "/reviewer"):
+            raise ValueError("trial or review path differs from the registered arm")
+        native_path = trial_dir / "ordinary-transfer.json"
+        native_digest = _sha(native_path)
+        if native_digest != arm.get("record_sha256"):
+            raise ValueError("native trial changed since blind packet preparation")
+        native = json.loads(native_path.read_text(encoding="utf-8"))
+        if (native.get("status") != "completed"
+                or native.get("capture_status") != "native_lesson_admitted"
+                or native.get("task_order") != order
+                or native.get("origin") != state["origin"]
+                or native.get("provider_identity") != state.get("provider_identity")):
+            raise ValueError("completed trial origin, protocol or identity changed")
+        world_id = native.get("world_id")
+        if not isinstance(world_id, str) or not world_id or world_id in worlds:
+            raise ValueError("independent native World identities are required")
+        worlds.add(world_id)
+        audit = audit_ordinary_transfer(trial_dir)
+        if audit.get("status") != "verified" or audit.get("errors"):
+            raise ValueError("native trial audit is not verified")
+        packet_path = review_dir / "reviewer" / "review-packet.json"
+        if _sha(packet_path) != arm.get("review_packet_sha256"):
+            raise ValueError("blind packet differs from the sealed study record")
+        key = json.loads((review_dir / "private" / "condition-key.json").read_text(encoding="utf-8"))
+        if key.get("trial_record_sha256") != native_digest:
+            raise ValueError("private condition key is not bound to this native trial")
+        stages = {entry["stage"]: entry for entry in native["stages"]}
+        for entry in key.get("mapping", {}).values():
+            source = stages.get(entry.get("stage"))
+            if (source is None
+                    or source.get("result_event_id") != entry.get("result_event_id")
+                    or source.get("artifact", {}).get("sha256") != entry.get("response_sha256")):
+                raise ValueError("private condition mapping does not match native results")
+        review = grade(review_dir, ratings_by_order[order])
+        if (review.get("trial_origin") != state["origin"]
+                or not review.get("ratings_packet_bound")
+                or not review.get("condition_mapping_bound")):
+            raise ValueError("review must bind original blinded packet and key")
+        for task, checks in CHECKS.items():
+            observations = review["comparisons"][task]["observed_checks"]
+            for check in checks:
+                pair = observations[check]
+                if type(pair.get("baseline")) is not bool or type(pair.get("conditional")) is not bool:
+                    raise ValueError("incomplete blinded check judgment")
+                paired[task][check].append(pair)
+
+        calls = sum(native.get("provider_requests", {}).values())
+        if (type(calls) is not int or calls != arm.get("observed_requests")
+                or native.get("provider_requests") != arm.get("provider_requests")):
+            raise ValueError("study request count does not match native trial")
+        request_total += calls
+        fully_accounted = bool(native["stages"]) and all(
+            entry.get("usage", {}).get("accounted") is True for entry in native["stages"]
+        )
+        if fully_accounted != arm.get("usage_accounted"):
+            raise ValueError("provider usage accounting changed since completion")
+        accounted = accounted and fully_accounted
+        reviewed.append({
+            "task_order": order, "world_id": world_id,
+            "reviewer": review["reviewer"], "ratings_packet_bound": True,
+            "condition_mapping_bound": True, "observed_provider_requests": calls,
+            "provider_usage_accounted": fully_accounted,
+        })
+    if (request_total != state.get("observed_requests")
+            or request_total > state.get("limits", {}).get("max_total_requests", -1)):
+        raise ValueError("combined provider requests do not match study limit")
+    checks_summary = {}
+    for task, checks in paired.items():
+        checks_summary[task] = {}
+        for check, pairs in checks.items():
+            if len(pairs) != len(TASK_ORDERS):
+                raise ValueError("missing review observations")
+            checks_summary[task][check] = {
+                "n": len(pairs),
+                "baseline_passes": sum(pair["baseline"] for pair in pairs),
+                "conditional_passes": sum(pair["conditional"] for pair in pairs),
+                "improved_pairs": sum(not pair["baseline"] and pair["conditional"] for pair in pairs),
+                "regressed_pairs": sum(pair["baseline"] and not pair["conditional"] for pair in pairs),
+                "unchanged_pairs": sum(pair["baseline"] == pair["conditional"] for pair in pairs),
+            }
+    return {
+        "schema": "per_pulse.ordinary_posture_study_review.v1",
+        "study_sha256": _sha(state_path), "origin": state["origin"],
+        "provider_identity": state["provider_identity"],
+        "review_status": "descriptive_human_checks" if state["origin"] == "real_provider" else "synthetic_qa_only",
+        "arms": reviewed, "observed_provider_requests": request_total,
+        "provider_usage_accounted": accounted, "checks": checks_summary,
+        "interpretation": (
+            "Reviewer identity and independence are self-declared. The audits "
+            "bind native outputs and rating packets, not reviewer judgment quality. "
+            "Unshared baseline always precedes sharing; order and extra "
+            "conditional computation remain confounded. These paired changes "
+            "are descriptive, not causal learning estimates or dollar costs."
+        ),
+    }
+
+
+def _summarize_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Reaudit and summarize two blinded study arms")
+    parser.add_argument("--study", type=Path, required=True)
+    parser.add_argument("--notice-ratings", type=Path, required=True)
+    parser.add_argument("--outline-ratings", type=Path, required=True)
+    parser.add_argument("--output", type=Path, help="create a private summary JSON without overwriting it")
+    parser.add_argument("--allow-fixture", action="store_true", help="synthetic QA only")
+    args = parser.parse_args(argv)
+    try:
+        result = summarize_reviews(args.study, {
+            "notice-first": args.notice_ratings, "outline-first": args.outline_ratings,
+        }, allow_fixture=args.allow_fixture)
+        if args.output is not None:
+            with args.output.open("x", encoding="utf-8") as stream:
+                stream.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+            args.output.chmod(0o600)
+    except (ValueError, OSError, KeyError, TypeError, IndexError, json.JSONDecodeError) as exc:
+        print(f"ordinary posture study review: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    actual_argv = list(sys.argv[1:] if argv is None else argv)
+    if actual_argv and actual_argv[0] == "summarize":
+        return _summarize_main(actual_argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--training-calls", type=int, default=8)
@@ -190,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-total-requests", type=int, default=48)
     parser.add_argument("--stage-timeout", type=float, default=180)
     parser.add_argument("--allow-fixture", action="store_true", help="QA only; cannot support provider-quality claims")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(actual_argv)
     try:
         result = run_study(args.output, training_calls=args.training_calls,
                            trial_calls=args.trial_calls, max_total_requests=args.max_total_requests,
