@@ -154,7 +154,7 @@ def test_runner_failure_recovers_only_pretransport_admission_count(tmp_path, mon
             {"stage": "feedback", "request": {"messages": []}, "audit": {"request_sha256": "b"}},
         ]
         (path / "provider-admissions.jsonl").write_text(
-            "".join(json.dumps(entry) + "\\n" for entry in entries)
+            "".join(json.dumps(entry) + "\n" for entry in entries)
         )
         raise ConnectionError("private remote request body")
 
