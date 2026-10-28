@@ -70,12 +70,15 @@ try {
   await create('Declined note','WRITE_DECLINE');
   const declinedId = new URL(page.url()).pathname.split('/').pop();
   // An approval blocked in a sibling Work must become discoverable in Home,
+  // Home reads the identity-bound observation endpoint, not the old /api/pulse
+  // state path. Hold the exact request used by Home to prove that a slow
+  // background read cannot hide an actionable foreground Work.
   // even when the unrelated Pulse activity read is still awaiting a response.
   // The review still happens only in the original context.
   let releasePulseRead = () => {};
   const heldPulseRead = new Promise(resolve => { releasePulseRead = resolve; });
   let pulseReadIntercepted = false;
-  await page.route('**/api/pulse', async route => {
+  await page.route('**/api/pulse/observation', async route => {
     pulseReadIntercepted = true;
     await heldPulseRead;
     try { await route.continue(); } catch { /* The old Home read may be aborted. */ }
@@ -87,7 +90,7 @@ try {
   check('foreground Home review is independent of stalled Pulse and does not preapprove',
     !(await (await fetch(base+'/__fixture/status')).json()).files.includes('declined.txt'));
   releasePulseRead();
-  await page.unroute('**/api/pulse');
+  await page.unroute('**/api/pulse/observation');
   await needsWork.getByRole('button',{name:'Open Declined note',exact:true}).click();
   await page.getByRole('heading',{name:'Declined note',exact:true}).waitFor();
   check('Home review opens the original Work approval and retains native authority',
