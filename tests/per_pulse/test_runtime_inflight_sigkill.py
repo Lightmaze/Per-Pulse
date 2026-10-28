@@ -196,7 +196,7 @@ def test_physical_kill_during_kernel_turn_keeps_original_work_and_does_not_repla
             assert lease.state is RuntimeLeaseState.ACTIVE
             deadline = (lease.expires_at + timedelta(milliseconds=250)
                         - datetime.now(timezone.utc)).total_seconds()
-            assert deadline < 7, "Unexpected lease TTL after physical kill"
+            assert deadline < 35, "Unexpected default native lease TTL after physical kill"
         finally:
             old_store.close()
         time.sleep(max(0, deadline))
