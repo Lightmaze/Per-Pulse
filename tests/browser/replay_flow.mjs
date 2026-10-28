@@ -3,7 +3,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -191,7 +191,18 @@ try {
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, count: checks.length, focused, errors, modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
 } catch (error) {
-  if (screenshots && page) await page.screenshot({ path: join(screenshots, 'replay-failure.png') }).catch(() => {});
+  if (screenshots) {
+    const pageId = page ? new URL(page.url()).pathname.split('/').pop() || 'home' : 'home';
+    const snapshot = await fetch(base + '/api/pages/' + encodeURIComponent(pageId), {
+      signal: AbortSignal.timeout(2000),
+    }).then(async response => ({ status: response.status, body: await response.json() }))
+      .catch(problem => ({ error: String(problem) }));
+    await Promise.allSettled([
+      writeFile(join(screenshots, 'replay-server.log'), serverLog),
+      writeFile(join(screenshots, 'replay-failure-view.json'), JSON.stringify(snapshot, null, 2)),
+      ...(page ? [page.screenshot({ path: join(screenshots, 'replay-failure.png') })] : []),
+    ]);
+  }
   throw error;
 } finally {
   await browser?.close(); await stop(server);
