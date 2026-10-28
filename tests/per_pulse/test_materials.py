@@ -1,226 +1,292 @@
-"""Explicit user file imports reuse the native workspace without running AI.
+"""Source uploads use actual workspace bytes and native page inputs.
 
+Provider decisions are explicit fixtures, never a substitute for a live model.
 Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
-All file contents and HTTP model choices used here are synthetic fixtures.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import os
-import time
+from pathlib import Path
+from uuid import uuid4
 
-from fastapi.testclient import TestClient
 import pytest
-import httpx
 
-from per_pulse.app import create_app
+from per_pulse.materials import material_footer
 from pulse_system.product.files import MAX_FILE_BYTES
-from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
-from pulse_harness.core.contracts import ActionStatus
+from test_pages import client_for, new_page, wait_for
+from material_fixture import MaterialFixture
 
 
-def _client(path, **kwargs):
-    kwargs.setdefault("model_factory", None)
-    return TestClient(create_app(path, **kwargs), base_url="http://localhost")
+def upload(client, page_id, name, content, *, identity=None, world=None, **headers):
+    return client.post(f"/api/pages/{page_id}/materials", params={"name": name}, content=content,
+        headers={"Content-Type": "application/octet-stream", "X-Per-Pulse-Upload-Id": identity or uuid4().hex,
+                 "X-Per-Pulse-World": world or client.app.state.pages.runtime.world_id,
+                 "X-Per-Pulse-File-SHA256": hashlib.sha256(content).hexdigest(), **headers})
 
 
-def _identity(client):
-    bootstrap = client.get("/api/bootstrap").json()
-    return {"X-Per-Pulse-World": bootstrap["workspaceId"],
-            "X-Per-Pulse-Service-Instance": bootstrap["serviceInstanceId"]}
+def test_upload_keeps_exact_bytes_and_does_not_submit_a_message_or_start_a_session(tmp_path):
+    content = "\ufeffname,value\r\nCafé,2\r\n文本,3\r\n".encode()
+    with client_for(tmp_path, model_factory=None) as client:
+        world_id = client.app.state.pages.runtime.world_id
+        reply = upload(client, "home", "Café 文本.csv", content)
+        assert reply.status_code == 201, reply.text
+        material = reply.json()["material"]
+        assert material["source"] == "user_upload" and material["pageId"] == "home"
+        assert (tmp_path / "workspace" / material["path"]).read_bytes() == content
+        assert material["sha256"] == hashlib.sha256(content).hexdigest()
+        assert not client.get("/api/pages/home").json()["messages"]
+        assert client.app.state.pages.runtime.kernel_service.store.sessions_for_world(world_id) == ()
+        preview = client.get(f"/api/pages/home/materials/{material['id']}").json()
+        assert preview["content"].encode() == content
+        assert not preview["truncated"] and not preview["redacted"]
+        assert client.get("/api/pages/home/materials").json()["materials"] == [material]
+
+    with client_for(tmp_path, model_factory=None) as client:
+        assert client.app.state.pages.runtime.world_id == world_id
+        assert client.get("/api/pages/home/materials").json()["materials"] == [material]
+        assert client.get(f"/api/pages/home/materials/{material['id']}").json()["content"].encode() == content
+        assert not client.app.state.pages.runtime.kernel_service._runtimes
 
 
-def _upload(client, data=b"An observed source.\n", name="source.md", headers=None):
-    return client.post("/api/workspace/files", params={"name": name}, content=data,
-                       headers={"Content-Type": "application/octet-stream", **(headers or _identity(client))})
+def test_upload_identity_is_repeated_only_for_the_same_page_and_original_bytes(tmp_path):
+    with client_for(tmp_path, model_factory=None) as client:
+        work = new_page(client)["page"]["id"]
+        identity = uuid4().hex
+        first = upload(client, work, "source.txt", b"original\n", identity=identity)
+        assert first.status_code == 201
+        record = first.json()["material"]
+        repeated = upload(client, work, "source.txt", b"original\n", identity=identity)
+        assert repeated.json() == {**first.json(), "repeated": True}
+        for page, name, content in (("home", "source.txt", b"original\n"),
+                                    (work, "renamed.txt", b"original\n"),
+                                    (work, "source.txt", b"replacement\n")):
+            assert upload(client, page, name, content, identity=identity).status_code == 409
+        assert len(list((tmp_path / "workspace" / "uploads").iterdir())) == 1
+        assert client.get(f"/api/pages/home/materials/{identity}").status_code == 404
+        before = len(client.get("/api/pages/home").json()["messages"])
+        denied = client.post("/api/pages/home/messages", json={"content": "Read another page's file.", "materials": [identity]})
+        assert denied.status_code == 404
+        assert len(client.get("/api/pages/home").json()["messages"]) == before
 
 
-def test_materials_are_native_create_only_files_and_survive_restart(tmp_path):
-    with _client(tmp_path) as client:
-        identity = _identity(client)
-        runtime = client.app.state.pages.runtime
-        sessions_before = runtime.kernel_service.store.sessions_for_world(runtime.world_id)
-        data = "# Field notes\nAn encounter belongs in later work.\n".encode()
-        result = _upload(client, data).json()
-        assert result["source"] == "user_upload"
-        assert result["sha256"] == hashlib.sha256(data).hexdigest()
-        assert result["workspaceId"] == identity["X-Per-Pulse-World"]
-        path = result["path"]
-        assert (tmp_path / "workspace" / path).read_bytes() == data
-        assert _upload(client, b"A separate revision.\n").json()["path"] != path
-        assert (tmp_path / "workspace" / path).read_bytes() == data
-        listing = client.get("/api/workspace/files", params={"path": "uploads"}, headers=identity).json()
-        assert len(listing["entries"]) == 2
-        assert listing["scope"] == "shared_native_workspace"
-        preview = client.get("/api/workspace/files/content", params={"path": path}, headers=identity).json()
-        assert preview["content"] == data.decode()
-        assert preview["sha256"] == result["sha256"]
-        assert runtime.kernel_service.store.sessions_for_world(runtime.world_id) == sessions_before
-        assert not runtime.kernel_service._runtimes
-        assert runtime.tick_count == 0
-        assert client.get("/api/pages/home").json()["messages"] == []
-        # Uploading is not a grant for model write tools.
-        assert client.get("/api/bootstrap").json()["provider"]["workspaceActions"] is False
-
-    with _client(tmp_path) as client:
-        assert _identity(client)["X-Per-Pulse-World"] == identity["X-Per-Pulse-World"]
-        assert client.get("/api/workspace/files/content", params={"path": path}, headers=identity).status_code == 409
-        assert _upload(client, headers=identity).status_code == 409
-        refreshed = client.get("/api/workspace/files/content", params={"path": path}, headers=_identity(client))
-        assert refreshed.json()["content"] == data.decode()
-        assert len(list((tmp_path / "workspace" / "uploads").iterdir())) == 2
-
-
-@pytest.mark.parametrize("headers", [{}, {"X-Per-Pulse-World": "different"},
-    {"X-Per-Pulse-World": "different", "X-Per-Pulse-Service-Instance": "different"}])
-def test_file_access_requires_observed_workspace_identity(tmp_path, headers):
-    with _client(tmp_path) as client:
-        assert client.get("/api/workspace/files", headers=headers).status_code == 409
-        response = client.post("/api/workspace/files?name=source.txt", content=b"A source.",
-                               headers={"Content-Type": "application/octet-stream", **headers})
-        assert response.status_code == 409
-        assert not (tmp_path / "workspace" / "uploads").exists()
+def test_attached_message_retains_native_references_and_unicode_body_without_copying_content(tmp_path):
+    with client_for(tmp_path, model_factory=None) as client:
+        work = new_page(client)["page"]["id"]
+        record = upload(client, work, "Original notes.md", b"PRIVATE_FILE_CONTENT\n").json()["material"]
+        text = "Inspect this material. 🌍"
+        response = client.post(f"/api/pages/{work}/messages", json={"content": text, "materials": [record["id"]]})
+        assert response.status_code == 202
+        message = response.json()["view"]["messages"][-1]
+        assert message["materials"] == [record]
+        assert message["content"] == text + material_footer([record])
+        assert message["content"][:-message["materialSuffixLength"]] == text
+        assert "PRIVATE_FILE_CONTENT" not in message["content"]
+        native = client.app.state.pages.runtime.causal_ledger.get_event(message["id"])
+        assert native.content == message["content"]
+        assert record["sha256"] in native.content and record["path"] in native.content
+        only_file = client.post(f"/api/pages/{work}/messages", json={"content": "", "materials": [record["id"]]})
+        assert only_file.status_code == 202
+        assert only_file.json()["view"]["messages"][-1]["materials"] == [record]
+        assert client.post(f"/api/pages/{work}/messages", json={"content": "", "materials": []}).status_code == 422
+        assert client.post(f"/api/pages/{work}/messages", json={"content": "No duplicates", "materials": [record["id"], record["id"]]}).status_code == 422
+        brought = client.post(f"/api/pages/{work}/return", json={"messageId": message["id"], "content": text, "includeMaterials": True}).json()
+        transferred = next(item for item in brought["view"]["messages"] if item["id"] == brought["messageId"])
+        assert transferred["materials"] == [record]
+        assert transferred["content"][:-transferred["materialSuffixLength"]] == text
+        text_only = client.post(f"/api/pages/{work}/return", json={"messageId": message["id"], "content": "Just this explanation."}).json()
+        assert text_only["view"]["messages"][-1]["materials"] == []
+        files_only = client.post(f"/api/pages/{work}/return", json={"messageId": message["id"], "content": "", "includeMaterials": True})
+        assert files_only.status_code == 201
+        assert files_only.json()["view"]["messages"][-1]["materials"] == [record]
+        assert client.post("/api/pages/home/messages", json={"content": "No implicit ownership transfer", "materials": [record["id"]]}).status_code == 404
+    with client_for(tmp_path, model_factory=None) as client:
+        restored = client.get(f"/api/pages/{work}").json()["messages"]
+        assert next(item for item in restored if item["id"] == message["id"]) == message
 
 
-@pytest.mark.parametrize("name,data,code,status", [
-    ("empty.txt", b"", "empty_file", 400),
-    ("binary.txt", b"a\x00b", "text_files_only", 415),
-    ("latin.txt", b"\xff\xfe", "text_files_only", 415),
-    ("huge.txt", b"x" * (MAX_FILE_BYTES + 1), "file_too_large", 413),
-    ("../outside.txt", b"outside", "protected_or_invalid_path", 400),
-    ("folder/file.txt", b"nested", "filename_only", 400),
-    ("world.db", b"protected", "protected_or_invalid_path", 400),
-    ("credentials.txt", b"api_key=sk-fictionalexampleabcdef", "credential_content_blocked", 403),
+def test_changed_source_is_not_exposed_attached_or_overwritten_by_a_repeated_upload(tmp_path):
+    with client_for(tmp_path, model_factory=None) as client:
+        record = upload(client, "home", "notes.txt", b"original\n").json()["material"]
+        path = tmp_path / "workspace" / record["path"]
+        path.write_text("REPLACEMENT_MUST_NOT_LEAK")
+        preview = client.get(f"/api/pages/home/materials/{record['id']}")
+        assert preview.status_code == 409 and preview.json()["error"]["code"] == "material_changed"
+        assert "REPLACEMENT_MUST_NOT_LEAK" not in preview.text
+        assert upload(client, "home", "notes.txt", b"original\n", identity=record["id"]).status_code == 409
+        sent = client.post("/api/pages/home/messages", json={"content": "Use this version.", "materials": [record["id"]]})
+        assert sent.status_code == 409
+        assert not client.get("/api/pages/home").json()["messages"]
+        assert path.read_text() == "REPLACEMENT_MUST_NOT_LEAK"
+        path.unlink()
+        assert client.get(f"/api/pages/home/materials/{record['id']}").json()["error"]["code"] == "material_unavailable"
+
+
+@pytest.mark.parametrize("name,content,status", [
+    ("../outside.txt", b"hello", 400), (".env", b"hello", 400), ("secret.key", b"hello", 400),
+    ("binary.txt", b"hello\x00", 415), ("binary.txt", b"\xff\xfe", 415),
+    ("large.txt", b"x" * (MAX_FILE_BYTES + 1), 413),
 ])
-def test_invalid_uploads_have_specific_errors_and_no_file_effect(tmp_path, name, data, code, status):
-    with _client(tmp_path) as client:
-        response = _upload(client, data, name)
-        assert response.status_code == status
-        assert response.json()["error"]["code"] == code
+def test_invalid_material_creates_no_file_record_or_message(tmp_path, name, content, status):
+    with client_for(tmp_path, model_factory=None) as client:
+        response = upload(client, "home", name, content)
+        assert response.status_code == status, response.text
+        assert client.get("/api/pages/home/materials").json()["materials"] == []
+        assert not client.get("/api/pages/home").json()["messages"]
         assert not (tmp_path / "workspace" / "uploads").exists()
 
 
-def test_streamed_upload_limit_counts_bytes_and_accepts_exact_limit(tmp_path):
-    with _client(tmp_path) as client:
-        identity = _identity(client)
-        response = _upload(client, (b"x" * 65536 for _ in range(17)))
-        assert response.status_code == 413
-        assert not (tmp_path / "workspace" / "uploads").exists()
-        data = ("\u6e90" * (MAX_FILE_BYTES // 3)).encode() + b"x"
-        assert len(data) == MAX_FILE_BYTES
-        accepted = _upload(client, data)
-        assert accepted.status_code == 201
-        assert accepted.json()["bytes"] == MAX_FILE_BYTES
-        read = client.get("/api/workspace/files/content", params={"path": accepted.json()["path"]}, headers=identity)
-        assert read.json()["sha256"] == hashlib.sha256(data).hexdigest()
-
-
-def test_file_routes_keep_loopback_origin_and_json_boundaries(tmp_path):
-    with _client(tmp_path) as client:
-        response = _upload(client, headers={**_identity(client), "Origin": "https://remote.invalid"})
-        assert response.status_code == 403
-        assert response.headers["X-Frame-Options"] == "DENY"
-        assert response.headers["Cache-Control"] == "no-store"
-        assert client.post("/api/workspace/files?name=source.txt", json={"content": "text"}, headers=_identity(client)).status_code == 415
-        assert client.post("/api/pages/home/messages", content=b"text", headers={"Content-Type": "application/octet-stream"}).status_code == 415
+def test_raw_upload_retains_existing_browser_boundary_and_checks_world_and_digest(tmp_path):
+    with client_for(tmp_path, model_factory=None) as client:
+        assert upload(client, "home", "source.txt", b"hello", Origin="https://elsewhere.invalid").status_code == 403
+        assert upload(client, "home", "source.txt", b"hello", world="a-different-world").status_code == 409
+        assert upload(client, "home", "source.txt", b"hello", **{"X-Per-Pulse-File-SHA256": "0" * 64}).status_code == 422
+        assert client.post("/api/pages/home/materials?name=file.txt", json={"content": "wrong encoding"}).status_code == 415
+        assert client.post("/api/pages/home/messages", content=b"raw bytes", headers={"Content-Type": "application/octet-stream"}).status_code == 415
+        assert upload(client, "missing", "source.txt", b"hello").status_code == 404
         assert not (tmp_path / "workspace" / "uploads").exists()
 
 
-def test_long_multibyte_file_name_keeps_its_extension_and_original_label(tmp_path):
-    with _client(tmp_path) as client:
-        # This valid 243-byte original name used to exceed the filesystem's
-        # 255-byte component limit once the unique upload prefix was added.
-        name = "\u6e90" * 80 + ".md"
-        response = _upload(client, name=name)
-        assert response.status_code == 201, response.text
-        result = response.json()
-        assert result["name"] == name
-        assert result["path"].endswith(".md")
-        assert len(result["path"].split("/")[-1].encode("utf-8")) <= 173
-        assert (tmp_path / "workspace" / result["path"]).read_bytes() == b"An observed source.\n"
+def test_large_multibyte_filename_and_full_size_file_remain_exact(tmp_path):
+    with client_for(tmp_path, model_factory=None) as client:
+        filename = "文" * 80 + ".txt"
+        content = b"x" * (MAX_FILE_BYTES - 7) + "café\r\n".encode()
+        record = upload(client, "home", filename, content).json()["material"]
+        assert len(Path(record["path"]).name.encode()) <= 255
+        assert record["name"] == filename
+        assert (tmp_path / "workspace" / record["path"]).read_bytes() == content
+        preview = client.get(f"/api/pages/home/materials/{record['id']}").json()
+        assert preview["truncated"]
+        assert len(preview["content"].encode()) <= preview["previewLimitBytes"]
 
 
-def test_native_file_guards_apply_to_materials_browser(tmp_path):
-    with _client(tmp_path) as client:
-        identity = _identity(client)
-        root = tmp_path / "workspace"
-        outside = tmp_path / "private.txt"
-        outside.write_text("This is outside the material workspace.")
-        (root / "linked.txt").symlink_to(outside)
-        os.link(outside, root / "hardlinked.txt")
-        (root / "secrets.env").write_text("Protected.")
-        (root / "nested").mkdir()
-        (root / "nested" / "source.txt").write_text("A nested source.")
-        listing = client.get("/api/workspace/files", headers=identity).json()
-        assert "linked.txt" not in {entry["name"] for entry in listing["entries"]}
-        assert "secrets.env" not in {entry["name"] for entry in listing["entries"]}
-        for path in ("linked.txt", "hardlinked.txt", "secrets.env", "../private.txt", "/etc/passwd"):
-            assert client.get("/api/workspace/files/content", params={"path": path}, headers=identity).status_code >= 400
-        nested = client.get("/api/workspace/files/content", params={"path": "nested/source.txt"}, headers=identity)
-        assert nested.json()["content"] == "A nested source."
+def test_actual_native_reading_continues_passages_then_writes_a_downloadable_report(tmp_path, monkeypatch):
+    fixture = MaterialFixture(monkeypatch.setenv)
+    content = ("\ufeffname,quantity,unit_price\r\n" + "Café supplies,3,2.50\r\n" * 300).encode()
+    with client_for(tmp_path, model_factory=fixture.factory, allow_workspace_actions=True) as client:
+        record = upload(client, "home", "Inventory.csv", content).json()["material"]
+        assert fixture.requests == []
+        sent = client.post("/api/pages/home/messages", json={"content": "PROCESS_ATTACHED_CSV", "materials": [record["id"]]})
+        assert sent.status_code == 202
+        pending = wait_for(client, "home", lambda v: bool(v["execution"]["pendingActions"]))
+        action = pending["execution"]["pendingActions"][0]
+        assert action["toolName"] == "mutate_file"
+        assert fixture.reads[0]["passages"] > 1
+        assert fixture.reads[0]["content"].encode() == content[3:]
+        assert not (tmp_path / "workspace" / fixture.reads[0]["path"]).exists()
+        approved = client.post(f"/api/pages/home/execution/actions/{action['actionId']}", json={"decision": "allow_once"})
+        assert approved.status_code == 200
+        view = wait_for(client, "home", lambda v: v["messages"][-1]["role"] == "assistant")
+        assert "2250.00" in view["messages"][-1]["content"]
+        artifact, = view["artifacts"]
+        downloaded = client.get(f"/api/pages/home/artifacts/{artifact['id']}/download")
+        assert downloaded.status_code == 200
+        assert downloaded.content == fixture.reads[0]["report"].encode()
+        assert (tmp_path / "workspace" / record["path"]).read_bytes() == content
 
 
-@pytest.mark.parametrize("tool_name", ["read_file", "reading"])
-def test_imported_source_is_read_by_existing_native_tools_in_separate_works(tmp_path, monkeypatch, tool_name):
-    """Synthetic tool choices, real imported bytes and original action receipts."""
-    monkeypatch.setenv("PER_PULSE_MATERIAL_TEST_KEY", "synthetic-test-credential")
-    source_path = None
-    requests = []
+def test_native_reader_refuses_a_file_replaced_after_message_admission(tmp_path, monkeypatch):
+    def replace(source):
+        (tmp_path / "workspace" / source["path"]).write_text("WRONG_VERSION_PRIVATE")
 
-    def handler(request):
-        body = json.loads(request.content)
-        requests.append(body)
-        messages = body["messages"]
-        last_user = max(i for i, message in enumerate(messages) if message.get("role") == "user")
-        if not any(message.get("role") == "tool" for message in messages[last_user:]):
-            args = {"path": source_path}
-            if tool_name == "reading":
-                args["op"] = "open"
-            delta = {"tool_calls": [{"index": 0, "id": "synthetic-material-read", "type": "function",
-                                    "function": {"name": tool_name, "arguments": json.dumps(args)}}]}
-            finish = "tool_calls"
-        else:
-            delta = {"content": "Synthetic fixture: the native read completed."}
-            finish = "stop"
-        chunks = [{"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
-                  {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]}]
-        return httpx.Response(200, headers={"content-type": "text/event-stream"},
-                              content="".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + "data: [DONE]\n\n")
+    fixture = MaterialFixture(monkeypatch.setenv, before_read=replace)
+    with client_for(tmp_path, model_factory=fixture.factory, allow_workspace_actions=True) as client:
+        record = upload(client, "home", "Inventory.csv", b"name,quantity,unit_price\nPencils,2,1.25\n").json()["material"]
+        sent = client.post("/api/pages/home/messages", json={"content": "PROCESS_ATTACHED_CSV", "materials": [record["id"]]})
+        assert sent.status_code == 202
+        view = wait_for(client, "home", lambda v: v["messages"][-1]["role"] == "assistant")
+        assert "changed before it could be read" in view["messages"][-1]["content"]
+        assert not view["artifacts"] and not view["execution"]["pendingActions"]
+        assert not fixture.reads
+        assert "WRONG_VERSION_PRIVATE" not in json.dumps(fixture.requests)
 
-    def factory(_scope):
-        return ChatHTTPModelAdapter(ChatHTTPConfig("https://fixture.invalid/chat/completions", "material-fixture",
-            credential_env="PER_PULSE_MATERIAL_TEST_KEY"), transport=httpx.MockTransport(handler))
 
-    with _client(tmp_path, model_factory=factory) as client:
-        source = b"The real source bytes reach the native read tool.\n"
-        uploaded = _upload(client, source).json()
-        source_path = uploaded["path"]
-        service = client.app.state.pages
-        scopes = []
-        for title, private in [("First reading", "PRIVATE_FIRST_NOTE"), ("Second reading", "PRIVATE_SECOND_NOTE")]:
-            created = client.post("/api/pages", json={"title": title,
-                "instruction": f"{private}: read workspace file {source_path}."}).json()
-            page_id = created["page"]["id"]
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                view = client.get(f"/api/pages/{page_id}").json()
-                if any(message["role"] == "assistant" for message in view["messages"]):
-                    break
-                time.sleep(0.025)
-            else:
-                pytest.fail(f"Native read did not complete: {view}")
-            scope = service.execution._scope(page_id)
-            scopes.append(scope)
-            actions = service.runtime.kernel_service.store.actions_for_session(scope)
-            action, = [action for action in actions if action.tool_name == tool_name]
-            assert action.status is ActionStatus.SUCCEEDED
-            assert action.result_delivered
-            assert uploaded["sha256"] in json.dumps(action.result)
-            assert source.decode().strip() in json.dumps(action.result)
-            assert view["artifacts"] == [], "A read must not masquerade as a generated file artifact"
-        assert scopes[0].session_id != scopes[1].session_id
-        for request in requests:
-            payload = json.dumps(request["messages"])
-            assert not ("PRIVATE_FIRST_NOTE" in payload and "PRIVATE_SECOND_NOTE" in payload)
-        assert (tmp_path / "workspace" / source_path).read_bytes() == source
+def test_symlinked_upload_directory_cannot_escape_the_native_workspace(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    with client_for(tmp_path / "world", model_factory=None) as client:
+        (tmp_path / "world" / "workspace" / "uploads").symlink_to(outside, target_is_directory=True)
+        reply = upload(client, "home", "file.txt", b"material")
+        assert reply.status_code == 404
+        assert list(outside.iterdir()) == []
+        assert not client.get("/api/pages/home/materials").json()["materials"]
+
+
+def test_failed_receipt_publication_does_not_invent_confirmation_or_retry_file_effect(tmp_path, monkeypatch):
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        save = pages.runtime.storage.save_component_state
+
+        def fail_receipt(key, value):
+            if key == pages._state_key and value.get("materials"):
+                raise OSError("simulated receipt storage failure")
+            return save(key, value)
+
+        monkeypatch.setattr(pages.runtime.storage, "save_component_state", fail_receipt)
+        result = upload(client, "home", "Unconfirmed.txt", b"The physical file may exist.\n")
+        assert result.status_code == 503
+        assert result.json()["error"]["code"] == "material_upload_unconfirmed"
+        assert client.get("/api/pages/home/materials").json()["materials"] == []
+        files = list((tmp_path / "workspace" / "uploads").iterdir())
+        assert len(files) == 1 and files[0].read_bytes() == b"The physical file may exist.\n"
+        assert not client.get("/api/pages/home").json()["messages"]
+
+
+def test_upload_respects_existing_unconfirmed_writer_cleanup(tmp_path):
+    with client_for(tmp_path, model_factory=None) as client:
+        writer = client.app.state.pages.materials.writer
+        writer.quarantine("actual-writer-cleanup-not-confirmed")
+        try:
+            response = upload(client, "home", "Wait.txt", b"No competing upload.\n")
+            assert response.status_code != 201
+            assert response.json()["error"]["code"] == "workspace_resource_unavailable"
+            assert not (tmp_path / "workspace" / "uploads").exists()
+            assert client.get("/api/pages/home/materials").json()["materials"] == []
+        finally:
+            writer.confirm_cleanup("actual-writer-cleanup-not-confirmed")
+        assert upload(client, "home", "Wait.txt", b"Now the lane is available.\n").status_code == 201
+
+
+def test_materials_survive_native_succession_and_stopped_image_restore(tmp_path, monkeypatch):
+    from per_pulse.service import PageService
+    from pulse_system.product import image
+
+    directory = tmp_path / "original"
+    fixture = MaterialFixture(monkeypatch.setenv)
+    pages = PageService(directory, model_factory=fixture.factory)
+    content = "\ufeffOriginal material, café\r\n".encode()
+    try:
+        created = pages.create_page("Continuing file", "Hold this supplied material.")
+        page_id = created["page"]["id"]
+        runtime = pages.runtime
+        record = pages.materials.upload(page_id, "Original.csv", content, upload_id=uuid4().hex,
+            world_id=runtime.world_id, expected_digest=hashlib.sha256(content).hexdigest())["material"]
+        sent = pages.send(page_id, "Retain this source.", materials=[record["id"]])
+        source_id = sent["messageId"]
+        context = pages.learning._context(page_id)
+        result = runtime._mgr.pulse(runtime.continuity_engram_id,
+            pulse_event=runtime.causal_ledger.get_event(source_id), execution_context=context,
+            runtime_fence=runtime._current_runtime_fence())
+        before = next(row for row in pages.view(page_id)["messages"] if row["id"] == source_id)
+        returned_id = pages.return_home(page_id, "Keep the original source.", source_id,
+                                       include_materials=True)["messageId"]
+        prepared = runtime._mgr.prepare_succession(runtime.continuity_engram_id,
+            parent_event_id=result.result_event_id, runtime_fence=runtime._current_runtime_fence())
+        successor = runtime._mgr.commit_succession(prepared, runtime_fence=runtime._current_runtime_fence()).new_id
+        assert pages.materials.read(page_id, record["id"])["content"].encode() == content
+    finally:
+        assert pages.runtime.close().clean
+    archive, restored = tmp_path / "private.pulse", tmp_path / "restored"
+    image.save(directory, archive)
+    assert image.restore(archive, restored)["model_calls"] == 0
+    pages = PageService(restored, model_factory=None)
+    try:
+        assert pages.runtime.continuity_engram_id == successor
+        assert pages.materials.listing(page_id)["materials"] == [record]
+        assert pages.materials.read(page_id, record["id"])["content"].encode() == content
+        assert (restored / "workspace" / record["path"]).read_bytes() == content
+        assert next(row for row in pages.view(page_id)["messages"] if row["id"] == source_id) == before
+        assert next(row for row in pages.view("home")["messages"] if row["id"] == returned_id)["materials"] == [record]
+        assert not pages.runtime.kernel_service._runtimes
+    finally:
+        assert pages.runtime.close().clean

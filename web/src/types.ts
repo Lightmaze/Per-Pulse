@@ -37,6 +37,8 @@ export type Message = {
   sourcePageId: string | null;
   sourceMessageId: string | null;
   references: PageReference[];
+  materials?: Material[];
+  materialSuffixLength?: number;
   replay?: {
     sources: { pageId: string; messageId: string; role: 'user' | 'assistant' }[];
     unavailableSources: number; selected: boolean; contentOffset: number;
@@ -80,6 +82,13 @@ export type ArtifactRead = {
   redacted: boolean; truncated: boolean; reason: string | null;
   limitBytes: number; previewLimitBytes: number;
 };
+
+export type Material = {
+  id: string; pageId: string; name: string; path: string; bytes: number; sha256: string;
+  createdAt: string; source: 'user_upload' | 'workspace_reference';
+};
+export type MaterialList = { pageId: string; materials: Material[]; truncated: boolean; limitBytes: number };
+export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number };
 
 export type PageView = {
   page: PageSummary;
@@ -156,7 +165,7 @@ export type PostureExperience = PostureLesson | PostureExample;
 export type PostureView = { enabled: boolean; experiences: PostureExperience[] };
 
 export type DraftReference = { targetPageId: string; label: string };
-export type Draft = { text: string; references: DraftReference[] };
+export type Draft = { text: string; references: DraftReference[]; materials?: Pick<Material, 'id' | 'name'>[] };
 export type NavigationOrigin = { pageId: string; messageId?: string; referenceId?: string };
 
 export type PulseConnection = {

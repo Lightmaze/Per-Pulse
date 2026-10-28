@@ -19,6 +19,7 @@ import { SaveExampleDialog } from './components/SaveExampleDialog';
 import { HistoryDialog } from './components/HistoryDialog';
 import { MessageSearchDialog } from './components/MessageSearchDialog';
 import { MaterialsDialog } from './components/MaterialsDialog';
+import { MaterialDialog } from './components/MaterialDialog';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 export default function App() {
@@ -123,7 +124,7 @@ export default function App() {
   }, []);
 
   const sendMessage = async () => {
-    if (!draft.text.trim() || !workspaceId || pendingSends.current.has(draftKey)) return;
+    if ((!draft.text.trim() && !draft.materials?.length) || !workspaceId || pendingSends.current.has(draftKey)) return;
     const id = route.id;
     const key = draftKey;
     const outgoing = draft;
@@ -134,11 +135,11 @@ export default function App() {
     setSendErrors(previous => ({ ...previous, [key]: '' }));
     setError('');
     try {
-      const response = await api.send(id, outgoing.text.trim(), outgoing.references.filter(reference => outgoing.text.includes(reference.label)));
+      const response = await api.send(id, outgoing.text.trim(), outgoing.references.filter(reference => outgoing.text.includes(reference.label)), outgoing.materials?.map(item => item.id));
       applyView(response.view);
       const empty = { text: '', references: [] };
       const currentDraft = draftsRef.current[draftKey] ?? readDraft(workspaceId, id);
-      const nextDraft = currentDraft.text === outgoing.text && JSON.stringify(currentDraft.references) === JSON.stringify(outgoing.references) ? empty : currentDraft;
+      const nextDraft = currentDraft.text === outgoing.text && JSON.stringify(currentDraft.references) === JSON.stringify(outgoing.references) && JSON.stringify(currentDraft.materials ?? []) === JSON.stringify(outgoing.materials ?? []) ? empty : currentDraft;
       const updated = { ...draftsRef.current, [draftKey]: nextDraft };
       draftsRef.current = updated;
       setDrafts(updated);
@@ -183,7 +184,7 @@ export default function App() {
       const before = draft.text.slice(0, start);
       const after = draft.text.slice(end);
       const insertion = `${before && !/\s$/.test(before) ? ' ' : ''}${page.title}${after && !/^\s/.test(after) ? ' ' : ''}`;
-      changeDraft({ text: before + insertion + after, references: [...draft.references.filter(reference => reference.targetPageId !== page.id), { targetPageId: page.id, label: page.title }] });
+      changeDraft({ ...draft, text: before + insertion + after, references: [...draft.references.filter(reference => reference.targetPageId !== page.id), { targetPageId: page.id, label: page.title }] });
       setModal(null);
       requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(before.length + insertion.length, before.length + insertion.length); });
       return;
@@ -196,11 +197,11 @@ export default function App() {
     finally { setBusy(false); }
   };
 
-  const bringHome = async (content: string) => {
+  const bringHome = async (content: string, includeMaterials = false) => {
     if (modal?.kind !== 'return') return;
     setBusy(true); setModalError('');
     try {
-      const response = await api.bringHome(route.id, content, modal.message.id);
+      const response = await api.bringHome(route.id, content, modal.message.id, includeMaterials);
       applyView(response.view);
       navigate('home', undefined, response.messageId);
       setToast(t('app.broughtHome'));
@@ -267,7 +268,7 @@ export default function App() {
           {syncError && !error && !sendError ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} /> : null}
-          {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onSaveExample={bootstrap?.postureEnabled ? (message, content) => openModal({ kind: 'save-example', message, content }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
+          {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onSaveExample={bootstrap?.postureEnabled ? (message, content) => openModal({ kind: 'save-example', message, content }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
           {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
@@ -278,22 +279,24 @@ export default function App() {
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
     {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
-    {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
+    {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} materials={modal.message.materials} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'rename' ? <RenameDialog initial={view?.page.title ?? ''} busy={busy} error={modalError} close={closeModal} rename={renamePage} /> : null}
     {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast(t('app.connectionChecked'))).catch(problem => setToast(errorText(problem)))} /> : null}
     {modal?.kind === 'learning' ? <LearningDialog key={`${workspaceId}/${route.id}`} pageId={route.id} pageTitle={view?.page.title ?? t('dialogs.thisPage')} messages={view?.messages ?? []} close={closeModal} navigate={navigate} /> : null}
     {modal?.kind === 'save-example' ? <SaveExampleDialog key={`${workspaceId}/${route.id}/${modal.message.id}`} pageId={route.id} message={modal.message} initial={modal.content} messages={view?.messages ?? []} close={closeModal} saved={() => openModal({ kind: 'learning' })} /> : null}
     {modal?.kind === 'history' ? <HistoryDialog key={`${workspaceId}/${route.id}`} pageId={route.id} beforeMessageId={modal.beforeMessageId} close={closeModal} navigate={navigate} /> : null}
     {modal?.kind === 'message-search' ? <MessageSearchDialog key={`${workspaceId}/${route.id}`} pageId={route.id} close={closeModal} navigate={navigate} /> : null}
-    {modal?.kind === 'materials' && bootstrap ? <MaterialsDialog key={`${workspaceId}/${bootstrap.serviceInstanceId}/${route.id}/${route.serial}`} identity={bootstrap} close={closeModal} add={file => {
-      if (file.workspaceId !== workspaceId || file.serviceInstanceId !== bootstrap.serviceInstanceId) return false;
-      const latest = draftsRef.current[draftKey] ?? readDraft(workspaceId, route.id);
-      const reference = t('materials.reference', { path: JSON.stringify(file.path), sha256: file.sha256 });
-      const text = latest.text + (latest.text ? '\n\n' : '') + reference;
-      if (text.length > 32_000) return false;
-      changeDraft({ ...latest, text });
+    {modal?.kind === 'materials' && modal.materialId && workspaceId ? <MaterialDialog key={`${workspaceId}/${bootstrap?.serviceInstanceId}/${modal.pageId ?? route.id}/${modal.materialId}`} pageId={modal.pageId ?? route.id} materialId={modal.materialId} close={closeModal} browse={() => openModal({ kind: 'materials' })} /> : null}
+    {modal?.kind === 'materials' && !modal.materialId && bootstrap && workspaceId ? <MaterialsDialog key={`${workspaceId}/${bootstrap.serviceInstanceId}/${route.id}/${route.serial}`} pageId={route.id} identity={bootstrap} selectedIds={draft.materials?.map(item => item.id) ?? []} close={closeModal} add={material => {
+      if (material.pageId !== route.id) return false;
+      const current = draftsRef.current[draftKey] ?? readDraft(workspaceId, route.id);
+      const materials = current.materials ?? [];
+      if (!materials.some(item => item.id === material.id)) {
+        if (materials.length >= 5) return false;
+        changeDraft({ ...current, materials: [...materials, { id: material.id, name: material.name }] });
+      }
       setModal(null);
-      requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(text.length, text.length); });
+      requestAnimationFrame(() => input.current?.focus());
       return true;
     }} /> : null}
   </div>;

@@ -1,9 +1,10 @@
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { useLanguage } from '../i18n';
-import type { Bootstrap, Message, PageSummary, ResponseLanguage } from '../types';
+import type { Bootstrap, Material, Message, PageSummary, ResponseLanguage } from '../types';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
+import { messageBody } from '../messageBody';
 
 export type Modal =
   | { kind: 'create'; message?: Message }
@@ -14,15 +15,16 @@ export type Modal =
   | { kind: 'save-example'; message: Message; content: string }
   | { kind: 'history'; beforeMessageId: string }
   | { kind: 'message-search' }
-  | { kind: 'materials' }
+  | { kind: 'materials'; materialId?: string; pageId?: string }
   | { kind: 'rename' };
 
 export function CreatePageDialog({ initial, busy, error, close, create }: { initial?: Message; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string) => void }) {
   const { t } = useLanguage();
   const [title, setTitle] = useState('');
-  const [instruction, setInstruction] = useState(initial?.content ?? '');
+  const [instruction, setInstruction] = useState(initial?.materials?.length ? messageBody(initial) : initial?.content ?? '');
   return <Dialog title={t("dialogs.createTitle")} onClose={close}>
     <p className="dialog-description">{t('dialogs.createDescription')}</p>
+    {initial?.materials?.length ? <p className="lesson-note">{t('materials.newPageSource')}</p> : null}
     <form onSubmit={event => { event.preventDefault(); if (title.trim() && instruction.trim() && !busy) create(title.trim(), instruction.trim()); }}>
       <label className="field-label" htmlFor="new-page-title">{t('dialogs.pageName')}</label>
       <input id="new-page-title" autoFocus value={title} onChange={event => setTitle(event.target.value)} placeholder={t('dialogs.namePlaceholder')} maxLength={160} required />
@@ -65,17 +67,20 @@ export function PagePickerDialog({ pages, mode, busy, error, close, select, crea
   </Dialog>;
 }
 
-export function ReturnDialog({ initial, busy, error, close, send, sourceTitle }: { initial: string; busy: boolean; error: string; close: () => void; send: (content: string) => void; sourceTitle?: string }) {
+export function ReturnDialog({ initial, busy, error, close, send, sourceTitle, materials = [] }: { initial: string; busy: boolean; error: string; close: () => void; send: (content: string, includeMaterials: boolean) => void; sourceTitle?: string; materials?: Material[] }) {
   const { t } = useLanguage();
   const [content, setContent] = useState(initial);
+  const [includeMaterials, setIncludeMaterials] = useState(materials.length > 0);
+  const canReturn = !!content.trim() || includeMaterials;
   return <Dialog title={t("dialogs.returnTitle")} onClose={close}>
     <p className="dialog-description">{t('dialogs.returnDescription')}</p>
     <div className="return-preview"><span className="return-preview-source">{t('dialogs.from')} <strong>{sourceTitle || t('dialogs.thisPage')}</strong></span><span aria-hidden="true">→</span><span className="return-preview-destination">{t('sidebar.home')}</span></div>
-    <form onSubmit={event => { event.preventDefault(); if (content.trim() && !busy) send(content.trim()); }}>
+    <form onSubmit={event => { event.preventDefault(); if (canReturn && !busy) send(content.trim(), includeMaterials); }}>
       <label className="field-label" htmlFor="return-content">{t('dialogs.returnContent')}</label>
-      <textarea id="return-content" autoFocus value={content} onChange={event => setContent(event.target.value)} rows={7} required />
+      <textarea id="return-content" autoFocus value={content} onChange={event => setContent(event.target.value)} rows={7} required={!includeMaterials} />
+      {materials.length ? <div className="return-materials"><label><input type="checkbox" checked={includeMaterials} disabled={busy} onChange={event => setIncludeMaterials(event.target.checked)} />{t('materials.include')}</label><p className="lesson-note">{materials.map(item => item.name).join(', ')}</p></div> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button className="primary-button" type="submit" disabled={busy || !content.trim()}>{busy ? t('dialogs.saving') : t('dialogs.bringHome')}</button></div>
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button className="primary-button" type="submit" disabled={busy || !canReturn}>{busy ? t('dialogs.saving') : t('dialogs.bringHome')}</button></div>
     </form>
   </Dialog>;
 }

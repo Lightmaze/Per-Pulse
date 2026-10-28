@@ -104,21 +104,22 @@ try {
   await page.getByRole('button', { name: 'Read', exact: true }).click();
   await shot('materials-desktop');
   await page.getByRole('button', { name: 'Add to draft', exact: true }).click();
-  assert.ok((await page.locator('.composer textarea').inputValue()).startsWith(before + '\n\n'));
-  assert.ok((await page.locator('.composer textarea').inputValue()).includes(path));
-  assert.ok((await page.locator('.composer textarea').inputValue()).includes(createHash('sha256').update(source).digest('hex')));
+  assert.equal(await page.locator('.composer textarea').inputValue(), before);
+  await page.getByRole('button', { name: `Remove ${filename} from this message`, exact: true }).waitFor();
   assert.equal(await page.locator('.reference-count').innerText(), '1');
-  assert.equal(await page.locator('.composer textarea').evaluate(el => document.activeElement === el), true);
+  await wait(async () => page.locator('.composer textarea').evaluate(el => document.activeElement === el), 'composer receives focus after native attachment');
   await page.reload();
   await page.locator('.composer textarea').waitFor();
-  assert.ok((await page.locator('.composer textarea').inputValue()).includes(path));
+  await page.getByRole('button', { name: `Remove ${filename} from this message`, exact: true }).waitFor();
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await wait(async () => (await fetch(base + '/api/pages/' + firstId).then(r => r.json())).messages.some(m => m.content.includes(path)), 'native saved source reference');
   const first = await fetch(base + '/api/pages/' + firstId).then(r => r.json());
   assert.equal(first.messages.at(-1).references[0].targetPageId, 'home');
   assert.equal(first.messages.at(-1).role, 'user');
+  assert.equal(first.messages.at(-1).materials[0].sha256, createHash('sha256').update(source).digest('hex'));
+  assert.equal(first.messages.at(-1).materials[0].path, path);
   assert.equal(first.provider.configured, false);
-  checks.push('Explicit upload, escaped preview, complete source digest, existing draft and page link survive reload and send');
+  checks.push('Explicit upload, escaped preview, native versioned attachment, existing draft and page link survive reload and send');
 
   await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Home', exact: true }).click();
   const secondId = await create('Another reading');

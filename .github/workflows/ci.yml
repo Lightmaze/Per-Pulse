@@ -119,6 +119,17 @@ jobs:
           path: ${{ runner.temp }}/per-pulse-replay-screenshots
           if-no-files-found: ignore
           retention-days: 7
+      - name: Verify source upload through native reading and report download in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_MATERIAL_SCREENSHOTS="$RUNNER_TEMP/per-pulse-material-screenshots" node tests/browser/material_flow.mjs
+      - name: Keep source material browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-material-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-material-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Keep concrete example browser evidence
         if: always()
         uses: actions/upload-artifact@v4

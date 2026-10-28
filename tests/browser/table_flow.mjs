@@ -85,7 +85,7 @@ try {
   await shot('tables-mobile');
   await page.getByRole('button', { name: 'Add to draft', exact: true }).click();
   assert.ok((await page.locator('.composer textarea').inputValue()).startsWith('Keep this question while inspecting the source.'));
-  assert.ok((await page.locator('.composer textarea').inputValue()).includes('Observation table.csv'));
+  await page.getByRole('button', { name: 'Remove Observation table.csv from this message', exact: true }).waitFor();
   checks.push('A phone can scroll the table by keyboard and add the native source without losing the draft');
 
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -111,7 +111,16 @@ try {
   checks.push('Malformed and over-wide files remain available as original text');
 
   await page.keyboard.press('Escape');
-  const fullDraft = 'x'.repeat(31990);
+  // Fill the native attachment selection without changing the authored draft.
+  for (const name of ['Repeated observations.tsv', 'Large source.csv', 'Unclosed quote.csv', 'Too many columns.csv']) {
+    await page.getByRole('button', { name: 'Materials', exact: true }).click();
+    await wait(async () => !(await page.getByRole('button', { name: 'Refresh', exact: true }).isDisabled()), 'attachment listing');
+    await page.locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();
+    await page.locator('.material-list button').filter({ hasText: name }).click();
+    await page.getByRole('button', { name: 'Add to draft', exact: true }).click();
+    await page.getByRole('button', { name: `Remove ${name} from this message`, exact: true }).waitFor();
+  }
+  const fullDraft = 'Keep this long draft intact. ' + 'x'.repeat(31900);
   await page.locator('.composer textarea').fill(fullDraft);
   await page.getByRole('button', { name: 'Materials', exact: true }).click();
   await wait(async () => !(await page.getByRole('button', { name: 'Refresh', exact: true }).isDisabled()), 'listing for full draft');
@@ -124,7 +133,7 @@ try {
   assert.ok(alertBounds.y >= 0 && alertBounds.y + alertBounds.height <= 900);
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.composer textarea').inputValue(), fullDraft);
-  checks.push('A full draft reports the problem beside the fixed action and preserves existing text');
+  checks.push('A full attachment selection reports the problem beside the fixed action and preserves existing draft text');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.locator('#interface-language').selectOption('zh-CN');
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();

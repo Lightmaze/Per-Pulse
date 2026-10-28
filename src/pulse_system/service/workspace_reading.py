@@ -33,6 +33,8 @@ SCHEMA = {
         "op": {"type": "string", "enum": ["open", "continue", "recent"]},
         "path": {"type": "string", "maxLength": 2048,
                  "description": "Workspace-relative UTF-8 text path, for open only."},
+        "expected_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$",
+                            "description": "Optional original SHA-256, for open only; refuse changed bytes before exposing text."},
         "receipt_id": {"type": "string", "maxLength": 256,
                        "description": "Exact saved receipt_id for continue; never invent offsets."},
         "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_CHARS},
@@ -46,7 +48,8 @@ def descriptor() -> ToolDescriptor:
     return ToolDescriptor(
         NAME,
         "Read a text material in manageable passages. open(path, max_chars?) starts "
-        "at its beginning; continue(receipt_id, max_chars?) reads after that actual "
+        "at its beginning; pass expected_digest when an input specifies a file version. "
+        "continue(receipt_id, max_chars?) reads after that actual "
         "saved passage, refusing changed source content. recent(limit?) finds the "
         "latest exposed positions in THIS logical session, including after reopen, "
         "without opening files. Use an older receipt to reread its following page; "
@@ -70,12 +73,16 @@ def validate(args: Mapping[str, Any]) -> str:
         raise ProviderProtocolError("reading requires an object", code="reading_arguments_invalid")
     op = args.get("op")
     allowed = {
-        "open": {"op", "path", "max_chars"},
+        "open": {"op", "path", "max_chars", "expected_digest"},
         "continue": {"op", "receipt_id", "max_chars"},
         "recent": {"op", "limit"},
     }
     if not isinstance(op, str) or op not in allowed or set(args) - allowed[op]:
         raise ProviderProtocolError("reading operation is invalid", code="reading_arguments_invalid")
+    if "expected_digest" in args:
+        digest = args["expected_digest"]
+        if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ProviderProtocolError("reading source digest is invalid", code="reading_arguments_invalid")
     field = "path" if op == "open" else "receipt_id" if op == "continue" else None
     if field:
         value = args.get(field)
@@ -206,6 +213,8 @@ def execute(
     snapshot = provider._snapshot(provider._safe_target(path, allow_missing=False))
     if not snapshot.exists:
         raise WorkspaceAdapterError("reading source disappeared", code="workspace_file_not_found")
+    if op == "open" and call.arguments.get("expected_digest", snapshot.digest) != snapshot.digest:
+        raise WorkspaceDigestConflict("reading source differs from the supplied version", code="reading_source_changed")
     cancellation.raise_if_cancelled()
     text, redacted = _view(snapshot.text)
     source = {
