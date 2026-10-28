@@ -16,9 +16,10 @@ import threading
 from typing import Any
 
 from pulse_harness.core import ApprovalDecision, HarnessScope, ModelRoundStatus, TurnStatus
-from pulse_harness.core.contracts import ActionStatus, ApprovalStatus
+from pulse_harness.core.contracts import ActionRecord, ActionStatus, ApprovalStatus
 from pulse_harness.core.errors import HarnessError, ScopeConflict, StoreUnavailable
 from pulse_harness.core.replay import redact_value, stored_payload_flags
+from pulse_system.core.causality import CausalTransitionError
 
 
 _TERMINAL = {TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED}
@@ -79,6 +80,67 @@ class PageExecution:
             raise ExecutionError("execution_unavailable", "Page execution is unavailable.", 503)
         return kernel
 
+    def _history_scopes(self, scope: HarnessScope) -> tuple[HarnessScope, ...]:
+        """Verified same-context ancestry for observation, never for controls."""
+        try:
+            lineage = self.runtime.causal_ledger.committed_history_lineage(
+                scope.world_id, scope.engram_id,
+            )
+        except CausalTransitionError as error:
+            raise ExecutionError(
+                "execution_history_unavailable",
+                "Historical execution evidence could not be verified. Try again.", 503,
+            ) from error
+        # The Harness's broader model-history reader can also include delegated
+        # team material. That is not authority to expose another page's effects.
+        return tuple(self.runtime.harness.scope_for(subject, scope.context_id) for subject in lineage)
+
+    def _historical_actions(self, scopes: tuple[HarnessScope, ...], *,
+                            status: ActionStatus, limit: int) -> list[ActionRecord]:
+        """Newest generation first, with one bounded scan across all scopes."""
+        actions = []
+        for scope in scopes:
+            try:
+                rows = self._kernel.store.actions_for_session(
+                    scope, status=status, limit=limit - len(actions),
+                )
+            except ScopeConflict as error:
+                if str(error).startswith("unknown session:"):
+                    continue
+                raise
+            actions.extend(reversed(rows))
+            if len(actions) >= limit:
+                break
+        return actions
+
+    def _uncertainty(self, scope: HarnessScope) -> dict:
+        scopes = self._history_scopes(scope)
+        records = self._historical_actions(scopes, status=ActionStatus.UNCERTAIN, limit=_MAX_ACTIONS + 1)
+        historical = bool(records)
+        if not historical:
+            for previous in scopes:
+                try:
+                    historical = self._kernel.store.count_model_rounds_for_session(
+                        previous, status=ModelRoundStatus.UNCERTAIN,
+                    ) > 0
+                except ScopeConflict as error:
+                    if str(error).startswith("unknown session:"):
+                        continue
+                    raise
+                if historical:
+                    break
+        actions = []
+        for action in records[:_MAX_ACTIONS]:
+            arguments, redacted, truncated = self._arguments(action.arguments)
+            actions.append({
+                "actionId": action.action_request_id, "turnId": action.scope.turn_id,
+                "toolName": action.tool_name, "arguments": arguments,
+                "argumentsTruncated": truncated, "argumentsRedacted": redacted,
+                "status": action.status.value,
+            })
+        return {"historicalUncertainty": historical, "uncertainActions": actions,
+                "uncertainActionsTruncated": len(records) > _MAX_ACTIONS}
+
     @staticmethod
     def _translate(error: HarnessError) -> ExecutionError:
         if isinstance(error, StoreUnavailable):
@@ -110,6 +172,7 @@ class PageExecution:
         scope = self._scope(page_id)
         kernel = self._kernel
         try:
+            history = self._uncertainty(scope)
             try:
                 session = kernel.store.get_session(scope)
             except ScopeConflict as error:
@@ -118,7 +181,7 @@ class PageExecution:
                         "pageId": page_id, "sessionId": None, "turnId": None,
                         "status": "idle", "canCancel": False, "pendingActions": [],
                         "pendingActionsTruncated": False, "recoveryRequired": False,
-                        "historicalUncertainty": False,
+                        **history,
                         "updatedAt": None,
                     }
                 raise
@@ -167,10 +230,6 @@ class PageExecution:
                     TurnStatus.FAILED: "error", TurnStatus.BLOCKED: "needs_attention",
                     TurnStatus.WAITING_APPROVAL: "needs_attention",
                 }.get(turn.status, "working")
-            historical_uncertainty = (
-                kernel.store.count_actions_for_session(scope, status=ActionStatus.UNCERTAIN) > 0
-                or kernel.store.count_model_rounds_for_session(scope, status=ModelRoundStatus.UNCERTAIN) > 0
-            )
             # Old uncertainty remains evidence, not a permanent demand to stop
             # later successful work. Only the current unresolved turn can need
             # an actionable recovery decision in this page's controls.
@@ -184,7 +243,7 @@ class PageExecution:
                 "canCancel": bool(turn and turn.status not in _TERMINAL),
                 "pendingActions": actions, "pendingActionsTruncated": pending_truncated,
                 "recoveryRequired": recovery,
-                "historicalUncertainty": historical_uncertainty,
+                **history,
                 "updatedAt": turn.updated_at if turn else session.updated_at,
             }
         except HarnessError as error:

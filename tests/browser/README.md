@@ -109,3 +109,28 @@ the later Work. This is mechanism and user-interface acceptance, **not**
 evidence that a real model independently learned a new default behavior.
 It does not establish a hard spending cap or long-duration autonomous Pulse.
 `PER_PULSE_JOURNEY_SCREENSHOTS` optionally records an approval/artifact screenshot.
+
+## Recover the original Work after a process dies during a file write
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  node tests/browser/crash_recovery_flow.mjs
+```
+
+This flow approves a native file mutation in Chromium, then kills the whole
+server after its atomic file replacement and before the durable effect receipt.
+It confirms physical exit and waits for the observed native lease expiry
+(normally up to 30 seconds), without changing or removing the lease. The
+successor opens the same World and Work. The browser inspects the original
+unconfirmed action, stops the old turn, preserves the draft across language
+and Home navigation, and submits a new instruction in that same Work. It then
+commits a native generation succession and verifies that the original Work
+still exposes the action and keeps its new draft. The original file is not
+rewritten; no successful artifact is invented. Desktop
+and mobile checks retain screenshots when `PER_PULSE_CRASH_SCREENSHOTS` is set.
+
+The model and post-write barrier are explicitly synthetic. Actual native
+approval, file mutation, Kernel recovery, World persistence and OS process
+termination are exercised. This is delayed crash recovery, not proof of
+graceful shutdown or a general exactly-once guarantee for external tools.

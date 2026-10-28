@@ -773,10 +773,15 @@ class PulseEngine:
         pending_finalizers = tuple(
             done for done in finalizers.values() if done is not None
         )
-        if pending_finalizers:
+        if pending_finalizers or abort_threads:
             def mark_drained() -> None:
                 for done in pending_finalizers:
                     done.wait()
+                # An abort callback can outlive the worker it was stopping.
+                # Retain shared storage and the owner lease until that caller
+                # also leaves; an executor-only drain is not enough.
+                for thread in abort_threads:
+                    thread.join()
                 self._shutdown_drained.set()
 
             threading.Thread(
@@ -833,6 +838,8 @@ class PulseEngine:
             ),
         )
         alive_aborts = sum(thread.is_alive() for thread in abort_threads)
+        if pulse_finalized and succession_finalized and not alive_aborts:
+            self._shutdown_drained.set()
         if abort_threads:
             reports = (
                 *reports,
@@ -848,7 +855,10 @@ class PulseEngine:
                         if alive_aborts
                         else ShutdownOwnerState.JOINED
                     ),
-                    process_tree=ShutdownProcessTreeState.UNKNOWN,
+                    # This component owns only the Python abort callbacks.
+                    # Physical backend processes have their own independent
+                    # Harness census; callback return cannot prove their exit.
+                    process_tree=ShutdownProcessTreeState.NOT_APPLICABLE,
                     cancel=(
                         ShutdownCancelState.UNKNOWN
                         if alive_aborts
@@ -878,7 +888,7 @@ class PulseEngine:
         return reports
 
     def wait_for_shutdown_drain(self, timeout: float | None = None) -> bool:
-        """Wait only for executor-owner exit, never for publication rights.
+        """Wait for executor and abort-callback exit, never publication rights.
 
         Runtime uses this from its daemon Storage finalizer.  The publication
         gate remains the authoritative late-write fence even if this returns

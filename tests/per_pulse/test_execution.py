@@ -108,6 +108,8 @@ def test_observation_does_not_create_a_session_or_a_runner(tmp_path):
             assert view["sessionId"] is None
             assert view["turnId"] is None
             assert view["pendingActions"] == []
+            assert view["uncertainActions"] == []
+            assert view["uncertainActionsTruncated"] is False
             assert view["canCancel"] is False
         assert runtime.kernel_service.store.sessions_for_world(runtime.world_id) == before
         assert not runtime.kernel_service._runtimes
@@ -450,6 +452,10 @@ def test_recovered_turn_can_stop_offline_without_constructing_model_or_tools(tmp
         assert not kernel._runtimes
         before = execution.snapshot(page_id)
         assert before["canCancel"] and before["recoveryRequired"]
+        assert len(before["uncertainActions"]) == int(effect_starting)
+        if effect_starting:
+            assert before["uncertainActions"][0]["actionId"] == action_id
+            assert before["uncertainActions"][0]["status"] == "uncertain"
         assert all(not a["canResolve"] for a in before["pendingActions"])
         if not effect_starting:
             with pytest.raises(ExecutionError):
@@ -482,6 +488,8 @@ def test_recovered_turn_can_stop_offline_without_constructing_model_or_tools(tmp
         expected = ActionStatus.UNCERTAIN if effect_starting else ActionStatus.CANCELLED
         assert action.status is expected
         assert receipt["execution"]["historicalUncertainty"] is effect_starting
+        if effect_starting:
+            assert receipt["execution"]["uncertainActions"][0]["status"] == "uncertain"
         assert not kernel._runtimes
         assert len(closed_control_runners) == 1
         assert len(requests) == rounds_before
@@ -503,6 +511,45 @@ def test_recovered_turn_can_stop_offline_without_constructing_model_or_tools(tmp
         if effect_starting:
             scope = execution._scope(page_id).for_turn(turn_id)
             assert client.app.state.pages.runtime.kernel_service.store.get_action(scope, action_id).status is ActionStatus.UNCERTAIN
+            assert latest["uncertainActions"][0]["actionId"] == action_id
+            assert execution.snapshot("home")["uncertainActions"] == []
+
+
+def test_uncertain_action_projection_is_bounded_redacted_and_observation_only(tmp_path, monkeypatch):
+    """Use native action transitions, including retained old terminal records.
+
+    These read-only fixture actions do not claim any real physical write. The
+    separate process-kill test covers approval and an actual filesystem effect.
+    """
+    import per_pulse.execution as module
+    from pulse_harness.core.contracts import ActionClassification, TerminalOutcome
+
+    with _client(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        work = _new_page(client, "Keep private action history here.")
+        scope = pages.execution._scope(work).for_turn("fixture-unconfirmed-history")
+        store = pages.runtime.kernel_service.store
+        store.create_session(scope.session_scope())
+        store.create_turn(scope, "Synthetic interrupted actions")
+        for index in range(3):
+            action_id = f"fixture-uncertain-{index}"
+            store.create_action(scope, action_request_id=action_id, tool_name="fixture_read",
+                                arguments={"path": f"private-{index}.txt", "api_key": "SYNTHETIC_SECRET_VALUE"},
+                                requires_approval=False, classification=ActionClassification.READ_ONLY_NOT_REQUIRED)
+            store.claim_action_start(scope, action_id)
+            store.mark_action_running(scope, action_id)
+            store.terminal_action(scope, action_id, TerminalOutcome.UNCERTAIN)
+        # Bound the read to two instead of manufacturing dozens of identical
+        # records. The third record must make incompleteness explicit.
+        monkeypatch.setattr(module, "_MAX_ACTIONS", 2)
+        state = client.get(f"/api/pages/{work}/execution").json()
+        assert [a["actionId"] for a in state["uncertainActions"]] == ["fixture-uncertain-2", "fixture-uncertain-1"]
+        assert state["uncertainActionsTruncated"] is True
+        assert all(a["argumentsRedacted"] for a in state["uncertainActions"])
+        assert "SYNTHETIC_SECRET_VALUE" not in json.dumps(state)
+        assert not pages.runtime.kernel_service._runtimes
+        assert pages.execution.snapshot("home")["uncertainActions"] == []
+        assert all(store.action_terminal_count(scope, f"fixture-uncertain-{i}") == 1 for i in range(3))
 
 
 def test_completed_effect_is_not_reported_as_rejected_when_continuation_is_redacted(tmp_path, monkeypatch):

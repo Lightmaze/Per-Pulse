@@ -114,23 +114,14 @@ class PageArtifacts:
         still addressable by its action ID through ``read`` after a restart.
         """
         scope = self.execution._scope(page_id)
-        store = self.execution._kernel.store
         try:
-            try:
-                store.get_session(scope)
-            except ScopeConflict as error:
-                if str(error).startswith("unknown session:"):
-                    return {
-                        "pageId": page_id, "artifacts": [], "truncated": False,
-                        "scanLimit": MAX_ACTION_SCAN, **self._limits(),
-                    }
-                raise
-            actions = store.actions_for_session(
-                scope, status=ActionStatus.SUCCEEDED, limit=MAX_ACTION_SCAN + 1,
+            actions = self.execution._historical_actions(
+                self.execution._history_scopes(scope),
+                status=ActionStatus.SUCCEEDED, limit=MAX_ACTION_SCAN + 1,
             )
             truncated = len(actions) > MAX_ACTION_SCAN
             items = []
-            for action in reversed(actions[-MAX_ACTION_SCAN:]):
+            for action in actions[:MAX_ACTION_SCAN]:
                 item = self._item(page_id, action)
                 if item is not None:
                     items.append(item)
@@ -159,10 +150,15 @@ class PageArtifacts:
         if not _identifier(artifact_id):
             raise missing
         try:
-            action_scope = kernel.store.action_scope_for_session(scope, artifact_id)
-            action = kernel.store.get_action(action_scope, artifact_id)
-        except ScopeConflict:
-            raise missing from None
+            for previous in self.execution._history_scopes(scope):
+                try:
+                    action_scope = kernel.store.action_scope_for_session(previous, artifact_id)
+                    action = kernel.store.get_action(action_scope, artifact_id)
+                except ScopeConflict:
+                    continue
+                break
+            else:
+                raise missing
         except HarnessError as error:
             raise self.execution._translate(error) from error
         item = self._item(page_id, action)

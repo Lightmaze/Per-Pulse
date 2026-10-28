@@ -111,3 +111,42 @@ exactly-once delivery, paid provider behavior, or uninterrupted process
 activity; the pre-create race has its own regression. The browser journey is
 still a separate acceptance check. Keep issue #32 open until its entire
 lifecycle and effect/reentry acceptance is reviewed together.
+
+## Physical death after a file effect, before its receipt
+
+`test_runtime_effect_sigkill.py` and `tests/browser/crash_recovery_flow.mjs`
+terminate a full native service after an approved atomic file replacement
+but before its durable operation receipt. The test independently confirms
+the file contents and native RUNNING action before the kill. After confirmed
+process death and observed lease expiry, the same World recovers the action
+as UNCERTAIN. Repeating the old approval only reads its existing receipt;
+it cannot execute again. An explicit Stop retains uncertainty and the file,
+and a new human instruction continues the **original Work** without another
+write. No unconfirmed effect is promoted to a successful artifact.
+
+The interface now exposes these retained native records, with redacted and
+bounded details, under **Actions with unconfirmed outcomes** in their original
+Work. Later successful work or committed native generation succession does
+not erase that evidence. The Chromium flow also checks succession in the same
+Work, bilingual controls, drafts, Home isolation and mobile overflow. A native
+artifact regression verifies approved file readback across prepare/commit and
+restart, no session creation on read, one global uncertainty bound, redaction,
+and rejection of old controls and other pages' action IDs.
+This is one tested local file crash boundary, not a blanket exactly-once claim
+for commands, external services or arbitrary operating-system failures.
+
+## Cooperative pre-create close and delayed cancellation callers
+
+The native World-level cases in `test_kernel_precreate_abort.py` complement
+the earlier isolated Kernel regression. A turn claimed before its durable
+row exists must cancel without a model call, drain the Pulse/Kernel owners,
+release its lease and immediately reopen the same Work for explicitly new
+input. A separate held abort callback proves that worker completion alone
+cannot release shared storage or admit another owner: the callback must also
+physically leave. The deferred finalizer then releases the original epoch.
+
+`PulseEngine.wait_for_shutdown_drain` includes these cancellation callers as
+well as executor workers. Its abort report describes Python callback threads;
+backend process-tree evidence remains the independent Harness report. This
+fixes the previous false unknown-process report without weakening a live
+owner's lease fencing or the late-publication guard.
