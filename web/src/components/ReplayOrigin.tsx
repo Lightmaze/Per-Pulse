@@ -13,6 +13,10 @@ export function ReplayOrigin({ message, pageId, navigate }: {
     <details>
       <summary>{t('replay.sources')}</summary>
       <p>{t('replay.meaning')}</p>
+      {message.replay.focus ? <>
+        <p>{t('replay.focus', { focus: message.replay.focus })}</p>
+        <p>{t('replay.focusInfo')}</p>
+      </> : null}
       <ul>{message.replay.sources.map((source, index) => <li key={source.messageId}>
         <SessionLink pageId={source.pageId} label={t(source.role === 'assistant' ? 'replay.originalReply' : 'replay.originalInput', { count: index + 1 })}
           targetMessageId={source.messageId} origin={{ pageId, messageId: message.id }} navigate={navigate} />

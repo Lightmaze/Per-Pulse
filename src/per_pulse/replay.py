@@ -70,4 +70,5 @@ class PageReplay:
         sources = self._sources(source_page, entry)
         return {"sources": sources, "unavailableSources": len(entry["sources"]) - len(sources),
                 "selected": selected,
+                **({"focus": entry["focus"]} if "focus" in entry else {}),
                 "contentOffset": len(prefix) if row["content"].startswith(prefix) else 0}

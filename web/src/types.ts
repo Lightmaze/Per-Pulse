@@ -34,6 +34,7 @@ export type Message = {
   replay?: {
     sources: { pageId: string; messageId: string; role: 'user' | 'assistant' }[];
     unavailableSources: number; selected: boolean; contentOffset: number;
+    focus?: string;
   } | null;
 };
 
@@ -60,7 +61,7 @@ export type PageExecution = {
   recoveryRequired: boolean; historicalUncertainty: boolean; updatedAt: string | null;
   uncertainActions: UncertainAction[];
   uncertainActionsTruncated: boolean;
-  replay?: { sourceCount: number } | null;
+  replay?: { sourceCount: number; focus?: string } | null;
 };
 export type Artifact = {
   id: string; pageId: string; path: string; sha256: string;

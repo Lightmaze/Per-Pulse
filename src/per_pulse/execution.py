@@ -246,7 +246,8 @@ class PageExecution:
                 "canCancel": bool(turn and turn.status not in _TERMINAL),
                 "pendingActions": actions, "pendingActionsTruncated": pending_truncated,
                 "recoveryRequired": recovery,
-                "replay": {"sourceCount": len(entry["message_ids"])} if entry else None,
+                "replay": {"sourceCount": len(entry["message_ids"]),
+                           **({"focus": entry["focus"]} if "focus" in entry else {})} if entry else None,
                 **history,
                 "updatedAt": turn.updated_at if turn else session.updated_at,
             }

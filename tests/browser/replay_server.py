@@ -14,6 +14,7 @@ from per_pulse.app import create_app
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "per_pulse"))
 from replay_fixture import ReplayFixture
+from focused_replay_fixture import FocusedReplayFixture
 
 
 if __name__ == "__main__":
@@ -21,8 +22,10 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--focused", action="store_true")
     args = parser.parse_args()
-    fixture = ReplayFixture(os.environ.__setitem__, hold=True)
+    fixture_type = FocusedReplayFixture if args.focused else ReplayFixture
+    fixture = fixture_type(os.environ.__setitem__, hold=True)
     app = create_app(args.data_dir, posture=True, allow_workspace_actions=True,
                      model_factory=None if args.offline else fixture.factory)
 

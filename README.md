@@ -41,8 +41,18 @@ prefix when copied. Saved examples and lessons retain the replay origin even
 when the selected passage omits that prefix; shared experience exposes its
 tentative nature without copying the private source material. Bringing a
 selected interpretation Home also preserves its nature in the actual input.
-This bounded regime retains the original conversation. It is not memory
-isolation, sleep scheduling, new external evidence, or proof of model learning.
+By default this bounded regime retains the original conversation. Optional
+`replay.enter(message_ids, focus)` declares a question of up to 1,000 characters.
+After its successful native entry, subsequent requests retain host system
+instructions, that declared focus, selected source references and replay
+exchanges. Other conversation, pre-entry reasoning/preambles and experience
+advice are omitted; auxiliary expert and delivery computations pause for the
+rest of that turn. Its final interpretation contains only text produced after
+entry; earlier preambles remain in the native transcript. Normal context and
+advice return next turn. The interface identifies this focused input in
+the activity and source details. It does not erase earlier provider exposure,
+create a separate identity, grant extra rounds, or establish sleep scheduling,
+new external evidence or model learning.
 
 ## Run from source
 

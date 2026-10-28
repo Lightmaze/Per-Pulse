@@ -15,6 +15,8 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const directory = await mkdtemp(join(tmpdir(), 'per-pulse-replay-'));
 const screenshots = process.env.PER_PULSE_REPLAY_SCREENSHOTS;
+const focused = process.env.PER_PULSE_FOCUSED_REPLAY === '1';
+const focus = 'Could a visitor inspect one example before registration?';
 if (screenshots) await mkdir(screenshots, { recursive: true });
 const socket = createServer();
 await new Promise(resolve => socket.listen(0, '127.0.0.1', resolve));
@@ -29,6 +31,7 @@ const start = (offline = false) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/replay_server.py'), '--data-dir', directory, '--port', String(port),
     ...(offline ? ['--offline'] : []),
+    ...(focused ? ['--focused'] : []),
   ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', data => { serverLog += data; });
   child.stderr.on('data', data => { serverLog += data; });
@@ -85,8 +88,11 @@ try {
   const original = (await view(origin)).messages.find(m => m.role === 'assistant');
   await send('RECONSIDER_SAVED_DESIGN');
   await page.getByText('Reconsidering saved material', { exact: true }).waitFor();
-  await page.getByText('Reading selected earlier messages. File and command actions are unavailable until this turn ends.', { exact: true }).waitFor();
+  await page.getByText(focused
+    ? 'This replay uses the declared focus and selected messages. Other conversation and experience advice return next turn.'
+    : 'Reading selected earlier messages. File and command actions are unavailable until this turn ends.', { exact: true }).waitFor();
   assert.equal((await view(origin)).execution.replay.sourceCount, 1);
+  if (focused) assert.equal((await view(origin)).execution.replay.focus, focus);
   const draft = 'Keep this unsent thought while I inspect the original.';
   await page.getByRole('textbox', { name: 'Message Reconsider a design', exact: true }).fill(draft);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'replay-working.png') });
@@ -102,6 +108,7 @@ try {
   checks.push('the real entry changes the visible activity; final interpretation stays labelled while raw copying preserves its full source prefix');
 
   await article.getByText('Original material', { exact: true }).click();
+  if (focused) await article.getByText('Declared focus: ' + focus, { exact: true }).waitFor();
   await article.getByRole('link', { name: 'Original reply 1', exact: true }).click();
   await wait(() => page.url().endsWith('#message-' + original.id), 'original source anchor');
   assert.equal(await page.getByRole('textbox', { name: 'Message Reconsider a design', exact: true }).inputValue(), draft);
@@ -174,6 +181,7 @@ try {
   await article.getByText('对已存材料的重新思考', { exact: true }).waitFor();
   await article.getByText('原始材料', { exact: true }).click();
   await article.getByRole('link', { name: '原始回复 1', exact: true }).waitFor();
+  if (focused) await article.getByText('本次聚焦问题：' + focus, { exact: true }).waitFor();
   await article.scrollIntoViewIfNeeded();
   assert.equal(await article.locator('.message-content').textContent(), excerpt);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -181,7 +189,7 @@ try {
   await languageTab.close();
   checks.push('mobile Chinese controls keep the original English content and its source links intact');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ checks, count: checks.length, errors, modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
+  console.log(JSON.stringify({ checks, count: checks.length, focused, errors, modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
 } catch (error) {
   if (screenshots && page) await page.screenshot({ path: join(screenshots, 'replay-failure.png') }).catch(() => {});
   throw error;

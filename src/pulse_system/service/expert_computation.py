@@ -19,6 +19,7 @@ from pulse_harness.plugins.expert_computation import ExpertStore, canonical, fin
 from pulse_harness.plugins.expert_work import working_view, make_work_prompt, contribution_context, WorkMaterialBudgetExceeded
 from pulse_harness.plugins.posture import pack_posture_materials, posture_contribution_context
 from .coverme import _BorrowedModel, _NoTools
+from . import native_replay
 
 
 def expert_enabled() -> bool:
@@ -177,6 +178,8 @@ class _Advisor:
         if cancel_event.is_set():
             raise CancellationRequested("expert computation cancelled")
         scope = request.scope
+        if native_replay.focused(self.main_store, scope):
+            return None
         index = self.main_store.next_model_round_index(scope)
         identity = scope.digest + (f":round:{index}" if index else "")
         # Reuse the paid calculation after restart, but main admission remains

@@ -131,7 +131,7 @@ button, a, input, textarea { outline-offset: 4px; }
 .replay-origin > span { font-weight: 550; }
 .replay-origin details { margin-top: 3px; }
 .replay-origin summary { cursor: pointer; width: fit-content; }
-.replay-origin p { margin: 7px 0; }
+.replay-origin p { margin: 7px 0; overflow-wrap: anywhere; }
 .replay-origin ul { list-style: none; padding: 0; margin: 6px 0; }
 .replay-origin li { margin: 5px 0; }
 .replay-origin .session-link { font-size: 12px; }

@@ -671,12 +671,15 @@ class TurnRunner:
                     HookRejected("hook rejected model execution"),
                     evidence=evidence,
                 )
-            request = self._request(
-                scope,
-                descriptors,
-                continuation_of=continuation_of,
-                tool_results=tool_results,
-            )
+            try:
+                request = self._request(
+                    scope,
+                    descriptors,
+                    continuation_of=continuation_of,
+                    tool_results=tool_results,
+                )
+            except HarnessError as exc:
+                return self._block_or_fail(scope, exc, evidence=evidence)
             if self.turn_advisor is not None and (
                 self.store.next_model_round_index(scope) == 0
                 or getattr(self.turn_advisor, "continues", False)
@@ -1672,6 +1675,20 @@ class TurnRunner:
                 "transcript_seq": message.transcript_seq,
             })
         messages = tuple(messages_list)
+        # A native regime may narrow model input without replacing durable
+        # history. Advice, review and the adapter consume this same projection.
+        projector = getattr(self.tool_provider, "project_model_messages", None)
+        if callable(projector):
+            try:
+                messages = tuple(projector(scope, messages))
+            except HarnessError:
+                raise
+            except Exception as exc:
+                raise ProviderProtocolError("scoped model input projection failed") from exc
+            if not all(isinstance(message, Mapping)
+                       and message.get("role") in {"system", "user", "assistant", "tool", "reasoning"}
+                       and isinstance(message.get("content"), str) for message in messages):
+                raise ProviderProtocolError("invalid scoped model input projection")
         cursor = self.store.get_session(scope.session_scope()).cursor
         return ModelRequest(
             scope=scope,

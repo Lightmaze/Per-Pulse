@@ -130,6 +130,9 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         return ((native_replay.descriptor(),) if native_replay.mode(self.store, scope)
                 else self.descriptors())
 
+    def project_model_messages(self, scope, messages):
+        return native_replay.project_model_messages(self.store, scope, messages)
+
     def model_round_limit_for_scope(self, scope, configured):
         entry = native_replay.mode(self.store, scope)
         limit = min(configured, entry['model_round_ceiling']) if entry else configured
@@ -470,9 +473,9 @@ class KernelHarnessRuntime:
             reviewers.append(("CoverMe", self.coverme.reviewer(store, model, scope)))
         if self.posture_memory is not None:
             reviewers.append(("posture", self.expert.posture_reviewer(store, model, scope)))
-        if len(reviewers) == 1:
-            return reviewers[0][1]
-        return CombinedResponseReviewer(tuple(reviewers), max_payload_bytes=store.max_payload_bytes)
+        delegate = (reviewers[0][1] if len(reviewers) == 1 else
+                    CombinedResponseReviewer(tuple(reviewers), max_payload_bytes=store.max_payload_bytes))
+        return native_replay.ResponseReviewer(store, delegate, self._check)
 
     def _claim_database(self, world_id):
         if self.db_path == ":memory:":
