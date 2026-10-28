@@ -160,6 +160,18 @@ def _error(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
 
+def _file_download(content: bytes, name: str, digest: str, *, headers: dict | None = None) -> Response:
+    """Serve already-verified bytes without reopening their filesystem path."""
+    filename = "".join("_" if unicodedata.category(c).startswith("C") else c
+                       for c in name.rsplit("/", 1)[-1]).strip(" .") or "result.txt"
+    fallback = re.sub(r"[^A-Za-z0-9._ -]", "_", filename)
+    return Response(content, media_type="application/octet-stream", headers={
+        "Content-Disposition": f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(filename, safe="")}',
+        "ETag": '"' + digest + '"', "X-Per-Pulse-Content-SHA256": digest,
+        **(headers or {}),
+    })
+
+
 def default_web_dir() -> Path:
     """Prefer packaged assets, then a Vite build in the source checkout."""
     packaged = Path(__file__).parent / "static"
@@ -381,6 +393,15 @@ def create_app(
     def material(page_id: str, material_id: str, request: Request):
         return pages(request).materials.read(page_id, material_id)
 
+    @app.get("/api/pages/{page_id}/materials/{material_id}/download", response_class=Response,
+             responses={200: {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})
+    def download_material(page_id: str, material_id: str, request: Request):
+        service = file_service(request)
+        result = service.materials.download(page_id, material_id)
+        return _file_download(result["content"], result["material"]["name"], result["material"]["sha256"],
+            headers={"X-Per-Pulse-World": service.runtime.world_id,
+                     "X-Per-Pulse-Service-Instance": service.service_instance_id})
+
     @app.post("/api/pages/{page_id}/materials", status_code=201)
     async def upload_material(page_id: str, request: Request, name: str):
         if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/octet-stream":
@@ -476,14 +497,7 @@ def create_app(
         # RFC 6266: offer only a basename, with UTF-8 filename* and an ASCII
         # fallback. The browser controls the destination; no file is served by
         # reopening a path after the version/content checks above.
-        filename = "".join("_" if unicodedata.category(c).startswith("C") else c
-                           for c in result["artifact"]["path"].rsplit("/", 1)[-1]).strip(" .") or "result.txt"
-        fallback = re.sub(r"[^A-Za-z0-9._ -]", "_", filename)
-        return Response(result["content"], media_type="application/octet-stream", headers={
-            "Content-Disposition": f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(filename, safe="")}',
-            "ETag": '"' + result["artifact"]["sha256"] + '"',
-            "X-Per-Pulse-Content-SHA256": result["artifact"]["sha256"],
-        })
+        return _file_download(result["content"], result["artifact"]["path"], result["artifact"]["sha256"])
 
     @app.post("/api/pages/{page_id}/execution/stop")
     def stop(page_id: str, body: StopTurn, request: Request):

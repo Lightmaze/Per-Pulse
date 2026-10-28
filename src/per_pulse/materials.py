@@ -175,7 +175,22 @@ class PageMaterials:
             clean, redacted = redact_text(current["content"])
             content, bounded_redacted, truncated = bound_text(clean, MAX_PREVIEW_BYTES)
             return {"material": record, "content": content, "redacted": redacted or bounded_redacted,
-                    "truncated": truncated, "previewLimitBytes": MAX_PREVIEW_BYTES}
+                    "truncated": truncated, "previewLimitBytes": MAX_PREVIEW_BYTES,
+                    "downloadable": clean == current["content"]}
+
+    def download(self, page_id, material_id):
+        """Read one complete receipt-bound source, preserving its original bytes."""
+        with self.pages._lock:
+            record = self._record(page_id, material_id)
+            current = self._current(record)
+            clean, _ = redact_text(current["content"])
+            if clean != current["content"]:
+                raise MaterialError("material_download_redacted",
+                    "This source contains values that must be hidden and cannot be downloaded as original bytes.", 422)
+            # An already-hidden marker may be literal user-supplied text. The
+            # native upload digest identifies those exact original bytes; it
+            # does not claim to recover any text omitted before the upload.
+            return {"material": record, "content": current["content"].encode("utf-8")}
 
     def selected(self, page_id, identities):
         if len(identities) > 5 or len(set(identities)) != len(identities):

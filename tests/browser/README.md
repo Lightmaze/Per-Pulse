@@ -179,9 +179,11 @@ original bytes, restores its draft, links another page, and submits its native
 file reference. A deliberately scripted provider follows actual `reading`
 passage receipts and computes the report from those returned CSV rows. The
 browser approves the native file write and downloads the exact result. It also
-checks raw message copying, explicit source-file return to Home, recovery of a
+downloads the original source with its upload name, rejects damaged response
+bytes and cancels a pending source save when its dialog closes. It checks
+raw message copying, explicit source-file return to Home, recovery of a
 dropped successful upload response, unsupported files, changed-version refusal,
-offline restart, file-only messages, and Chinese phone layout. Upload, reading,
+offline restart, file-only messages, and Chinese phone source download. Upload, reading,
 approval and filesystem effects are real; semantic choices and arithmetic are
 fixture code and do not establish real-model performance.
 

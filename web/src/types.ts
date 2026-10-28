@@ -89,7 +89,7 @@ export type Material = {
   createdAt: string; source: 'user_upload' | 'workspace_reference';
 };
 export type MaterialList = { pageId: string; materials: Material[]; truncated: boolean; limitBytes: number };
-export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number };
+export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number; downloadable: boolean };
 
 export type PageView = {
   page: PageSummary;

@@ -153,7 +153,39 @@ try {
   await dialog().getByRole('region', { name: 'Source file preview', exact: true }).waitFor();
   await dialog().getByRole('button', { name: 'Source', exact: true }).click();
   assert.equal(await dialog().locator('.document-source').textContent(), bytes.toString('utf8'));
+  let sourceDownloads = 0;
+  page.on('download', () => sourceDownloads++);
+  const sourceSaved = page.waitForEvent('download');
+  await dialog().getByRole('button', { name: 'Download original', exact: true }).click();
+  const sourceDownload = await sourceSaved;
+  assert.equal(sourceDownload.suggestedFilename(), filename);
+  await sourceDownload.saveAs(join(directory, 'original.csv'));
+  assert.deepEqual(await readFile(join(directory, 'original.csv')), bytes);
+  const sourceUrl = '**/api/pages/' + origin + '/materials/' + material.id + '/download';
+  await page.route(sourceUrl, async route => {
+    const actual = await route.fetch();
+    await route.fulfill({ response: actual, body: 'DAMAGED_SOURCE_RESPONSE' });
+  });
+  await dialog().getByRole('button', { name: 'Download original', exact: true }).click();
+  await dialog().getByRole('alert').getByText('The downloaded file did not match this recorded version. Refresh the preview and try again.', { exact: true }).waitFor();
+  assert.equal(sourceDownloads, 1);
+  await page.unroute(sourceUrl);
+  let heldDownload = false, releaseDownload = () => {};
+  const heldResponse = new Promise(resolve => { releaseDownload = resolve; });
+  await page.route(sourceUrl, async route => {
+    const actual = await route.fetch(); heldDownload = true;
+    await heldResponse;
+    try { await route.fulfill({ response: actual }); } catch { /* The dialog cancelled the old request. */ }
+  });
+  await dialog().getByRole('button', { name: 'Download original', exact: true }).click();
+  await wait(() => heldDownload, 'source download held before delivery');
   await close();
+  await dialog().waitFor({ state: 'hidden' });
+  releaseDownload(); await page.unrouteAll({ behavior: 'wait' });
+  await page.waitForTimeout(150);
+  assert.equal(sourceDownloads, 1);
+  assert.equal(await input().inputValue(), retainedDraft);
+  checks.push('the source downloads with its original name and exact bytes; damaged responses and late closed-dialog saves are refused without losing the draft');
   await article.getByRole('button', { name: 'New page', exact: true }).click();
   const newPage = page.getByRole('dialog', { name: 'Give this a little room.', exact: true });
   await newPage.getByText('This starts with the message text. Its files remain available from the linked source message.', { exact: true }).waitFor();
@@ -256,8 +288,14 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.getByRole('button', { name: '原文', exact: true }).click();
   assert.equal(await page.locator('.document-source').textContent(), '# Source only\n\nA durable file-only draft.\n');
+  const mobileSaved = page.waitForEvent('download');
+  await page.getByRole('button', { name: '下载原文件', exact: true }).click();
+  const mobileDownload = await mobileSaved;
+  assert.equal(mobileDownload.suggestedFilename(), 'Only a source.md');
+  await mobileDownload.saveAs(join(directory, 'mobile-source.md'));
+  assert.equal(await readFile(join(directory, 'mobile-source.md'), 'utf8'), '# Source only\n\nA durable file-only draft.\n');
   if (screenshots) await page.screenshot({ path: join(screenshots, 'materials-mobile-chinese.png') });
-  checks.push('the Chinese phone view preserves original source text and fits within the viewport');
+  checks.push('the Chinese phone view preserves and downloads the original source after a disconnected restart, within the viewport');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ count: checks.length, checks, errors, modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
 } catch (error) {

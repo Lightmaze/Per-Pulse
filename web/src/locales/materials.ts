@@ -1,6 +1,8 @@
 export const materialsEnglish = {
   'library.title': 'Materials',
   'library.browse': 'Browse workspace files',
+  'library.downloadOriginal': 'Download original',
+  'library.downloadRedacted': 'This source contains values that need to be hidden. Its original bytes cannot be downloaded here.',
   'library.description': 'Bring a text file into your work, or use a file already here. Files in this workspace can be read from any page.',
   'library.choose': 'Choose a text file',
   'library.hint': 'UTF-8 text, Markdown, CSV or code. Up to 1 MiB. Choosing a file does not upload it.',
@@ -35,6 +37,8 @@ export const materialsEnglish = {
 export const materialsChinese: Record<keyof typeof materialsEnglish, string> = {
   'library.title': '材料',
   'library.browse': '浏览工作区文件',
+  'library.downloadOriginal': '下载原文件',
+  'library.downloadRedacted': '此来源文件包含需要隐藏的内容，无法在这里下载原始文件。',
   'library.description': '导入文本文件，或使用已有文件。工作区中的文件可以从任何页面读取。',
   'library.choose': '选择文本文件',
   'library.hint': 'UTF-8 文本、Markdown、CSV 或代码，最大 1 MiB。选择文件不会立即上传。',
