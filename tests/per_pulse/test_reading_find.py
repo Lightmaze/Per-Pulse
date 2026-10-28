@@ -94,9 +94,9 @@ def test_find_distant_original_passages_without_full_file_read_or_other_work_his
         assert observation["matches"][0]["start_char"] == len(prefix) + len("Consolidated ")
         assert observation["matches"][0]["excerpt"].count("REPORT-ALPHA") >= 1
         assert observation["matches"][0]["excerpt_start_char"] > 1000
-        assert "unrelated note" not in observation["matches"][0]["excerpt"]
+        assert len(observation["matches"][0]["excerpt"]) < 320
         assert observation["observation_only"] and observation["searched_entire_redacted_view"]
-        assert not client.get(f"/api/pages/{other}").json()["messages"][-1]["content"].find("REPORT-ALPHA") >= 0
+        assert "REPORT-ALPHA" not in json.dumps(client.get(f"/api/pages/{other}").json()["messages"])
         assert (tmp_path / "workspace" / material["path"]).read_bytes() == body.encode()
 
 
