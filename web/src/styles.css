@@ -316,6 +316,9 @@ button, a, input, textarea { outline-offset: 4px; }
 .execution-status .execution-allow { color: white; background: var(--accent); border-color: var(--accent); }
 .execution-status .execution-expiry { font-size: 11px; }
 .execution-status .execution-error { color: #8b4c3f; }
+.execution-uncertain { margin-top: 12px; }
+.execution-uncertain > summary { cursor: pointer; color: var(--accent); padding: 6px 0; }
+.execution-status .execution-identity { font-size: 11px; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .execution-heading { flex-direction: column; gap: 10px; } .execution-status button { min-height: 44px; } }
 .page-artifacts { margin-top: 25px; border-bottom: 1px solid var(--border); padding-bottom: 18px; }
 .page-artifacts h2 { font-size: 13px; font-weight: 550; margin: 0; }

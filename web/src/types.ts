@@ -39,9 +39,12 @@ export type ProviderState = {
   workspaceActions: boolean;
 };
 
-export type PendingAction = {
+export type ActionDetails = {
   actionId: string; turnId: string; toolName: string;
   arguments: Record<string, unknown>; argumentsTruncated: boolean; argumentsRedacted: boolean;
+};
+export type UncertainAction = ActionDetails & { status: 'uncertain' };
+export type PendingAction = ActionDetails & {
   approvalId: string | null; expiresAt: string | null; canResolve: boolean; blockedReason: string | null;
 };
 export type PageExecution = {
@@ -49,6 +52,8 @@ export type PageExecution = {
   status: 'idle' | 'working' | 'needs_attention' | 'error' | 'stopped';
   canCancel: boolean; pendingActions: PendingAction[]; pendingActionsTruncated: boolean;
   recoveryRequired: boolean; historicalUncertainty: boolean; updatedAt: string | null;
+  uncertainActions: UncertainAction[];
+  uncertainActionsTruncated: boolean;
 };
 export type Artifact = {
   id: string; pageId: string; path: string; sha256: string;

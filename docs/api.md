@@ -263,4 +263,15 @@ Errors use `{error:{code:string,message:string}}` with 400/404/409/422/503. Show
 
 `GET /api/pages/{id}/execution` observes a native turn with exact-action approvals. `POST /api/pages/{id}/execution/stop` takes `{turnId}`; `POST /api/pages/{id}/execution/actions/{actionId}` takes `{decision: 'allow_once'|'deny'|'cancel'}`. Each returns a source-bound receipt and current page view. Scope is derived from the page server-side. Completed effects are preserved separately from a failed continuation.
 
+Execution also includes `uncertainActions`, the most recent 32 native
+`UNCERTAIN` action records in this page's own Kernel session, newest first.
+Each contains `actionId`, `turnId`, `toolName`, `status: 'uncertain'`, bounded
+and redacted `arguments`, `argumentsTruncated`, and `argumentsRedacted`.
+`uncertainActionsTruncated` explicitly signals older omitted records. Empty
+sessions return an empty array without creating a runner. These are saved
+outcome records, not fresh approvals or confirmed file results. They remain
+visible after an explicit Stop and later successful work; Stop cannot undo
+an effect. The UI exposes them in **Actions with unconfirmed outcomes** only
+on their originating page, without a retry or approval button.
+
 `GET /api/pages/{id}/artifacts` projects bounded successful native `mutate_file` receipts; `GET /api/pages/{id}/artifacts/{artifactId}` verifies original action/page, regular text file and content SHA-256 before presenting a bounded redacted preview. A changed or missing file has no substitute preview. Page view includes `execution`, `artifacts`, `artifactsTruncated`; provider includes `workspaceActions`. See [Harness foundation](harness-foundation.md) for exact contracts.

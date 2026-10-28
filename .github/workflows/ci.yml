@@ -58,6 +58,17 @@ jobs:
       - name: Verify native attention provenance and bilingual return in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_ATTENTION_SCREENSHOTS="$RUNNER_TEMP/per-pulse-attention-screenshots" node tests/browser/attention_flow.mjs
+      - name: Verify original Work recovery after a process dies during a file effect
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_CRASH_SCREENSHOTS="$RUNNER_TEMP/per-pulse-crash-screenshots" node tests/browser/crash_recovery_flow.mjs
+      - name: Keep crash recovery browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-recovery-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-crash-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Keep attention browser evidence
         if: always()
         uses: actions/upload-artifact@v4

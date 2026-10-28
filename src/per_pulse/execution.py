@@ -119,6 +119,7 @@ class PageExecution:
                         "status": "idle", "canCancel": False, "pendingActions": [],
                         "pendingActionsTruncated": False, "recoveryRequired": False,
                         "historicalUncertainty": False,
+                        "uncertainActions": [], "uncertainActionsTruncated": False,
                         "updatedAt": None,
                     }
                 raise
@@ -167,8 +168,23 @@ class PageExecution:
                     TurnStatus.FAILED: "error", TurnStatus.BLOCKED: "needs_attention",
                     TurnStatus.WAITING_APPROVAL: "needs_attention",
                 }.get(turn.status, "working")
+            # Uncertain effects remain inspectable in their original page even
+            # after Stop or a successful later turn. They are not approvals or
+            # confirmed artifacts, and reading them never resumes a runner.
+            uncertain = kernel.store.actions_for_session(
+                scope, status=ActionStatus.UNCERTAIN, limit=_MAX_ACTIONS + 1,
+            )
+            uncertain_actions = []
+            for action in reversed(uncertain[-_MAX_ACTIONS:]):
+                arguments, redacted, truncated = self._arguments(action.arguments)
+                uncertain_actions.append({
+                    "actionId": action.action_request_id, "turnId": action.scope.turn_id,
+                    "toolName": action.tool_name, "arguments": arguments,
+                    "argumentsTruncated": truncated, "argumentsRedacted": redacted,
+                    "status": action.status.value,
+                })
             historical_uncertainty = (
-                kernel.store.count_actions_for_session(scope, status=ActionStatus.UNCERTAIN) > 0
+                bool(uncertain)
                 or kernel.store.count_model_rounds_for_session(scope, status=ModelRoundStatus.UNCERTAIN) > 0
             )
             # Old uncertainty remains evidence, not a permanent demand to stop
@@ -185,6 +201,8 @@ class PageExecution:
                 "pendingActions": actions, "pendingActionsTruncated": pending_truncated,
                 "recoveryRequired": recovery,
                 "historicalUncertainty": historical_uncertainty,
+                "uncertainActions": uncertain_actions,
+                "uncertainActionsTruncated": len(uncertain) > _MAX_ACTIONS,
                 "updatedAt": turn.updated_at if turn else session.updated_at,
             }
         except HarnessError as error:
