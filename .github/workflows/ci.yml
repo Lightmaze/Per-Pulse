@@ -97,6 +97,17 @@ jobs:
       - name: Verify concrete example capture, native retrieval and later feedback in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_EXAMPLE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-example-screenshots" node tests/browser/example_flow.mjs
+      - name: Verify exact native file downloads in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_DOWNLOAD_SCREENSHOTS="$RUNNER_TEMP/per-pulse-download-screenshots" node tests/browser/download_flow.mjs
+      - name: Keep file download browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: file-download-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-download-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Keep concrete example browser evidence
         if: always()
         uses: actions/upload-artifact@v4

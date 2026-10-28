@@ -7,12 +7,14 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+import re
 from typing import Annotated, Any, Literal
-from urllib.parse import urlparse
+import unicodedata
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.exceptions import HTTPException
@@ -345,6 +347,20 @@ def create_app(
     @app.get("/api/pages/{page_id}/artifacts/{artifact_id}")
     def artifact(page_id: str, artifact_id: str, request: Request):
         return pages(request).artifacts.read(page_id, artifact_id)
+
+    @app.get("/api/pages/{page_id}/artifacts/{artifact_id}/download")
+    def download_artifact(page_id: str, artifact_id: str, request: Request):
+        result = pages(request).artifacts.download(page_id, artifact_id)
+        # RFC 6266: offer only a basename, with UTF-8 filename* and an ASCII
+        # fallback. The browser controls the destination; no file is served by
+        # reopening a path after the version/content checks above.
+        filename = "".join("_" if unicodedata.category(c).startswith("C") else c
+                           for c in result["artifact"]["path"].rsplit("/", 1)[-1]).strip(" .") or "result.txt"
+        fallback = re.sub(r"[^A-Za-z0-9._ -]", "_", filename)
+        return Response(result["content"], media_type="application/octet-stream", headers={
+            "Content-Disposition": f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(filename, safe="")}',
+            "ETag": '"' + result["artifact"]["sha256"] + '"',
+        })
 
     @app.post("/api/pages/{page_id}/execution/stop")
     def stop(page_id: str, body: StopTurn, request: Request):

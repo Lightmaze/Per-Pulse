@@ -20,9 +20,12 @@ entered = threading.Event()
 requests = []
 before = 'Draft heading.\npassword=abc\nOrdinary report content.\n'
 large_before = 'DRAFT ' + 'An explicitly synthetic long report. ' * 1_400 + '\n'
+download_name = 'Café 100% 文本.txt'
+download_before = '\ufeffDRAFT\r\n' + 'A fixture line: café 文本.\r\n' * 1400
 (state / 'workspace').mkdir()
 (state / 'workspace' / 'redacted.txt').write_text(before)
 (state / 'workspace' / 'large-report.txt').write_text(large_before)
+(state / 'workspace' / download_name).write_bytes(download_before.encode('utf-8'))
 
 def handler(request):
     body = json.loads(request.content)
@@ -40,6 +43,10 @@ def handler(request):
             arguments = {'path': 'redacted.txt', 'expected_digest': hashlib.sha256(before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'Draft heading.', 'new': 'Final heading.'}]}}
         if 'WRITE_LARGE' in text:
             arguments = {'path': 'large-report.txt', 'expected_digest': hashlib.sha256(large_before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'DRAFT', 'new': 'FINAL'}]}}
+        if 'WRITE_DOWNLOAD' in text:
+            arguments = {'path': download_name, 'expected_digest': hashlib.sha256(download_before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'DRAFT', 'new': 'FINAL'}]}}
+        if 'WRITE_HTML' in text:
+            arguments = {'path': 'preview.html', 'expected_digest': None, 'content': '<!doctype html><script>fetch("/__fixture/should-not-run")</script><p>Explicit synthetic HTML result.</p>'}
         delta = {'tool_calls': [{'index': 0, 'id': 'fixture-file', 'type': 'function', 'function': {
             'name': 'mutate_file', 'arguments': json.dumps(arguments)
         }}]}
@@ -65,9 +72,14 @@ def unblock():
     release.set()
     return {'released': True}
 
+@app.post('/__fixture/replace-download')
+def replace_download():
+    (state / 'workspace' / download_name).write_text('PRIVATE_LATER_WRITER: a different version.\n')
+    return {'replaced': True}
+
 # Put fixture routes before the frontend catch-all, only in this test server.
-fixture_routes = app.router.routes[-2:]
-del app.router.routes[-2:]
+fixture_routes = app.router.routes[-3:]
+del app.router.routes[-3:]
 frontend_index = next(i for i, route in enumerate(app.router.routes) if getattr(route, 'path', None) == '/{route:path}')
 app.router.routes[frontend_index:frontend_index] = fixture_routes
 

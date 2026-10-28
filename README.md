@@ -181,6 +181,16 @@ new outcomes; do not use a short synthetic CI run as that evidence.
 
 Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. The example workspace is always read-only. See [Core Harness](docs/harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
 
+**Download file** takes the complete verified text result out of the workspace.
+It checks the file again when requested and verifies the received bytes before
+starting the browser download. A later overwrite, protected content, or missing
+file produces an explanation; **Refresh file preview** checks its current state.
+Downloads preserve UTF-8 text, line endings and the original filename, including
+non-ASCII names. Redacted previews cannot be downloaded as original files.
+This works for existing results while disconnected and after restart. File
+access remains limited to text up to 1 MiB; the native write path currently
+has a separate 64 KiB output bound. It does not restore older overwritten bytes.
+
 ### Carry a stopped workspace to another directory (POSIX alpha)
 
 Per Pulse uses the **existing native cold Pulse Image** format, not a second

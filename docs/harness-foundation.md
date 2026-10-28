@@ -46,7 +46,7 @@ These are responsibilities, not a proposal for separate microservices. “Requir
 | Tool catalog and capability boundary | Required / P0 | Native tool descriptors/providers and read-only profile; reused. | Unsupported or unauthorized tools fail explicitly. Read-only Work/team descriptions should advertise only enabled operations. |
 | Effect authority, receipts and recovery | Required / P0 | Native action/approval records; product controls connected. | Original-action allow/deny, no duplicate execution on retry, explicit uncertain effects, completed effect separated from failed continuation. |
 | Environment and resource coordination | Required / P0–P1 | Existing workspace/command adapters; shared writer lane added. | Conflicting cooperating writes serialize while reads and unrelated work proceed. Browser leases and cross-process isolation remain separate. |
-| Artifacts, delivery and acceptance | Required / P0–P1 | `PageArtifacts` projects successful native file actions. Existing selected Return Home remains. | Verify source and digest before preview. Immutable revisions, binary files, uploads/downloads and delivery/acceptance state remain. |
+| Artifacts, delivery and acceptance | Required / P0–P1 | `PageArtifacts` projects successful native file actions, previews and complete verified text downloads. Existing selected Return Home remains. | Verify source and digest before delivery. Immutable revisions, binary files, uploads and delivery/acceptance state remain. |
 | Usage, budget and admission | Required before unattended work / P1 | Native usage evidence and in-memory runtime budgeting exist. | Add durable reservations, settlement, per-work envelopes and explicit exhaustion. Existing counters are not restart-safe spending limits. |
 | Trigger and schedule admission | Required for unattended work / P1 | Native runtime activation; no new cron loop added. | Admit events through the same causal path with owner, deduplication, timezone, revision, environment and budget. |
 | Attention and notification delivery | Important / P1 | Page waiting indicators and visible background refresh added. Native work reports exist. | Separate actionable waits, ordinary results, unread activity and delivery acknowledgement; avoid tool-event notification spam. |
@@ -75,6 +75,19 @@ flowchart TD
 
 `PageArtifacts` projects confirmed successful `mutate_file` receipts. A click verifies a regular UTF-8 file within the original workspace, with no-follow/identity checks, a 1 MiB file bound and 64 KiB preview bound. The recorded digest must match. A changed file produces a changed-state explanation, never the replacement content presented as the original version. Sensitive values are redacted. The list performs no file-content I/O. There is no second artifact database or implicit immutable blob store.
 
+`GET /api/pages/{pageId}/artifacts/{actionId}/download` resolves the same native
+receipt and reads the complete file again through `WorkspaceFiles`. It returns
+only bytes matching that recorded digest and needing no redaction. Responses
+use `application/octet-stream`, attachment disposition with an encoded UTF-8
+basename and ASCII fallback, the SHA-256 as ETag, and the existing no-store and
+nosniff headers. HTTP sends the checked in-memory bytes rather than reopening
+the pathname. The client verifies their digest before starting a download and
+cancels a pending save when the user closes the preview or leaves its Work.
+The download neither creates a model call nor replays a native file action.
+The 1 MiB read bound is distinct from the native adapter's current 64 KiB
+write-output bound; this change does not enlarge either. Older overwritten
+versions are still unavailable without a separate immutable-version feature.
+
 When native succession moves a Work to its next generation, confirmed file
 receipts and uncertain action evidence remain observable through that Work's
 verified committed lineage. This reader preserves the same World and context,
@@ -94,6 +107,7 @@ The shared resource registry coordinates a workspace's participating file writes
 | Allow once | Decide one original eligible action. Repeating the same decision returns observation, without resuming or repeating its effect. |
 | Decline | Reject that action; normal native continuation may explain or proceed with different work. |
 | Open a file result | Check the recorded version when opened. This is not live content polling or old-version restoration. |
+| Download a file result | Recheck and deliver exact current bytes matching the original receipt; refuse changed, unavailable or redacted content. |
 | Pause work / cancel a schedule / revoke access | Distinct future product controls; not aliases for Stop this turn. |
 
 If an approved write succeeds and the following model response fails, the receipt reports `actionCompleted: true` and a separate continuation error. Users must not be invited to repeat a completed external effect to repair a conversational failure.

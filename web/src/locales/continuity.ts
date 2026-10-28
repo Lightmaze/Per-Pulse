@@ -156,6 +156,12 @@ export const continuityEnglish = {
   "artifacts.retry": "This file changed while it was being read. Open it again to check this version.",
   "artifacts.missing": "This file is missing or cannot be safely previewed.",
   "artifacts.error": "This file could not be read.",
+  "artifacts.download": "Download file",
+  "artifacts.downloading": "Preparing download…",
+  "artifacts.downloadStarted": "Download started",
+  "artifacts.refresh": "Refresh file preview",
+  "artifacts.downloadRedacted": "This file contains hidden or sensitive values. Its original bytes are not available for download.",
+  "artifacts.downloadUnverified": "The downloaded file did not match this recorded version. Refresh the preview and try again.",
 } as const;
 export const continuityChinese: Record<keyof typeof continuityEnglish, string> = {
   "pulse.title": "活动",
@@ -314,4 +320,10 @@ export const continuityChinese: Record<keyof typeof continuityEnglish, string> =
   "artifacts.retry": "读取期间文件发生变化，请重新打开核对版本。",
   "artifacts.missing": "文件不存在或无法安全预览。",
   "artifacts.error": "无法读取此文件。",
+  "artifacts.download": "下载文件",
+  "artifacts.downloading": "正在准备下载…",
+  "artifacts.downloadStarted": "已开始下载",
+  "artifacts.refresh": "刷新文件预览",
+  "artifacts.downloadRedacted": "文件含有已隐藏的内容或敏感信息，无法下载原始字节。",
+  "artifacts.downloadUnverified": "下载内容与此记录版本不符。请刷新预览后重试。",
 };

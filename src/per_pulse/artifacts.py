@@ -10,7 +10,8 @@ recorded version and never exposes a later writer's content as the old result.
 
 Only the existing ``mutate_file`` receipt contract is supported. Command output,
 assistant claims, arbitrary workspace paths, and unconfirmed effects are not
-artifacts. Text preview is bounded and redacted; this is not a download API.
+artifacts. Preview is bounded and redacted. Downloads separately verify the
+complete current text and refuse any content that would require redaction.
 """
 from __future__ import annotations
 
@@ -137,13 +138,8 @@ class PageArtifacts:
         except HarnessError as error:
             raise self.execution._translate(error) from error
 
-    def read(self, page_id: str, artifact_id: str) -> dict:
-        """Preview an exact page-owned action's current, digest-matching file.
-
-        Original versions are not reconstructed from checkpoints: those hold
-        pre-images and have separate recovery authority. A missing, replaced,
-        binary, protected, or oversized file returns no content.
-        """
+    def _resolve(self, page_id: str, artifact_id: str) -> dict:
+        """Resolve a confirmed receipt in this page's committed history."""
         scope = self.execution._scope(page_id)
         kernel = self.execution._kernel
         missing = ArtifactError("artifact_not_found", "This file result does not belong to this page.", 404)
@@ -164,6 +160,16 @@ class PageArtifacts:
         item = self._item(page_id, action)
         if item is None:
             raise missing
+        return item
+
+    def read(self, page_id: str, artifact_id: str) -> dict:
+        """Preview an exact page-owned action's current, digest-matching file.
+
+        Original versions are not reconstructed from checkpoints: those hold
+        pre-images and have separate recovery authority. A missing, replaced,
+        binary, protected, or oversized file returns no content.
+        """
+        item = self._resolve(page_id, artifact_id)
         response = {
             "pageId": page_id,
             "artifact": item,
@@ -179,7 +185,7 @@ class PageArtifacts:
         try:
             # Reuses the product's dirfd/no-follow path traversal, regular-file
             # check, hardlink rejection, bounded UTF-8 read, and secret guard.
-            current = WorkspaceFiles(kernel.workspace_root).read(item["path"])
+            current = WorkspaceFiles(self.execution._kernel.workspace_root).read(item["path"])
         except FileAccessError as error:
             response["artifact"] = {**item, "state": "unavailable"}
             response["reason"] = error.code
@@ -202,3 +208,25 @@ class PageArtifacts:
         })
         response["artifact"] = {**item, "state": "current"}
         return response
+
+    def download(self, page_id: str, artifact_id: str) -> dict:
+        """Return complete verified UTF-8 bytes, never a reconstructed preview.
+
+        Read once through the existing no-follow descriptor path. Encoding its
+        lossless UTF-8 text back to bytes preserves BOM, CRLF and all whitespace.
+        The returned bytes have the receipt's digest even if a writer replaces
+        the filesystem path after this read. No pathname is reopened by HTTP.
+        """
+        item = self._resolve(page_id, artifact_id)
+        try:
+            current = WorkspaceFiles(self.execution._kernel.workspace_root).read(item["path"])
+        except FileAccessError as error:
+            raise ArtifactError(error.code, "This recorded file version is not available for download.", error.status) from error
+        if current["sha256"] != item["sha256"]:
+            raise ArtifactError("artifact_version_changed", "This file has changed since this page wrote it. Refresh the file preview.", 409)
+        clean, redacted = redact_text(current["content"])
+        # A literal stored redaction/truncation marker is ambiguous provenance,
+        # not a basis for claiming an exact original file download.
+        if redacted or clean != current["content"] or any(stored_text_flags(current["content"])):
+            raise ArtifactError("artifact_download_redacted", "This file requires redaction and cannot be downloaded as an original result.", 422)
+        return {"artifact": item, "content": current["content"].encode("utf-8")}

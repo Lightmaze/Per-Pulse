@@ -23,6 +23,12 @@ const errorKeys: Record<string, MessageKey> = {
   not_found: 'error.notFound', frontend_not_built: 'error.frontendBuild',
   experience_revision_conflict: 'learning.revisionConflict',
   experience_not_found: 'learning.notAvailable', posture_disabled: 'learning.disabled',
+  artifact_version_changed: 'artifacts.changed', artifact_download_redacted: 'artifacts.downloadRedacted',
+  artifact_download_unverified: 'artifacts.downloadUnverified',
+  file_too_large: 'artifacts.tooLarge', text_files_only: 'artifacts.nonText',
+  credential_content_blocked: 'artifacts.sensitive', file_changed_retry: 'artifacts.retry',
+  file_unavailable: 'artifacts.missing', path_unavailable: 'artifacts.missing',
+  not_a_single_regular_file: 'artifacts.missing', artifact_not_found: 'artifacts.missing',
 };
 
 type LanguageContext = {

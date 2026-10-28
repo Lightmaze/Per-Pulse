@@ -1,4 +1,4 @@
-import type { ArtifactRead, Bootstrap, DraftReference, LessonShift, LessonVerdict, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
+import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonShift, LessonVerdict, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
 export type PulseWriteIdentity = Pick<PulseObservation, 'workspaceId' | 'serviceInstanceId'>;
@@ -10,7 +10,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function fetchResponse(path: string, options: RequestInit = {}): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
@@ -21,10 +21,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
     throw new ApiError('Your workspace could not be reached. Please try again.', 'network_error', 0);
   }
-  const body = await response.json().catch(() => null);
   if (!response.ok) {
+    const body = await response.json().catch(() => null);
     throw new ApiError(body?.error?.message ?? 'Something went wrong. Please try again.', body?.error?.code ?? 'request_failed', response.status);
   }
+  return response;
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetchResponse(path, options);
+  const body = await response.json().catch(() => null);
   if (body === null) throw new ApiError('The workspace returned an unreadable response.', 'invalid_response', response.status);
   return body as T;
 }
@@ -77,5 +83,20 @@ export const api = {
   stop: (id: string, turnId: string) => request<{ accepted: boolean; repeated: boolean; view: PageView }>(`${pagePath(id)}/execution/stop`, { method: 'POST', body: JSON.stringify({ turnId }) }),
   decide: (id: string, actionId: string, decision: 'allow_once' | 'deny' | 'cancel') => request<ActionReceipt>(`${pagePath(id)}/execution/actions/${encodeURIComponent(actionId)}`, { method: 'POST', body: JSON.stringify({ decision }) }),
   artifact: (id: string, artifactId: string) => request<ArtifactRead>(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}`),
+  downloadArtifact: async (id: string, artifact: Artifact, signal: AbortSignal) => {
+    const response = await fetchResponse(`${pagePath(id)}/artifacts/${encodeURIComponent(artifact.id)}/download`, { signal });
+    if (response.headers.get('content-type') !== 'application/octet-stream'
+      || response.headers.get('etag') !== `"${artifact.sha256}"`) {
+      throw new ApiError('The downloaded version could not be verified.', 'artifact_download_unverified', 0);
+    }
+    const encodedName = response.headers.get('content-disposition')?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    if (!encodedName) throw new ApiError('The workspace returned an unreadable download.', 'invalid_response', response.status);
+    const filename = decodeURIComponent(encodedName);
+    const bytes = await response.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const actual = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+    if (actual !== artifact.sha256) throw new ApiError('The downloaded version could not be verified.', 'artifact_download_unverified', 0);
+    return { blob: new Blob([bytes], { type: 'application/octet-stream' }), filename };
+  },
   rename: (id: string, title: string) => request<PageView>(pagePath(id), { method: 'PATCH', body: JSON.stringify({ title }) }),
 };
