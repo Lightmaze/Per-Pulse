@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, type Translate } from '../i18n';
 import type { Artifact, ArtifactRead, PageView } from '../types';
+import { TextDocument } from './TextDocument';
 
 function unavailableReason(reason: string | null, t: Translate): string {
   if (reason === 'file_too_large') return t('artifacts.tooLarge');
@@ -68,7 +69,7 @@ export function PageArtifacts({ view }: { view: PageView }) {
         {loading ? <p role="status">{t('artifacts.reading')}</p> : null}
         {error ? <p role="alert">{errorText(error)}</p> : null}
         {result?.state === 'current' ? <>
-          <pre>{result.content}</pre>
+          <TextDocument key={artifact.id} path={artifact.path} content={result.content ?? ''} truncated={result.truncated} />
           {result.truncated ? <p>{t('artifacts.limited')}</p> : null}
           {result.redacted ? <p>{t('artifacts.redacted')}</p> : null}
           <p className="artifact-provenance">{t('artifacts.provenance', { time: new Date(artifact.createdAt).toLocaleString() })}</p>

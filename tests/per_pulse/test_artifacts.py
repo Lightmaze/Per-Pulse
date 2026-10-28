@@ -475,6 +475,7 @@ def test_download_keeps_complete_utf8_bytes_and_filename_after_restart(tmp_path,
         assert download.content == after.encode("utf-8")
         assert len(download.content) > len(preview["content"].encode("utf-8"))
         assert download.headers["etag"] == '"' + _sha(after) + '"'
+        assert download.headers["x-per-pulse-content-sha256"] == _sha(after)
         assert download.headers["content-type"] == "application/octet-stream"
         assert download.headers["content-length"] == str(len(after.encode("utf-8")))
         disposition = download.headers["content-disposition"]

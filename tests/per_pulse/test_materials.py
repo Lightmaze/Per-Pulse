@@ -57,7 +57,7 @@ def test_upload_identity_is_repeated_only_for_the_same_page_and_original_bytes(t
         assert first.status_code == 201
         record = first.json()["material"]
         repeated = upload(client, work, "source.txt", b"original\n", identity=identity)
-        assert repeated.json() == {"material": record, "repeated": True}
+        assert repeated.json() == {**first.json(), "repeated": True}
         for page, name, content in (("home", "source.txt", b"original\n"),
                                     (work, "renamed.txt", b"original\n"),
                                     (work, "source.txt", b"replacement\n")):

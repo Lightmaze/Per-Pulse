@@ -46,7 +46,7 @@ These are responsibilities, not a proposal for separate microservices. “Requir
 | Tool catalog and capability boundary | Required / P0 | Native tool descriptors/providers and read-only profile; reused. | Unsupported or unauthorized tools fail explicitly. Read-only Work/team descriptions should advertise only enabled operations. |
 | Effect authority, receipts and recovery | Required / P0 | Native action/approval records; product controls connected. | Original-action allow/deny, no duplicate execution on retry, explicit uncertain effects, completed effect separated from failed continuation. |
 | Environment and resource coordination | Required / P0–P1 | Existing workspace/command adapters; shared writer lane added. | Conflicting cooperating writes serialize while reads and unrelated work proceed. Browser leases and cross-process isolation remain separate. |
-| Artifacts, delivery and acceptance | Required / P0–P1 | `PageArtifacts` projects successful native file actions, previews and complete verified text downloads. Existing selected Return Home remains. | Verify source and digest before delivery. Immutable revisions, binary files, uploads and delivery/acceptance state remain. |
+| Artifacts, delivery and acceptance | Required / P0–P1 | `PageArtifacts` projects successful native file actions. Materials reuse native text uploads; confirmed text results can be read and downloaded with fresh digest verification. Existing selected Return Home remains. | Immutable revisions, binary files and explicit delivery/acceptance state remain. |
 | Usage, budget and admission | Required before unattended work / P1 | Native usage evidence and in-memory runtime budgeting exist. | Add durable reservations, settlement, per-work envelopes and explicit exhaustion. Existing counters are not restart-safe spending limits. |
 | Trigger and schedule admission | Required for unattended work / P1 | Native runtime activation; no new cron loop added. | Admit events through the same causal path with owner, deduplication, timezone, revision, environment and budget. |
 | Attention and notification delivery | Important / P1 | Page waiting indicators and visible background refresh added. Native work reports exist. | Separate actionable waits, ordinary results, unread activity and delivery acknowledgement; avoid tool-event notification spam. |
@@ -87,6 +87,9 @@ The download neither creates a model call nor replays a native file action.
 The 1 MiB read bound is distinct from the native adapter's current 64 KiB
 write-output bound; this change does not enlarge either. Older overwritten
 versions are still unavailable without a separate immutable-version feature.
+
+Markdown file results retain a source-text view and do not execute HTML or
+automatically load remote images. Materials reuse the same native workspace.
 
 When native succession moves a Work to its next generation, confirmed file
 receipts and uncertain action evidence remain observable through that Work's

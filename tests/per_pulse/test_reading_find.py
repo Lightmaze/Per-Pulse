@@ -15,7 +15,7 @@ import pytest
 from material_fixture import MaterialFixture
 from test_pages import client_for, new_page, wait_for
 from pulse_harness.core.errors import ProviderProtocolError
-from pulse_system.service.workspace_reading import validate
+from pulse_system.service.workspace_reading import _view, validate
 
 
 class FindFixture(MaterialFixture):
@@ -95,7 +95,8 @@ def test_find_distant_original_passages_without_full_file_read_or_other_work_his
         assert observation["matches"][0]["excerpt"].count("REPORT-ALPHA") >= 1
         assert observation["matches"][0]["excerpt_start_char"] > 1000
         assert len(observation["matches"][0]["excerpt"]) < 320
-        assert observation["observation_only"] and observation["searched_entire_redacted_view"]
+        assert observation["observation_only"]
+        assert not observation["searched_entire_redacted_view"]
         assert "REPORT-ALPHA" not in json.dumps(client.get(f"/api/pages/{other}").json()["messages"])
         assert (tmp_path / "workspace" / material["path"]).read_bytes() == body.encode()
 
@@ -111,6 +112,7 @@ def test_find_respects_case_flag_and_refuses_changed_source_bytes(tmp_path, monk
                         and "No literal matching" in v["messages"][-1]["content"])
         assert fixture.observations[-1]["matches"] == []
         assert not fixture.observations[-1]["more_matches"]
+        assert fixture.observations[-1]["searched_entire_redacted_view"]
     changed = FindFixture(monkeypatch.setenv, before_search=lambda source:
         (tmp_path / "workspace" / source["path"]).write_text("CHANGED_PRIVATE_CONTENT"))
     with client_for(tmp_path, model_factory=changed.factory) as client:
@@ -122,6 +124,63 @@ def test_find_respects_case_flag_and_refuses_changed_source_bytes(tmp_path, monk
                         and "not available" in v["messages"][-1]["content"])
         assert changed.observations[-1]["status"] != "succeeded"
         assert "CHANGED_PRIVATE_CONTENT" not in json.dumps(changed.requests)
+
+
+def test_find_redacts_before_search_and_uses_redacted_view_coordinates(tmp_path, monkeypatch):
+    body = ("PUBLIC report-alpha before.\n"
+            "api_key = SYNTHETIC_SECRET_MARKER_0123456789\n"
+            "PUBLIC report-alpha after.\n")
+    redacted, hidden = _view(body)
+    assert hidden
+    fixture = FindFixture(monkeypatch.setenv)
+    with client_for(tmp_path, model_factory=fixture.factory) as client:
+        work = new_page(client)["page"]["id"]
+        uploaded = _upload(client, work, "redacted-notes.txt", body.encode())
+        assert uploaded.status_code == 201, uploaded.text
+        material = uploaded.json()["material"]
+        assert client.post(f"/api/pages/{work}/messages", json={
+            "content": "FIND_RARE_LINE", "materials": [material["id"]]}).status_code == 202
+        wait_for(client, work, lambda item: item["messages"][-1]["role"] == "assistant"
+                 and "bounded source passages" in item["messages"][-1]["content"])
+        observation = fixture.observations[-1]
+        assert observation["redacted"] and observation["searched_entire_redacted_view"]
+        assert not observation["more_matches"]
+        assert observation["source"]["view_digest"] == hashlib.sha256(redacted.encode()).hexdigest()
+        assert [item["start_char"] for item in observation["matches"]] == [
+            redacted.index("report-alpha"), redacted.rindex("report-alpha")]
+        assert "SYNTHETIC_SECRET_MARKER" not in json.dumps(fixture.requests)
+        assert (tmp_path / "workspace" / material["path"]).read_text() == body
+        before_restart = client.get(f"/api/pages/{work}").json()["messages"]
+
+    # The already-hidden marker crosses action results, event envelopes and
+    # tool transcript rows. All must remain readable after cold reopening.
+    with client_for(tmp_path, model_factory=None) as client:
+        reopened = client.get(f"/api/pages/{work}")
+        assert reopened.status_code == 200, reopened.text
+        assert reopened.json()["messages"] == before_restart
+
+
+@pytest.mark.parametrize("text", [
+    "An earlier source said [REDACTED]; preserve that visible omission.",
+    "[TRUNCATED sha256=" + "a" * 64 + " redacted=0 preview=An explicitly shortened source.]",
+    "[TRUNCATED sha256=" + "b" * 64 + " redacted=1 preview=An earlier hidden source.]",
+])
+def test_existing_visibility_markers_survive_native_execution_and_reopen(tmp_path, monkeypatch, text):
+    fixture = FindFixture(monkeypatch.setenv)
+    with client_for(tmp_path, model_factory=fixture.factory) as client:
+        work = new_page(client)["page"]["id"]
+        wait_for(client, work, lambda view: view["messages"][-1]["role"] == "assistant")
+        sent = client.post(f"/api/pages/{work}/messages", json={"content": text})
+        assert sent.status_code == 202, sent.text
+        message_id = sent.json()["messageId"]
+        current = wait_for(client, work, lambda view: any(
+            item["id"] == message_id and item["status"] == "settled" for item in view["messages"]))
+        assert next(item["content"] for item in current["messages"] if item["id"] == message_id) == text
+        assert text in json.dumps(fixture.requests)
+    with client_for(tmp_path, model_factory=None) as client:
+        reopened = client.get(f"/api/pages/{work}")
+        assert reopened.status_code == 200, reopened.text
+        assert next(item["content"] for item in reopened.json()["messages"] if item["id"] == message_id) == text
 
 
 @pytest.mark.parametrize("query,options", [

@@ -128,9 +128,15 @@ class WorkspaceFiles:
         if len(data) > MAX_FILE_BYTES:
             raise FileAccessError("file_too_large", 413)
         _text(data)
-        # Common filesystems limit a basename in bytes, not Unicode characters.
-        # Leave room for the native create-only prefix without breaking UTF-8.
-        safe_name = re.sub(r"[^\w. -]", "_", name, flags=re.UNICODE).encode("utf-8")[:200].decode("utf-8", errors="ignore")
+        safe_name = re.sub(r"[^\w. -]", "_", name, flags=re.UNICODE)
+        # The filesystem limits bytes, not characters. Leave room for the
+        # unique prefix even when the original name contains multibyte text,
+        # and retain a short extension so the imported material stays usable.
+        suffix = Path(safe_name).suffix
+        if len(suffix.encode("utf-8")) > 16:
+            suffix = ""
+        stem = safe_name[:-len(suffix)] if suffix else safe_name
+        safe_name = stem.encode("utf-8")[:160 - len(suffix.encode("utf-8"))].decode("utf-8", errors="ignore") + suffix
         target = f"{uuid4().hex[:12]}-{safe_name}"
         with self.directory() as root:
             try:

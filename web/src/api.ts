@@ -1,4 +1,5 @@
 import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
+import type { WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
 export type PulseWriteIdentity = Pick<PulseObservation, 'workspaceId' | 'serviceInstanceId'>;
@@ -42,6 +43,14 @@ const pulseWriteHeaders = (identity: PulseWriteIdentity) => ({
 });
 
 export const api = {
+  files: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
+    request<WorkspaceFileList>(`/workspace/files?path=${encodeURIComponent(path)}`, { headers: pulseWriteHeaders(identity), signal }),
+  file: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
+    request<WorkspaceFile>(`/workspace/files/content?path=${encodeURIComponent(path)}`, { headers: pulseWriteHeaders(identity), signal }),
+  upload: (file: File, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
+    request<WorkspaceUpload>(`/workspace/files?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST', headers: { ...pulseWriteHeaders(identity), 'Content-Type': 'application/octet-stream' }, body: file, signal,
+    }),
   bootstrap: (signal?: AbortSignal) => request<Bootstrap>('/bootstrap', { signal }),
   settings: (signal?: AbortSignal) => request<WorkspaceSettings>('/settings', { signal }),
   updateSettings: (responseLanguage: ResponseLanguage) => request<WorkspaceSettings>('/settings', { method: 'PATCH', body: JSON.stringify({ responseLanguage }) }),
@@ -57,13 +66,13 @@ export const api = {
     request<{ messageId: string; view: PageView }>(`${pagePath(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, references, materials }) }),
   materials: (id: string, signal?: AbortSignal) => request<MaterialList>(`${pagePath(id)}/materials`, { signal }),
   material: (id: string, materialId: string, signal?: AbortSignal) => request<MaterialRead>(`${pagePath(id)}/materials/${encodeURIComponent(materialId)}`, { signal }),
-  uploadMaterial: async (pageId: string, workspaceId: string, uploadId: string, file: File) => {
+  uploadMaterial: async (pageId: string, identity: WorkspaceFileIdentity, uploadId: string, file: File, signal?: AbortSignal) => {
     if (file.size > 1024 * 1024) throw new ApiError('Choose a text file of at most 1 MiB.', 'material_too_large', 413);
     const bytes = await file.arrayBuffer();
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), value => value.toString(16).padStart(2, '0')).join('');
-    const result = await request<{ material: Material; repeated: boolean }>(`${pagePath(pageId)}/materials?name=${encodeURIComponent(file.name)}`, {
-      method: 'POST', body: bytes, headers: {
-        'Content-Type': 'application/octet-stream', 'X-Per-Pulse-World': workspaceId,
+    const result = await request<WorkspaceFileIdentity & { material: Material; repeated: boolean }>(`${pagePath(pageId)}/materials?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST', body: bytes, signal, headers: {
+        ...pulseWriteHeaders(identity), 'Content-Type': 'application/octet-stream',
         'X-Per-Pulse-Upload-Id': uploadId, 'X-Per-Pulse-File-SHA256': digest,
       },
     });
@@ -72,6 +81,11 @@ export const api = {
     }
     return result;
   },
+  referenceMaterial: (pageId: string, file: WorkspaceFile, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
+    request<WorkspaceFileIdentity & { material: Material; repeated: boolean }>(`${pagePath(pageId)}/materials/reference`, {
+      method: 'POST', headers: pulseWriteHeaders(identity), signal,
+      body: JSON.stringify({ path: file.path, sha256: file.sha256 }),
+    }),
   reference: (id: string, data: { targetPageId: string; label: string; sourceMessageId?: string | null }) =>
     request<{ reference: PageReference; view: PageView }>(`${pagePath(id)}/references`, { method: 'POST', body: JSON.stringify(data) }),
   bringHome: (id: string, content: string, messageId?: string, includeMaterials = false) =>

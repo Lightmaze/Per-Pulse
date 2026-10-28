@@ -20,8 +20,10 @@ from uuid import uuid4
 
 from pulse_harness.adapters.chat_http import ChatHTTPModelAdapter, model_factory_from_env
 from pulse_harness.core import HarnessScope
+from pulse_harness.core.errors import HarnessError
 from pulse_system.service.kernel_runtime import KernelHarnessFactory
 from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
+from pulse_system.product.files import WorkspaceFiles
 from pulse_system.core.pulse.context import ContextPulseConfig as PulseSettings
 
 from . import __version__
@@ -75,6 +77,7 @@ class PageService:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         workspace = self.data_dir / "workspace"
         workspace.mkdir(exist_ok=True)
+        self.files = WorkspaceFiles(workspace)
         self._lock = threading.RLock()
         # An ephemeral process identity is distinct from the persistent World.
         self.service_instance_id = uuid4().hex
@@ -286,6 +289,35 @@ class PageService:
                 "serviceInstanceId": self.service_instance_id,
                 "pulse": self.pulse_status(),
             }
+
+    def require_file_identity(self, world_id: str | None, instance_id: str | None) -> None:
+        """Bind material access to the World and process the browser observed."""
+        if world_id != self.runtime.world_id or instance_id != self.service_instance_id:
+            raise PageError(
+                "workspace_changed",
+                "The workspace changed. Reload before opening or uploading materials.",
+                409,
+            )
+
+    def file_response(self, result: dict) -> dict:
+        return {"workspaceId": self.runtime.world_id,
+                "serviceInstanceId": self.service_instance_id, **result}
+
+    def upload_file(self, name: str, data: bytes, world_id: str | None, instance_id: str | None) -> dict:
+        with self._lock:
+            self.require_file_identity(world_id, instance_id)
+            self.runtime._require_runtime_owner()
+            if not data:
+                raise PageError("empty_file", "This file is empty. Choose a text file with some content.")
+            # Explicit user uploads use the native create-only file interface;
+            # they do not grant the model permission to modify workspace files.
+            try:
+                with self.materials.writer.write(timeout=5), self.runtime._publication_permit.transaction_guard():
+                    self.require_file_identity(world_id, instance_id)
+                    self.runtime._require_runtime_owner()
+                    return self.file_response(self.files.upload(name, data))
+            except HarnessError as error:
+                raise self.execution._translate(error) from error
 
     def require_pulse_identity(self, world_id: str | None, instance_id: str | None) -> None:
         """Fence first-party Activity edits to their observed World and process.

@@ -19,8 +19,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.concurrency import run_in_threadpool
 
 from pulse_system.service.runtime import ServiceError
+from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES
 
 from . import __version__
 from .language import ResponseLanguage
@@ -64,6 +66,11 @@ class NewMessage(Input):
 
 class NewReference(ReferenceInput):
     sourceMessageId: Identifier | None = None
+
+
+class ExistingMaterial(Input):
+    path: Annotated[str, StringConstraints(min_length=1, max_length=2048)]
+    sha256: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 
 class ReturnHome(Input):
@@ -216,15 +223,16 @@ def create_app(
                 if not same_origin and not dev_origin:
                     return secure_response(_error("origin_not_allowed", "Open Per Pulse from its local address.", 403))
             if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
-                content_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
-                is_upload = request.method == "POST" and re.fullmatch(r"/api/pages/[^/]+/materials", request.url.path)
-                if is_upload and content_type == "application/octet-stream":
-                    # The upload route streams its own strict byte bound. Do
-                    # not decode/re-encode a File or allocate an unbounded body.
-                    pass
-                elif content_type != "application/json":
+                file_upload = request.method == "POST" and request.url.path == "/api/workspace/files"
+                material_upload = request.method == "POST" and re.fullmatch(r"/api/pages/[^/]+/materials", request.url.path)
+                upload = file_upload or material_upload
+                media_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
+                if upload and media_type != "application/octet-stream":
+                    code = "file_body_required" if file_upload else "material_bytes_required"
+                    return secure_response(_error(code, "Send the original file as application/octet-stream.", 415))
+                if not upload and media_type != "application/json":
                     return secure_response(_error("json_required", "Send this request as JSON.", 415))
-                elif len(await request.body()) > 128 * 1024:
+                if not upload and len(await request.body()) > 128 * 1024:
                     return secure_response(_error("request_too_large", "This request is too large.", 413))
         return secure_response(await call_next(request))
 
@@ -243,6 +251,23 @@ def create_app(
     @app.exception_handler(ServiceError)
     async def service_error(_request: Request, error: ServiceError):
         return _error(error.error, error.detail, error.status)
+
+    @app.exception_handler(FileAccessError)
+    async def file_error(_request: Request, error: FileAccessError):
+        messages = {
+            "file_too_large": "Choose a text file no larger than 1 MiB.",
+            "text_files_only": "Choose a UTF-8 text file, such as Markdown, plain text or CSV.",
+            "credential_content_blocked": "This file appears to contain a credential. Remove it before sharing the file.",
+            "protected_or_invalid_path": "This file name or location cannot be opened here.",
+            "invalid_path": "This file location is invalid.",
+            "filename_only": "Choose a file name without folders.",
+            "file_changed_retry": "The file changed while it was being read. Open it again.",
+            "file_unavailable": "This file is no longer available.",
+            "path_unavailable": "This folder is no longer available.",
+            "not_a_single_regular_file": "This file cannot be opened here.",
+            "upload_failed_or_unconfirmed": "The upload could not be confirmed. Check the uploads folder before trying again.",
+        }
+        return _error(error.code, messages.get(error.code, "This file could not be opened."), error.status)
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request: Request, error: RequestValidationError):
@@ -267,6 +292,36 @@ def create_app(
     @app.get("/api/settings")
     def settings(request: Request):
         return pages(request).settings()
+
+    def file_service(request: Request) -> PageService:
+        service = pages(request)
+        service.require_file_identity(request.headers.get("x-per-pulse-world"),
+                                      request.headers.get("x-per-pulse-service-instance"))
+        return service
+
+    @app.get("/api/workspace/files")
+    def list_files(request: Request, path: str = ""):
+        service = file_service(request)
+        return service.file_response(service.files.list(path))
+
+    @app.get("/api/workspace/files/content")
+    def read_file(request: Request, path: str):
+        service = file_service(request)
+        return service.file_response(service.files.read(path))
+
+    @app.post("/api/workspace/files", status_code=201)
+    async def upload_file(request: Request, name: str):
+        service = file_service(request)
+        # Bound streamed bodies too; Content-Length is not an authority and
+        # must not turn an oversized upload into an unbounded allocation.
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_FILE_BYTES:
+                raise FileAccessError("file_too_large", 413)
+            data.extend(chunk)
+        return await run_in_threadpool(service.upload_file, name, bytes(data),
+                                      request.headers.get("x-per-pulse-world"),
+                                      request.headers.get("x-per-pulse-service-instance"))
 
     @app.patch("/api/settings")
     def update_settings(body: SettingsInput, request: Request):
@@ -334,15 +389,30 @@ def create_app(
         service.execution._scope(page_id)
         if request.headers.get("x-per-pulse-world") != service.runtime.world_id:
             raise MaterialError("material_workspace_changed", "The workspace changed. Refresh before uploading.")
+        # The first-party browser also fences uploads to the service instance it
+        # observed. Retain compatibility with existing World-only native clients.
+        if "x-per-pulse-service-instance" in request.headers:
+            service.require_file_identity(request.headers.get("x-per-pulse-world"),
+                                          request.headers.get("x-per-pulse-service-instance"))
         data = bytearray()
         async for chunk in request.stream():
             if len(data) + len(chunk) > MAX_FILE_BYTES:
                 raise MaterialError("material_too_large", "Choose a text file of at most 1 MiB.", 413)
             data.extend(chunk)
-        return await asyncio.to_thread(service.materials.upload, page_id, name, bytes(data),
+        result = await asyncio.to_thread(service.materials.upload, page_id, name, bytes(data),
             upload_id=request.headers.get("x-per-pulse-upload-id"),
             world_id=request.headers.get("x-per-pulse-world"),
             expected_digest=request.headers.get("x-per-pulse-file-sha256"))
+        return service.file_response(result)
+
+    @app.post("/api/pages/{page_id}/materials/reference", status_code=201)
+    def reference_material(page_id: str, body: ExistingMaterial, request: Request):
+        service = file_service(request)
+        return service.file_response(service.materials.reference_existing(
+            page_id, body.path, body.sha256,
+            world_id=request.headers.get("x-per-pulse-world"),
+            service_instance_id=request.headers.get("x-per-pulse-service-instance"),
+        ))
 
     @app.get("/api/pages/{page_id}/messages")
     def earlier_messages(page_id: str, request: Request, beforeMessageId: Identifier):
@@ -399,7 +469,8 @@ def create_app(
     def artifact(page_id: str, artifact_id: str, request: Request):
         return pages(request).artifacts.read(page_id, artifact_id)
 
-    @app.get("/api/pages/{page_id}/artifacts/{artifact_id}/download")
+    @app.get("/api/pages/{page_id}/artifacts/{artifact_id}/download", response_class=Response,
+             responses={200: {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})
     def download_artifact(page_id: str, artifact_id: str, request: Request):
         result = pages(request).artifacts.download(page_id, artifact_id)
         # RFC 6266: offer only a basename, with UTF-8 filename* and an ASCII
@@ -411,6 +482,7 @@ def create_app(
         return Response(result["content"], media_type="application/octet-stream", headers={
             "Content-Disposition": f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(filename, safe="")}',
             "ETag": '"' + result["artifact"]["sha256"] + '"',
+            "X-Per-Pulse-Content-SHA256": result["artifact"]["sha256"],
         })
 
     @app.post("/api/pages/{page_id}/execution/stop")
