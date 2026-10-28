@@ -20,6 +20,7 @@ from pulse_harness.core.contracts import ActionRecord, ActionStatus, ApprovalSta
 from pulse_harness.core.errors import HarnessError, ScopeConflict, StoreUnavailable
 from pulse_harness.core.replay import redact_value, stored_payload_flags
 from pulse_system.core.causality import CausalTransitionError
+from pulse_system.service import native_replay
 
 
 _TERMINAL = {TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED}
@@ -181,6 +182,7 @@ class PageExecution:
                         "pageId": page_id, "sessionId": None, "turnId": None,
                         "status": "idle", "canCancel": False, "pendingActions": [],
                         "pendingActionsTruncated": False, "recoveryRequired": False,
+                        "replay": None,
                         **history,
                         "updatedAt": None,
                     }
@@ -237,12 +239,14 @@ class PageExecution:
                 turn and turn.status not in _TERMINAL
                 and (turn.status is TurnStatus.BLOCKED or not self._attached(turn.scope))
             )
+            entry = native_replay.mode(kernel.store, turn.scope) if turn and turn.status not in _TERMINAL else None
             return {
                 "pageId": page_id, "sessionId": session.scope.session_id,
                 "turnId": turn.scope.turn_id if turn else None, "status": status,
                 "canCancel": bool(turn and turn.status not in _TERMINAL),
                 "pendingActions": actions, "pendingActionsTruncated": pending_truncated,
                 "recoveryRequired": recovery,
+                "replay": {"sourceCount": len(entry["message_ids"])} if entry else None,
                 **history,
                 "updatedAt": turn.updated_at if turn else session.updated_at,
             }

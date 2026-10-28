@@ -27,6 +27,7 @@ from pulse_system.core.pulse.context import ContextPulseConfig as PulseSettings
 from . import __version__
 from .execution import PageExecution
 from .artifacts import PageArtifacts
+from .replay import PageReplay, RETURN_PREFIX
 from .language import RESPONSE_LANGUAGES, ResponseLanguage, install_language_advisor
 
 MAX_MESSAGES = 500
@@ -113,6 +114,7 @@ class PageService:
         self.runtime = RuntimeService(config, harness_factory=harness)
         self.execution = PageExecution(self.runtime)
         self.artifacts = PageArtifacts(self.runtime, execution=self.execution)
+        self.replay = PageReplay(self)
         from .learning import PageLearning
         self.learning = PageLearning(self)
         self._state_key = f"per-pulse-pages-v1:{self.runtime.world_id}"
@@ -473,6 +475,7 @@ class PageService:
                 "sourcePageId": origin.get("pageId"),
                 "sourceMessageId": origin.get("messageId"),
                 "activation": activation,
+                "replay": self.replay.message(page_id, row, origin),
                 "references": [r for r in refs if r["sourceMessageId"] == row["event_id"]],
             })
         return messages
@@ -621,6 +624,11 @@ class PageService:
             if page_id == "home":
                 raise PageError("already_home", "Choose a session page to bring a result home.")
             self._check_message(page_id, message_id)
+            if message_id is not None:
+                from pulse_system.service.native_replay import result_origin
+
+                if result_origin(self.runtime, message_id) is not None:
+                    content = RETURN_PREFIX + content
             # This is the user's selected contribution, not an invented
             # assistant report or an implicit copy of the Work conversation.
             # A causal parent inherits its center in the native ledger, so a

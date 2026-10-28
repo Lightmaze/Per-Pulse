@@ -108,6 +108,17 @@ jobs:
           path: ${{ runner.temp }}/per-pulse-download-screenshots
           if-no-files-found: ignore
           retention-days: 7
+      - name: Verify native replay provenance and ordinary continuation in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_REPLAY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-replay-screenshots" node tests/browser/replay_flow.mjs
+      - name: Keep replay browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-replay-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Keep concrete example browser evidence
         if: always()
         uses: actions/upload-artifact@v4

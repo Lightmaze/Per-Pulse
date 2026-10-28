@@ -5,6 +5,7 @@ import { getMessageActivity } from '../status';
 import { useLanguage } from '../i18n';
 import { MessageContent } from './MessageContent';
 import { CopyButton } from './CopyButton';
+import { ReplayOrigin } from './ReplayOrigin';
 
 export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onSaveExample, onHistory, onFind, stale = false }: {
   view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
@@ -22,7 +23,8 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
     {view.messages.map(message => { const activity = getMessageActivity(message.status, view.provider.configured, stale); return <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id} key={message.id} tabIndex={-1} aria-label={t(message.role === 'user' ? 'conversation.yourMessage' : message.role === 'assistant' ? 'conversation.assistantMessage' : 'conversation.workspaceMessage')}>
       <div className="message-label">{message.role === 'user' ? t('conversation.you') : message.role === 'assistant' ? 'Per Pulse' : t('conversation.workspace')}</div>
       {message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">{t("conversation.from")} <SessionLink pageId={message.sourcePageId} label={pageMap.get(message.sourcePageId) ? pageTitle(pageMap.get(message.sourcePageId)!) : t('conversation.sourcePage')} targetMessageId={message.sourceMessageId ?? undefined} navigate={navigate} /></div> : null}
-      <MessageContent content={message.content} referenceKey={JSON.stringify(message.references.map(({ id, targetPageId, label }) => ({ id, targetPageId, label })))} pageId={view.page.id} messageId={message.id} navigate={navigate} />
+      <ReplayOrigin message={message} pageId={view.page.id} navigate={navigate} />
+      <MessageContent content={message.content.slice(message.replay?.contentOffset ?? 0)} referenceKey={JSON.stringify(message.references.map(({ id, targetPageId, label }) => ({ id, targetPageId, label })))} pageId={view.page.id} messageId={message.id} navigate={navigate} />
       <div className="message-footer">
         {activity ? <span className={`message-status tone-${activity.tone}`} title={activity.detail}>{activity.label}</span> : null}
         <div className="message-actions">

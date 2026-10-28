@@ -17,6 +17,7 @@ The alpha candidate provides English and 简体中文 interface controls, a sepa
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.
 - Read structured replies and notes with headings, lists, tables, and code blocks. Copy a code block or the original Markdown, and keep native page links connected to their source.
+- Recognize a native selected-history replay while it runs, inspect its original messages, and retain the interpretation's provenance when saving an example or bringing it Home.
 - Use a separate, clearly labeled example workspace to explore the interface without a model.
 - Enable bounded local pulses: a context can continue from its retained history, and explicit computational connections can carry its results into related contexts.
 
@@ -29,6 +30,18 @@ when it contains the name of a linked page. A reference that appears only in
 code or across separate formatting spans keeps a separate page link below the
 message. **Copy** preserves the original message text, including Markdown;
 **Copy code** preserves the displayed code's spacing and line breaks.
+
+The existing `replay` tool lets the model reconsider one to four saved messages
+within its current turn. After its successful native entry, only the selected
+history reader remains available for that turn; finishing restores ordinary
+tools for the next turn. The interface shows this activity and provides verified
+links to the original input or reply. The raw message keeps its full provenance
+prefix when copied. Saved examples and lessons retain the replay origin even
+when the selected passage omits that prefix; shared experience exposes its
+tentative nature without copying the private source material. Bringing a
+selected interpretation Home also preserves its nature in the actual input.
+This bounded regime retains the original conversation. It is not memory
+isolation, sleep scheduling, new external evidence, or proof of model learning.
 
 ## Run from source
 

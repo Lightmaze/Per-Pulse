@@ -72,6 +72,7 @@ class PageLearning:
         # Shared experiences expose only the original message anchors so the
         # reader can inspect their provenance without copying the raw episode.
         source = record.get("source", {})
+        result["sourceRegime"] = "replay" if source.get("execution_regime") == "replay" else None
         if source_page is not None and isinstance(source, dict):
             original, correction = source.get("source_message_id"), source.get("feedback_message_id")
             if isinstance(original, str) and original:

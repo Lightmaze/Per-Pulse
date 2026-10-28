@@ -44,6 +44,7 @@ export function SaveExampleDialog({ pageId, message, initial, messages, close, s
   };
   return <Dialog title={t('learning.saveExample')} onClose={() => { if (!writing.current) close(); }} className="save-example-dialog">
     <p className="dialog-description">{t('learning.saveExampleHelp')}</p>
+    {message.replay ? <p className="lesson-note">{t('replay.saved')}</p> : null}
     <form onSubmit={event => { event.preventDefault(); void save(); }}>
       <label className="field-label" htmlFor="example-title">{t('learning.exampleTitle')}</label>
       <input id="example-title" value={title} onChange={event => setTitle(event.target.value)} maxLength={160} disabled={busy} required />

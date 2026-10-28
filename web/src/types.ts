@@ -29,6 +29,10 @@ export type Message = {
   sourcePageId: string | null;
   sourceMessageId: string | null;
   references: PageReference[];
+  replay?: {
+    sources: { pageId: string; messageId: string; role: 'user' | 'assistant' }[];
+    unavailableSources: number; selected: boolean; contentOffset: number;
+  } | null;
 };
 
 export type ProviderState = {
@@ -54,6 +58,7 @@ export type PageExecution = {
   recoveryRequired: boolean; historicalUncertainty: boolean; updatedAt: string | null;
   uncertainActions: UncertainAction[];
   uncertainActionsTruncated: boolean;
+  replay?: { sourceCount: number } | null;
 };
 export type Artifact = {
   id: string; pageId: string; path: string; sha256: string;
@@ -116,6 +121,7 @@ type ExperienceBase = {
   canEdit: boolean;
   canReport: boolean;
   sourcePageId: string | null;
+  sourceRegime?: 'replay' | null;
   sourceAnchor?: { resultMessageId: string; feedbackMessageId?: string };
   record_type: 'observed_episode' | 'constructed_fixture';
   encounter?: { situation: string; action: string; outcome?: string };
@@ -123,6 +129,7 @@ type ExperienceBase = {
   feedback?: { verdict: string; evidence: string; source?: {
     kind?: string; page_id?: string; relation?: string;
     result_message_id?: string; result_evidence_class?: string;
+    result_execution_regime?: 'ordinary' | 'replay';
   } }[];
 };
 export type PostureLesson = ExperienceBase & {

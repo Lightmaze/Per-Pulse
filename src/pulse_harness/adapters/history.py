@@ -44,7 +44,7 @@ def _integer(value: Any, low: int, high: int) -> int:
     return value
 
 
-def _source(row: Mapping[str, Any]) -> dict[str, Any]:
+def source_identity(row: Mapping[str, Any]) -> dict[str, Any]:
     scope = row["scope"]
     return {"session_id": scope.session_id, "engram_id": scope.engram_id,
             "message_id": row["message_id"], "event_id": row["event_id"],
@@ -151,7 +151,7 @@ class ConversationHistoryTools:
             for row in rows:
                 start = max(0, row["content"].find(query) - 40)
                 snippet = row["content"][start:start + 256]
-                matches.append((i, row["transcript_seq"], {"source": _source(row),
+                matches.append((i, row["transcript_seq"], {"source": source_identity(row),
                     "excerpt": snippet, "offset": start, "total_chars": len(row["content"]),
                     "excerpt_complete": start == 0 and len(snippet) == len(row["content"])}))
             if len(matches) > limit:
@@ -180,6 +180,6 @@ class ConversationHistoryTools:
             # Reserve wrapper space even for escaped Unicode/control characters.
             count = min(count, max(1, (self.store.max_payload_bytes // 2 - 4096) // 12))
             end = min(len(text), offset + count)
-            return {"source": _source(row), "content": text[offset:end], "offset": offset,
+            return {"source": source_identity(row), "content": text[offset:end], "offset": offset,
                     "next_offset": end if end < len(text) else None, "total_chars": len(text)}
         raise ScopeConflict("history message is not available in this committed lineage")

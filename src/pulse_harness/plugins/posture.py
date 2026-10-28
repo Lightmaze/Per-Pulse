@@ -34,6 +34,9 @@ adapt or decline it when the purpose or constraints differ. A saved example
 is not a certified success. Missing outcome/feedback means it was not attached,
 and an attached user follow-up is attributed testimony, not independent proof.
 Do not invent the omitted private context of an example shared from another page.
+When source.execution_regime is "replay", the retained passage or lesson came
+from tentative reconsideration of old material, not a new external observation.
+Keep that origin when adapting or testing it; retrieval cannot certify it.
 
 If no offered experience changes a warranted decision, reply exactly PASS.
 Otherwise give the concrete contribution and its consequence for the next

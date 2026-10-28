@@ -284,7 +284,21 @@ def capture_result_anchor(runtime, subject_id: str, context_id: str, result_mess
         "result_turn_id": turn.id,
         "result_content_sha256": hashlib.sha256(result.content.encode("utf-8")).hexdigest(),
         "result_evidence_class": str(result.metadata.get("evidence_class", "UNKNOWN")),
+        "result_execution_regime": _result_regime(runtime, result)["execution_regime"],
     }
+
+
+def _result_regime(runtime, original):
+    from . import native_replay
+
+    entry = native_replay.result_origin(runtime, original.id)
+    if entry is None:
+        return {"execution_regime": "ordinary"}
+    return {"execution_regime": "replay", "replay_origin": {
+        "kind": native_replay.KIND, "entry_action_id": entry["entry_action_id"],
+        "selected_sources": entry["sources"],
+        "meaning": "replay_interpretation_not_new_external_observation",
+    }}
 
 
 def capture_encounter(runtime, subject_id: str, context_id: str,
@@ -323,6 +337,7 @@ def capture_encounter(runtime, subject_id: str, context_id: str,
         "content_digests": {"situation": _digest(situation.content),
                             "action": _digest(original.content), "outcome": _digest(feedback.content)},
     }
+    source.update(_result_regime(runtime, original))
     encounter, shortened = {}, []
     for key, content in (("situation", situation.content), ("action", original.content),
                          ("outcome", feedback.content)):
@@ -377,6 +392,7 @@ def capture_example(runtime, subject_id: str, context_id: str, source_message_id
                         "bounded_encounter_fields": shortened,
                     }}
     offset = original.content.index(excerpt)
+    captured["source"].update(_result_regime(runtime, original))
     captured["source"]["selected_excerpt"] = {
         "start": offset, "end": offset + len(excerpt), "offset_unit": "unicode_code_points",
         "occurrence": "first_exact_match",

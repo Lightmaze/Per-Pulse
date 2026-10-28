@@ -127,6 +127,15 @@ button, a, input, textarea { outline-offset: 4px; }
 .message-status.status-failed, .message-status.status-error { color: var(--error); }
 .source-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; color: var(--muted); font-size: 12px; margin: -2px 0 8px; }
 .source-line .session-link .icon { width: 13px; height: 13px; top: 2px; }
+.replay-origin { margin: 0 0 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.replay-origin > span { font-weight: 550; }
+.replay-origin details { margin-top: 3px; }
+.replay-origin summary { cursor: pointer; width: fit-content; }
+.replay-origin p { margin: 7px 0; }
+.replay-origin ul { list-style: none; padding: 0; margin: 6px 0; }
+.replay-origin li { margin: 5px 0; }
+.replay-origin .session-link { font-size: 12px; }
+.replay-saved { border-left: 2px solid var(--line); padding-left: 10px; }
 .conversation-note, .empty-conversation { color: var(--muted); font-size: 14px; line-height: 1.75; margin: 0 0 20px; }
 .conversation-note { font-size: 12px; }
 .conversation-history { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 24px; margin: -10px 0 24px; }

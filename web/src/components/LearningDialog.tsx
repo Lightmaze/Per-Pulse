@@ -74,6 +74,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   };
   return <article hidden={hidden} className={`lesson ${experience.active ? '' : 'lesson-paused'}`}>
     <div className="lesson-heading"><h3>{experience.title}</h3><span>{t(experience.active ? 'learning.active' : 'learning.paused')} · v{experience.revision}</span></div>
+    {experience.sourceRegime === 'replay' ? <p className="lesson-note replay-saved">{t('replay.saved')}</p> : null}
     {example ? <div className="saved-example">
       <p className="lesson-scope">{t('learning.example')}</p>
       <pre tabIndex={0} aria-label={t('learning.excerpt')}><code>{example.excerpt}</code></pre>
@@ -101,6 +102,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       return <p key={index}><strong>{entry.verdict === 'useful' ? t('learning.verdictUseful') : entry.verdict === 'not_useful' ? t('learning.verdictNotUseful') : entry.verdict === 'harmful' ? t('learning.verdictHarmful') : entry.verdict === 'revised' ? t('learning.verdictRevised') : entry.verdict === 'withdrawn' ? t('learning.verdictWithdrawn') : entry.verdict.replaceAll('_', ' ')}</strong> · {entry.evidence}
         {resultPage ? <> · <button type="button" className="text-button" onClick={() => navigate(resultPage, resultPage !== pageId ? { pageId } : undefined, entry.source!.result_message_id)}>{t('learning.reportedResult')}</button>
           {['TEST_DOUBLE', 'EXPLICIT_MOCK'].includes(entry.source?.result_evidence_class ?? '') ? <> · {t('learning.resultFixture')}</> : null}
+          {entry.source?.result_execution_regime === 'replay' ? <> · {t('replay.result')}</> : null}
         </> : reportedPage ? <> · <button type="button" className="text-button" onClick={() => navigate(reportedPage, { pageId })}>{t('learning.reportedWork')}</button></> : null}
       </p>;
     })}</details> : null}

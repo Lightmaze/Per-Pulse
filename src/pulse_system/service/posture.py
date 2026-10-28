@@ -437,6 +437,10 @@ class PostureMemory:
             item["representation"] = record.get("representation", "lesson")
             item["source"] = {"experience_id": record["id"], "revision": record["revision"],
                               "context_id": record["context_id"]}
+            if record["source"].get("execution_regime") == "replay":
+                # Share the meaning, not the original page's selected sources.
+                item["source"]["execution_regime"] = "replay"
+                item["source"]["meaning"] = "replay_interpretation_not_new_external_observation"
             item["encounter_available"] = local
             if local:
                 item["encounter"] = deepcopy(record["encounter"])

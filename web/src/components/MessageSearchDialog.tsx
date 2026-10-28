@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useLanguage } from '../i18n';
 import type { MessageHistory } from '../types';
 import { Dialog } from './Dialog';
+import { ReplayOrigin } from './ReplayOrigin';
 import type { Navigate } from './SessionLink';
 
 export function MessageSearchDialog({ pageId, close, navigate }: {
@@ -63,7 +64,8 @@ export function MessageSearchDialog({ pageId, close, navigate }: {
       {result && !result.messages.length ? <p role="status">{t('find.empty', { query })}</p> : null}
       {result?.messages.map(message => <article className="history-message" key={message.id} data-search-message-id={message.id}>
         <div className="history-message-heading"><strong>{message.role === 'assistant' ? 'Per Pulse' : t(message.role === 'user' ? 'conversation.you' : 'conversation.workspace')}</strong><time dateTime={message.createdAt}>{date.format(new Date(message.createdAt))}</time></div>
-        <p className="history-message-content">{message.content}</p>
+        <ReplayOrigin message={message} pageId={pageId} navigate={navigate} />
+        <p className="history-message-content">{message.content.slice(message.replay?.contentOffset ?? 0)}</p>
         <button className="text-button" onClick={() => navigate(pageId, undefined, message.id)}>{t('history.open')}</button>
       </article>)}
     </div>
