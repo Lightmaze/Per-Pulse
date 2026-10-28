@@ -389,3 +389,54 @@ ordinary notes, with preserved performance on the negative controls and
 continued useful action after reminders are removed. Provider cost, failures,
 and manual-review coverage belong beside that result. A full matrix or a
 passing fixture is not evidence that expert ability has been learned.
+
+
+## Run two independent ordinary-feedback orders
+
+The one-World trial above is also available as a *two-World study*, with
+notice-first and outline-first order **within** the baseline and shared-memory
+phases. Each arm independently creates its own native World, Kernel evidence,
+request snapshots and private review packet. The two orders do not randomize
+baseline versus shared-memory phase order.
+
+Configure an explicitly authorized real model as described in the README,
+then run from a **new private directory outside the Git checkout**:
+
+~~~sh
+python -m per_pulse.posture_study --output /tmp/per-pulse-private/study-001 \
+  --training-calls 8 --trial-calls 4 --max-total-requests 48
+~~~
+
+The study validates all call ceilings and provider configuration before
+creating a directory; the default maximum is 48 adapter-model requests across
+both arms (8 training + four targets at 4 each per arm). This is **not a
+provider billing cap**: latency, output size, retries, auxiliary requests and
+unreported token usage require independent accounting. A model may choose not
+to capture a lesson. Capture absence is recorded, never repaired by adding an
+operator-written lesson. Unverified/faulted trials stop the subsequent arm.
+Study metadata in private study.json holds each actual status, usage evidence,
+audit outcome, and any reviewer-only packet path. Incomplete or failed runs
+cannot become blind-review evidence by deleting error rows.
+
+For each completed and audited arm, only
+study-001/review-notice-first/reviewer/ or
+study-001/review-outline-first/reviewer/ may go to an independent reviewer.
+The parent study directory contains private conversations, adapter requests
+and condition mapping keys; **never upload or share the parent folder**.
+Give the reviewer the original task and anonymized response packet only,
+collect scored ratings, and use the existing blinded_review grade command
+against that arm's private review directory. Reviews and verdicts are not
+automatically invented by the study runner.
+
+The two trials are observations in separate Context Bodies, not two pulses in
+one subject; they do not claim continuous learning of one model. Both still
+have baseline-first and potentially extra posture computations in the
+shared-memory condition. Report the provider name, actual requests and
+unaccounted auxiliary usage alongside independently reviewed outcomes. In
+offline QA, synthetic adapters must be deliberately injected and
+allow_fixture=True; those observations are labeled synthetic and are not
+real-provider results.
+
+~~~sh
+python -m pytest tests/per_pulse/test_posture_study.py -q
+~~~
