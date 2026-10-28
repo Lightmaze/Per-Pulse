@@ -89,9 +89,44 @@ try {
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('A note to continue after restart.', { exact: true }).waitFor();
 
+  // The first Work's save can be pending while the person visits another Work.
+  // This is a real wheel-installed browser and persistent World, with the
+  // response held at the browser/network boundary (no model and no mock store).
+  const originalWorkId = new URL(page.url()).pathname.split('/').pop();
+  const delayedPattern = '**/api/pages/' + encodeURIComponent(originalWorkId) + '/messages';
+  let releaseOriginal;
+  const delayedResponse = new Promise(resolve => { releaseOriginal = resolve; });
+  let signalHeld;
+  const heldRequest = new Promise(resolve => { signalHeld = resolve; });
+  await page.route(delayedPattern, async route => {
+    signalHeld();
+    await delayedResponse;
+    await route.continue();
+  });
+  await page.locator('.composer textarea').fill('Saved in the first Work after visiting another Work.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await heldRequest;
+  await page.getByRole('link', { name: 'Home', exact: true }).click();
+  await page.getByRole('button', { name: 'Create a page', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Second independent Work');
+  await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
+    .fill('Continue here while the first Work saves its message.');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Second independent Work', exact: true }).waitFor();
+  await page.getByRole('textbox', { name: /^Message / })
+    .fill('The second Work is independently writable.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await page.getByText('The second Work is independently writable.', { exact: true }).waitFor();
+  releaseOriginal();
+  await page.unroute(delayedPattern);
+  await page.getByRole('link', { name: 'A real disconnected Work', exact: true }).click();
+  await page.getByText('Saved in the first Work after visiting another Work.', { exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), '',
+    'Late origin save clears only its own unchanged draft');
+
   const bootstrap = await (await fetch(base + '/api/bootstrap')).json();
   assert.equal(bootstrap.provider.configured, false);
-  assert.equal(bootstrap.pages.filter(item => item.kind === 'work').length, 1);
+  assert.equal(bootstrap.pages.filter(item => item.kind === 'work').length, 2);
   await stop(server);
   server = start();
   await ready();
@@ -105,9 +140,10 @@ try {
   assert.equal(restored.provider.configured, false);
 
   console.log(JSON.stringify({
-    passed: 5,
+    passed: 6,
     checks: ['isolated wheel starts without credentials', 'browser offers local provider setup',
       'English/Chinese first-use instructions work', 'real disconnected Work accepts queued input',
+      'two Works stay writable across a delayed origin request without losing its result or draft',
       'original World, Work and note persist after clean restart'],
     provider: 'none; no synthetic model replies',
   }, null, 2));

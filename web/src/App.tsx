@@ -27,7 +27,9 @@ export default function App() {
   const [modal, setModal] = useState<Modal | null>(null);
   const [modalError, setModalError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [sendingPages, setSendingPages] = useState<Record<string, boolean>>({});
+  const pendingSends = useRef(new Set<string>());
+  const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState('');
   const [sourceNotice, setSourceNotice] = useState('');
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -43,6 +45,8 @@ export default function App() {
   currentPage.current = route.id;
   const draftKey = `${workspaceId ?? ''}/${route.id}`;
   const draft = workspaceId ? drafts[draftKey] ?? readDraft(workspaceId, route.id) : EMPTY_DRAFT;
+  const sending = sendingPages[draftKey] === true;
+  const sendError = sendErrors[draftKey] ?? '';
 
   const navigate: Navigate = useCallback((id: string, origin?: NavigationOrigin, targetMessageId?: string) => {
     window.clearTimeout(scrollTimer.current);
@@ -111,10 +115,16 @@ export default function App() {
   }, []);
 
   const sendMessage = async () => {
-    if (!draft.text.trim() || sending || !workspaceId) return;
+    if (!draft.text.trim() || !workspaceId || pendingSends.current.has(draftKey)) return;
     const id = route.id;
+    const key = draftKey;
     const outgoing = draft;
-    setSending(true); setError('');
+    // Only this local context is saving. Another Work remains usable while
+    // this request is awaiting the native World/Kernel response.
+    pendingSends.current.add(key);
+    setSendingPages(previous => ({ ...previous, [key]: true }));
+    setSendErrors(previous => ({ ...previous, [key]: '' }));
+    setError('');
     try {
       const response = await api.send(id, outgoing.text.trim(), outgoing.references.filter(reference => outgoing.text.includes(reference.label)));
       applyView(response.view);
@@ -129,8 +139,18 @@ export default function App() {
         requestAnimationFrame(() => { if (currentPage.current === id) document.getElementById(`message-${response.messageId}`)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });
         input.current?.focus();
       }
-    } catch (problem) { setError(errorText(problem)); }
-    finally { setSending(false); }
+    } catch (problem) {
+      // A late failure belongs to its originating Work, not whichever page
+      // the user has opened while the request was outstanding. Keep its draft.
+      setSendErrors(previous => ({ ...previous, [key]: errorText(problem) }));
+    } finally {
+      pendingSends.current.delete(key);
+      setSendingPages(previous => {
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
+    }
   };
 
   const createPage = async (title: string, instruction: string) => {
@@ -235,7 +255,8 @@ export default function App() {
           </section>
           {route.id === 'home' && bootstrap ? <HomeContinuations pages={pages} workspaceId={bootstrap.workspaceId} navigate={navigate} /> : null}
           {error ? <div className="error-notice" role="alert"><span>{error}</span><button disabled={isRefreshing} onClick={() => { setError(''); refreshWorkspace().catch(problem => setError(errorText(problem))); }}>{t('app.retry')}</button></div> : null}
-          {syncError && !error ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
+          {sendError && !error ? <div className="error-notice" role="alert"><span>{sendError}</span><button disabled={isRefreshing} onClick={() => { setSendErrors(previous => ({ ...previous, [draftKey]: '' })); refreshWorkspace().catch(problem => setError(errorText(problem))); }}>{t('app.retry')}</button></div> : null}
+          {syncError && !error && !sendError ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <PageArtifacts key={`artifacts-${route.id}`} view={view} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
