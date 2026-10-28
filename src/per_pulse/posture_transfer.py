@@ -12,6 +12,7 @@ import asyncio
 from collections import Counter
 from contextlib import closing
 import json
+import os
 from pathlib import Path
 import sqlite3
 import threading
@@ -174,6 +175,9 @@ def run_ordinary_transfer(
         raise ValueError("output directory must be new")
 
     ceilings = {partition: training_calls if partition == "training" else trial_calls for _, partition, _ in stages}
+    # Durable, pre-transport admission evidence survives an interrupted stage.
+    # It records attempted calls, not a provider bill or proof of delivery.
+    admission_path = output / "provider-admissions.jsonl"
     lock = threading.Lock()
     accounting = {"stage": "source", "partition": "training", "counts": dict.fromkeys(ceilings, 0), "requests": []}
 
@@ -189,10 +193,19 @@ def run_ordinary_transfer(
                 partition = accounting["partition"]
                 if accounting["counts"][partition] >= ceilings[partition]:
                     raise ProviderUnavailable("ordinary-transfer call ceiling reached", code="evaluation_budget_exhausted")
+                # Write and fsync before opening the transport. If this fails,
+                # reject the request rather than making an unrecorded paid call.
+                # The parent directory is private; this file is also 0600.
+                entry = {"stage": accounting["stage"], "budget_partition": partition,
+                         "request": request.as_dict(), "audit": _audit_request(request)}
+                line = (_canonical(entry) + "\n").encode("utf-8")
+                fd = os.open(admission_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                with os.fdopen(fd, "ab") as stream_file:
+                    stream_file.write(line)
+                    stream_file.flush()
+                    os.fsync(stream_file.fileno())
                 accounting["counts"][partition] += 1
-                # This is the exact credential-free ModelRequest, not HTTP headers.
-                accounting["requests"].append({"stage": accounting["stage"], "budget_partition": partition,
-                                               "request": request.as_dict(), "audit": _audit_request(request)})
+                accounting["requests"].append(entry)
             return original_stream(request, cancel_event=cancel_event)
 
         adapter.stream = stream
@@ -219,7 +232,7 @@ def run_ordinary_transfer(
         ],
     }
     manifest = {"schema": SCHEMA, "protocol": protocol, "task_order": task_order, "budget": ceilings, "provider_identity": identity,
-                "adapter_test_only": test_only}
+                "adapter_test_only": test_only, "request_admission_log": admission_path.name}
     manifest_path = output / "ordinary-transfer-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
@@ -393,6 +406,19 @@ def audit_ordinary_transfer(output: Path) -> dict:
         if problem:
             raise ValueError(problem)
         requests = json.loads(raw)
+        # Older trials had only the periodic snapshot; new trials additionally
+        # bind every admitted stream attempt to a fsynced pre-transport log.
+        if manifest.get("request_admission_log") is not None:
+            if manifest["request_admission_log"] != "provider-admissions.jsonl":
+                errors.append("provider_admission_journal_unknown")
+            else:
+                try:
+                    with (output / "provider-admissions.jsonl").open("r", encoding="utf-8") as stream:
+                        admissions = [json.loads(line) for line in stream]
+                    if admissions != requests:
+                        errors.append("provider_admission_journal_mismatch")
+                except (OSError, UnicodeError, json.JSONDecodeError):
+                    errors.append("provider_admission_journal_unreadable")
         counts = Counter(item["budget_partition"] for item in requests)
         if any(type(record["provider_requests"].get(key)) is not int
                or record["provider_requests"][key] != counts[key]
