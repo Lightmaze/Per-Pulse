@@ -355,8 +355,42 @@ try {
     if (!fromSource) await page.waitForFunction(sourceIsInViewport);
   }
   await page.unroute('**/api/pages/home*');
+
+  // A later Work can report the outcome of a shared lesson without returning
+  // to the source to manage it. The source alone retains private feedback.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.locator('.breadcrumbs').getByRole('button', { name: 'Home', exact: true }).click();
+  await openLessons();
+  await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
+  await lesson.getByText('In use · v10', { exact: true }).waitFor();
+  await close();
+  await page.getByRole('button', { name: 'Registration tool', exact: true }).click();
+  await page.getByRole('textbox', { name: /^Message / }).fill(unsentWorkDraft);
+  await openLessons();
+  await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
+  await lesson.getByText('Report what happened in this Work.', { exact: false }).waitFor();
+  const receiverOutcome = 'The shared lesson added unnecessary onboarding in this registration Work.';
+  await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(receiverOutcome);
+  await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).click();
+  await lesson.getByText('Paused · v11', { exact: true }).waitFor();
+  assert.equal(await lesson.getByRole('button', { name: 'Give feedback', exact: true }).count(), 0);
+  const receiverPages = (await (await fetch(base + '/api/bootstrap')).json()).pages;
+  const receiverId = receiverPages.find(item => item.title === 'Registration tool').id;
+  const receivingLesson = (await (await fetch(base + '/api/pages/' + encodeURIComponent(receiverId) + '/posture')).json()).experiences[0];
+  assert.equal(receivingLesson.canEdit, false);
+  assert.equal(receivingLesson.canReport, false);
+  assert.equal(receivingLesson.encounter, undefined);
+  assert.equal(receivingLesson.feedback, undefined);
+  assert.equal(receivingLesson.source, undefined);
+  const originLesson = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
+  assert.equal(originLesson.revision, 11);
+  assert.equal(originLesson.feedback.at(-1).evidence, receiverOutcome);
+  assert.equal(originLesson.feedback.at(-1).source.page_id, receiverId);
+  assert.equal(originLesson.feedback.at(-1).source.relation, 'shared_recipient');
+  await close();
+  assert.equal(await page.getByRole('textbox', { name: /^Message / }).inputValue(), unsentWorkDraft);
   assert.deepEqual(errors, []);
-  console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, negative feedback, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
+  console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, receiving-Work outcome feedback without private source exposure, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
 } finally {
   await browser?.close();
   await stopServer(server);
