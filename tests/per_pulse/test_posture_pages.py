@@ -245,3 +245,77 @@ def test_operator_refinement_keeps_described_evidence_and_source_private(tmp_pat
         assert persisted["source"] == initial["source"] and persisted["encounter"] == initial["encounter"]
         assert persisted["feedback"] == current["feedback"]
         assert persisted["revision"] == 3
+
+def test_receiving_work_can_report_shared_lesson_outcome_without_importing_private_history(tmp_path, monkeypatch):
+    """Real native World/Kernel and SQLite; model replies are explicit HTTP fixtures."""
+    with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
+        source_work = new_page(client, title="Original encounter")["page"]["id"]
+        wait_for(client, source_work, lambda v: any(m["role"] == "assistant" for m in v["messages"]))
+        _, original, correction = observed_pair(client, source_work)
+        source_endpoint = f"/api/pages/{source_work}/posture/experiences"
+        saved = client.post(source_endpoint, json=lesson(original, correction)).json()["experience"]
+        receiving_work = new_page(client, title="Later task", instruction="Fix a registration page.")["page"]["id"]
+        wait_for(client, receiving_work, lambda v: any(m["role"] == "assistant" for m in v["messages"]))
+        receiving_endpoint = f"/api/pages/{receiving_work}/posture/experiences/{saved['id']}"
+
+        # Work-local lessons are not open for other Works to rate or edit.
+        assert client.post(receiving_endpoint + "/feedback", json={
+            "expectedRevision": 1, "verdict": "useful", "evidence": "No shared lesson yet.",
+        }).status_code == 404
+        shared = client.patch(source_endpoint + "/" + saved["id"], json={
+            "expectedRevision": 1, "changes": {"scope": "subject"},
+        }).json()["experience"]
+        assert shared["revision"] == 2
+        receiving = client.get(f"/api/pages/{receiving_work}/posture").json()["experiences"][0]
+        assert receiving["canReport"] and not receiving["canEdit"]
+        assert receiving["sourceAnchor"] == {
+            "resultMessageId": original, "feedbackMessageId": correction,
+        }
+        assert all(field not in receiving for field in ("source", "encounter", "feedback"))
+        assert client.patch(receiving_endpoint, json={
+            "expectedRevision": 2, "changes": {"lesson": "Unauthorized edit"},
+        }).status_code == 404
+
+        helpful = client.post(receiving_endpoint + "/feedback", json={
+            "expectedRevision": 2, "verdict": "useful",
+            "evidence": "The shared guidance prompted a useful first interaction.",
+        })
+        assert helpful.status_code == 200, helpful.text
+        projected = helpful.json()["experience"]
+        assert projected["revision"] == 3 and projected["active"] and projected["canReport"]
+        assert not projected["canEdit"]
+        assert all(field not in projected for field in ("source", "encounter", "feedback"))
+        assert client.post(receiving_endpoint + "/feedback", json={
+            "expectedRevision": 2, "verdict": "harmful", "evidence": "Stale observation.",
+        }).status_code == 409
+
+        harmful = client.post(receiving_endpoint + "/feedback", json={
+            "expectedRevision": 3, "verdict": "harmful",
+            "evidence": "It led to an unnecessary onboarding preview in this Work.",
+        })
+        assert harmful.status_code == 200, harmful.text
+        after = harmful.json()["experience"]
+        assert after["revision"] == 4 and not after["active"] and not after["canReport"]
+        assert all(field not in after for field in ("source", "encounter", "feedback"))
+        assert client.post(receiving_endpoint + "/feedback", json={
+            "expectedRevision": 4, "verdict": "useful", "evidence": "No longer shared.",
+        }).status_code == 404
+
+        # The original owner retains full private records and native feedback
+        # attribution; no receiving Work gets the original correction content.
+        owner = client.get(f"/api/pages/{source_work}/posture").json()["experiences"][0]
+        assert owner["id"] == saved["id"] and owner["revision"] == 4
+        assert owner["source"] == saved["source"] and owner["encounter"] == saved["encounter"]
+        assert [item["verdict"] for item in owner["feedback"]] == ["useful", "harmful"]
+        assert all(item["source"] == {
+            "kind": "operator_report", "page_id": receiving_work,
+            "relation": "shared_recipient",
+        } for item in owner["feedback"])
+        runtime = client.app.state.pages.runtime
+        assert runtime.harness.posture_memory.materials(
+            subject_id=runtime.continuity_engram_id, context_id="",
+        )["episodes"] == []
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        owner = client.get(f"/api/pages/{source_work}/posture").json()["experiences"][0]
+        assert owner["revision"] == 4 and not owner["active"]
+        assert owner["feedback"][-1]["source"]["page_id"] == receiving_work

@@ -144,3 +144,28 @@ See [runtime behavior](posture-engineering.md) and
 [evaluation commands and limits](posture-evaluation.md). Source control keeps
 this plan beside the implementation so another continuation can start with
 the actual remaining question.
+
+## Receiving-Work outcome reports (integrated PerPulse)
+
+An explicitly shared native lesson now exposes **Give feedback** where a later
+Work receives it, not only in its original Work. A person who sees the
+consequence can record an attributed useful/harmful outcome without abandoning
+their receiving Work to find the origin. Harmful feedback pauses that same
+versioned lesson for all contexts; stale revisions fail rather than
+overwriting a newer choice. The original source-Work alone can still edit,
+share, unshare and reactivate the lesson.
+
+The recipient may report only an active subject-shared lesson belonging to
+the continuing subject. An unshared, foreign or now-inactive lesson cannot be
+reported from that receiving context. The HTTP response and visible
+cross-page projection contain only the abstraction, source navigation anchors
+and revision/status: **no private source encounter, original raw correction
+or subsequent feedback**. The full attributed report remains with the
+original Work and survives SQLite restart.
+
+This is a deliberately **operator-described result**, not proof that the
+native model used the lesson or that it caused the outcome. The note in both
+interface languages distinguishes observation from verified learning; the
+real-provider output/control study remains the quality gate. This is a
+user-facing feedback path in the existing Posture journal, not an additional
+reward model or Runtime.

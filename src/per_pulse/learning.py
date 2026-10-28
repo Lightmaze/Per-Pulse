@@ -66,7 +66,7 @@ class PageLearning:
         if source_context.startswith("work:"):
             source_page = next((front["id"] for front in self.pages.runtime.list_task_fronts()
                                 if front["center_id"] == source_context.removeprefix("work:")), None)
-        result.update(canEdit=local, sourcePageId=source_page)
+        result.update(canEdit=local, canReport=local or (record["scope"] == "subject" and record["active"]), sourcePageId=source_page)
         # Shared experiences expose only the original message anchors so the
         # reader can inspect their provenance without copying the raw episode.
         source = record.get("source", {})
@@ -147,13 +147,33 @@ class PageLearning:
             return {"experience": self._public(updated, record["context_id"])}
 
     def feedback(self, page_id, experience_id, revision, verdict, evidence):
+        """Let a receiving Work report an outcome of shared guidance.
+
+        Editing and sharing remain source-Work-only. A recipient can only rate
+        an active, explicitly shared lesson of the same continuing subject.
+        The rating is attributed operator testimony, not a verified native
+        result or a claim that the lesson caused the outcome.
+        """
         with self.pages._lock:
-            memory, record = self._owned(page_id, experience_id)
+            memory = self._memory()
+            context_id = self._context(page_id)
+            try:
+                record = memory.get_experience(experience_id)
+            except ValueError:
+                raise PageError("experience_not_found", "This lesson does not exist.", 404) from None
+            local = record["context_id"] == context_id
+            if (not memory.owns_subject(self._subject(page_id), record["subject_id"])
+                    or not local and (record["scope"] != "subject" or not record["active"])):
+                raise PageError("experience_not_found",
+                                "This lesson is not available for feedback from this page.", 404)
             try:
                 updated = memory.record_feedback(
                     experience_id, expected_revision=revision, verdict=verdict, evidence=evidence,
-                    source={"kind": "operator_report", "page_id": page_id},
+                    source={"kind": "operator_report", "page_id": page_id,
+                            "relation": "source" if local else "shared_recipient"},
                 )
             except (ValueError, RedactionRequired) as error:
                 raise self._invalid(error) from error
-            return {"experience": self._public(updated, record["context_id"])}
+            # Never return source-only encounter or private feedback to a
+            # receiving Work, including after a harmful rating pauses sharing.
+            return {"experience": self._public(updated, context_id)}

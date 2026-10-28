@@ -103,6 +103,7 @@ export type PostureExperience = {
   scope: 'context' | 'subject';
   active: boolean;
   canEdit: boolean;
+  canReport: boolean;
   sourcePageId: string | null;
   sourceAnchor?: { resultMessageId: string; feedbackMessageId: string };
   record_type: 'observed_episode' | 'constructed_fixture';
