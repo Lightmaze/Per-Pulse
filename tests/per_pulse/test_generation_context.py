@@ -119,8 +119,11 @@ def test_native_succession_keeps_summary_and_successor_inputs_in_context(
             execute(name, pages.send(page_ids[name], "Continue after restart.")["messageId"])
 
         violations = []
+        first_successor_requests = {}
         for name, scope, request_stage, messages in captured:
             text = json.dumps(messages)
+            if request_stage == "successor":
+                first_successor_requests.setdefault(name, text)
             if request_stage in {"initial", "summary"}:
                 assert markers[name] in text, (name, request_stage, "own history missing")
             foreign = [marker for key, marker in markers.items() if key != name and marker in text]
@@ -128,6 +131,8 @@ def test_native_succession_keeps_summary_and_successor_inputs_in_context(
                 violations.append((name, request_stage, foreign))
             assert scope.engram_id == (predecessor if request_stage in {"initial", "summary"} else successor)
         assert not violations, violations
+        for name, text in first_successor_requests.items():
+            assert (f"{markers[summary_page]}: summary synthetic result." in text) == (name == summary_page)
         assert len(captured) == 22
         assert summary_turn.execution_context == (contexts[summary_page] or "home")
     finally:
@@ -156,5 +161,42 @@ def test_native_internal_admission_derives_context_before_claiming_a_turn(tmp_pa
         context = "work:" + runtime.world.get_task_front(created["page"]["id"]).center_id
         assert turn.execution_context == context
         assert len(fixture.requests) == 1 and fixture.scopes[0].context_id == context
+    finally:
+        runtime.close()
+
+
+def test_native_successor_does_not_trust_an_old_unscoped_summary_seed(tmp_path, monkeypatch):
+    """Preserve old records without treating their global cursor as local proof."""
+    from test_pulse_integration import TransportFixture
+
+    fixture = TransportFixture(monkeypatch)
+    pages = PageService(tmp_path, model_factory=fixture.factory)
+    runtime = pages.runtime
+    try:
+        event_id = pages.send("home", "A_LOCAL_HISTORY")["messageId"]
+        original = runtime._mgr.pulse(
+            runtime.continuity_engram_id, pulse_event=runtime.causal_ledger.get_event(event_id),
+            runtime_fence=runtime._current_runtime_fence(),
+        )
+        with monkeypatch.context() as legacy:
+            # Explicit compatibility fixture: older summaries omitted the
+            # native context resolver and stored the global empty cursor.
+            legacy.setattr(runtime._mgr, "_causal_context_for_center", None)
+            prepared = runtime._mgr.prepare_succession(
+                runtime.continuity_engram_id, parent_event_id=original.result_event_id,
+                runtime_fence=runtime._current_runtime_fence(),
+            )
+        summary = runtime.causal_ledger.get_turn_for_world(prepared.summary_turn_id, runtime.world_id)
+        assert summary.execution_context == ""
+        runtime._mgr.commit_succession(prepared, runtime_fence=runtime._current_runtime_fence())
+        current = pages.send("home", "Continue with the new instruction.")["messageId"]
+        runtime._mgr.pulse(
+            runtime.continuity_engram_id, pulse_event=runtime.causal_ledger.get_event(current),
+            runtime_fence=runtime._current_runtime_fence(),
+        )
+        assert len(fixture.requests) == 3
+        text = json.dumps(fixture.requests[-1]["messages"])
+        assert "Continue with the new instruction." in text
+        assert "A_LOCAL_HISTORY" not in text and "A_FIXTURE_OUTPUT" not in text
     finally:
         runtime.close()

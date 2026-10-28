@@ -27,6 +27,7 @@ from pulse_system.core.types import (
     Engram,
     EngramStatus,
     GenerationTransitionState,
+    HarnessTurnState,
     Message,
     MessageRole,
     RuntimeLeaseLostError,
@@ -606,14 +607,16 @@ class EngramManager:
         if execution_context:
             prompt_messages = [] if input_message is None else [input_message]
             # Legacy adapters retain their one-time lineage bootstrap. Native
-            # Kernel retrieves committed context history through its existing
-            # tools. The subject-wide seed cannot be imported into every Work:
-            # it may summarize a different context's private conversation.
+            # Kernel can carry only a proven summary of this exact context;
+            # other original context history stays in its existing tools.
             if (
-                self._causal_context_for_center is None
-                and turn.cursor_before == 0
+                turn.cursor_before == 0
                 and session
                 and session[0].role is MessageRole.ASSISTANT
+                and (self._causal_context_for_center is None
+                     or self._summary_seed_matches_context(
+                         engram_id, event.world_id, execution_context, session[0].content,
+                     ))
             ):
                 prompt_messages.insert(0, session[0])
         else:
@@ -741,6 +744,45 @@ class EngramManager:
             causal_id=event.causal_id,
             turn_id=settled_turn.id,
             result_event_id=result_event.id,
+        )
+
+    def _summary_seed_matches_context(
+        self, successor_id: str, world_id: str, execution_context: str, content: str,
+    ) -> bool:
+        """Allow only this context's attributable committed summary bootstrap."""
+        assert self._causal_ledger is not None and self._causal_context_for_center is not None
+        generations = self._causal_ledger.list_generations(
+            successor_id=successor_id, state=GenerationTransitionState.COMMITTED,
+        )
+        if len(generations) != 1 or not generations[0].summary_turn_id:
+            return False
+        generation = generations[0]
+        try:
+            lineage = self._causal_ledger.committed_history_lineage(world_id, successor_id)
+        except CausalTransitionError:
+            return False
+        if len(lineage) < 2 or lineage[1] != generation.predecessor_id:
+            return False
+        summary = self._causal_ledger.get_turn_for_world(generation.summary_turn_id, world_id)
+        if (summary is None or summary.state is not HarnessTurnState.SETTLED
+                or summary.engram_id != generation.predecessor_id
+                or summary.execution_context != execution_context or not summary.result_event_id):
+            return False
+        request = self._causal_ledger.get_event(summary.event_id)
+        result = self._causal_ledger.get_event(summary.result_event_id)
+        return bool(
+            request is not None and result is not None
+            and request.world_id == result.world_id == world_id
+            and request.engram_id == result.engram_id == generation.predecessor_id
+            and request.domain is CausalEventDomain.GENERATION
+            and request.metadata.get("generation_id") == generation.id
+            and request.metadata.get("generation_stage") == "summary"
+            and result.kind is CausalEventKind.ASSISTANT_RESULT
+            and result.status is CausalEventStatus.SETTLED
+            and result.parent_event_id == request.id
+            and result.content == content
+            and (self._causal_context_for_center(request.center_id) or "home") == execution_context
+            and (self._causal_context_for_center(result.center_id) or "home") == execution_context
         )
 
     def _pulse_with_harness(
