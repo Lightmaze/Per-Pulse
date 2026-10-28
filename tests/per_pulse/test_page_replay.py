@@ -43,8 +43,14 @@ def test_native_replay_reenters_original_sources_then_restores_ordinary_tools(tm
         event = runtime.causal_ledger.get_event(replayed["id"])
         assert event.metadata["execution_regime"] == "replay"
         send(client, page_id, "TRY_ORDINARY_ACTION")
-        pending = wait_for(client, page_id, lambda v: bool(v["execution"]["pendingActions"]))
-        action = pending["execution"]["pendingActions"][0]
+        # A persisted action can become visible before its turn reaches
+        # WAITING_APPROVAL. Only the native canResolve projection authorizes
+        # the user's click; an early snapshot must not race the Kernel guard.
+        pending = wait_for(
+            client, page_id,
+            lambda v: any(action["canResolve"] for action in v["execution"]["pendingActions"]),
+        )
+        action = next(action for action in pending["execution"]["pendingActions"] if action["canResolve"])
         assert action["toolName"] == "mutate_file"
         assert pending["execution"]["replay"] is None
         response = client.post(f"/api/pages/{page_id}/execution/actions/{action['actionId']}", json={"decision": "allow_once"})

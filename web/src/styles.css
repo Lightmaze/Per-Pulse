@@ -131,7 +131,7 @@ button, a, input, textarea { outline-offset: 4px; }
 .replay-origin > span { font-weight: 550; }
 .replay-origin details { margin-top: 3px; }
 .replay-origin summary { cursor: pointer; width: fit-content; }
-.replay-origin p { margin: 7px 0; }
+.replay-origin p { margin: 7px 0; overflow-wrap: anywhere; }
 .replay-origin ul { list-style: none; padding: 0; margin: 6px 0; }
 .replay-origin li { margin: 5px 0; }
 .replay-origin .session-link { font-size: 12px; }
@@ -364,7 +364,7 @@ button, a, input, textarea { outline-offset: 4px; }
 .save-example-dialog { max-width: 680px; }
 .save-example-dialog select { width: 100%; min-width: 0; max-width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--canvas, white); color: var(--text); font: inherit; }
 .save-example-dialog .lesson-note { line-height: 1.7; }
-.saved-example pre { padding: 14px; background: #f6f8f3; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; line-height: 1.7; overflow: auto; max-height: 320px; white-space: pre; }
+.saved-example pre { padding: 14px; background: #f6f8f3; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; line-height: 1.7; overflow: auto; max-height: 320px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .saved-example pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .saved-example > .copy-control { font-size: 11px; color: var(--muted); }
 .lesson { border-top: 1px solid var(--border); padding-top: 22px; margin-top: 22px; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }

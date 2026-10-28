@@ -184,3 +184,16 @@ dropped successful upload response, unsupported files, changed-version refusal,
 offline restart, file-only messages, and Chinese phone layout. Upload, reading,
 approval and filesystem effects are real; semantic choices and arithmetic are
 fixture code and do not establish real-model performance.
+
+The same flow saves a concrete example of the report, opens its source
+experience, and returns to the actual attached-file input with the draft intact.
+The rendered episode hides only a server-verified file-reference envelope;
+the stored encounter stays unchanged and does not travel with shared guidance.
+
+`workspace_status_flow.mjs` holds a real native Work after an approved file
+effect, navigates to idle Home and releases its explicit provider fixture.
+The sidebar must reflect completion without leaving Home, losing the draft
+or focus, or making another model request. A held Home response also checks
+that finishing navigation does not interrupt a draft already being edited.
+It checks ordinary foreground Work
+observations; it does not activate background Pulse or schedule a new turn.

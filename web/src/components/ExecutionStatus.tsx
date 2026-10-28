@@ -64,7 +64,7 @@ export function ExecutionStatus({ view, applyView }: { view: PageView; applyView
     {showCurrent ? <div className="execution-heading">
       <div>
         <strong>{execution.pendingActions.length ? t('execution.approval') : error || execution.recoveryRequired || execution.status === 'needs_attention' ? t('execution.attention') : execution.status === 'stopped' ? t('execution.stopped') : execution.replay ? t('replay.working') : t('execution.working')}</strong>
-        <p>{execution.recoveryRequired ? execution.canCancel ? t('execution.recoveryStop') : t('execution.recoverySaved') : execution.pendingActions.length ? t('execution.approvalInfo') : error || execution.status === 'needs_attention' ? execution.canCancel ? t('execution.failedStop') : t('execution.reviewResult') : execution.status === 'stopped' ? t('execution.stoppedInfo') : execution.replay ? t('replay.workingInfo') : t('execution.keepWriting')}</p>
+        <p>{execution.recoveryRequired ? execution.canCancel ? t('execution.recoveryStop') : t('execution.recoverySaved') : execution.pendingActions.length ? t('execution.approvalInfo') : error || execution.status === 'needs_attention' ? execution.canCancel ? t('execution.failedStop') : t('execution.reviewResult') : execution.status === 'stopped' ? t('execution.stoppedInfo') : execution.replay?.focus ? t('replay.focusInfo') : execution.replay ? t('replay.workingInfo') : t('execution.keepWriting')}</p>
       </div>
       {execution.canCancel && execution.turnId ? <button className="execution-stop" disabled={stopping} onClick={() => act(() => api.stop(pageId, execution.turnId!), true)}>{stopping ? t('execution.stopping') : t('execution.stop')}</button> : null}
     </div> : null}

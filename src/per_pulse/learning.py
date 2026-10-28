@@ -56,6 +56,41 @@ class PageLearning:
             return PageError("experience_revision_conflict", "This experience changed. Refresh it before saving.", 409)
         return PageError("invalid_experience", message, 422)
 
+    def _encounter_sources(self, record, source_page):
+        """Project verified attachment envelopes without rewriting the episode.
+
+        Only an exact retained field matched to its original native message
+        can hide a file-reference footer. Bounded or altered fields stay literal.
+        This metadata is local to the source page, like the encounter itself.
+        """
+        encounter = record["encounter"]
+        if not source_page or not any("[Attached workspace materials]\n" in value for value in encounter.values()):
+            return {}
+        from pulse_system.service.native_posture import _settled_result
+
+        source = record.get("source", {})
+        original_id = source.get("source_message_id")
+        if not isinstance(original_id, str) or not original_id:
+            return {}
+        try:
+            original, _ = _settled_result(self.pages.runtime, self._subject(source_page),
+                self._context(source_page), original_id)
+        except ScopeConflict:
+            return {}
+        fields = {"situation": original.parent_event_id, "action": original.id,
+                  "outcome": source.get("feedback_message_id")}
+        result = {}
+        for field, message_id in fields.items():
+            if not isinstance(message_id, str) or not message_id or field not in encounter:
+                continue
+            rows = self.pages._rows(source_page, limit=1, event_id=message_id)
+            if not rows or rows[0]["content"] != encounter[field]:
+                continue
+            projection = self.pages.materials.message(source_page, rows[0])
+            if projection["materials"]:
+                result[field] = {"pageId": source_page, "messageId": message_id, **projection}
+        return result
+
     def _public(self, record, context_id):
         local = record["context_id"] == context_id
         result = {key: deepcopy(record[key]) for key in (
@@ -86,6 +121,9 @@ class PageLearning:
             result["encounter"] = deepcopy(record["encounter"])
             result["source"] = deepcopy(record["source"])
             result["feedback"] = deepcopy(record["feedback"])
+            sources = self._encounter_sources(record, source_page)
+            if sources:
+                result["encounterSources"] = sources
         return result
 
     def view(self, page_id):

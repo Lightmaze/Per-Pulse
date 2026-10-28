@@ -111,7 +111,9 @@ try {
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
   release(); await page.unrouteAll({ behavior: 'wait' });
   // Returning immediately exercises an old completion racing a fresh view.
-  await page.locator('aside.sidebar').getByRole('link', { name: 'Report to take away', exact: true }).click();
+  // The accessible name also includes the current native status. Navigate by
+  // the saved page identity while the original turn may still be settling.
+  await page.locator('aside.sidebar a[href="/page/' + origin + '"]').click();
   await page.getByRole('textbox', { name: 'Message Report to take away', exact: true }).waitFor();
   assert.equal(downloadCount, 1);
   checks.push('navigation cancels a pending file save without sending it into another Work');

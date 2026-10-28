@@ -13,6 +13,7 @@ The alpha candidate provides English and 简体中文 interface controls, a sepa
 - Create a session page from Home or another page, with a focused opening instruction.
 - Insert lightweight page links directly into a message and reuse a page from several conversations.
 - Continue in the linked page and return to the source while retaining your unsent draft and reading position.
+- See a running page finish in the sidebar while you keep writing in another page.
 - Bring selected text back to Home with a reference to its source page and message.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.
@@ -41,8 +42,18 @@ prefix when copied. Saved examples and lessons retain the replay origin even
 when the selected passage omits that prefix; shared experience exposes its
 tentative nature without copying the private source material. Bringing a
 selected interpretation Home also preserves its nature in the actual input.
-This bounded regime retains the original conversation. It is not memory
-isolation, sleep scheduling, new external evidence, or proof of model learning.
+By default this bounded regime retains the original conversation. Optional
+`replay.enter(message_ids, focus)` declares a question of up to 1,000 characters.
+After its successful native entry, subsequent requests retain host system
+instructions, that declared focus, selected source references and replay
+exchanges. Other conversation, pre-entry reasoning/preambles and experience
+advice are omitted; auxiliary expert and delivery computations pause for the
+rest of that turn. Its final interpretation contains only text produced after
+entry; earlier preambles remain in the native transcript. Normal context and
+advice return next turn. The interface identifies this focused input in
+the activity and source details. It does not erase earlier provider exposure,
+create a separate identity, grant extra rounds, or establish sleep scheduling,
+new external evidence or model learning.
 
 ## Run from source
 
@@ -135,6 +146,11 @@ the passage editor when that selection matches the original text. An example
 can stand on its own without a rule or evaluation. You can save one from a
 previous reply even while the model is disconnected. The source passage stays
 intact when you later edit its note.
+
+When that experience began with an attached file, **Source experience** shows
+the readable message and an **Open source message** link to its original file
+references. The stored encounter retains its exact input. Shared experiences
+keep that private input and its file references in the source page.
 
 With a model connected, explain what worked or what should change after a reply.
 The model may save a conditional lesson with its original result and your
@@ -285,6 +301,15 @@ If a restore fails, do not start its incomplete destination. The archive
 contains **private conversations, histories and workspace files**: do not
 publish or share it. Model credentials and external tool/resource bindings
 must be configured deliberately after restore.
+
+To continue a partly read source after moving the workspace, the native model
+can use `reading.recent` to find its earlier passage, then explicitly call
+`reading.resume(receipt_id)`. Resume checks the same relative path, complete
+file bytes and redacted text view before reading from the saved position.
+The new receipt retains its original receipt and workspace provenance; later
+`reading.continue` calls use the new receipt. A changed file must be opened
+deliberately from the beginning. This does not carry approvals, cross logical
+session boundaries, or establish that the material was understood.
 
 This is a **cold copy**: it does not transfer a running process, merge later
 changes made to the original home, or copy browser-local unsent drafts and

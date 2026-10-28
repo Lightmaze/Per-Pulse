@@ -100,6 +100,17 @@ jobs:
       - name: Verify exact native file downloads in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_DOWNLOAD_SCREENSHOTS="$RUNNER_TEMP/per-pulse-download-screenshots" node tests/browser/download_flow.mjs
+      - name: Verify Work completion remains visible from idle Home
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_STATUS_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/workspace_status_flow.mjs
+      - name: Keep workspace status browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-status-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-status-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Keep file download browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -111,6 +122,7 @@ jobs:
       - name: Verify native replay provenance and ordinary continuation in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_REPLAY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-replay-screenshots" node tests/browser/replay_flow.mjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_FOCUSED_REPLAY=1 PER_PULSE_REPLAY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-replay-screenshots/focused" node tests/browser/replay_flow.mjs
       - name: Keep replay browser evidence
         if: always()
         uses: actions/upload-artifact@v4

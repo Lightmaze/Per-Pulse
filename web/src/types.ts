@@ -42,6 +42,7 @@ export type Message = {
   replay?: {
     sources: { pageId: string; messageId: string; role: 'user' | 'assistant' }[];
     unavailableSources: number; selected: boolean; contentOffset: number;
+    focus?: string;
   } | null;
 };
 
@@ -68,7 +69,7 @@ export type PageExecution = {
   recoveryRequired: boolean; historicalUncertainty: boolean; updatedAt: string | null;
   uncertainActions: UncertainAction[];
   uncertainActionsTruncated: boolean;
-  replay?: { sourceCount: number } | null;
+  replay?: { sourceCount: number; focus?: string } | null;
 };
 export type Artifact = {
   id: string; pageId: string; path: string; sha256: string;
@@ -142,6 +143,9 @@ type ExperienceBase = {
   sourceAnchor?: { resultMessageId: string; feedbackMessageId?: string };
   record_type: 'observed_episode' | 'constructed_fixture';
   encounter?: { situation: string; action: string; outcome?: string };
+  encounterSources?: Partial<Record<'situation' | 'action' | 'outcome', {
+    pageId: string; messageId: string; materials: Material[]; materialSuffixLength: number;
+  }>>;
   source?: { source_message_id?: string; feedback_message_id?: string };
   feedback?: { verdict: string; evidence: string; source?: {
     kind?: string; page_id?: string; relation?: string;
