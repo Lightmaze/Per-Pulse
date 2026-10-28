@@ -132,7 +132,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
 
   return <Dialog title={t('pulse.title')} onClose={() => { if (!busy) onClose(); }} className="pulse-activity-dialog">
     <p className="dialog-description">{t('pulse.description')}</p>
-    {error ? <p className="form-error" role="alert">{error} {identityChanged
+    {error ? <p className="form-error" role="alert"><span>{error}</span> {identityChanged
       ? <button className="text-button" type="button" onClick={() => window.location.reload()}>{t('pulse.reloadWorkspace')}</button>
       : <button className="text-button" type="button" onClick={() => void reload()}>{t('pulse.retry')}</button>}</p> : null}
     {!pulse ? <p role="status" className="pulse-activity-empty">{t('pulse.reading')}</p> : <>
