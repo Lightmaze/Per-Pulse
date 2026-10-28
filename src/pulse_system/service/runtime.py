@@ -6022,6 +6022,10 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             ),
             harness_turn_timeout_sec=c.harness_turn_timeout_sec,
             causal_ledger=self._causal_ledger,
+            causal_context_for_center=(
+                self._native_kernel_context_for_center
+                if self._harness_kind == "kernel" else None
+            ),
         )
         self._world = WorldRegistry(self._storage)
         self._dendrite = DendriteProcessor(self._mgr, DendriteConfig(

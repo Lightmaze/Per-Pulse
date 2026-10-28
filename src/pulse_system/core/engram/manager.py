@@ -10,6 +10,7 @@ import inspect
 import logging
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -202,6 +203,7 @@ class EngramManager:
         harness_turn_timeout_sec: float | None = None,
         causal_ledger: "CausalLedger | None" = None,
         causal_world_id: str | None = None,
+        causal_context_for_center: Callable[[str | None], str] | None = None,
     ):
         self._storage = storage
         self._llm = llm
@@ -225,6 +227,10 @@ class EngramManager:
         # deliberately does not recover or mutate scheduler state on its own.
         self._causal_ledger = causal_ledger
         self._causal_world_id = causal_world_id
+        # Native Kernel retains each original context's transcript and exposes
+        # committed ancestors through its history tools. Generation calls use
+        # the same context as ordinary admissions, not the subject-wide index.
+        self._causal_context_for_center = causal_context_for_center
         self._harness_bootstrapped: set[str] = set()
         self._harness_calls_guard = threading.Lock()
         self._harness_calls: dict[tuple[str, str], threading.RLock] = {}
@@ -556,6 +562,14 @@ class EngramManager:
                 "durable event content is the sole input projection; "
                 "injected_context differs"
             )
+        if self._causal_context_for_center is not None:
+            resolved = self._causal_context_for_center(event.center_id)
+            if not isinstance(resolved, str):
+                raise TypeError("causal context resolver must return text")
+            resolved = resolved.strip() or "home"
+            if execution_context and execution_context != resolved:
+                raise ValueError("execution context differs from the durable event context")
+            execution_context = resolved
 
         source_engram_id = getattr(pulse_event, "source_engram_id", None)
         if source_engram_id is None:
@@ -591,11 +605,13 @@ class EngramManager:
         # each other's uncommitted message range.
         if execution_context:
             prompt_messages = [] if input_message is None else [input_message]
-            # A successor is born with one assistant lineage seed before its
-            # first input. Preserve that one-time bootstrap without importing
-            # messages from another concurrently running context.
+            # Legacy adapters retain their one-time lineage bootstrap. Native
+            # Kernel retrieves committed context history through its existing
+            # tools. The subject-wide seed cannot be imported into every Work:
+            # it may summarize a different context's private conversation.
             if (
-                turn.cursor_before == 0
+                self._causal_context_for_center is None
+                and turn.cursor_before == 0
                 and session
                 and session[0].role is MessageRole.ASSISTANT
             ):

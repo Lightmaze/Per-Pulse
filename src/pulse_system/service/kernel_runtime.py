@@ -994,9 +994,9 @@ class KernelHarnessRuntime:
                     session.scope,
                     SessionStatus.QUIESCED,
                 )
-        # The manager owns the new Engram and seed. We preserve every old
-        # context transcript and leave the new generation unbootstrapped,
-        # never copy it twice.
+        # The manager owns the new Engram. Old context transcripts remain
+        # addressable through committed history tools; a subject-wide summary
+        # is never copied into every new context's transcript.
 
     def close_session(self, engram_id: str) -> None:
         with self._lock:
