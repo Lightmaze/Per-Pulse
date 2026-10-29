@@ -98,6 +98,14 @@ without unmounting them, so clearing a search restores unsent feedback,
 refinement drafts, and the explicitly selected result. Changing Work or World
 still resets those editors at the existing dialog boundary. The browser flow
 checks this preservation before submitting a receiving-Work report.
+Lesson refinements and example-note drafts stay bound to the revision opened
+for editing. If a refresh or another action changes that revision, the editor
+keeps the draft and its evidence visible but disables saving. An explicit
+**Reload latest version** replaces the draft with the current fields and clears
+its unsent evidence; the warning tells the person to copy anything they want
+to keep first. The browser flows cover both a refresh before saving and a
+rejected stale save, including Chinese phone controls. A fresh edit then saves
+against the reloaded revision, preserving untouched current fields and source.
 This helps a person locate an old judgment before
 refining or pausing it; it is not itself model learning or retrieval.
 

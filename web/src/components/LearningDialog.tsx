@@ -57,11 +57,15 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [resultMessageId, setResultMessageId] = useState('');
   const [refineOpen, setRefineOpen] = useState(false);
+  const [refineRevision, setRefineRevision] = useState(experience.revision);
   const [lessonDraft, setLessonDraft] = useState(lesson?.lesson ?? '');
   const [noteDraft, setNoteDraft] = useState(example?.note ?? '');
   const [exceptionDraft, setExceptionDraft] = useState(lesson?.counterexamples.join('\n') ?? '');
   const [shiftDraft, setShiftDraft] = useState<LessonShift>({ understanding: '', candidates: '', delivery: '', ...lesson?.shift });
   const [refineEvidence, setRefineEvidence] = useState('');
+  // A refreshed projection must not lend its version to fields drafted from an
+  // older experience. Keep the draft until the person explicitly reloads it.
+  const refinementStale = refineOpen && refineRevision !== experience.revision;
   const refinedLesson = lessonDraft.trim();
   const refinedExceptions = exceptionDraft.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
   const refinedShift = {
@@ -77,6 +81,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     || JSON.stringify(refinedExceptions) !== JSON.stringify(lesson?.counterexamples)
     || Object.keys(refinedShift).some(key => refinedShift[key as keyof typeof refinedShift] !== lesson?.shift[key as keyof typeof refinedShift]);
   const beginRefinement = () => {
+    setRefineRevision(experience.revision);
     setNoteDraft(example?.note ?? '');
     setLessonDraft(lesson?.lesson ?? '');
     setExceptionDraft(lesson?.counterexamples.join('\n') ?? '');
@@ -85,7 +90,8 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     setRefineOpen(true);
   };
   const submitRefinement = async () => {
-    await revise(experience, example ? { note: noteDraft.trim() } : { lesson: refinedLesson, counterexamples: refinedExceptions, shift: refinedShift }, refineEvidence.trim() || undefined);
+    if (refinementStale) return;
+    await revise({ ...experience, revision: refineRevision }, example ? { note: noteDraft.trim() } : { lesson: refinedLesson, counterexamples: refinedExceptions, shift: refinedShift }, refineEvidence.trim() || undefined);
     setRefineEvidence('');
     setRefineOpen(false);
   };
@@ -135,11 +141,15 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     {experience.canEdit ? <div className="lesson-actions">
       <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { active: !experience.active }).catch(() => {}); }}>{t(experience.active ? (example ? 'learning.pauseExample' : 'learning.pause') : 'learning.resume')}</button>
       <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { scope: experience.scope === 'context' ? 'subject' : 'context' }).catch(() => {}); }}>{t(experience.scope === 'context' ? 'learning.share' : 'learning.keepLocal')}</button>
-      <button className="text-button" disabled={busy} onClick={beginRefinement}>{t(example ? 'learning.refineExample' : 'learning.refine')}</button>
+      <button className="text-button" disabled={busy || refineOpen} onClick={beginRefinement}>{t(example ? 'learning.refineExample' : 'learning.refine')}</button>
     </div> : experience.sourcePageId && !experience.sourceAnchor ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin)}>{t('learning.editSource')}</button> : null}
     {experience.canReport ? <div className="lesson-actions"><button type="button" className="text-button" disabled={busy} onClick={() => setFeedbackOpen(value => !value)}>{t('learning.giveFeedback')}</button></div> : null}
     {refineOpen && experience.canEdit ? <div className="lesson-feedback">
       <p className="lesson-note">{t(example ? 'learning.refineExampleHelp' : 'learning.refineHelp')}</p>
+      {refinementStale ? <div className="form-error" role="alert">
+        <p>{t('learning.refinementStale')}</p>
+        <button className="secondary-button" disabled={busy} onClick={beginRefinement}>{t('learning.reloadRefinement')}</button>
+      </div> : null}
       {example ? <>
         <label className="field-label" htmlFor={`refine-note-${experience.id}`}>{t('learning.exampleNote')}</label>
         <textarea id={`refine-note-${experience.id}`} rows={4} value={noteDraft} maxLength={4000} disabled={busy} onChange={event => setNoteDraft(event.target.value)} />
@@ -164,7 +174,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       <label className="field-label" htmlFor={`refine-evidence-${experience.id}`}>{t('learning.refineEvidence')}</label>
       <textarea id={`refine-evidence-${experience.id}`} rows={2} value={refineEvidence} maxLength={1500} disabled={busy} onChange={event => setRefineEvidence(event.target.value)} placeholder={t('learning.refineEvidenceHint')} />
       <div className="lesson-actions">
-        <button className="secondary-button" disabled={busy || !validRefinement || !changedRefinement} onClick={() => { void submitRefinement().catch(() => {}); }}>{t('learning.saveRefinement')}</button>
+        <button className="secondary-button" disabled={busy || refinementStale || !validRefinement || !changedRefinement} onClick={() => { void submitRefinement().catch(() => {}); }}>{t('learning.saveRefinement')}</button>
         <button className="text-button" disabled={busy} onClick={() => setRefineOpen(false)}>{t('learning.cancelRefinement')}</button>
       </div>
     </div> : null}

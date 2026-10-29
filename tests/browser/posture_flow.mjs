@@ -531,6 +531,56 @@ try {
   assert.equal(neutralReport.feedback.at(-1).verdict, 'not_useful');
   assert.equal(neutralReport.feedback.at(-1).source.page_id, receiverId);
   assert.equal(await lesson.getByText('Later feedback (6)', { exact: true }).count(), 0);
+  // Refresh must not attach a newer revision to fields drafted from an older
+  // lesson, otherwise an apparently current save overwrites another edit.
+  await close();
+  await page.locator('.breadcrumbs').getByRole('button', { name: 'Home', exact: true }).click();
+  await openLessons();
+  await lesson.getByRole('button', { name: 'Refine lesson', exact: true }).click();
+  const retainedDraft = 'Keep the first step usable, with a draft I have not yet saved.';
+  const retainedEvidence = 'My unsent reason for refining this lesson.';
+  await newLesson.fill(retainedDraft);
+  await lesson.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).fill(retainedEvidence);
+  const latestLesson = 'Check the current task before offering a practice interaction.';
+  const latestShift = { ...neutralReport.shift, candidates: 'Ask which task is current before choosing an action.' };
+  const otherRefinement = await fetch(base + '/api/pages/home/posture/experiences/' + initialLesson.id, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expectedRevision: neutralReport.revision, changes: { lesson: latestLesson, shift: latestShift } }),
+  });
+  assert.equal(otherRefinement.status, 200);
+  await page.getByRole('button', { name: 'Refresh experience', exact: true }).click();
+  await lesson.getByText(latestLesson, { exact: true }).waitFor();
+  assert.equal(await newLesson.inputValue(), retainedDraft);
+  assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isDisabled(), true,
+    'Refreshing must not silently rebase old draft fields onto a newer revision.');
+  await lesson.getByRole('alert').getByText('This experience changed while you were editing.', { exact: false }).waitFor();
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-stale-refinement.png') });
+  await changeInterfaceLanguage('zh-CN');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await lesson.getByRole('alert').getByText('编辑期间，这条经验已被修改。', { exact: false }).waitFor();
+  assert.equal(await lesson.getByRole('textbox', { name: '以后应当怎样做？', exact: true }).inputValue(), retainedDraft);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await lesson.getByRole('button', { name: '重新载入最新版本', exact: true }).scrollIntoViewIfNeeded();
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-stale-refinement-mobile-zh.png') });
+  await changeInterfaceLanguage('en');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  assert.equal(await lesson.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).inputValue(), retainedEvidence);
+  const unchanged = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
+  assert.equal(unchanged.revision, neutralReport.revision + 1);
+  assert.equal(unchanged.lesson, latestLesson);
+  await lesson.getByRole('button', { name: 'Reload latest version', exact: true }).click();
+  assert.equal(await newLesson.inputValue(), latestLesson);
+  await lesson.getByText('Revise how this changes future choices', { exact: true }).click();
+  assert.equal(await actionShift.inputValue(), latestShift.candidates);
+  assert.equal(await lesson.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).inputValue(), '');
+  assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isDisabled(), true);
+  await newLesson.fill(retainedDraft);
+  await lesson.getByRole('button', { name: 'Save refinement', exact: true }).click();
+  await lesson.getByText(retainedDraft, { exact: true }).waitFor();
+  const resolved = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
+  assert.equal(resolved.revision, neutralReport.revision + 2);
+  assert.deepEqual(resolved.shift, latestShift);
+  assert.deepEqual(resolved.source, neutralReport.source);
   assert.deepEqual(errors, []);
   console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, receiving-Work outcome feedback without private source exposure, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
 } catch (error) {

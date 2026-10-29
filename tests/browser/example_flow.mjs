@@ -249,6 +249,37 @@ try {
   assert.deepEqual(reviewed.feedback, []);
   checks.push('restart preserves native examples and permits offline capture with an attributed later follow-up');
 
+  // A note is also a versioned draft: both a rejected save and a refresh must
+  // preserve the input without letting it overwrite a concurrently changed note.
+  const reviewedCard = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: reviewed.title, exact: true }) });
+  await reviewedCard.getByRole('button', { name: 'Edit example note', exact: true }).click();
+  const noteField = reviewedCard.getByRole('textbox', { name: 'What should we notice? (optional)', exact: true });
+  const unsentNote = 'Keep my unsent comparison of the notice wording.';
+  await noteField.fill(unsentNote);
+  const concurrentNote = 'A later editor checked the current service state.';
+  const changed = await fetch(base + '/api/pages/' + nativePage + '/posture/experiences/' + reviewed.id, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expectedRevision: reviewed.revision, changes: { note: concurrentNote } }),
+  });
+  assert.equal(changed.status, 200);
+  await reviewedCard.getByRole('button', { name: 'Save refinement', exact: true }).click();
+  await page.getByRole('alert').getByText('This experience changed. Refresh it before saving.', { exact: true }).waitFor();
+  assert.equal(await noteField.inputValue(), unsentNote);
+  await page.getByRole('button', { name: 'Refresh experience', exact: true }).click();
+  await reviewedCard.getByText(concurrentNote, { exact: true }).waitFor();
+  assert.equal(await noteField.inputValue(), unsentNote);
+  assert.equal(await reviewedCard.getByRole('button', { name: 'Save refinement', exact: true }).isDisabled(), true);
+  await reviewedCard.getByRole('button', { name: 'Reload latest version', exact: true }).click();
+  assert.equal(await noteField.inputValue(), concurrentNote);
+  await noteField.fill(unsentNote);
+  await reviewedCard.getByRole('button', { name: 'Save refinement', exact: true }).click();
+  await reviewedCard.getByText(unsentNote, { exact: true }).waitFor();
+  const resolvedNote = (await experiences(nativePage)).find(item => item.id === reviewed.id);
+  assert.equal(resolvedNote.revision, reviewed.revision + 2);
+  assert.equal(resolvedNote.excerpt, reviewed.excerpt);
+  assert.deepEqual(resolvedNote.source, reviewed.source);
+  checks.push('conflicting note drafts survive rejection and refresh, require explicit reload, and keep the original example source');
+
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'example-mobile.png') });
