@@ -125,6 +125,14 @@ def run_study(
                 trial_dir, model_factory=model_factory, training_calls=training_calls,
                 trial_calls=trial_calls, stage_timeout=stage_timeout, task_order=order,
             )
+        except KeyboardInterrupt:
+            # Ctrl-C can land outside the native runner's own interrupt handler.
+            # Keep a private admission lower bound rather than leaving a
+            # misleading "running" study or repeating a potentially paid arm.
+            result.update(status="stopped", stop_reason="trial_runner_interrupted",
+                          failed_order=order, failed_arm_admissions=_failed_arm_admissions(trial_dir))
+            save()
+            break
         except Exception as exc:
             # Keep a resumable forensic pointer, not a traceback or provider
             # exception text: failures can include private request material.
@@ -163,6 +171,11 @@ def run_study(
         seen_worlds.add(world_id)
         try:
             audit = audit_ordinary_transfer(trial_dir)
+        except KeyboardInterrupt:
+            result.update(status="stopped", stop_reason="native_audit_interrupted",
+                          failed_order=order)
+            save()
+            break
         except Exception as exc:
             result.update(status="stopped", stop_reason="native_audit_exception",
                           failed_order=order, exception_type=type(exc).__name__)
@@ -172,13 +185,23 @@ def run_study(
         arm["audit_errors"] = audit.get("errors", [])
         save()
         if audit.get("status") != "verified" or audit.get("errors"):
-            result.update(status="stopped", stop_reason="trial_not_verified")
+            interrupted = record.get("status") == "interrupted"
+            result.update(status="stopped",
+                          stop_reason="native_trial_interrupted" if interrupted else "trial_not_verified",
+                          failed_order=order)
+            if interrupted:
+                result["failed_arm_admissions"] = _failed_arm_admissions(trial_dir)
             save()
             break
         if record.get("status") == "completed":
             private_review = output / ("review-" + order)
             try:
                 packet = prepare(trial_dir, private_review, allow_fixture=allow_fixture)
+            except KeyboardInterrupt:
+                result.update(status="stopped", stop_reason="blind_packet_interrupted",
+                              failed_order=order)
+                save()
+                break
             except Exception as exc:
                 # A partially written packet must never be distributed. Preserve
                 # its location for private inspection, and do not run arm two.
