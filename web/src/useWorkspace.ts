@@ -79,13 +79,16 @@ export function useWorkspace() {
     if (workspaceId) savePosition(workspaceId, routeRef.current.id, document.querySelector('.workspace-main')?.scrollTop ?? 0);
     const previous = readNavigationState(history.state, workspaceId, routeRef.current.id);
     const changedPage = id !== routeRef.current.id;
-    const canGoBack = changedPage && origin?.pageId === routeRef.current.id;
-    const state = { origin, targetMessageId, workspaceId, pageId: id, canGoBack };
+    // An anchor change replaces this history entry; it must retain the actual
+    // incoming page. Only a cross-page visit establishes a new return origin.
+    const returnOrigin = changedPage ? origin : previous?.origin;
+    const canGoBack = changedPage ? origin?.pageId === routeRef.current.id : previous?.canGoBack ?? false;
+    const state = { origin: returnOrigin, targetMessageId, workspaceId, pageId: id, canGoBack };
     if (changedPage) {
       history.replaceState({ ...previous, workspaceId, pageId: routeRef.current.id, restoreFocus: canGoBack ? origin : undefined }, '');
       history.pushState(state, '', pageHref(id, targetMessageId));
     } else history.replaceState(state, '', pageHref(id, targetMessageId));
-    setRoute(previous => ({ id, serial: previous.serial + 1, origin, targetMessageId, canGoBack }));
+    setRoute(previous => ({ id, serial: previous.serial + 1, origin: returnOrigin, targetMessageId, canGoBack }));
     setError('');
   }, []);
 

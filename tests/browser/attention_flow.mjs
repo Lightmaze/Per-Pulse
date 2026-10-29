@@ -266,6 +266,17 @@ try {
   await page.locator('#message-' + propagated.sourceMessageId).waitFor();
   checks.push('native source event opens original Work with validated causal identity');
 
+  // Inspecting another anchor inside this same source Work must not discard
+  // the receiving Work we came from. Reload must keep that return route too.
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByRole('button', { name: 'Actual source Work · 打开原始消息', exact: true }).click();
+  assert.equal(await page.evaluate(() => history.state?.origin?.pageId), localReceiver,
+    'same-page source inspection retains the actual incoming Work');
+  assert.equal(await page.evaluate(() => history.state?.canGoBack), true);
+  await page.reload();
+  await page.getByRole('heading', { name: 'Actual source Work', exact: true }).waitFor();
+  checks.push('same-page Activity inspection and reload retain the incoming Work return route');
+
   // Follow the product's actual Back/return route, not a manual URL reset.
   // It should recover the receiver's exact local event and unsent draft.
   await page.locator('.return-to-thread').click();
