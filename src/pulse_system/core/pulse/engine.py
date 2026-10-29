@@ -906,7 +906,12 @@ class PulseEngine:
     ) -> None:
         try:
             abort(engram_id)
-        except Exception:  # noqa: BLE001 - the worker report remains authoritative
+        except Exception as error:  # noqa: BLE001 - worker reports remain authoritative
+            # Native completion can detach the turn after the worker census
+            # but before this callback. There is then nothing left to cancel.
+            # Independent worker/pool reports still have to prove their exit.
+            if isinstance(error, HarnessError) and error.code == "kernel_turn_not_running":
+                return
             with failures_lock:
                 failures.append(engram_id)
             _logger.exception("could not abort in-flight pulse for %s", engram_id)
