@@ -326,6 +326,62 @@ def test_read_only_observation_uses_actual_world_kernel_http_without_side_effect
             "home", first, second
         }
 
+
+def test_native_observer_counts_verified_cross_work_delivery(tmp_path, monkeypatch):
+    """A real local World and page lineage anchor the observer's Work result."""
+    from per_pulse.service import PulseSettings
+    from test_pulse_integration import (
+        TransportFixture, assistant_count, client_for, connect, eventually, page, view,
+    )
+
+    fixture = TransportFixture(monkeypatch)
+    pulse = PulseSettings(
+        enabled=True, spontaneous_rate=0, check_interval_seconds=0.01,
+        refractory_seconds=0, max_propagation_depth=1,
+        max_background_pulses_per_hour=1,
+    )
+    with client_for(tmp_path / "native-world", pulse=pulse,
+                    model_factory=fixture.factory) as service:
+        source = page(service, "Source Work", "A_LOCAL_HISTORY")
+        receiver = page(service, "Receiving Work", "B_LOCAL_HISTORY")
+        for work in (source, receiver):
+            eventually(lambda work=work: view(service, work),
+                       lambda value: assistant_count(value) == 1)
+        connect(service, source, receiver)
+        sent = service.post(f"/api/pages/{source}/messages",
+                            json={"content": "A_NEW_INPUT"})
+        assert sent.status_code == 202
+        eventually(lambda: view(service, receiver),
+                   lambda value: assistant_count(value) == 2)
+
+        def native_delivery():
+            response = service.get("/api/pulse/observation")
+            assert response.status_code == 200
+            return [event for event in response.json()["pulse"]["recentActivations"]
+                    if event["kind"] == "propagation" and event["pageId"] == receiver]
+
+        delivery = eventually(native_delivery, lambda events: len(events) == 1
+                              and events[0]["status"] == "settled")
+        event = delivery[0]
+        # The native service checked page/engram lineage before exposing this ID.
+        assert event["messageId"] == event["eventId"]
+        receiving_messages = view(service, receiver)["messages"]
+        assert any(message["id"] == event["messageId"] for message in receiving_messages)
+
+        clock = Clock()
+        output = tmp_path / "native-delivery.jsonl"
+        report = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=0.1, interval_seconds=0.1,
+                         client=service, clock=clock, sleep=clock.sleep)
+        assert report["observed_navigable_work_results_by_page"][receiver] == 1
+        assert report["observed_navigable_work_results"] == 1
+        assert report["observed_settled_background_by_page"][receiver] == 1
+        assert report["eligible_for_uninterrupted_observation"]
+        assert report["provider_quality_or_cost_verified"] is False
+        assert records(output)[-1] == report
+
+
+
 def test_native_service_restart_changes_instance_not_persistent_world(tmp_path):
     from per_pulse.service import PulseSettings
     from test_pulse_integration import client_for
