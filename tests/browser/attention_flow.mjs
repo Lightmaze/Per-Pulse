@@ -222,6 +222,24 @@ try {
   await page.locator('.return-to-thread').click();
   await wait(async () => new URL(page.url()).pathname === '/', 'Home return after receiving Work');
   checks.push('Home opens verified local result and returns without fabricating a Home message');
+  // Opening a verified receiver is a browser-local reading action. Home
+  // should stop presenting that same event as new after reload, while native
+  // World still retains it and Activity can still inspect its original source.
+  await wait(async () => page.evaluate(eventId => Object.keys(localStorage).some(key => {
+    if (!key.endsWith('.visited-local-events')) return false;
+    try { return JSON.parse(localStorage.getItem(key) ?? 'null')?.includes(eventId); }
+    catch { return false; }
+  }), propagated.eventId), 'Home visit persisted in this browser');
+  await continued.getByRole('button', { name: '返回 Actual receiving Work', exact: true })
+    .waitFor({ state: 'detached' });
+  await page.reload();
+  await page.locator('.composer textarea').waitFor();
+  assert.equal(await page.getByRole('button',
+    { name: '返回 Actual receiving Work', exact: true }).count(), 0);
+  assert.ok((await (await fetch(base + '/api/pulse')).json()).recentActivations
+    .some(item => item.eventId === propagated.eventId && item.status === 'settled'));
+  checks.push('Home remembers viewed local result without deleting its native causal event');
+
 
   await page.goto(base + '/page/' + encodeURIComponent(localReceiver));
   await page.getByRole('heading', { name: 'Actual receiving Work', exact: true }).waitFor();
