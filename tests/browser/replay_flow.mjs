@@ -111,6 +111,10 @@ try {
   if (focused) await article.getByText('Declared focus: ' + focus, { exact: true }).waitFor();
   await article.getByRole('link', { name: 'Original reply 1', exact: true }).click();
   await wait(() => page.url().endsWith('#message-' + original.id), 'original source anchor');
+  assert.equal(await page.evaluate(() => history.state?.origin?.messageId), replayed.id,
+    'a same-Work source link keeps its explicit interpretation return anchor');
+  assert.equal(await page.evaluate(() => history.state?.canGoBack), false,
+    'same-Work inspection does not invent a cross-Work browser history entry');
   assert.equal(await page.getByRole('textbox', { name: 'Message Reconsider a design', exact: true }).inputValue(), draft);
   await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await wait(() => page.url().endsWith('#message-' + replayed.id), 'return to the interpretation');

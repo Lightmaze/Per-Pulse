@@ -79,9 +79,11 @@ export function useWorkspace() {
     if (workspaceId) savePosition(workspaceId, routeRef.current.id, document.querySelector('.workspace-main')?.scrollTop ?? 0);
     const previous = readNavigationState(history.state, workspaceId, routeRef.current.id);
     const changedPage = id !== routeRef.current.id;
-    // An anchor change replaces this history entry; it must retain the actual
-    // incoming page. Only a cross-page visit establishes a new return origin.
-    const returnOrigin = changedPage ? origin : previous?.origin;
+    // A second anchor in a visited Work must preserve the incoming Work.
+    // A same-Work source link without an outer return path still needs its
+    // explicit message origin so Back returns to the interpretation.
+    const returnOrigin = changedPage ? origin
+      : previous?.canGoBack ? previous.origin : origin ?? previous?.origin;
     const canGoBack = changedPage ? origin?.pageId === routeRef.current.id : previous?.canGoBack ?? false;
     const state = { origin: returnOrigin, targetMessageId, workspaceId, pageId: id, canGoBack };
     if (changedPage) {
