@@ -384,6 +384,89 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), sourceDraft);
   checks.push('durable per-Work backlog opens held receiver and returns with both drafts');
 
+  // A receiving Work can inspect and remove just one incoming influence,
+  // without visiting each source to find its outgoing controls.
+  for (const [sourcePageId, targetPageId, kind] of [
+    [workId, localReceiver, 'inhibitory'],
+    [localReceiver, localSource, 'excitatory'],
+  ]) {
+    const response = await fetch(base + '/api/pulse/connections', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sourcePageId, targetPageId, kind, weight: 0.6 }),
+    });
+    assert.equal(response.status, 201);
+  }
+  // Reuse the actual held input established above, before the later quota
+  // test exhausts native admission. No queue or model result is fabricated.
+  await page.goto(base + '/page/' + encodeURIComponent(localReceiver));
+  await page.locator('.composer textarea').waitFor();
+  await wait(async () => (await (await fetch(base + '/api/pulse')).json()).queueByContext
+    .some(entry => entry.pageId === localReceiver && entry.queued === 1 && entry.running === 0),
+  'native held input before disconnect');
+  const savedReceiver = (await (await fetch(base + '/api/pages/' + localReceiver)).json()).messages;
+  const pendingInput = savedReceiver.find(message => message.activation === 'propagation'
+    && message.sourcePageId === localSource && message.status === 'queued');
+  assert.ok(pendingInput, 'the original queued causal input is visible in its receiving Work');
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  const incoming = page.getByRole('region', { name: '影响此页面的连接', exact: true });
+  await incoming.getByRole('button', { name: 'Actual source Work', exact: true }).waitFor();
+  await incoming.getByText('→ 抑制', { exact: true }).waitFor();
+  await incoming.getByRole('button', { name: 'Actual source Work', exact: true }).click();
+  await wait(async () => new URL(page.url()).pathname === '/page/' + localSource, 'open incoming source');
+  assert.equal(await page.locator('.composer textarea').inputValue(), sourceDraft);
+  await page.locator('.return-to-thread').click();
+  await wait(async () => new URL(page.url()).pathname === '/page/' + localReceiver, 'return from incoming source');
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '活动', exact: true }).click();
+  await incoming.scrollIntoViewIfNeeded();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'incoming-connections-mobile-zh.png') });
+  await incoming.getByRole('button', { name: '移除来自 Actual source Work 的连接', exact: true }).click();
+  await wait(async () => await incoming.getByRole('button', { name: 'Actual source Work', exact: true }).count() === 0,
+    'only selected incoming connection removed');
+  await incoming.getByRole('button', { name: 'Independent design work', exact: true }).waitFor();
+  await wait(async () => !(await (await fetch(base + '/api/pulse')).json()).queueByContext
+    .some(entry => entry.pageId === localReceiver && entry.queued > 0), 'removed edge cancels its unstarted delivery');
+  const afterDisconnect = (await (await fetch(base + '/api/pulse')).json());
+  assert.equal(afterDisconnect.connections.some(edge => edge.sourcePageId === localSource && edge.targetPageId === localReceiver), false);
+  assert.ok(afterDisconnect.connections.some(edge => edge.sourcePageId === workId && edge.targetPageId === localReceiver));
+  assert.ok(afterDisconnect.connections.some(edge => edge.sourcePageId === localReceiver && edge.targetPageId === localSource));
+  assert.deepEqual((await (await fetch(base + '/api/pages/' + localReceiver)).json()).messages,
+    savedReceiver.map(message => message.id === pendingInput.id ? { ...message, status: 'cancelled' } : message));
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.locator('#interface-language').selectOption('en');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await stopServer(server); server = startServer();
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'restart after incoming disconnect');
+  await page.reload();
+  await page.locator('.composer textarea').waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  const incomingEnglish = page.getByRole('region', { name: 'Connections into this page', exact: true });
+  await incomingEnglish.getByRole('button', { name: 'Independent design work', exact: true }).waitFor();
+  assert.equal(await incomingEnglish.getByRole('button', { name: 'Actual source Work', exact: true }).count(), 0);
+  await incomingEnglish.scrollIntoViewIfNeeded();
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'incoming-connections-desktop-en.png') });
+  await incomingEnglish.getByRole('button', { name: 'Remove connection from Independent design work', exact: true }).click();
+  await incomingEnglish.getByText('No incoming computation connections.', { exact: true }).waitFor();
+  checks.push('receiving Work inspects incoming sources, removes one edge and its unstarted input, preserves unrelated edges/history/drafts, and retains the change after restart');
+
+  // Continue the existing quota test: cancellation does not refund an
+  // admission, and reconnecting must not revive the cancelled input.
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.locator('#interface-language').selectOption('zh-CN');
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  const reconnected = await fetch(base + '/api/pulse/connections', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sourcePageId: localSource, targetPageId: localReceiver, kind: 'excitatory', weight: 0.6 }),
+  });
+  assert.equal(reconnected.status, 201);
+  assert.equal((await (await fetch(base + '/api/pulse')).json()).queueByContext
+    .some(entry => entry.pageId === localReceiver && entry.queued > 0), false);
   const releaseReceiver = await fetch(base + '/api/pulse/contexts/' + localReceiver, {
     method: 'PATCH', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ paused: false }),
@@ -427,6 +510,7 @@ try {
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
   checks.push('restarted-service observation blocks stale controls and preserves Work draft');
+
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks,
