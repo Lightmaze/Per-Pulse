@@ -428,12 +428,16 @@ class PageService:
         statuses = {row["status"] for row in rows}
         if statuses.intersection({"running", "admitted", "processing"}):
             return "working"
+        # A newer failure or approval hold needs the person's attention even
+        # when an unrelated older message remains queued. Do not hide the
+        # actionable latest outcome behind an earlier backlog entry.
+        latest = rows[-1]["status"] if rows else None
+        if latest in {"failed", "uncertain"}:
+            return "error"
+        if latest in {"blocked", "awaiting_approval"}:
+            return "needs_attention"
         if "queued" in statuses:
             return "queued"
-        if rows and rows[-1]["status"] in {"failed", "uncertain"}:
-            return "error"
-        if rows and rows[-1]["status"] in {"blocked", "awaiting_approval"}:
-            return "needs_attention"
         return "idle"
 
     def _summary(self, page_id: str, rows: list[dict] | None = None) -> dict:
