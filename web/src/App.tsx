@@ -231,7 +231,11 @@ export default function App() {
   const goBack = () => {
     window.clearTimeout(scrollTimer.current);
     if (workspaceId) savePosition(workspaceId, route.id, main.current?.scrollTop ?? 0);
-    if (route.origin) {
+    if (route.samePageReturn) {
+      // Finish the local source detour first; keep the actual incoming Work
+      // available for the next Back action.
+      navigate(route.samePageReturn.pageId, undefined, route.samePageReturn.messageId);
+    } else if (route.origin) {
       const origin = route.origin;
       if (route.canGoBack) history.back();
       else navigate(origin.pageId, undefined, origin.messageId);
@@ -255,7 +259,7 @@ export default function App() {
           </Fragment>)}
         </nav>
         <button className="text-button pulse-activity-trigger" onClick={() => { setModal(null); setSidebarOpen(false); setPulseOpen(true); }}>{t('pulse.title')}</button>
-        {(route.id !== 'home' || Boolean(route.origin)) ? <button className="text-button return-to-thread" onClick={goBack} aria-label={t('app.back')}><Icon name="back" size={16} /><span className="return-label-long">{t('app.back')}</span><span className="return-label-short">{t('app.backShort')}</span></button> : null}
+        {(route.id !== 'home' || Boolean(route.origin) || Boolean(route.samePageReturn)) ? <button className="text-button return-to-thread" onClick={goBack} aria-label={t('app.back')}><Icon name="back" size={16} /><span className="return-label-long">{t('app.back')}</span><span className="return-label-short">{t('app.backShort')}</span></button> : null}
       </header>
       <main className="workspace-main" ref={main} onPointerDownCapture={recordInteraction}
         onKeyDownCapture={recordInteraction} onWheelCapture={recordInteraction} onScroll={() => {

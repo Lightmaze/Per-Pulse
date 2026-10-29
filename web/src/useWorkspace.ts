@@ -4,7 +4,7 @@ import { messageFromLocation, pageFromLocation, pageHref, readNavigationState, s
 import { mergeWorkspaceSnapshot } from './workspaceSnapshot';
 import type { Bootstrap, NavigationOrigin, PageView } from './types';
 
-type Route = { id: string; serial: number; origin?: NavigationOrigin; targetMessageId?: string; restoreFocus?: NavigationOrigin; canGoBack: boolean };
+type Route = { id: string; serial: number; origin?: NavigationOrigin; samePageReturn?: NavigationOrigin; targetMessageId?: string; restoreFocus?: NavigationOrigin; canGoBack: boolean };
 export function useWorkspace() {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
   const bootstrapRef = useRef<Bootstrap | null>(null);
@@ -79,13 +79,21 @@ export function useWorkspace() {
     if (workspaceId) savePosition(workspaceId, routeRef.current.id, document.querySelector('.workspace-main')?.scrollTop ?? 0);
     const previous = readNavigationState(history.state, workspaceId, routeRef.current.id);
     const changedPage = id !== routeRef.current.id;
-    const canGoBack = changedPage && origin?.pageId === routeRef.current.id;
-    const state = { origin, targetMessageId, workspaceId, pageId: id, canGoBack };
+    // The incoming Work and a same-Work source detour are independent
+    // return paths. Opening another Activity anchor must not erase either.
+    const returnOrigin = changedPage ? origin
+      : previous?.origin ?? (origin?.pageId !== id ? origin : undefined);
+    const requestedSamePageReturn = !changedPage && origin?.pageId === id ? origin : undefined;
+    const samePageReturn = changedPage ? undefined : requestedSamePageReturn
+      ?? (targetMessageId && previous?.samePageReturn?.messageId === targetMessageId
+        ? undefined : previous?.samePageReturn);
+    const canGoBack = changedPage ? origin?.pageId === routeRef.current.id : previous?.canGoBack ?? false;
+    const state = { origin: returnOrigin, samePageReturn, targetMessageId, workspaceId, pageId: id, canGoBack };
     if (changedPage) {
       history.replaceState({ ...previous, workspaceId, pageId: routeRef.current.id, restoreFocus: canGoBack ? origin : undefined }, '');
       history.pushState(state, '', pageHref(id, targetMessageId));
     } else history.replaceState(state, '', pageHref(id, targetMessageId));
-    setRoute(previous => ({ id, serial: previous.serial + 1, origin, targetMessageId, canGoBack }));
+    setRoute(previous => ({ id, serial: previous.serial + 1, origin: returnOrigin, samePageReturn, targetMessageId, canGoBack }));
     setError('');
   }, []);
 
@@ -95,7 +103,7 @@ export function useWorkspace() {
       if (workspaceId) savePosition(workspaceId, routeRef.current.id, document.querySelector('.workspace-main')?.scrollTop ?? 0);
       const id = pageFromLocation();
       const saved = readNavigationState(history.state, workspaceId, id);
-      setRoute(previous => ({ id, serial: previous.serial + 1, origin: saved?.origin, targetMessageId: messageFromLocation() ?? saved?.targetMessageId, restoreFocus: saved?.restoreFocus, canGoBack: saved?.canGoBack ?? false }));
+      setRoute(previous => ({ id, serial: previous.serial + 1, origin: saved?.origin, samePageReturn: saved?.samePageReturn, targetMessageId: messageFromLocation() ?? saved?.targetMessageId, restoreFocus: saved?.restoreFocus, canGoBack: saved?.canGoBack ?? false }));
       setError('');
     };
     window.addEventListener('popstate', onPop);
@@ -114,7 +122,7 @@ export function useWorkspace() {
   useEffect(() => {
     if (!bootstrap?.workspaceId) return;
     const saved = readNavigationState(history.state, bootstrap.workspaceId, routeRef.current.id);
-    setRoute(previous => ({ ...previous, origin: saved?.origin, targetMessageId: messageFromLocation() ?? saved?.targetMessageId, restoreFocus: saved?.restoreFocus, canGoBack: saved?.canGoBack ?? false }));
+    setRoute(previous => ({ ...previous, origin: saved?.origin, samePageReturn: saved?.samePageReturn, targetMessageId: messageFromLocation() ?? saved?.targetMessageId, restoreFocus: saved?.restoreFocus, canGoBack: saved?.canGoBack ?? false }));
   }, [bootstrap?.workspaceId]);
 
   useEffect(() => {

@@ -111,9 +111,19 @@ try {
   if (focused) await article.getByText('Declared focus: ' + focus, { exact: true }).waitFor();
   await article.getByRole('link', { name: 'Original reply 1', exact: true }).click();
   await wait(() => page.url().endsWith('#message-' + original.id), 'original source anchor');
+  assert.equal(await page.evaluate(() => history.state?.samePageReturn?.messageId), replayed.id,
+    'a same-Work source link retains its own interpretation return anchor');
+  assert.equal(await page.evaluate(() => history.state?.origin?.pageId), 'home',
+    'same-Work inspection does not erase the original incoming Home route');
+  assert.equal(await page.evaluate(() => history.state?.canGoBack), true,
+    'the earlier cross-page return remains available beneath the local detour');
   assert.equal(await page.getByRole('textbox', { name: 'Message Reconsider a design', exact: true }).inputValue(), draft);
   await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await wait(() => page.url().endsWith('#message-' + replayed.id), 'return to the interpretation');
+  assert.equal(await page.evaluate(() => history.state?.samePageReturn), undefined,
+    'returning from the source consumes only the same-Work detour');
+  assert.equal(await page.evaluate(() => history.state?.origin?.pageId), 'home',
+    'returning to the interpretation preserves the outer Home route');
   assert.equal(await page.getByRole('textbox', { name: 'Message Reconsider a design', exact: true }).inputValue(), draft);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'replay-sources.png') });
   checks.push('verified native source opens and returns to the exact interpretation without losing the Work draft');
