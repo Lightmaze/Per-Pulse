@@ -101,6 +101,23 @@ Replace the placeholders with your provider's values. The endpoint is a complete
 
 If neither endpoint nor model is set, the workspace runs disconnected. Setting only one is a configuration error. Restart after changing provider configuration. Queued input from the ordinary workspace can be processed after connecting a model, so use a separate data directory when you want a fresh conversation.
 
+Before starting a provider-backed Work or a paid posture experiment, check the
+**local configuration** without sending any network request:
+
+```sh
+per-pulse doctor
+per-pulse doctor --json
+```
+
+This uses the same adapter configuration validation and local credential-presence
+check as the runtime. It distinguishes intentional disconnected mode, incomplete
+settings, missing credentials, and locally configured settings; no secret value,
+model response or source conversation is printed. The JSON form is suitable for
+a local executor's preflight. A locally configured result is **not** a remote
+connectivity, authentication, streaming/tool-call, usage-reporting, model-quality
+or money-cap verification. The doctor sends zero provider requests, leaves the
+World untouched, and returns a nonzero exit code for invalid/missing settings.
+
 Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. Per Pulse also enforces a default **8 MiB maximum serialized request body** at the outbound Chat Completions boundary, configurable with `P_PULSE_MAX_REQUEST_BYTES`. This rejects oversized requests *before network send*, including those arising from long history, side computations, tool schemas or image parts. It never silently truncates the saved context; a blocked turn remains visible for review. This byte guard is **not** a context-token limit, provider bill cap, or solution to automatic long-history management. Provider compatibility must be verified separately.
 
 ### Bring source material into a conversation
