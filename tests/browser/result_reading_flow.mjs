@@ -102,6 +102,20 @@ try {
   await article.waitFor();
   assert.equal(await composer.inputValue(), draft);
   assert.equal(new URL(page.url()).hash, '#message-' + result.messageId);
+  // A rendered paragraph joins the bold span to plain text, but those
+  // characters are not one contiguous excerpt in the authored Markdown.
+  // Keep the canonical source instead of presenting a synthesized quotation.
+  await article.locator('.message-content p').first().evaluate(node => {
+    const range = document.createRange(); range.selectNodeContents(node);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  });
+  await article.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  const crossFormatDialog = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
+  assert.equal(await crossFormatDialog.getByRole('textbox', { name: 'What would you like to bring back?', exact: true }).inputValue(), content);
+  await page.keyboard.press('Escape');
+  await crossFormatDialog.waitFor({ state: 'hidden' });
+  checks.push('a rendered cross-format selection falls back to the exact authored source');
+
   await article.locator('blockquote').evaluate(node => {
     const range = document.createRange(); range.selectNodeContents(node);
     const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
