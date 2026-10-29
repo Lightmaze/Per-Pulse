@@ -38,6 +38,7 @@ export function homeContinuations(
   pulse: PulseState | null,
   pages: readonly PageSummary[],
   maximum = 3,
+  visitedEventIds: ReadonlySet<string> = new Set<string>(),
 ): HomeContinuation[] {
   if (!pulse?.enabled || !Number.isInteger(maximum) || maximum <= 0) return [];
   const known = new Map(pages.filter(page => page.kind === 'work').map(page => [page.id, page]));
@@ -53,6 +54,9 @@ export function homeContinuations(
     const target = activationMessageTarget(event, validIds, 'receiver');
     if (!target?.messageId) continue; // Never fabricate a World message link.
     displayed.add(page.id);
+    // Opening the latest event should not resurrect an older event from the
+    // same Work as an apparently new Home continuation.
+    if (visitedEventIds.has(event.eventId)) continue;
     rows.push({
       page, event, receiver: { pageId: target.pageId, messageId: target.messageId },
       source: activationMessageTarget(event, validIds, 'source'),
