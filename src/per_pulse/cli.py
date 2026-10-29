@@ -54,6 +54,10 @@ def _image_command(argv: list[str]) -> None:
 def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
+    if argv and argv[0] == "doctor":
+        from .doctor import run as doctor_run
+        doctor_run(argv[1:])
+        return
     if argv and argv[0] == "image":
         _image_command(argv[1:])
         return
