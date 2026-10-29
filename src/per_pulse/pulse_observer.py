@@ -138,6 +138,10 @@ def observe(
                         # saturated window must never be called full coverage.
                         saturated |= len(recent) >= 20
                         changes = []
+                        pending_seen = {}
+                        # Validate the entire status window before accepting any
+                        # of its events. A malformed later item must not leave
+                        # apparent evidence from a failed observation sample.
                         for item in recent:
                             if not isinstance(item, dict):
                                 raise ValueError("Invalid native activation")
@@ -159,9 +163,11 @@ def observe(
                                 "sourceEventId": item.get("sourceEventId"),
                                 "sourcePageId": item.get("sourcePageId"),
                             }
-                            if seen.get(event_id) != slim:
-                                seen[event_id] = slim
+                            previous = pending_seen.get(event_id, seen.get(event_id))
+                            if previous != slim:
+                                pending_seen[event_id] = slim
                                 changes.append(slim)
+                        seen.update(pending_seen)
                         connected = pulse.get("providerConfigured") is True
                         connected_samples += int(connected)
                         running_samples += int(pulse.get("running") is True)
