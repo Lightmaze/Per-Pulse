@@ -8,6 +8,8 @@ No sidecar bookmark store, semantic scheduler or file write is involved.
 """
 from __future__ import annotations
 
+from array import array
+from bisect import bisect_left
 from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
@@ -45,6 +47,9 @@ SCHEMA = {
                         "description": "For follow: the zero-based match_index from an exposed find result."},
         "query": {"type": "string", "minLength": 2, "maxLength": 120},
         "case_sensitive": {"type": "boolean"},
+        "casefold": {"type": "boolean", "description":
+                     "For find: opt into full Unicode casefold matching of whole original characters. "
+                     "No normalization or locale rules; incompatible with case_sensitive=true."},
         "max_matches": {"type": "integer", "minimum": 1, "maximum": 8},
         "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_CHARS},
         "limit": {"type": "integer", "minimum": 1, "maximum": 8},
@@ -68,6 +73,11 @@ def descriptor() -> ToolDescriptor:
         "find(path, query, expected_digest?, max_matches?) locates exact literal "
         "phrases with bounded excerpts and source coordinates in the redacted view; "
         "it is not a semantic search or proof of reading the whole file. "
+        "The default keeps Python regex case-insensitive matching. For Unicode "
+        "expansions such as Straße/STRASSE, explicitly set casefold=true; matches "
+        "must cover whole original characters and still return original view "
+        "coordinates. This adds no normalization or locale rules and cannot be "
+        "combined with case_sensitive=true. "
         "follow(receipt_id, match_index, max_chars?) reads from one of those "
         "observed matches, checking the full source and workspace again. Use the "
         "find receipt and its zero-based match_index, never an invented offset. "
@@ -99,7 +109,7 @@ def validate(args: Mapping[str, Any]) -> str:
         "open": {"op", "path", "max_chars", "expected_digest"},
         "continue": {"op", "receipt_id", "max_chars"},
         "resume": {"op", "receipt_id", "max_chars"},
-        "find": {"op", "path", "query", "expected_digest", "max_matches", "case_sensitive"},
+        "find": {"op", "path", "query", "expected_digest", "max_matches", "case_sensitive", "casefold"},
         "follow": {"op", "receipt_id", "match_index", "max_chars"},
         "recent": {"op", "limit"},
     }
@@ -122,6 +132,9 @@ def validate(args: Mapping[str, Any]) -> str:
                 raise ProviderProtocolError("reading query is invalid", code="reading_arguments_invalid")
             if type(args.get("case_sensitive", False)) is not bool:
                 raise ProviderProtocolError("reading case sensitivity is invalid", code="reading_arguments_invalid")
+            if (type(args.get("casefold", False)) is not bool
+                    or (args.get("casefold", False) and args.get("case_sensitive", False))):
+                raise ProviderProtocolError("reading casefold mode is invalid", code="reading_arguments_invalid")
             _integer(args.get("max_matches", 5), 1, 8)
         else:
             _integer(args.get("max_chars", 4000), 1, MAX_CHARS)
@@ -130,6 +143,47 @@ def validate(args: Mapping[str, Any]) -> str:
     else:
         _integer(args.get("limit", 5), 1, 8)
     return op
+
+
+def _casefold_spans(text: str, query: str, cancellation: CancellationToken):
+    """Yield greedy non-overlapping matches in the original character space.
+
+    A folded substring is a match only when BOTH ends are original character
+    boundaries. For example, ``as`` must not match half of the final ß in Aß.
+    The compact cumulative array avoids a Python object per folded character.
+    """
+    needle, folded = query.casefold(), text.casefold()
+    start = folded.find(needle)
+    cancellation.raise_if_cancelled()
+    if start < 0:
+        return
+    # Every ASCII source character maps to exactly one folded character, even
+    # when the query itself contains an expansion. No offset map is needed.
+    boundaries = None
+    if not text.isascii():
+        boundaries = array("I", [0])
+        total = 0
+        for index, character in enumerate(text):
+            if index % 4096 == 0:
+                cancellation.raise_if_cancelled()
+            total += len(character.casefold())
+            boundaries.append(total)
+    while start >= 0:
+        cancellation.raise_if_cancelled()
+        end = start + len(needle)
+        if boundaries is None:
+            left, right = start, end
+            valid = True
+        else:
+            left, right = bisect_left(boundaries, start), bisect_left(boundaries, end)
+            valid = boundaries[left] == start and boundaries[right] == end
+        if valid:
+            yield left, right
+            cursor = end
+        else:
+            # Advancing by the whole query would miss the valid ß in sß/ss.
+            cursor = start + 1
+        start = folded.find(needle, cursor)
 
 
 def _view(text: str) -> tuple[str, bool]:
@@ -281,27 +335,31 @@ def execute(
         query = call.arguments["query"]
         maximum = call.arguments.get("max_matches", 5)
         flags = 0 if call.arguments.get("case_sensitive", False) else re.IGNORECASE
+        casefold = call.arguments.get("casefold", False)
+        spans = (_casefold_spans(text, query, cancellation) if casefold else
+                 (found.span() for found in re.finditer(re.escape(query), text, flags=flags)))
         result = {
             "kind": FIND_KIND, "receipt_id": action_request_id, "source": source,
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "scope": "current_action_source", "observation_only": True,
             "redacted": redacted, "searched_entire_redacted_view": True,
             "coordinates": "unicode_characters_in_redacted_view",
+            "case_mode": "unicode_casefold" if casefold else "case_sensitive" if not flags else "regex_ignorecase",
             "matches": [], "more_matches": False,
         }
         limit = provider.store.max_payload_bytes // 2
-        for found in re.finditer(re.escape(query), text, flags=flags):
+        for start, end in spans:
             cancellation.raise_if_cancelled()
             if len(result["matches"]) >= maximum:
                 result["more_matches"] = True
                 result["searched_entire_redacted_view"] = False
                 break
-            left = max(0, found.start() - 72)
-            right = min(len(text), found.end() + 96)
+            left = max(0, start - 72)
+            right = min(len(text), end + 96)
             excerpt, clipped = _view(text[left:right])
             match = {
                 "match_index": len(result["matches"]),
-                "start_char": found.start(), "end_char": found.end(),
+                "start_char": start, "end_char": end,
                 "excerpt_start_char": left, "excerpt": excerpt,
                 "excerpt_redacted": clipped,
             }

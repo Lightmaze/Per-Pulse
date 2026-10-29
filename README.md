@@ -316,6 +316,16 @@ After relocating a workspace, run find again before following a hit. The
 coordinate unit is Python Unicode characters in the redacted view, not raw
 UTF-8 bytes or JavaScript UTF-16 indices.
 
+For expansion-aware Unicode matching, explicitly pass `casefold=true` to
+`reading.find`: `STRASSE` can locate the original `Straße`, and `FFI` can
+locate `ﬃ`. Matches cover whole original characters; `fi` does not match
+part of `ﬃ`. The returned `case_mode` records the selected semantics, and
+follow/continue still use the original source coordinates. The default
+remains Python regex case-insensitive matching; `case_sensitive=true` selects
+exact case and cannot be combined with `casefold=true`. Casefold adds neither
+accent normalization nor locale rules. See [Unicode source search](docs/unicode-source-search.md)
+for examples and the actual prototype experiment.
+
 A lost upload response is shown as unconfirmed and never retried automatically.
 Open **Materials → uploads/** to inspect the saved file and add it to the draft.
 The native file creation
