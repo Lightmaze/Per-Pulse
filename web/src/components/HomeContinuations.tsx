@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { homeContinuations, homeWorkNeedsAttention, verifiedHomePulse } from '../homeContinuations';
 import { useLanguage } from '../i18n';
+import { markVisitedLocalEvent, readVisitedLocalEvents } from '../storage';
 import { pulseActivityLabel } from '../pulseActivityLabels';
 import type { Bootstrap, PageSummary, PulseObservation } from '../types';
 import type { Navigate } from './SessionLink';
@@ -18,6 +19,9 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
   workspaceId: string;
 }) {
   const { t, pageTitle } = useLanguage();
+  const [visited, setVisited] = useState<{ workspaceId: string; eventIds: string[] }>(() => ({
+    workspaceId, eventIds: readVisitedLocalEvents(workspaceId),
+  }));
   // Foreground Work and Pulse are read independently. Do not pair their
   // results until they agree on both the persistent World and live process.
   // A restart can happen between the requests even within one polling tick.
@@ -84,13 +88,22 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
   // Verify page ownership against the fresh native World before producing
   // exact-source Pulse links or actionable Work status.
   const currentPages = freshPages ?? pages;
-  const items = homeContinuations(freshPages ? pulse : null, freshPages ?? []);
+  const visitedIds = visited.workspaceId === workspaceId
+    ? visited.eventIds : readVisitedLocalEvents(workspaceId);
+  const items = homeContinuations(freshPages ? pulse : null, freshPages ?? [], 3, new Set(visitedIds));
   const needAttention = homeWorkNeedsAttention(freshPages ?? []);
   if (!items.length && !needAttention.length) return null;
 
   const titleOf = (id: string) => id === 'home' ? t('app.home')
     : currentPages.find(page => page.id === id)?.title ?? '';
   const open = (id: string, messageId?: string) => navigate(id, { pageId: 'home' }, messageId);
+  const openLocalResult = (eventId: string, id: string, messageId: string) => {
+    // A read receipt is confined to this browser and World. Inspecting the
+    // causal source alone does not mark the receiving result as visited.
+    const eventIds = markVisitedLocalEvent(workspaceId, eventId);
+    setVisited({ workspaceId, eventIds });
+    open(id, messageId);
+  };
 
   return <>
     {needAttention.length ? <section className="home-continuations" aria-label={t('pulse.homeReview.title')}>
@@ -112,7 +125,7 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
       <p className="home-continuations-intro">{t('pulse.home.info')}</p>
       <ol className="home-continuations-list">
         {items.map(({ event, page, receiver, source }) => <li key={event.eventId}>
-          <button type="button" className="home-continuation-open" onClick={() => open(receiver.pageId, receiver.messageId)}>
+          <button type="button" className="home-continuation-open" onClick={() => openLocalResult(event.eventId, receiver.pageId, receiver.messageId)}>
             {t('pulse.home.open', { title: pageTitle(page) })}
           </button>
           <span className="home-continuation-detail" title={event.status}>
