@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useId, useRef, type ReactNode } from 'react';
 import { Icon } from './Icon';
 import { useLanguage } from '../i18n';
 
@@ -6,7 +6,7 @@ export function Dialog({ title, children, onClose, className = '', initialFocus 
   const { t } = useLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = dialog.current;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     element?.showModal();
