@@ -104,6 +104,94 @@ def test_native_local_provenance_is_deduplicated_over_elapsed_samples(tmp_path):
     assert "PRIVATE_TRANSCRIPT" not in output.read_text()
 
 
+
+def test_observer_counts_only_source_checked_navigable_work_results(tmp_path):
+    """A settled event without an exact receiving message is not a returned artifact."""
+    clock = Clock()
+    visible = activation("visible", "settled", "work-A")
+    visible["messageId"] = "visible"
+    propagation = activation("prop", "settled", "work-B")
+    propagation["kind"] = "propagation"
+    propagation["messageId"] = "prop"
+    invisible = activation("not-a-message", "settled", "work-C")
+    home = activation("home-event", "settled", "home")
+    home["messageId"] = "home-event"
+    unfinished = activation("still-running", "running", "work-D")
+    unfinished["messageId"] = "still-running"
+    phases = [
+        snapshot([activation("visible", "queued", "work-A")]),
+        snapshot([visible, propagation, invisible, home, unfinished]),
+    ]
+    phases[1]["paused"] = True
+    phases[1]["running"] = False
+    output = tmp_path / "watch.jsonl"
+    with mock_client(phases) as client:
+        result = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=1, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+
+    # These are lower-bound observations, not verified model usefulness.
+    assert result["observed_settled_background_by_page"] == {
+        "home": 1, "work-A": 1, "work-B": 1, "work-C": 1,
+    }
+    assert result["observed_navigable_work_results_by_page"] == {
+        "work-A": 1, "work-B": 1,
+    }
+    assert result["observed_navigable_work_results"] == 2
+    assert result["pulse_running_samples"] == 1
+    assert result["pulse_paused_samples"] == 1
+    assert result["eligible_for_uninterrupted_observation"]
+    rows = records(output)
+    assert rows[-1] == result
+    updates = [event for row in rows if row["type"] == "sample"
+               for event in row["event_updates"]]
+    # The queued observation predates the verified receiving message; its
+    # earlier update must remain visible rather than being retroactively filled.
+    visible_updates = [event for event in updates if event["eventId"] == "visible"]
+    assert [event["messageId"] for event in visible_updates] == [None, "visible"]
+    assert next(event for event in updates if event["eventId"] == "not-a-message")["messageId"] is None
+
+
+def test_observer_rejects_unverified_receiving_message_identity(tmp_path):
+    clock = Clock()
+    genuine = activation("valid", "settled", "work-B")
+    genuine["messageId"] = "valid"
+    spoofed = activation("event-1", "settled", "work-A")
+    spoofed["messageId"] = "different-message"
+    output = tmp_path / "watch.jsonl"
+    # A good item before a malformed item cannot be partially admitted.
+    with mock_client([snapshot([genuine, spoofed])]) as client:
+        result = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=0.1, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+    assert result["poll_errors"] == 2
+    assert result["successful_samples"] == 0
+    assert result["observed_events"] == 0
+    assert result["observed_navigable_work_results"] == 0
+    assert not result["eligible_for_uninterrupted_observation"]
+    assert [row["type"] for row in records(output)] == [
+        "header", "poll_error", "poll_error", "summary",
+    ]
+
+
+def test_invalid_full_window_does_not_claim_saturation_or_any_events(tmp_path):
+    """Coverage flags also commit atomically with validated native observations."""
+    clock = Clock()
+    events = [activation(f"valid-{i}", "settled", "work-A") for i in range(19)]
+    malformed = activation("broken", "settled", "work-B")
+    malformed["messageId"] = "unrelated-message"
+    output = tmp_path / "watch.jsonl"
+    with mock_client([snapshot(events + [malformed])]) as client:
+        report = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=0.1, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+    assert report["successful_samples"] == 0
+    assert report["observed_events"] == 0
+    assert report["observed_settled_background_by_page"] == {}
+    assert report["observed_navigable_work_results"] == 0
+    assert report["recent_window_saturated"] is False
+    assert report["poll_errors"] == 2
+
 def test_world_switch_stops_without_cross_body_merging(tmp_path):
     clock = Clock()
     output = tmp_path / "watch.jsonl"
@@ -237,6 +325,62 @@ def test_read_only_observation_uses_actual_world_kernel_http_without_side_effect
         assert {p["id"] for p in service.get("/api/bootstrap").json()["pages"]} >= {
             "home", first, second
         }
+
+
+def test_native_observer_counts_verified_cross_work_delivery(tmp_path, monkeypatch):
+    """A real local World and page lineage anchor the observer's Work result."""
+    from per_pulse.service import PulseSettings
+    from test_pulse_integration import (
+        TransportFixture, assistant_count, client_for, connect, eventually, page, view,
+    )
+
+    fixture = TransportFixture(monkeypatch)
+    pulse = PulseSettings(
+        enabled=True, spontaneous_rate=0, check_interval_seconds=0.01,
+        refractory_seconds=0, max_propagation_depth=1,
+        max_background_pulses_per_hour=1,
+    )
+    with client_for(tmp_path / "native-world", pulse=pulse,
+                    model_factory=fixture.factory) as service:
+        source = page(service, "Source Work", "A_LOCAL_HISTORY")
+        receiver = page(service, "Receiving Work", "B_LOCAL_HISTORY")
+        for work in (source, receiver):
+            eventually(lambda work=work: view(service, work),
+                       lambda value: assistant_count(value) == 1)
+        connect(service, source, receiver)
+        sent = service.post(f"/api/pages/{source}/messages",
+                            json={"content": "A_NEW_INPUT"})
+        assert sent.status_code == 202
+        eventually(lambda: view(service, receiver),
+                   lambda value: assistant_count(value) == 2)
+
+        def native_delivery():
+            response = service.get("/api/pulse/observation")
+            assert response.status_code == 200
+            return [event for event in response.json()["pulse"]["recentActivations"]
+                    if event["kind"] == "propagation" and event["pageId"] == receiver]
+
+        delivery = eventually(native_delivery, lambda events: len(events) == 1
+                              and events[0]["status"] == "settled")
+        event = delivery[0]
+        # The native service checked page/engram lineage before exposing this ID.
+        assert event["messageId"] == event["eventId"]
+        receiving_messages = view(service, receiver)["messages"]
+        assert any(message["id"] == event["messageId"] for message in receiving_messages)
+
+        clock = Clock()
+        output = tmp_path / "native-delivery.jsonl"
+        report = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=0.1, interval_seconds=0.1,
+                         client=service, clock=clock, sleep=clock.sleep)
+        assert report["observed_navigable_work_results_by_page"][receiver] == 1
+        assert report["observed_navigable_work_results"] == 1
+        assert report["observed_settled_background_by_page"][receiver] == 1
+        assert report["eligible_for_uninterrupted_observation"]
+        assert report["provider_quality_or_cost_verified"] is False
+        assert records(output)[-1] == report
+
+
 
 def test_native_service_restart_changes_instance_not_persistent_world(tmp_path):
     from per_pulse.service import PulseSettings

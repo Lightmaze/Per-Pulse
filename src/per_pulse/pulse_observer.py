@@ -82,6 +82,8 @@ def observe(
     poll_errors = 0
     saturated = False
     connected_samples = 0
+    running_samples = 0
+    paused_samples = 0
     exit_reason = "completed"
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -134,8 +136,11 @@ def observe(
                             raise ValueError("Pulse status has no recent activation list")
                         # The native endpoint exposes only its recent window. A
                         # saturated window must never be called full coverage.
-                        saturated |= len(recent) >= 20
                         changes = []
+                        pending_seen = {}
+                        # Validate the entire status window before accepting any
+                        # of its events. A malformed later item must not leave
+                        # apparent evidence from a failed observation sample.
                         for item in recent:
                             if not isinstance(item, dict):
                                 raise ValueError("Invalid native activation")
@@ -143,17 +148,31 @@ def observe(
                             status = item.get("status")
                             if not isinstance(event_id, str) or not event_id or not isinstance(status, str):
                                 raise ValueError("Invalid native activation identity")
+                            # The native service only exposes a receiving message
+                            # after verifying its durable page lineage. Never
+                            # promote a settled root without that exact link to
+                            # evidence of a result the user can actually open.
+                            message_id = item.get("messageId")
+                            if message_id is not None and message_id != event_id:
+                                raise ValueError("Invalid native receiving message identity")
                             slim = {
                                 "eventId": event_id, "status": status,
                                 "kind": item.get("kind"), "pageId": item.get("pageId"),
+                                "messageId": message_id,
                                 "sourceEventId": item.get("sourceEventId"),
                                 "sourcePageId": item.get("sourcePageId"),
                             }
-                            if seen.get(event_id) != slim:
-                                seen[event_id] = slim
+                            previous = pending_seen.get(event_id, seen.get(event_id))
+                            if previous != slim:
+                                pending_seen[event_id] = slim
                                 changes.append(slim)
+                        seen.update(pending_seen)
+                        # A failed status read cannot leave partial coverage metadata.
+                        saturated |= len(recent) >= 20
                         connected = pulse.get("providerConfigured") is True
                         connected_samples += int(connected)
+                        running_samples += int(pulse.get("running") is True)
+                        paused_samples += int(pulse.get("paused") is True)
                         emit({
                             "type": "sample", "elapsed_seconds": round(elapsed, 3),
                             "utc": datetime.now(timezone.utc).isoformat(),
@@ -183,14 +202,29 @@ def observe(
                 if event["status"] == "settled"
                 and event["kind"] in {"spontaneous", "propagation"}
             )
+            # A settled activation is not necessarily a navigable Work result.
+            # Message identity comes from the server's source-checked page
+            # projection, not from a guessed event-to-message relationship.
+            work_results = Counter(
+                event["pageId"] for event in seen.values()
+                if event["status"] == "settled"
+                and event["kind"] in {"spontaneous", "propagation"}
+                and isinstance(event["pageId"], str)
+                and event["pageId"] not in {"", "home"}
+                and event["messageId"] == event["eventId"]
+            )
             summary = {
                 "type": "summary", "reason": exit_reason, "workspaceId": world_id,
                 "serviceInstanceId": service_instance_id,
                 "elapsed_seconds": round(clock() - start, 3),
                 "successful_samples": samples, "poll_errors": poll_errors,
                 "provider_configured_samples": connected_samples,
+                "pulse_running_samples": running_samples,
+                "pulse_paused_samples": paused_samples,
                 "observed_events": len(seen),
                 "observed_settled_background_by_page": dict(sorted(counts.items())),
+                "observed_navigable_work_results_by_page": dict(sorted(work_results.items())),
+                "observed_navigable_work_results": sum(work_results.values()),
                 "recent_window_saturated": saturated,
                 "full_event_coverage_claimed": False,
                 "eligible_for_uninterrupted_observation":

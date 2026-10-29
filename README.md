@@ -247,6 +247,13 @@ the observer catches the interruption; a caught interruption is marked
 `interrupted`. Poll failures and a full twenty-event server window are
 explicit evidence gaps, never silently counted as successful endurance.
 The observed event count is a **lower bound**, not an exhaustive ledger read.
+The summary separates settled background activations from **navigable Work results**:
+only a settled local event with an exact receiving message verified by the
+native page lineage counts as a navigable result, grouped by receiving Work.
+Events without such a message are still recorded as activity, never promoted to
+completed user-visible work. The report also distinguishes sampled running and
+paused states; neither an accessible message nor a running process proves that
+the result was useful, learned from, or delivered by a real model.
 The native bootstrap exposes an ephemeral `serviceInstanceId`: when a running
 service restarts under the same persistent World identity, the observer ends
 with `service_restarted` instead of claiming uninterrupted process activity.
