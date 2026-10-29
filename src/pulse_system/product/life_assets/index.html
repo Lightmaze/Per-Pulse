@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content"><title>P · 一起看</title><link rel="stylesheet" href="/life/assets/tokens.css"><link rel="stylesheet" href="/life/assets/watch.css"></head>
+<body>
+<svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="m12 5-7 7 7 7M5 12h14"/></symbol>
+<symbol id="i-open" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M3 10h18"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11a8 8 0 0 1-8 8H6l-4 3V5a3 3 0 0 1 3-3h13a3 3 0 0 1 3 3Z"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h5m5 0h6M4 17h10m5 0h1"/><circle cx="11.5" cy="7" r="2.5"/><circle cx="16.5" cy="17" r="2.5"/></symbol>
+<symbol id="i-recent" viewBox="0 0 24 24"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6M12 7v5l3 2"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="m6 13 6 6 6-6M12 5v14"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="m6 11 6-6 6 6M12 5v14"/></symbol>
+<symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3h7v7m0-7L10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="m9 5 11 7-11 7Z"/></symbol>
+</defs></svg>
+<header class="watch-header">
+  <a class="brand" href="/" aria-label="在 Home 打开完整对话" target="_blank" rel="noopener"><svg><use href="#i-back"/></svg><span>P</span></a><span class="divider" aria-hidden="true"></span><h1>一起看</h1>
+  <div class="header-actions"><span id="status" role="status">尚未开始共享</span><button id="settings" class="icon-button" aria-label="共享与字幕设置"><svg><use href="#i-sliders"/></svg></button><button id="chat-toggle" class="icon-button" aria-label="收起对话" aria-expanded="true" aria-controls="conversation"><svg><use href="#i-chat"/></svg></button></div>
+</header>
+<main class="watch-layout">
+  <section class="stage" aria-label="观看区">
+    <div class="player-shell" id="player-shell">
+      <video id="video" controls playsinline hidden></video>
+      <div id="empty-player" class="empty-player"><div class="play-mark"><svg><use href="#i-play"/></svg></div><h2>一起看点什么？</h2><p>打开一段视频，把想聊的片刻留在这里。</p><button id="open-video" class="primary"><svg><use href="#i-open"/></svg>打开视频</button><button id="open-screen" class="text-button">或共享窗口</button></div>
+      <p id="live-caption" class="live-caption" hidden></p>
+    </div>
+    <div class="player-meta"><div class="media-label"><h2 id="source-name">还没有打开视频</h2><span id="source-note">视频由你选择，P 不会自动发表评论。</span></div><div class="player-actions"><button id="recent" class="soft-button" disabled><svg><use href="#i-recent"/></svg>聊聊刚才</button><button id="stop" class="text-button" disabled>结束共享</button></div></div>
+    <div id="error" role="alert" hidden></div>
+    <button id="reopen-video" class="text-button" hidden><svg><use href="#i-open"/></svg>打开另一个视频</button>
+  </section>
+  <aside id="conversation" class="conversation" aria-label="与原 P 的对话">
+    <div class="conversation-header"><div class="identity"><span class="p-mark">P</span><div><h2>对话</h2></div></div><a class="icon-button" href="/" target="_blank" rel="noopener" aria-label="在 Home 查看完整对话"><svg><use href="#i-external"/></svg></a></div>
+    <div id="messages" class="messages" tabindex="0" aria-label="本页发起的对话"><div id="conversation-empty" class="conversation-empty"><p>有想法，随时说。</p></div></div>
+    <button id="latest" class="jump-latest" hidden>回到最新消息 <svg aria-hidden="true"><use href="#i-down"/></svg></button>
+    <form id="composer" class="composer">
+      <div id="moment" class="moment-reference" hidden><button id="review" type="button" class="reference-main" aria-haspopup="dialog"><img id="reference-image" alt="选中片刻的画面" hidden><span><strong>刚才这一段</strong><small id="moment-range"></small></span></button><button id="clear-moment" class="icon-button" type="button" aria-label="移除片刻引用"><svg><use href="#i-close"/></svg></button></div>
+      <label class="sr-only" for="question">和 P 说点什么</label><textarea id="question" placeholder="和 P 说点什么…" maxlength="2000" rows="2"></textarea>
+      <div class="composer-bottom"><button id="attach-recent" class="text-button" type="button" disabled><svg><use href="#i-recent"/></svg>最近 10 秒</button><button id="ask" class="send-button" type="submit" aria-label="发送消息" disabled><svg><use href="#i-send"/></svg></button></div>
+      <p id="send-error" class="inline-error" role="alert" hidden></p>
+    </form><p class="composer-note" id="composer-note">打开视频后，就可以带着片刻提问。</p>
+  </aside>
+</main>
+<dialog id="setup" aria-labelledby="setup-title"><div class="dialog-header"><h2 id="setup-title">共享与字幕</h2><button class="icon-button" data-close="setup" aria-label="关闭设置"><svg><use href="#i-close"/></svg></button></div><div class="dialog-body">
+  <details id="connection"><summary>连接到你的 P</summary><label>启动令牌<input id="token" type="password" autocomplete="off" placeholder="与工作台使用同一令牌"></label><p class="hint">只保留在当前页面；也可沿用工作台在本标签页保存的令牌。</p></details>
+  <p>只共享你选择的内容。画面和声音在 Pulse 宿主中滚动保留 60 秒，提问时才调用模型。</p>
+  <label class="choice"><input type="checkbox" id="vision"><span><strong>让 P 按需查看画面</strong><small>发送选中的图像给已配置的视觉模型，可能计费。</small></span></label>
+  <details id="caption-options"><summary>字幕（可选）</summary><label>字幕文件<input id="caption-file" type="file" accept=".srt,.vtt,text/vtt"></label><p id="caption-file-info" class="hint">选择与视频同步的 UTF-8 SRT／WebVTT。</p><label class="choice"><input id="caption-share" type="checkbox"><span><strong>让 P 读取播放到的字幕</strong><small>被读取的文字随对话保存；字幕不代表 P 已听懂声音。</small></span></label></details>
+  <details class="privacy-details"><summary>共享范围与保留方式</summary><p>停止共享清除未发送的现场缓存，已发给模型或写入对话的内容不会撤回。选中片刻最多保留 2 分钟。音频当前仅供回听，没有自动转写；共享窗口的声音取决于浏览器，不会开启麦克风或绕过受保护内容。</p></details>
+  <div id="setup-error" role="alert" class="inline-error" hidden></div>
+</div><div class="dialog-footer"><button id="screen" class="soft-button">共享窗口</button><button id="local" class="primary"><svg><use href="#i-open"/></svg>选择视频并开始</button></div><input id="file" type="file" accept="video/*" hidden></dialog>
+<dialog id="evidence" aria-labelledby="evidence-title"><div class="dialog-header"><div><h2 id="evidence-title">刚才这一段</h2><span id="review-range" class="hint"></span></div><button class="icon-button" data-close="evidence" aria-label="返回观看与对话"><svg><use href="#i-close"/></svg></button></div><div class="dialog-body">
+  <section id="caption-review" hidden><h3>这一段的字幕</h3><div id="caption-lines"></div><p class="hint">来自你选择的字幕文件</p></section>
+  <section><h3>回听</h3><audio id="audio" controls hidden></audio><p id="audioInfo" class="hint"></p></section>
+  <details id="frame-review"><summary>查看参考画面</summary><div id="frames"></div></details>
+  <details id="observation-details"><summary>观测详情</summary><p id="summary"></p><p id="caption-info"></p><p id="coverage">等待视频</p><p class="hint">变化提示不是剧情判断；采样缺口不等于没有发生。原声音只供本地回听。</p><pre id="diagnostics"></pre></details>
+</div></dialog>
+<script type="module" src="/life/assets/watch.js"></script>
+</body></html>

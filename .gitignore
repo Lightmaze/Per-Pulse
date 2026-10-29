@@ -1,0 +1,40 @@
+# Local dependencies and build output
+.venv/
+node_modules/
+web/dist/
+dist/
+build/
+*.egg-info/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+# Credentials and persistent personal workspaces
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials*.json
+secrets.*
+!src/pulse_harness/core/secrets.py
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+*.jsonl
+.per-pulse/
+.pulse/
+.fgrun/
+data/
+workspace/
+logs/
+
+# Temporary browser verification
+playwright-report/
+test-results/

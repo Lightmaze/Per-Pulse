@@ -1,0 +1,286 @@
+"""Blind review of native ordinary-feedback transfer outputs.
+
+Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
+
+This never calls a model or changes a World. An auditor binds the exported
+responses to native turns; a separate reviewer judges their usefulness without
+receiving the condition mapping. A single blinded comparison is not a causal
+estimate and review identities are self-declared.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import secrets
+import sys
+
+from .posture_transfer import audit_ordinary_transfer
+
+SCHEMA = "per_pulse.ordinary_transfer_blind_review.v1"
+PAIRS = (
+    ("notice", "bare_transfer", "conditional_transfer", "A", "B"),
+    ("outline", "bare_negative", "conditional_negative", "C", "D"),
+)
+CHECKS = {
+    "notice": ("finished_notice", "availability_first", "facts_preserved"),
+    "outline": ("outline_not_finished_notice", "facts_preserved"),
+}
+
+
+def _sha(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _key_commitment(key: dict) -> str:
+    """Seal the randomized private mapping before a reviewer sees responses.
+
+    The unrevealed 256-bit salt prevents guessing the two A/B assignments
+    from the public digest. Ratings separately bind the exact public packet.
+    """
+    salt = key.get("commitment_salt_hex")
+    if not isinstance(salt, str) or len(salt) != 64:
+        raise ValueError("missing or invalid private condition commitment salt")
+    try:
+        secret = bytes.fromhex(salt)
+    except ValueError as exc:
+        raise ValueError("invalid private condition commitment salt") from exc
+    public_identity = {
+        "schema": key["schema"],
+        "trial_origin": key["trial_origin"],
+        "trial_record_sha256": key["trial_record_sha256"],
+        "mapping": key["mapping"],
+    }
+    canonical = json.dumps(public_identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return _sha(secret + canonical)
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_private(path: Path, value: dict) -> None:
+    raw = (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+    with path.open("xb") as stream:
+        stream.write(raw)
+    path.chmod(0o600)
+
+
+def _verified_output(trial: Path) -> tuple[dict, dict]:
+    audit = audit_ordinary_transfer(trial)
+    if audit.get("status") != "verified" or audit.get("errors"):
+        raise ValueError(f"native trial audit not verified: {audit.get('errors', audit.get('status'))}")
+    record = _load_json(trial / "ordinary-transfer.json")
+    if record.get("status") != "completed" or record.get("origin") not in {"real_provider", "synthetic_fixture"}:
+        raise ValueError("the ordinary-feedback trial is not completed with a declared origin")
+    return record, audit
+
+
+def prepare(trial: Path, output: Path, *, allow_fixture: bool = False) -> dict:
+    """Create reviewer-only packet and separate condition key after native audit."""
+    record, _ = _verified_output(trial)
+    if record["origin"] != "real_provider" and not allow_fixture:
+        raise ValueError("synthetic fixture is not real-provider evidence (use --allow-fixture only for QA)")
+    stage_map = {entry["stage"]: entry for entry in record["stages"]}
+    protocol = {entry["stage"]: entry["prompt"] for entry in record["protocol"]}
+    packet = {"schema": SCHEMA, "review_instruction": "Rate the delivered output against the requested task; do not infer its memory condition.",
+              "items": []}
+    key = {"schema": SCHEMA, "trial_origin": record["origin"],
+           "trial_record_sha256": _sha((trial / "ordinary-transfer.json").read_bytes()),
+           "mapping": {}, "conditions_disclosed_to_reviewer": False,
+           "limitations": ["Reviewer identity and blindness are not independently authenticated.",
+                           "Baseline was run before conditional sharing; order and compute are not controlled.",
+                           "One trial cannot establish a general behavioral or causal improvement."]}
+    for task, baseline, conditional, left, right in PAIRS:
+        # The reviewer must see the same task for each condition. Divergent
+        # prompts make A/B assignment reveal the treatment before scoring.
+        if protocol[baseline] != protocol[conditional]:
+            raise ValueError(f"paired review prompts differ for {task}")
+        stages = [baseline, conditional]
+        if secrets.randbelow(2):
+            stages.reverse()
+        for label, stage_name in zip((left, right), stages):
+            entry = stage_map[stage_name]
+            attachment = entry["artifact"]
+            filename = attachment["path"]
+            if Path(filename).name != filename or not filename.endswith("-response.md"):
+                raise ValueError("unexpected artifact path")
+            raw = (trial / filename).read_bytes()
+            if _sha(raw) != attachment["sha256"]:
+                raise ValueError("native response artifact digest mismatch")
+            packet["items"].append({"label": label, "task": task, "prompt": protocol[stage_name],
+                                     "response": raw.decode("utf-8"), "checks": list(CHECKS[task])})
+            key["mapping"][label] = {"condition": "conditional" if stage_name.startswith("conditional") else "baseline",
+                                      "stage": stage_name, "result_event_id": entry["result_event_id"],
+                                      "response_sha256": attachment["sha256"], "usage": entry.get("usage", {})}
+    # Publish a salted commitment in the reviewer packet before ratings are
+    # made. The condition key and salt stay only in the experimenter's private
+    # subtree; a later edit to the key cannot silently reverse A/B conclusions.
+    key["commitment_salt_hex"] = secrets.token_hex(32)
+    packet["condition_key_commitment_sha256"] = _key_commitment(key)
+    if output.exists():
+        raise ValueError("review output directory must be new")
+    output.mkdir(parents=True, mode=0o700)
+    # Only the reviewer/ subtree may be handed to a blind judge. The root is
+    # the experimenter's private workspace; it also holds the condition key.
+    reviewer_root = output / "reviewer"
+    private_root = output / "private"
+    reviewer_root.mkdir(mode=0o700)
+    private_root.mkdir(mode=0o700)
+    (output / ".gitignore").write_text("*\n", encoding="utf-8")
+    (output / ".gitignore").chmod(0o600)
+    try:
+        _write_private(reviewer_root / "review-packet.json", packet)
+        key["review_packet_sha256"] = _sha((reviewer_root / "review-packet.json").read_bytes())
+        _write_private(private_root / "condition-key.json", key)
+        _write_private(reviewer_root / "ratings-template.json", {"schema": SCHEMA, "reviewer": "",
+            "review_packet_sha256": key["review_packet_sha256"],
+            "ratings": {item["label"]: {check: None for check in item["checks"]} for item in packet["items"]}})
+    except Exception:
+        # Do not silently reuse partially created blind assignments.
+        raise
+    return {"output": str(output), "items": len(packet["items"]), "origin": record["origin"],
+            "reviewer_directory": str(reviewer_root),
+            "review_file": "reviewer/review-packet.json",
+            "private_key_file": "private/condition-key.json"}
+
+
+def _nonnegative_int(value):
+    """Reject booleans, malformed and negative reported token counts."""
+    return value if type(value) is int and value >= 0 else None
+
+
+def _usage_evidence(usage):
+    """Preserve observed main/sidecar usage without inventing missing costs.
+
+    Known provider-reported token counts form a lower bound even if one round
+    failed to report usage. Cache figures are subsets/metadata, not extra
+    tokens to add to total input. This does not certify a provider invoice.
+    """
+    data = usage if isinstance(usage, dict) else {}
+    side = data.get("posture")
+    side = side if isinstance(side, dict) else {}
+    main = {
+        "provider_rounds": _nonnegative_int(data.get("main_provider_rounds")),
+        "input_tokens": _nonnegative_int(data.get("main_input_tokens")),
+        "output_tokens": _nonnegative_int(data.get("main_output_tokens")),
+    }
+    auxiliary = {
+        "provider_requests": _nonnegative_int(side.get("provider_requests")),
+        "input_tokens": _nonnegative_int(side.get("input_tokens")),
+        "output_tokens": _nonnegative_int(side.get("output_tokens")),
+        "cached_tokens": _nonnegative_int(side.get("cached_tokens")),
+        "cache_write_tokens": _nonnegative_int(side.get("cache_write_tokens")),
+    }
+
+    def observed_lower_bound(field):
+        known = [group[field] for group in (main, auxiliary) if group[field] is not None]
+        return sum(known) if known else None
+
+    recorded = data.get("accounted") if type(data.get("accounted")) is bool else None
+    complete = (recorded is True and all(value is not None for value in main.values())
+                and all(value is not None for value in auxiliary.values()))
+    return {
+        "native_accounted": recorded,
+        "token_evidence_complete": complete,
+        "main": main,
+        "auxiliary_posture": auxiliary,
+        "reported_token_lower_bound": {
+            "input_tokens": observed_lower_bound("input_tokens"),
+            "output_tokens": observed_lower_bound("output_tokens"),
+        },
+        "limits": "Provider-reported observations only; missing rounds, retries, prices and invoices are not inferred.",
+    }
+
+
+def grade(review_dir: Path, ratings_file: Path, *, allow_legacy_unbound: bool = False,
+          allow_legacy_uncommitted: bool = False) -> dict:
+    """Reveal descriptive differences after checking each rating's packet identity."""
+    packet_path = review_dir / "reviewer" / "review-packet.json"
+    key_path = review_dir / "private" / "condition-key.json"
+    if not packet_path.is_file() and (review_dir / "review-packet.json").is_file():
+        # Older PR #29 packets used the same directory for reviewer and key.
+        # Preserve grading compatibility; never emit this layout for new runs.
+        packet_path = review_dir / "review-packet.json"
+        key_path = review_dir / "condition-key.json"
+    packet = _load_json(packet_path)
+    key = _load_json(key_path)
+    ratings = _load_json(ratings_file)
+    if packet.get("schema") != SCHEMA or key.get("schema") != SCHEMA or ratings.get("schema") != SCHEMA:
+        raise ValueError("review schema mismatch")
+    packet_digest = _sha(packet_path.read_bytes())
+    if packet_digest != key.get("review_packet_sha256"):
+        raise ValueError("review packet changed since condition mapping was sealed")
+    commitment = packet.get("condition_key_commitment_sha256")
+    if commitment is None:
+        if not allow_legacy_uncommitted:
+            raise ValueError("uncommitted legacy condition mapping; use --allow-legacy-uncommitted for historical review only")
+    elif not isinstance(commitment, str) or commitment != _key_commitment(key):
+        raise ValueError("private condition mapping changed after the blind packet was issued")
+    rating_digest = ratings.get("review_packet_sha256")
+    if rating_digest != packet_digest:
+        if not (allow_legacy_unbound and rating_digest is None):
+            raise ValueError("ratings are not bound to this review packet")
+    if not isinstance(ratings.get("reviewer"), str) or not ratings["reviewer"].strip():
+        raise ValueError("a reviewer identifier is required")
+    items = packet["items"]
+    expected = {item["label"]: set(item["checks"]) for item in items}
+    if set(ratings.get("ratings", {})) != set(expected) or set(key["mapping"]) != set(expected):
+        raise ValueError("all blinded items must be rated exactly once")
+    for label, checks in expected.items():
+        entry = ratings["ratings"][label]
+        if not isinstance(entry, dict) or set(entry) != checks or any(type(v) is not bool for v in entry.values()):
+            raise ValueError(f"item {label} needs one boolean observation per check")
+    comparisons = {}
+    for task, _, _, left, right in PAIRS:
+        group = {key["mapping"][label]["condition"]: label for label in (left, right)}
+        if set(group) != {"baseline", "conditional"}:
+            raise ValueError("invalid condition mapping")
+        b, c = group["baseline"], group["conditional"]
+        comparisons[task] = {"baseline_label": b, "conditional_label": c,
+                             "observed_checks": {check: {"baseline": ratings["ratings"][b][check],
+                                                        "conditional": ratings["ratings"][c][check]}
+                                                 for check in CHECKS[task]},
+                             "usage_accounted": {condition: _usage_evidence(key["mapping"][label].get("usage"))["native_accounted"]
+                                                 for condition, label in (("baseline", b), ("conditional", c))},
+                             "usage_observed": {condition: _usage_evidence(key["mapping"][label].get("usage"))
+                                                for condition, label in (("baseline", b), ("conditional", c))}}
+    return {"schema": SCHEMA, "reviewer": ratings["reviewer"], "trial_origin": key["trial_origin"],
+            "ratings_packet_bound": rating_digest == packet_digest,
+            "condition_mapping_bound": commitment is not None,
+            "blindness_self_report_only": True, "comparisons": comparisons,
+            "interpretation": "Descriptive paired reviewer judgments only; not proof of causal improvement."
+            }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("prepare", help="create a condition-blind response review packet")
+    p.add_argument("trial", type=Path)
+    p.add_argument("--output", required=True, type=Path)
+    p.add_argument("--allow-fixture", action="store_true", help="only for synthetic QA; not model evidence")
+    g = sub.add_parser("grade", help="reveal descriptive pairs after all checks are scored")
+    g.add_argument("review_dir", type=Path)
+    g.add_argument("ratings", type=Path)
+    g.add_argument("--allow-legacy-unbound", action="store_true",
+                   help="explicitly accept historical ratings without a packet digest")
+    g.add_argument("--allow-legacy-uncommitted", action="store_true",
+                   help="explicitly accept historical packets without a sealed condition key")
+    try:
+        args = parser.parse_args(argv)
+        result = (prepare(args.trial, args.output, allow_fixture=args.allow_fixture)
+                  if args.command == "prepare" else
+                  grade(args.review_dir, args.ratings,
+                        allow_legacy_unbound=args.allow_legacy_unbound,
+                        allow_legacy_uncommitted=args.allow_legacy_uncommitted))
+    except (ValueError, OSError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
+        print(f"blinded review: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

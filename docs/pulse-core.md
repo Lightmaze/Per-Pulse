@@ -1,0 +1,352 @@
+# Local pulses in one continuing context body
+
+Per Pulse keeps Home and Work pages as local contexts of the same subject.
+The pulse core lets a completed local computation contribute to later activity
+without requiring another user message. It uses the existing World, causal
+ledger, scheduler, Dendrite and Harness Kernel; pages do not become separate
+agents, and the pulse core does not own a second conversation store.
+
+Three events form the basic path:
+
+1. A model turn settles in a local context. Its assistant result and causal
+   source become durable evidence of that context's activity.
+2. A later local opportunity can reopen that context's existing history. A
+   directed connection can also carry the settled output to another context.
+3. The receiving context computes with its own history and the selected
+   incoming material. Its result remains part of the same context body.
+
+The world tick is a coordination clock. It does not manufacture a new task at
+every interval. Eligibility depends on retained local activity, the explicit
+connection graph, inhibition, refractory time and the shared background quota.
+
+## Separate histories, explicit influence
+
+Each Work page retains its native TaskFront and ActivityCenter IDs. Kernel
+sessions remain scoped by context, while Home and Work keep the same continuity
+Engram. A pulse reentering a page uses that page's original model history. It
+does not prepend a generic instruction telling the model to invent more work.
+
+An excitatory edge delivers the source's settled result. It does not copy the
+source page's whole transcript, tool authority or browser navigation state.
+The delivered event points to its source result in the causal ledger. A
+navigation reference and a computational connection are distinct: opening an
+ordinary page link does not by itself enable autonomous diffusion.
+
+When distinct local outputs reach the same target within its Dendrite window,
+the native convergence mechanism can combine them into one receiving turn.
+The original deliveries remain individually attributable to their source
+results. The page shows those source-linked inputs and the receiving answer;
+it does not show the internal aggregate again as a duplicate message.
+The aggregate retains the member event IDs, source edge identities and frozen
+window policy. Its depth follows the contributing paths, and it consumes no
+extra background admission beyond the original deliveries. Removing a
+contributing edge cancels an unstarted fused turn while preserving that
+formation evidence.
+
+An inhibitory edge changes a decaying numeric trace on its target context.
+That trace influences later background eligibility and survives restart. A
+trace of at least `1.0` defers background admission until it decays below that
+level; lower traces reduce reentry probability. It does not write a semantic
+instruction into the target transcript. Foreground
+user input remains available when a background quota is exhausted.
+
+## Configuration and API
+
+Background computation is opt-in.
+
+Start the ordinary local workspace with `per-pulse --pulse`. Set its background
+admission ceiling with `--pulse-budget 12`; the default is twelve admissions in
+a rolling hour. The normal command without `--pulse` keeps background
+computation disabled.
+
+Python callers can configure the local rhythm directly:
+
+```python
+from per_pulse.app import create_app
+from per_pulse.service import PulseSettings
+
+app = create_app(
+    "./data/my-workspace",
+    pulse=PulseSettings(
+        enabled=True,
+        check_interval_seconds=10,
+        spontaneous_rate=0.1,
+        refractory_seconds=60,
+        max_background_pulses_per_hour=12,
+        max_propagation_depth=2,
+        propagation_threshold=0.3,
+    ),
+)
+```
+
+Use the ordinary provider configuration from the [README](../README.md).
+Offline workspaces save input without calling a model. Example workspaces
+remain authored examples and never consume model calls, even when a pulse
+profile or provider credentials are supplied.
+
+| Endpoint | Meaning |
+| --- | --- |
+| `GET /api/pulse` | Read running state, background quota, local contexts, connections and recent activation outcomes. |
+| `POST /api/pulse/connections` | Connect two pages with an excitatory or inhibitory edge. |
+| `DELETE /api/pulse/connections` | Remove the directed edge between two pages. |
+
+Create a directed computational connection with the native page IDs returned
+by `/api/bootstrap`:
+
+```json
+{
+  "sourcePageId": "the-source-page-id",
+  "targetPageId": "the-target-page-id",
+  "weight": 0.6,
+  "kind": "excitatory"
+}
+```
+
+Use `"home"` for Home. To remove the edge, send its `sourcePageId` and
+`targetPageId` to the DELETE endpoint as JSON. The connection API uses the same
+loopback, same-origin and JSON request boundaries as the existing page API.
+
+Repeating the same connection is idempotent. Changing its weight or kind
+creates a new edge identity that applies to subsequently settled results.
+Removing or changing an edge cancels its queued, unstarted deliveries; a model
+turn already running may finish normally. Recreating an edge does not revive
+cancelled deliveries or retroactively relay old results.
+
+## Bounds and recovery
+
+The background quota is charged when an autonomous input is admitted. Retrying
+the coordinator or reopening the workspace cannot refill that quota or create
+a second copy of an already admitted event. Propagation depth limits connected
+cycles. One eligible context has at most one pending local opportunity, so a
+slow provider cannot accumulate an unbounded timer-generated backlog.
+
+Disabling the pulse profile pauses its queued work. Reenabling it resumes an
+eligible admitted delivery under the same event identity. Refractory time
+defers background turns in recently active contexts; it does not suppress user
+input. A saturated background budget does not stop the observation of newly
+settled foreground activity.
+
+Successful results are the source of later influence. Failed or uncertain
+model turns do not create an invented result or establish a new continuation
+source. The existing Kernel retains model failures, cancellation and recovery
+evidence. Normal user messages continue through the existing foreground path.
+`recentActivations` in `/api/pulse` exposes queued, settled, failed, uncertain
+and cancelled background events, including reentries that contain no new text.
+
+### Paused local contexts retain completed influence
+
+A local pause stops new background execution in that context. It does not
+remove that context from the continuing body. Results completed in a connected
+source are retained as canonical queued deliveries even when the source or
+target is paused when the coordinator observes them. The target must become
+active before its existing delivery can be claimed. The claim transaction
+rechecks active status, subject ownership and membership.
+
+Retention uses the same result/edge identity and rolling admission quota as an
+ordinary delivery. It spends one admission when the input is saved; restart,
+resume and repeated observation do not spend another. Removing or revising its
+edge cancels an unstarted retained delivery, including a formed aggregate.
+Inhibitory influence also survives a pause and decays from the original result
+time, so resuming does not turn an old impulse into a fresh one.
+
+This policy applies to active and paused contexts. Archived, completed and
+dormant contexts retain their existing exclusion policy. The change prevents
+future observation from losing paused influence; it does not rewind old
+checkpoints to invent previously skipped deliveries. A long pause can accumulate
+queued inputs across rolling hours: the hourly admission quota limits growth
+per hour, not the total retained backlog.
+
+### Inspect retained work
+
+`GET /api/pulse` includes `queue.queued`, `queue.running` and
+`queue.oldestQueuedAt` for all durable background roots in this World. These
+counts are independent of both the engine's working set and the last twenty
+entries in `recentActivations`. Reconciled Dendrite members are not counted as
+new executions; their queued aggregate is counted once.
+
+Queued recent activations expose `deferredReason` from the same read-only gate
+used by the engine: `profile_paused`, `context_paused`, `context_inactive`,
+`refractory`, `inhibited`, `depth_limit` or `connection_revoked`. A null reason
+means that this context gate is clear. Dendrite formation, worker availability,
+other turns in the same execution context and final claim checks can still
+delay execution. Running and terminal events have no current deferral reason.
+
+Committed subject succession retains local context IDs, connection identities,
+numeric inhibition and the rolling quota. Prior settled results remain
+immutable evidence in the predecessor's identity; new eligible work belongs
+to the active successor in the same committed lineage. Queued fused work keeps
+its event identity and original formation record during handoff. Recovery can
+resume a partially admitted fanout without replaying its already settled
+predecessor deliveries. An uncommitted or unrelated identity cannot use that
+lineage evidence as a continuation source.
+
+### Model-side attention joins the same Context Body (integration draft)
+
+The optional `attention` tool is exposed only in the native Pulse-enabled
+World/Kernel, bound to the exact active Home or Work scope. `inspect` reads
+that context's retained thought, source and operator state. `hold(note,drive)`
+stages a bounded local concern; `release` stages clearing it. Neither tool
+creates another agent, copies a Work transcript, adds a new human instruction,
+or grants permission to use external tools.
+
+The original action result alone is *not* a successful change. An intent
+is reconciled in the existing `ContextPulseController` only after the same
+World turn and exact Kernel turn/action both succeed; failed/cancelled or
+mismatched actions are discarded. Later ordinary user inputs and an operator
+local Hold/Resume override an older staged model preference. The accepted
+entry retains the original `sourceTurnId`, `sourceActionId`,
+`sourceEventId`, local center and revision; the existing PerPulse API maps
+that center back to its original Home/Work page when possible.
+
+Retained drive may increase a local context's chance of a *native* reentry
+when that context has an eligible settled result. It cannot bypass the
+existing `spontaneous_rate` ceiling, hourly admission quota, inhibition,
+refractory period, depth limit, global/local pause, worker capacity or
+foreground priority. Operator pause does not erase already stored thoughts
+or in-flight turns. The feature is not the alternative second ContextBody,
+continuous token streaming, or the `Keep thinking` UI of the earlier #6
+exploration.
+
+The focused `tests/per_pulse/test_native_attention.py` exercises staged
+intent, original action outcome, later human correction, pause, and original
+source attribution. Its HTTP transport is an explicit test double. Whether a
+live model chooses useful retained work, and what continued activity costs
+in tokens/dollars, remain separate real-provider experiments.
+
+The PerPulse Activity panel now shows only the **opened page's** retained
+model thought. The existing World/Kernel action and causal IDs remain literal
+and attributable, including when the thought is released. The HTTP status
+projection resolves the thought's original source page only when it belongs
+to that same World and local center; it offers a deep link only when the
+original event passes the existing full-history message ownership check.
+An old or unresolvable Work cannot be guessed as Home, and an internal event
+without a displayable message is never given a fabricated message link.
+Navigation reuses the product's message anchor, saved draft and scroll state,
+in English or Simplified Chinese. This projection does not turn a retained
+thought into a user command or show another Work's note as the current one.
+
+Recent Pulse activations now also expose two *independent*, source-checked
+message anchors: `messageId` for the receiver's original local event and
+`sourceMessageId` for the actual causal-parent event in its source Home/Work.
+The existing `GET /api/pages/{page}?sourceMessageId=...` path can reopen
+either message even outside the recent 500-message window. An internal event
+without a displayable message falls back to **open that page**, not a made-up
+message; an unavailable historical Work offers neither a link nor a Home
+substitute. Opening a queued propagation is an inspection of pending native
+evidence, **not** a claim its receiver finished the task. From an actual
+settled Work result, the user can still select **Bring to Home** and preserve
+the original message provenance. All event/message ownership validation
+remains in the original PageService/World; no new state or scheduler exists.
+
+`web/tests/pulse-attention.test.mjs` checks the page-local projection and
+source target invariant. `tests/browser/attention_flow.mjs` checks real
+Chromium navigation, a Kernel-held thought and its original Home event,
+Work isolation, bilingual deep linking, process restart, browser draft
+continuation and a later Kernel release. The HTTP model transport is explicitly
+synthetic, not evidence of a live provider's autonomous usefulness.
+
+The quota counts background pulse admissions. It is not a currency limit or a
+hard token ceiling for a provider: a Kernel turn may contain more than one
+model/tool round, and provider token usage is learned after the request. The
+inherited Runtime token budget is an estimate, separate from the durable
+background admission quota. Workspace mutation permissions remain unchanged.
+
+## Optional persistent background token admission envelope
+
+The rolling count in `budget` is still an **admission count**, not a token or
+currency limit. For unattended local work, a separate opt-in envelope can now
+reserve nominal provider tokens **before** each new background root is queued:
+
+```sh
+per-pulse --pulse --pulse-budget 12 \
+  --pulse-hourly-tokens 32768 --pulse-token-reservation 8192
+```
+
+A single World SQLite transaction checks both limits at the same original
+`CausalLedger.enqueue` boundary. The budget is derived from durable
+`spontaneous`/`propagation` roots in this World. It includes recent admissions
+and outcomes in the rolling hour **plus old roots still queued or running**.
+This matters when a paused context or long backlog resumes: a reservation
+must not become free merely because an hour passed before the provider call.
+Reopening the workspace does **not** grant those tokens again.
+Unaccounted roots hold their full reservation while pending or within the
+hour after a terminal outcome; terminal work eventually ages out rather than
+locking the budget forever. A settled original World turn with a matched
+successful Kernel turn and a complete `KERNEL_PROVIDER_USAGE_DURABLE` receipt replaces the
+reservation with the actual recorded **input + output token count**. Explicit
+`TEST_DOUBLE` receipts have the same mechanics in tests, but are marked
+separately; no synthetic tokens are presented as a real provider bill.
+Malformed or missing receipts never become zero-cost evidence.
+
+`GET /api/pulse` preserves `budget` and adds `providerTokenBudget` with
+`limit`, `charged`, `remaining`, `accountedTokens`,
+`unaccountedReservations`, `syntheticTokens`, `overrunTokens`,
+`trackedAdmissions`, `reservationPerAdmission` and
+`hardProviderSpendingCap: false`. The field is `null` until the envelope
+is explicitly configured. Example workspaces remain model-free.
+
+**This is a conservative new-background-admission gate, not a hard provider
+billing limit.** A model/tool turn can exceed its reservation, cost depends on
+the provider's rates and cached-token rules, and usage after a failed or
+interrupted turn may be reported only in the Kernel or by the provider later.
+An overrun remains visible and blocks later admissions, but cannot unspend
+tokens already used. A failed/unknown turn holds its reservation instead of
+releasing it without evidence. An already-admitted or in-flight root may
+finish, and ordinary foreground user input does not consume this optional
+background envelope. A strict financial ceiling would additionally require
+provider-specific per-request maximums, atomic reservations across all model
+and auxiliary calls (including failure/recovery), and reconciliation of
+unknown provider usage. None is claimed here.
+
+## Verification
+
+Run the native integration and dynamics checks with:
+
+```sh
+python -m pytest tests/per_pulse
+```
+
+The integration fixtures inject a local HTTP transport into the normal model
+adapter. They exercise real World and Kernel persistence, distinct context
+histories, a shared continuity subject, causal result propagation, bounded
+reentry, multi-source convergence, inhibitory gating, pause/revocation, interrupted
+checkpoints, restart and visible provider failure. They make no external provider
+requests and incur no paid model validation. These checks establish runtime
+behavior, including fusion and committed succession; the value of
+model-generated background work still needs to be measured with the intended
+provider and real ongoing projects.
+
+### Local scaling probe
+
+`tests/per_pulse/benchmark_pulse_core.py` creates a temporary native SQLite
+body with 100 contexts, 200 directed edges and 10,000 historical causal events.
+It uses no model or network calls and prints source hashes, query plans and
+timings. Reproduce both profiles with:
+
+```sh
+PYTHONPATH=src python tests/per_pulse/benchmark_pulse_core.py --rate 0
+PYTHONPATH=src python tests/per_pulse/benchmark_pulse_core.py --rate 0.1
+```
+
+On the development host with Python 3.12.14 and SQLite 3.53.1, the index and
+graph snapshot changes produced these local measurements on 2026-10-23:
+
+| Operation | Before | After |
+| --- | ---: | ---: |
+| Cold projection of 10,000 events, total | 16,279 ms | 635 ms |
+| Status snapshot, median of 10 | 138.8 ms | 1.08 ms |
+| Scheduled check with reentry rate 0, median of 10 | 689.4 ms | 2.06 ms |
+| SQL statements per status snapshot | 204 | 4 |
+| SQL statements per rate 0 scheduled check | 911 | 11 |
+
+At rate `0.1`, the first eligible check started with an empty admission budget,
+admitted twelve opportunities and took 30.2 ms. Later checks were quota-bound
+and took a median 2.16 ms; that smaller number does not measure an unsaturated
+candidate pass. Snapshot median was 1.01 ms. The quota and result-proof queries
+used the new indexes. Schema version 8 adds indexes only; the upgrade smoke
+test verifies retained causal rows, the version 7 backup and idempotent reopen.
+These synthetic timings describe the coordinator on this host, not provider
+latency, model quality or a service-level guarantee.
+
+The [continuity follow-up](pulse-continuity-next.md) records the queue-liveness
+work, current validation and the next integration boundaries.
