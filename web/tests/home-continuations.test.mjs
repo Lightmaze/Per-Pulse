@@ -26,6 +26,25 @@ test('Home projects settled original Work messages, latest one per context', () 
   assert.equal(rows[0].page.kind, 'work');
 });
 
+test('After opening a Work result, Home does not resurrect its older local activation', () => {
+  const pulse = state(
+    event('new-receiver', 'receiver'),
+    event('old-receiver', 'receiver'),
+    event('another-event', 'another'),
+  );
+  const visited = new Set(['new-receiver']);
+  const remaining = homeContinuations(pulse, pages, 3, visited);
+  assert.deepEqual(remaining.map(row => row.event.eventId), ['another-event']);
+  // Reading the causal source is not by itself a receipt for the receiver.
+  assert.deepEqual(homeContinuations(pulse, pages).map(row => row.event.eventId),
+    ['new-receiver', 'another-event']);
+  // The next settled activation from that same Work is genuinely new.
+  const next = state(event('newer-receiver', 'receiver'),
+    event('new-receiver', 'receiver'), event('old-receiver', 'receiver'));
+  assert.deepEqual(homeContinuations(next, pages, 3, visited).map(row => row.event.eventId),
+    ['newer-receiver']);
+});
+
 test('Home never promotes pending, uncertain, failed or fabricated source events', () => {
   const rows = homeContinuations(state(
     event('pending', 'receiver', { status: 'queued' }),
