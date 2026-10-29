@@ -151,15 +151,19 @@ def test_observer_counts_only_source_checked_navigable_work_results(tmp_path):
 
 def test_observer_rejects_unverified_receiving_message_identity(tmp_path):
     clock = Clock()
+    genuine = activation("valid", "settled", "work-B")
+    genuine["messageId"] = "valid"
     spoofed = activation("event-1", "settled", "work-A")
     spoofed["messageId"] = "different-message"
     output = tmp_path / "watch.jsonl"
-    with mock_client([snapshot([spoofed])]) as client:
+    # A good item before a malformed item cannot be partially admitted.
+    with mock_client([snapshot([genuine, spoofed])]) as client:
         result = observe("http://127.0.0.1:8000", output,
                          duration_seconds=0.1, interval_seconds=1,
                          client=client, clock=clock, sleep=clock.sleep)
     assert result["poll_errors"] == 2
     assert result["successful_samples"] == 0
+    assert result["observed_events"] == 0
     assert result["observed_navigable_work_results"] == 0
     assert not result["eligible_for_uninterrupted_observation"]
     assert [row["type"] for row in records(output)] == [
