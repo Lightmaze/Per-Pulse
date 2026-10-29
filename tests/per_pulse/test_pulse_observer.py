@@ -173,6 +173,25 @@ def test_observer_rejects_unverified_receiving_message_identity(tmp_path):
         "header", "poll_error", "poll_error", "summary",
     ]
 
+
+def test_invalid_full_window_does_not_claim_saturation_or_any_events(tmp_path):
+    """Coverage flags also commit atomically with validated native observations."""
+    clock = Clock()
+    events = [activation(f"valid-{i}", "settled", "work-A") for i in range(19)]
+    malformed = activation("broken", "settled", "work-B")
+    malformed["messageId"] = "unrelated-message"
+    output = tmp_path / "watch.jsonl"
+    with mock_client([snapshot(events + [malformed])]) as client:
+        report = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=0.1, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+    assert report["successful_samples"] == 0
+    assert report["observed_events"] == 0
+    assert report["observed_settled_background_by_page"] == {}
+    assert report["observed_navigable_work_results"] == 0
+    assert report["recent_window_saturated"] is False
+    assert report["poll_errors"] == 2
+
 def test_world_switch_stops_without_cross_body_merging(tmp_path):
     clock = Clock()
     output = tmp_path / "watch.jsonl"
