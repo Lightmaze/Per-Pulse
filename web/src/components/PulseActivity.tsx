@@ -115,6 +115,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
 
   const identity = { workspaceId, serviceInstanceId };
   const edges = pulse?.connections.filter(edge => edge.sourcePageId === pageId) ?? [];
+  const incoming = pulse?.connections.filter(edge => edge.targetPageId === pageId) ?? [];
   // Model-retained notes are private to their original local context, not a
   // global cross-Work summary. An unknown older center stays unresolved.
   const retained = localRetainedAttention(pulse, pageId);
@@ -226,6 +227,21 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
               </> : null}
             </li>;
           })}</ul>}
+      </section>
+      <section className="pulse-activity-section" aria-label={t('pulse.incomingConnections')}>
+        <h3>{t('pulse.incomingConnections')}</h3>
+        <p className="pulse-activity-detail">{t('pulse.incomingInfo')}</p>
+        {!incoming.length ? <p className="pulse-activity-empty">{t('pulse.noIncoming')}</p> : <ul className="pulse-activity-list">
+          {incoming.map(edge => <li key={edge.id}>
+            {edge.sourcePageId && validIds.has(edge.sourcePageId)
+              ? <button className="pulse-activity-link" type="button" onClick={() => jump(edge.sourcePageId)}>{nameFor(edge.sourcePageId)}</button>
+              : <span>{nameFor(edge.sourcePageId, edge.source_center_id)}</span>}
+            <span> → {edge.kind === 'inhibitory' ? t('pulse.settles') : t('pulse.excites')}</span>
+            {edge.sourcePageId && validIds.has(edge.sourcePageId) ? <button className="text-button" type="button" disabled={busy}
+              aria-label={t('pulse.removeIncoming', { page: nameFor(edge.sourcePageId) })}
+              onClick={() => void act(() => api.disconnectPulse(edge.sourcePageId!, pageId, identity))}>{t('pulse.remove')}</button> : null}
+          </li>)}
+        </ul>}
       </section>
       <section className="pulse-activity-section" aria-label={t('pulse.connections')}>
         <h3>{t('pulse.connections')}</h3>
