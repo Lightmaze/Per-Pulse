@@ -33,6 +33,31 @@ export function readPosition(workspaceId: string, pageId: string) {
   } catch { return 0; }
 }
 
+// A browser-local Home reading state, not a native event acknowledgement.
+// It never changes what the continuing Context Body computed or recorded.
+const VISITED_LOCAL_EVENTS_LIMIT = 96;
+const visitedLocalEventsKey = (workspaceId: string) =>
+  `${PREFIX}${encodeURIComponent(workspaceId)}.visited-local-events`;
+
+export function readVisitedLocalEvents(workspaceId: string): string[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(visitedLocalEventsKey(workspaceId)) ?? 'null');
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((id): id is string =>
+      typeof id === 'string' && id.length > 0 && id.length <= 128)
+      .slice(-VISITED_LOCAL_EVENTS_LIMIT);
+  } catch { return []; }
+}
+
+export function markVisitedLocalEvent(workspaceId: string, eventId: string): string[] {
+  if (!workspaceId || !eventId || eventId.length > 128) return readVisitedLocalEvents(workspaceId);
+  const visited = readVisitedLocalEvents(workspaceId);
+  const updated = [...visited.filter(id => id !== eventId), eventId].slice(-VISITED_LOCAL_EVENTS_LIMIT);
+  try { localStorage.setItem(visitedLocalEventsKey(workspaceId), JSON.stringify(updated)); }
+  catch { /* Losing browser storage never prevents navigating to native work. */ }
+  return updated;
+}
+
 export const pageHref = (id: string, targetMessageId?: string) => `${id === 'home' ? '/' : `/page/${encodeURIComponent(id)}`}${targetMessageId ? `#message-${encodeURIComponent(targetMessageId)}` : ''}`;
 
 export function pageFromLocation(source: Pick<Location, 'pathname'> = location) {
