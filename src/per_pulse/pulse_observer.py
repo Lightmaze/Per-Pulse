@@ -136,7 +136,6 @@ def observe(
                             raise ValueError("Pulse status has no recent activation list")
                         # The native endpoint exposes only its recent window. A
                         # saturated window must never be called full coverage.
-                        saturated |= len(recent) >= 20
                         changes = []
                         pending_seen = {}
                         # Validate the entire status window before accepting any
@@ -168,6 +167,8 @@ def observe(
                                 pending_seen[event_id] = slim
                                 changes.append(slim)
                         seen.update(pending_seen)
+                        # A failed status read cannot leave partial coverage metadata.
+                        saturated |= len(recent) >= 20
                         connected = pulse.get("providerConfigured") is True
                         connected_samples += int(connected)
                         running_samples += int(pulse.get("running") is True)
