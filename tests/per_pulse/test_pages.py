@@ -15,6 +15,7 @@ import httpx
 import pytest
 
 from per_pulse.app import create_app
+from per_pulse.service import PageService
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 from pulse_harness.core import HarnessScope
 from pulse_system.agent.harness.base import HarnessError
@@ -286,6 +287,26 @@ def test_native_http_turns_keep_page_contexts_separate_and_resume(tmp_path, monk
         assert "HOME_ONLY_MARKER" in json.dumps(home_request)
         assert "FIRST_WORK_ONLY_MARKER" not in json.dumps(home_request)
         assert "SECOND_WORK_ONLY_MARKER" not in json.dumps(home_request)
+
+
+@pytest.mark.parametrize(("history", "expected"), [
+    (["queued", "failed"], "error"),
+    (["queued", "uncertain"], "error"),
+    (["queued", "blocked"], "needs_attention"),
+    (["queued", "awaiting_approval"], "needs_attention"),
+    (["failed", "queued"], "queued"),
+    (["blocked", "queued"], "queued"),
+    (["queued", "processing", "failed"], "working"),
+    (["queued"], "queued"),
+    ([], "idle"),
+])
+def test_latest_work_blocker_outweighs_older_queued_history(history, expected):
+    """Home must not hide a newer failed/held Work behind old queued input.
+
+    The overview consumes this same native page status and routes the person
+    back to the original Work, rather than inventing an action in Home.
+    """
+    assert PageService._status([{"status": status} for status in history]) == expected
 
 
 def test_provider_failure_stays_visible_without_fabricated_answer(tmp_path, monkeypatch):
