@@ -38,6 +38,14 @@ Validation on the candidate based on `63d6c6c7`:
   1280px and mobile 390px screenshots were inspected, with no page errors or
   horizontal overflow.
 
+A later host-mediated Method Work recorded a prediction before a second
+experiment: if the held cancellation caller raises after release, physical
+drain should still complete while the real error remains observable. The test
+now runs both normal and exceptional returns. Both pass: it retains the store
+while held, requires lease release after exit, and checks the exact injected
+exception in the existing engine log instead of suppressing it. This narrows
+the lifetime condition to actual caller exit, not successful cancellation.
+
 The private browser fixture retains its process after Uvicorn's graceful ASGI
 shutdown so a late daemon callback can be observed. The first attempt used
 Uvicorn's default signal re-raising and ended before that observation; its

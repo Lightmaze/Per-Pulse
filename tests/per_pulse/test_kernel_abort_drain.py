@@ -21,7 +21,8 @@ from pulse_system.substrate.storage import Storage
 from test_execution import _factory
 
 
-def test_shutdown_retains_kernel_store_until_admitted_abort_returns(tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize('abort_result_error', [False, True], ids=['returns', 'raises'])
+def test_shutdown_retains_kernel_store_until_admitted_abort_returns(tmp_path, monkeypatch, caplog, abort_result_error):
     requests = []
     provider_entered, provider_release = threading.Event(), threading.Event()
     abort_entered, abort_release = threading.Event(), threading.Event()
@@ -61,6 +62,8 @@ def test_shutdown_retains_kernel_store_until_admitted_abort_returns(tmp_path, mo
                 # worker alone cannot prove this separate caller has left.
                 abort_entered.set()
                 assert abort_release.wait(10), 'Release the native abort read boundary.'
+                if abort_result_error:
+                    raise RuntimeError('injected native abort outcome failure')
             return original_outcome(*args, **kwargs)
 
         def observe_store_close():
@@ -109,7 +112,13 @@ def test_shutdown_retains_kernel_store_until_admitted_abort_returns(tmp_path, mo
         # An engine callback arriving after shutdown owns cancellation must
         # leave without opening subordinate journals or replaying a request.
         backend.abort(scope.engram_id)
-        assert not any('could not abort in-flight pulse' in record.message for record in caplog.records)
+        failures = [record for record in caplog.records if 'could not abort in-flight pulse' in record.message]
+        if abort_result_error:
+            assert len(failures) == 1
+            assert failures[0].exc_info is not None
+            assert str(failures[0].exc_info[1]) == 'injected native abort outcome failure'
+        else:
+            assert failures == []
         with TestClient(create_app(tmp_path, model_factory=None), base_url='http://localhost') as reopened:
             assert reopened.get('/api/bootstrap').json()['workspaceId'] == world
             messages = reopened.get(f'/api/pages/{page}').json()['messages']
