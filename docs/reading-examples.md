@@ -70,7 +70,9 @@ and a cold image save/restore.
 
 The browser trial carries a short attributed W3C passage through actual native
 reading, retention, explicit sharing, denial before sharing, a later native file
-action with approval, and restart. It checks desktop English and mobile Chinese
+action with approval, exact file download, selected result return to Home, and
+restart. The Home source link opens the precise delivery result and restores
+the Work draft. It checks desktop English and mobile Chinese
 views. The model's choices are scripted test transport; the trial establishes
 the executable product path, not real-provider judgment or improved learning
 quality. A configured provider is still needed for that separate evaluation.

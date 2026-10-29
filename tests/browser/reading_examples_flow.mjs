@@ -147,8 +147,46 @@ try {
   assert.ok(!bytes.includes('PRIVATE_SURROUNDING_FIXTURE'));
   checks.push('the shared example reaches a real native file action, with the existing explicit approval');
 
+  // Consume the product's recorded artifact, not just its workspace bytes.
+  await page.getByRole('button', { name: /comparison\.md/ }).click();
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download file', exact: true }).click();
+  const downloaded = await downloading;
+  assert.equal(downloaded.suggestedFilename(), 'comparison.md');
+  assert.equal(await readFile(await downloaded.path(), 'utf8'), bytes);
+  const result = (await view(receiver)).messages.find(m => m.role === 'assistant'
+    && m.status === 'settled' && m.content.includes('The source comparison is saved in comparison.md'));
+  const deliveryDraft = 'Continue comparing the original source after delivery.';
+  await page.locator('.composer textarea').fill(deliveryDraft);
+  await page.locator('#message-' + result.id).getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  const returning = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
+  await returning.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  await wait(async () => new URL(page.url()).pathname === '/', 'selected result at Home');
+  let adopted;
+  await wait(async () => {
+    const matches = (await view('home')).messages.filter(m =>
+      m.sourcePageId === receiver && m.sourceMessageId === result.id);
+    adopted = matches.length === 1 ? matches[0] : null;
+    return Boolean(adopted);
+  }, 'persisted exact result attribution');
+  assert.ok(adopted.content.includes(result.content));
+  await page.locator('#message-' + adopted.id + ' .source-line a.session-link').click();
+  await wait(async () => decodeURIComponent(new URL(page.url()).hash) === '#message-' + result.id,
+    'Home source opens the exact delivery result');
+  assert.equal(await page.locator('.composer textarea').inputValue(), deliveryDraft);
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await wait(async () => new URL(page.url()).pathname === '/', 'return to original Home conversation');
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'reading-result-home.png') });
+  checks.push('the exact approved file downloads; the selected result returns to Home with its source and restores the delivery draft');
+
   await stop(server); server = start(true);
   await wait(async () => (await fetch(base + '/api/health')).ok, 'restarted World');
+  const retainedReturn = (await view('home')).messages.find(m => m.id === adopted.id);
+  assert.equal(retainedReturn.sourcePageId, receiver);
+  assert.equal(retainedReturn.sourceMessageId, result.id);
+  await page.goto(`${base}/page/${receiver}#message-${result.id}`);
+  await page.getByRole('heading', { name: 'New application', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), deliveryDraft);
   await page.goto(`${base}/page/${source}`);
   await openSettings();
   await page.locator('#interface-language').selectOption('zh-CN');
