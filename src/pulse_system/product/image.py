@@ -109,12 +109,44 @@ def _inventory(home):
     return files, sorted(directories)
 
 
-def _stopped(db):
+def _stopped(db, *, include_recovered_history=False):
     lease = db.execute("SELECT state FROM runtime_leases WHERE scope='pulse_world'").fetchone()
     _check(lease is not None and lease[0] == 'released',
            'stop the source cleanly first; an active or expired lease cannot be exported')
-    _check(db.execute("SELECT count(*) FROM harness_turns WHERE state IN ('running','uncertain')").fetchone()[0] == 0,
+    states = "('running')" if include_recovered_history else "('running','uncertain')"
+    _check(db.execute(f"SELECT count(*) FROM harness_turns WHERE state IN {states}").fetchone()[0] == 0,
            'source still has unsettled native turns; recover and stop before saving')
+
+
+def _recovered_history(world, kernel, world_id):
+    """Verify retained recovery evidence without changing either native store.
+
+    A World recovery record deliberately remains uncertain after its Kernel
+    turn is cancelled. It is history, not permission to replay a request or an
+    effect. Only this narrow, settled recovery case can opt into a cold copy.
+    """
+    rows = world.execute(
+        "SELECT t.id, t.engram_id, t.execution_context, t.error_code, "
+        "t.error_phase, t.settled_at, e.world_id, e.engram_id, e.status, e.settled_at "
+        "FROM harness_turns t LEFT JOIN causal_events e ON e.id = t.event_id "
+        "WHERE t.state = 'uncertain' ORDER BY t.id"
+    ).fetchall()
+    _check(len(rows) <= MAX_ENTRIES, 'too many recovered turns for an image manifest')
+    for turn_id, engram_id, context, code, phase, settled, event_world, event_engram, status, event_settled in rows:
+        _check(isinstance(turn_id, str) and 0 < len(turn_id) <= 256
+               and code == 'process_recovered' and phase == 'recovery' and bool(settled)
+               and event_world == world_id and event_engram == engram_id
+               and status == 'uncertain' and bool(event_settled),
+               'uncertain World history is not a settled process recovery')
+        matches = kernel.execute(
+            "SELECT world_id, engram_id, context_id, status FROM turns WHERE turn_id = ?",
+            (turn_id,),
+        ).fetchall()
+        expected_context = '' if context == 'home' else context
+        _check(len(matches) == 1 and matches[0][:3] == (world_id, engram_id, expected_context)
+               and matches[0][3] in ('succeeded', 'failed', 'cancelled'),
+               'recovered World history has no matching finished Kernel turn')
+    return [row[0] for row in rows]
 
 
 def _identity(world, kernel):
@@ -132,6 +164,8 @@ def _no_pending(db):
            'Kernel has unfinished turns; recover and stop before saving')
     _check(db.execute("SELECT count(*) FROM actions WHERE status NOT IN ('succeeded','failed','cancelled')").fetchone()[0] == 0,
            'Kernel has unfinished actions; recover and stop before saving')
+    _check(db.execute("SELECT count(*) FROM operations WHERE status NOT IN ('succeeded','failed','cancelled')").fetchone()[0] == 0,
+           'Kernel has unfinished operations; recover and stop before saving')
 
 
 def _hash(path):
@@ -142,7 +176,7 @@ def _hash(path):
     return digest.hexdigest()
 
 
-def save(home: Path, archive: Path) -> dict:
+def save(home: Path, archive: Path, *, include_recovered_history: bool = False) -> dict:
     _check(os.name == 'posix', 'cold Image currently supports POSIX hosts')
     home, archive = home.expanduser().resolve(), archive.expanduser().absolute()
     _check(not archive.resolve().is_relative_to(home), 'save the image outside its source home')
@@ -163,8 +197,10 @@ def save(home: Path, archive: Path) -> dict:
                                                             timeout=0, isolation_level=None)))
             db.execute('BEGIN IMMEDIATE')
             locks[name] = db
-        _stopped(locks['world.db']); _no_pending(locks['kernel.db'])
+        _stopped(locks['world.db'], include_recovered_history=include_recovered_history)
+        _no_pending(locks['kernel.db'])
         world_id = _identity(locks['world.db'],locks['kernel.db'])
+        recovered = _recovered_history(locks['world.db'], locks['kernel.db'], world_id) if include_recovered_history else []
         implementation = _implementation()
         if 'kernel.db.cognition.sqlite3' in files:
             _check('stream_cognition' in implementation, 'install the source cognition module before saving its journal')
@@ -206,12 +242,16 @@ def save(home: Path, archive: Path) -> dict:
                     'rebind':['model setup and credentials','external resources and command image',
                               'optional module activation','workspace-root-bound historical operations'],
                     'semantics':'restore_copy; source is not retired; no startup or model calls'}
+        if recovered:
+            manifest['retained_uncertain_turns'] = recovered
+        manifest_bytes = json.dumps(manifest,ensure_ascii=False,indent=2).encode('utf-8')
+        _check(len(manifest_bytes) <= MAX_MANIFEST, 'image manifest limit exceeded')
         # Create-only publication: a collision never replaces an existing file.
         archive.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix='.pulse-image-', dir=archive.parent); os.close(fd)
         try:
             with zipfile.ZipFile(temporary,'w',zipfile.ZIP_DEFLATED) as z:
-                z.writestr('manifest.json',json.dumps(manifest,ensure_ascii=False,indent=2))
+                z.writestr('manifest.json',manifest_bytes)
                 for entry in entries:
                     z.write(stage/entry['path'], entry['path'])
             with open(temporary,'rb') as f: os.fsync(f.fileno())
@@ -219,7 +259,8 @@ def save(home: Path, archive: Path) -> dict:
         finally:
             Path(temporary).unlink(missing_ok=True)
     return {'saved':str(archive), 'files':len(entries), 'sha256':_hash(archive),
-            'model_calls':0, 'privacy':manifest['privacy'], 'rebind':manifest['rebind']}
+            'model_calls':0, 'privacy':manifest['privacy'], 'rebind':manifest['rebind'],
+            'retained_uncertain_turns':recovered}
 
 
 def _manifest(z):
@@ -228,6 +269,10 @@ def _manifest(z):
     _check('manifest.json' in names and z.getinfo('manifest.json').file_size <= MAX_MANIFEST, 'invalid image manifest')
     manifest = json.loads(z.read('manifest.json'))
     _check(isinstance(manifest,dict) and manifest.get('format') == FORMAT, 'unsupported image format')
+    recovered = manifest.get('retained_uncertain_turns', [])
+    _check(isinstance(recovered, list) and len(recovered) <= MAX_ENTRIES
+           and all(isinstance(item, str) and 0 < len(item) <= 256 for item in recovered)
+           and recovered == sorted(set(recovered)), 'invalid retained recovery history')
     _check(isinstance(manifest.get('world_id'),str) and bool(manifest['world_id'])
            and manifest.get('semantics') == 'restore_copy; source is not retired; no startup or model calls'
            and isinstance(manifest.get('rebind'),list)
@@ -309,11 +354,16 @@ def restore(archive: Path, home: Path) -> dict:
         _verify(z,manifest,home)
         with closing(sqlite3.connect((home/'world.db').resolve().as_uri()+'?mode=ro',uri=True)) as w:
             with closing(sqlite3.connect((home/'kernel.db').resolve().as_uri()+'?mode=ro',uri=True)) as k:
-                _stopped(w); _no_pending(k)
-                _check(_identity(w,k)==manifest.get('world_id'), 'restored identity differs from its manifest')
+                recovered = manifest.get('retained_uncertain_turns', [])
+                _stopped(w, include_recovered_history=bool(recovered)); _no_pending(k)
+                world_id = _identity(w,k)
+                _check(world_id==manifest.get('world_id'), 'restored identity differs from its manifest')
+                _check(_recovered_history(w,k,world_id)==recovered,
+                       'restored recovery history differs from its manifest')
         receipt = {'format':FORMAT, 'source_sha256':_hash(archive),
                    'restored_at':datetime.now(timezone.utc).isoformat(), 'semantics':manifest['semantics'],
-                   'rebind':manifest['rebind'], 'world_id':manifest['world_id'], 'model_calls':0}
+                   'rebind':manifest['rebind'], 'world_id':manifest['world_id'], 'model_calls':0,
+                   'retained_uncertain_turns':recovered}
         p = home/'image-origin.json'; p.write_text(json.dumps(receipt,indent=2)); p.chmod(0o600)
         marker.unlink()
     return {'restored':str(home), 'files':len(manifest['files']), **receipt,

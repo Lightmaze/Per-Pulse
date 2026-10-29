@@ -334,9 +334,21 @@ is not assumed to be interchangeable. Save refuses an active World or
 unfinished Kernel turns/actions. Restore checks member digests and the
 matching Python implementation before writing, preserves the native
 World/Kernel identities and source links, and does not start any model.
-Historical World turns marked uncertain after process recovery also block
-export in this alpha. Cancelling the corresponding Kernel turn does not erase
-that recovery record; a completed Stop is not proof that this home can export.
+Historical World turns marked uncertain after process recovery block export
+by default. To deliberately keep that history in a private copy, after
+recovering the original workspace and stopping any pending turn, use:
+
+```sh
+per-pulse image save ./per-pulse-private.zip --data-dir ~/.local/share/per-pulse --include-recovered-history
+```
+
+This option requires a released World lease, finished Kernel turns/actions
+and operations, and an exact matching Kernel turn for each recovered World
+record. It cannot carry an uncertain file or other tool effect. The archive
+and restore receipt list `retained_uncertain_turns`; those original messages
+and records stay uncertain in both copies. Restore verifies that list against
+the native history, and never retries an old request or action. A completed
+Stop alone does not establish that every effect can be safely copied.
 Native file checkpoints, including retained pre-write bytes, are carried with
 their original workspace provenance. Moving those records does not authorize
 an old write or checkpoint restore against the new workspace root.

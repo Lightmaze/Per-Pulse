@@ -22,16 +22,20 @@ def _image_command(argv: list[str]) -> None:
     parser.add_argument("archive", type=Path)
     parser.add_argument("--data-dir", type=Path,
                         help="Source home for save, NEW destination home for restore.")
+    parser.add_argument("--include-recovered-history", action="store_true",
+                        help="Save stopped process-recovery history whose Kernel turns are finished; keep uncertainty intact.")
     args = parser.parse_args(argv)
     if args.operation == "restore" and args.data_dir is None:
         parser.error("Image restore requires --data-dir NEW_HOME; do not silently select the default personal workspace.")
+    if args.include_recovered_history and args.operation != "save":
+        parser.error("--include-recovered-history applies only to image save.")
     home = args.data_dir or Path.home() / ".local" / "share" / "per-pulse"
 
     from pulse_system.product import image
 
     try:
         if args.operation == "save":
-            result = image.save(home, args.archive)
+            result = image.save(home, args.archive, include_recovered_history=args.include_recovered_history)
         elif args.operation == "inspect":
             result = image.inspect(args.archive)
         else:
