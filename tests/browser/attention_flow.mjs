@@ -218,10 +218,39 @@ try {
   await continued.getByRole('button', { name: '返回 Actual receiving Work', exact: true }).click();
   await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
     '#message-' + propagated.messageId, 'Home card original receiving event');
+  const receivingMessage = page.locator('#message-' + propagated.messageId);
+  await receivingMessage.waitFor();
+  const nativeReceiver = (await (await fetch(base + '/api/pages/' + localReceiver +
+    '?sourceMessageId=' + encodeURIComponent(propagated.messageId))).json())
+    .messages.find(message => message.id === propagated.messageId);
+  assert.ok(nativeReceiver?.content, 'only a real, saved receiving message can be returned');
+  const resultDraft = 'I am still writing in the receiving Work after choosing its Pulse result.';
+  await page.locator('.composer textarea').fill(resultDraft);
+  // The observer's "settled" count alone does not complete the user's work.
+  // Actually choose this native Pulse-produced message and return it through
+  // the normal product flow, with no scripted Home message or copied history.
+  await receivingMessage.getByRole('button', { name: '带回主页', exact: true }).click();
+  const returnDialog = page.getByRole('dialog', { name: '把这份成果带回主页。', exact: true });
+  await returnDialog.waitFor();
+  await returnDialog.getByRole('button', { name: '带回主页', exact: true }).click();
+  await wait(async () => new URL(page.url()).pathname === '/', 'chosen Pulse result returned Home');
+  let attributedHomeResult;
+  await wait(async () => {
+    const snapshot = await (await fetch(base + '/api/pages/home')).json();
+    const matches = snapshot.messages.filter(message => message.sourcePageId === localReceiver &&
+      message.sourceMessageId === propagated.messageId);
+    attributedHomeResult = matches.length === 1 ? matches[0] : null;
+    return Boolean(attributedHomeResult);
+  }, 'exact native Work message is attributed in persistent Home');
+  assert.ok(attributedHomeResult.content.includes(nativeReceiver.content));
+  await page.locator('#message-' + attributedHomeResult.id + ' .source-line a.session-link').click();
+  await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
+    '#message-' + propagated.messageId, 'Home adoption opens original Pulse Work message');
   await page.locator('#message-' + propagated.messageId).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), resultDraft);
   await page.locator('.return-to-thread').click();
-  await wait(async () => new URL(page.url()).pathname === '/', 'Home return after receiving Work');
-  checks.push('Home opens verified local result and returns without fabricating a Home message');
+  await wait(async () => new URL(page.url()).pathname === '/', 'Home return after adopted Work');
+  checks.push('user adopts a genuine Pulse-produced Work result into persistent sourced Home and returns with Work draft');
   // Opening a verified receiver is a browser-local reading action. Home
   // should stop presenting that same event as new after reload, while native
   // World still retains it and Activity can still inspect its original source.
