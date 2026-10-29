@@ -1,5 +1,10 @@
 /** Interface copy only. Original lessons, encounters, feedback and source IDs are never translated. */
 export const learningEnglish = {
+  'learning.readingExample': "Saved from a reading passage. The note is an interpretation; the passage has not been rated as a successful result.",
+  'learning.readingSource': "Source read",
+  'learning.readingVersion': "This is the version observed then. Saving the example did not check the file again.",
+  'learning.readingDetails': "Recorded version",
+  'learning.readingTurn': "Open reading conversation",
   'learning.titleLong': "Choose a shorter name (up to 240 UTF-8 bytes).",
   'learning.example': "Concrete example",
   'learning.excerpt': "Original passage",
@@ -96,6 +101,11 @@ export const learningEnglish = {
   'learning.hurt': "It hurt · pause",
 } as const;
 export const learningChinese: Record<keyof typeof learningEnglish, string> = {
+  'learning.readingExample': "来自实际读到的材料片段。备注是解释，片段尚未被评为成功结果。",
+  'learning.readingSource': "当时读取的来源",
+  'learning.readingVersion': "这里保留当时观察到的版本；保存实例时没有再次检查文件。",
+  'learning.readingDetails': "保存的版本信息",
+  'learning.readingTurn': "打开阅读对话",
   'learning.titleLong': "请缩短名称（UTF-8 编码最多 240 字节）。",
   'learning.example': "具体实例",
   'learning.excerpt': "原文摘录",
