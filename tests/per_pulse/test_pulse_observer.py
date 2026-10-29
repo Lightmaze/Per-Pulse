@@ -145,7 +145,10 @@ def test_observer_counts_only_source_checked_navigable_work_results(tmp_path):
     assert rows[-1] == result
     updates = [event for row in rows if row["type"] == "sample"
                for event in row["event_updates"]]
-    assert next(event for event in updates if event["eventId"] == "visible")["messageId"] == "visible"
+    # The queued observation predates the verified receiving message; its
+    # earlier update must remain visible rather than being retroactively filled.
+    visible_updates = [event for event in updates if event["eventId"] == "visible"]
+    assert [event["messageId"] for event in visible_updates] == [None, "visible"]
     assert next(event for event in updates if event["eventId"] == "not-a-message")["messageId"] is None
 
 
