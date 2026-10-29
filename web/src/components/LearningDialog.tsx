@@ -7,6 +7,8 @@ import { Dialog } from './Dialog';
 import { CopyButton } from './CopyButton';
 import type { Navigate } from './SessionLink';
 import { messageBody } from '../messageBody';
+import { conditionIssue } from '../lessonConditions';
+import { ConditionEditor } from './ConditionEditor';
 
 function ExperienceSourceLink({ source, pageId, navigate }: {
   source: ExperienceMessageSource; pageId: string; navigate: Navigate;
@@ -41,7 +43,7 @@ function describeCondition(value: LessonCondition, t: Translate): string {
   return children.map(child => typeof child === 'string' ? child : `(${describeCondition(child, t)})`).join(t(all ? 'learning.all' : 'learning.any'));
 }
 
-type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; note?: string; counterexamples?: string[]; shift?: LessonShift };
+type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; note?: string; conditions?: LessonCondition; counterexamples?: string[]; shift?: LessonShift };
 
 function Experience({ experience, pageId, results, busy, hidden, revise, feedback, navigate }: {
   experience: PostureExperience; pageId: string; busy: boolean; hidden: boolean;
@@ -59,6 +61,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineRevision, setRefineRevision] = useState(experience.revision);
   const [lessonDraft, setLessonDraft] = useState(lesson?.lesson ?? '');
+  const [conditionDraft, setConditionDraft] = useState<LessonCondition>(lesson?.conditions ?? '');
   const [noteDraft, setNoteDraft] = useState(example?.note ?? '');
   const [exceptionDraft, setExceptionDraft] = useState(lesson?.counterexamples.join('\n') ?? '');
   const [shiftDraft, setShiftDraft] = useState<LessonShift>({ understanding: '', candidates: '', delivery: '', ...lesson?.shift });
@@ -74,16 +77,19 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     delivery: shiftDraft.delivery.trim(),
   };
   const validRefinement = example ? new TextEncoder().encode(noteDraft.trim()).length <= 4000 : Boolean(refinedLesson) && refinedLesson.length <= 4000
+    && conditionIssue(conditionDraft) === null
     && refinedExceptions.length >= 1 && refinedExceptions.length <= 8
     && refinedExceptions.every(value => value.length <= 2000)
     && Object.values(refinedShift).every(value => value.length > 0 && value.length <= 2400);
   const changedRefinement = example ? noteDraft.trim() !== example.note : refinedLesson !== lesson?.lesson
+    || JSON.stringify(conditionDraft) !== JSON.stringify(lesson?.conditions)
     || JSON.stringify(refinedExceptions) !== JSON.stringify(lesson?.counterexamples)
     || Object.keys(refinedShift).some(key => refinedShift[key as keyof typeof refinedShift] !== lesson?.shift[key as keyof typeof refinedShift]);
   const beginRefinement = () => {
     setRefineRevision(experience.revision);
     setNoteDraft(example?.note ?? '');
     setLessonDraft(lesson?.lesson ?? '');
+    setConditionDraft(lesson?.conditions ?? '');
     setExceptionDraft(lesson?.counterexamples.join('\n') ?? '');
     setShiftDraft({ understanding: '', candidates: '', delivery: '', ...lesson?.shift });
     setRefineEvidence('');
@@ -91,7 +97,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   };
   const submitRefinement = async () => {
     if (refinementStale) return;
-    await revise({ ...experience, revision: refineRevision }, example ? { note: noteDraft.trim() } : { lesson: refinedLesson, counterexamples: refinedExceptions, shift: refinedShift }, refineEvidence.trim() || undefined);
+    await revise({ ...experience, revision: refineRevision }, example ? { note: noteDraft.trim() } : { lesson: refinedLesson, conditions: conditionDraft, counterexamples: refinedExceptions, shift: refinedShift }, refineEvidence.trim() || undefined);
     setRefineEvidence('');
     setRefineOpen(false);
   };
@@ -157,6 +163,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       </> : <>
       <label className="field-label" htmlFor={`refine-lesson-${experience.id}`}>{t('learning.refineLesson')}</label>
       <textarea id={`refine-lesson-${experience.id}`} rows={3} value={lessonDraft} maxLength={4000} disabled={busy} onChange={event => setLessonDraft(event.target.value)} />
+      <ConditionEditor id={`refine-conditions-${experience.id}`} value={conditionDraft} onChange={setConditionDraft} disabled={busy} />
       <label className="field-label" htmlFor={`refine-exceptions-${experience.id}`}>{t('learning.refineExceptions')}</label>
       <textarea id={`refine-exceptions-${experience.id}`} rows={3} value={exceptionDraft} maxLength={16000} disabled={busy} onChange={event => setExceptionDraft(event.target.value)} />
       <details className="lesson-refinement-shift">
