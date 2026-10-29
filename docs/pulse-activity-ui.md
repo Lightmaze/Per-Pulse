@@ -152,3 +152,20 @@ scheduler, provider invocation or authority. Native World/SQLite/Kernel tests
 use an explicit synthetic model transport; browser and full-tree CI results
 must be checked on the exact integrated commit. Real-model usefulness,
 wall-clock autonomy and provider billing remain separate acceptance items.
+
+## Inspect and remove influence from the receiving Work
+
+Activity shows incoming connections separately from outgoing connections.
+From a receiving Home/Work page, the person can inspect a source page and
+return with the draft intact, or remove that specific incoming connection
+without changing other incoming or outgoing links. Both excitatory and
+inhibitory connections are identified. Missing historical source pages remain
+non-navigable rather than becoming invented Home links.
+
+Removal uses the existing identity-fenced native disconnect API. It cancels
+unstarted deliveries on that edge, not already running turns or earlier
+results. The original pending causal input remains in history as cancelled.
+English and Chinese copy explains this boundary. The native browser
+journey checks actual retained input cancellation, source navigation, unrelated
+connections, unchanged receiving history, phone layout and persistence after
+restart, using explicitly synthetic model transport.
