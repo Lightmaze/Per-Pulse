@@ -195,7 +195,12 @@ def save(home: Path, archive: Path, *, include_recovered_history: bool = False) 
                 continue
             db = stack.enter_context(closing(sqlite3.connect((home/name).as_uri()+'?mode=rw', uri=True,
                                                             timeout=0, isolation_level=None)))
-            db.execute('BEGIN IMMEDIATE')
+            try:
+                db.execute('BEGIN IMMEDIATE')
+            except sqlite3.OperationalError as exc:
+                if (getattr(exc, 'sqlite_errorcode', 0) & 0xff) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                    raise ImageError('stop the source cleanly first; a source journal is still being written') from None
+                raise
             locks[name] = db
         _stopped(locks['world.db'], include_recovered_history=include_recovered_history)
         _no_pending(locks['kernel.db'])
