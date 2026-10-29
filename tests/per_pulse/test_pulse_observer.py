@@ -104,6 +104,68 @@ def test_native_local_provenance_is_deduplicated_over_elapsed_samples(tmp_path):
     assert "PRIVATE_TRANSCRIPT" not in output.read_text()
 
 
+
+def test_observer_counts_only_source_checked_navigable_work_results(tmp_path):
+    """A settled event without an exact receiving message is not a returned artifact."""
+    clock = Clock()
+    visible = activation("visible", "settled", "work-A")
+    visible["messageId"] = "visible"
+    propagation = activation("prop", "settled", "work-B")
+    propagation["kind"] = "propagation"
+    propagation["messageId"] = "prop"
+    invisible = activation("not-a-message", "settled", "work-C")
+    home = activation("home-event", "settled", "home")
+    home["messageId"] = "home-event"
+    unfinished = activation("still-running", "running", "work-D")
+    unfinished["messageId"] = "still-running"
+    phases = [
+        snapshot([activation("visible", "queued", "work-A")]),
+        snapshot([visible, propagation, invisible, home, unfinished]),
+    ]
+    phases[1]["paused"] = True
+    phases[1]["running"] = False
+    output = tmp_path / "watch.jsonl"
+    with mock_client(phases) as client:
+        result = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=1, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+
+    # These are lower-bound observations, not verified model usefulness.
+    assert result["observed_settled_background_by_page"] == {
+        "home": 1, "work-A": 1, "work-B": 1, "work-C": 1,
+    }
+    assert result["observed_navigable_work_results_by_page"] == {
+        "work-A": 1, "work-B": 1,
+    }
+    assert result["observed_navigable_work_results"] == 2
+    assert result["pulse_running_samples"] == 1
+    assert result["pulse_paused_samples"] == 1
+    assert result["eligible_for_uninterrupted_observation"]
+    rows = records(output)
+    assert rows[-1] == result
+    updates = [event for row in rows if row["type"] == "sample"
+               for event in row["event_updates"]]
+    assert next(event for event in updates if event["eventId"] == "visible")["messageId"] == "visible"
+    assert next(event for event in updates if event["eventId"] == "not-a-message")["messageId"] is None
+
+
+def test_observer_rejects_unverified_receiving_message_identity(tmp_path):
+    clock = Clock()
+    spoofed = activation("event-1", "settled", "work-A")
+    spoofed["messageId"] = "different-message"
+    output = tmp_path / "watch.jsonl"
+    with mock_client([snapshot([spoofed])]) as client:
+        result = observe("http://127.0.0.1:8000", output,
+                         duration_seconds=0.1, interval_seconds=1,
+                         client=client, clock=clock, sleep=clock.sleep)
+    assert result["poll_errors"] == 2
+    assert result["successful_samples"] == 0
+    assert result["observed_navigable_work_results"] == 0
+    assert not result["eligible_for_uninterrupted_observation"]
+    assert [row["type"] for row in records(output)] == [
+        "header", "poll_error", "poll_error", "summary",
+    ]
+
 def test_world_switch_stops_without_cross_body_merging(tmp_path):
     clock = Clock()
     output = tmp_path / "watch.jsonl"
