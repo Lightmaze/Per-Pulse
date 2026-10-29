@@ -80,6 +80,16 @@ def _implementation():
 
 
 def _inventory(home):
+    try:
+        return _scan_inventory(home)
+    except (FileNotFoundError, NotADirectoryError):
+        # A live checkpoint writer can rename a temporary file between
+        # scandir and stat, before the journal/lease checks are reached.
+        # Refuse the changing body without exposing its private path.
+        raise ImageError('stop the source cleanly first; source files changed during inspection') from None
+
+
+def _scan_inventory(home):
     files, directories = {}, []
     for name in DATABASES:
         p = home/name
