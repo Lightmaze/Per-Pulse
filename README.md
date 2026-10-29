@@ -57,10 +57,10 @@ new external evidence or model learning.
 
 ## Run from source
 
-Requirements: Python 3.12 or later and Node.js 20.19 or later. **The default `main` branch now links to this Draft PR #31, but still does not contain the runnable application.** To try the working review version, explicitly check out that branch (not an empty default checkout):
+Requirements: Python 3.12 or later and Node.js 20.19 or later. The runnable **local alpha source is now on `main`**, following [PR #31](https://github.com/Lightmaze/Per-Pulse/pull/31). It has passed the native and installed-browser CI on its reviewed integration head; this is **not** a hosted deployment, package-registry release, or evidence of improved real-provider model quality. Start from a fresh clone:
 
 ```sh
-git clone --branch integration/installed-alpha-main-candidate-20261026 --single-branch https://github.com/Lightmaze/Per-Pulse.git
+git clone https://github.com/Lightmaze/Per-Pulse.git
 cd Per-Pulse
 python -m venv .venv
 source .venv/bin/activate
