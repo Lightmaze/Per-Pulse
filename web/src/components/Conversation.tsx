@@ -46,7 +46,10 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
             const selected = window.getSelection();
             const node = document.getElementById(`message-${message.id}`);
             const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString().trim() : '';
-            onReturn(message, text || messageBody(message));
+            const canonical = messageBody(message);
+            // Rendered Markdown may join text that is not contiguous in the
+            // original. Only label an exact source substring as a selection.
+            onReturn(message, text && canonical.includes(text) ? text : canonical);
           }} title={t("conversation.bringHomeTitle")}><Icon name="return" size={14} />{t("conversation.bringHome")}</button> : null}
         </div>
       </div>
