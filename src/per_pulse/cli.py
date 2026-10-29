@@ -23,7 +23,7 @@ def _image_command(argv: list[str]) -> None:
     parser.add_argument("--data-dir", type=Path,
                         help="Source home for save, NEW destination home for restore.")
     parser.add_argument("--include-recovered-history", action="store_true",
-                        help="Save stopped process-recovery history whose Kernel turns are finished; keep uncertainty intact.")
+                        help="Save stopped process-recovery or native-timeout history whose Kernel turns are finished; keep uncertainty intact.")
     args = parser.parse_args(argv)
     if args.operation == "restore" and args.data_dir is None:
         parser.error("Image restore requires --data-dir NEW_HOME; do not silently select the default personal workspace.")
