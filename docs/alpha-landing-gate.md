@@ -1,12 +1,27 @@
 # First runnable alpha — landing gate
 
-Per Pulse's default `main` now contains a navigation README that links to
-Draft PR #31, but it does **not** contain the runnable Home/Work application.
-The integrated product is still developed as a stack of review branches,
-not a usable default checkout. This candidate deliberately targets
-`main` so users can obtain one runnable product instead of learning a chain
-of thirty pull requests. **It is a Draft review candidate, not an alpha
-release, deployment, or request to publish a package.**
+## Landing status — 2026-10-29
+
+[PR #31](https://github.com/Lightmaze/Per-Pulse/pull/31) merged into `main` at
+[`6f79f2c40e6a7e6e6da793a211f5ffc19f80e713`](https://github.com/Lightmaze/Per-Pulse/commit/6f79f2c40e6a7e6e6da793a211f5ffc19f80e713),
+from exact source head `7441504c26cd27ee293e9e3c0adad7791939badd`.
+Before landing, [push CI #40817875390](https://github.com/Lightmaze/Per-Pulse/actions/runs/40817875390)
+and [PR CI #40817880168](https://github.com/Lightmaze/Per-Pulse/actions/runs/40817880168)
+both completed `verify` and `browser-journey` successfully on that source head.
+The runnable local alpha is now present in the default checkout. This is a
+**source-code landing**, not a package release, hosted deployment, or proof of
+real-provider learning quality, unattended multi-day benefits, or hard spending caps.
+The tested source-head result is not automatically a test result for any later
+README-only commit or post-merge Actions run.
+
+## Historical pre-landing gate (retained)
+
+Before merging, the default `main` only contained a navigation README pointing
+to Draft PR #31. The integrated product was a stack of review branches.
+The candidate deliberately targeted `main` so people could obtain one local
+product without checking out a chain of pull requests. The following criteria
+are the original review gates, preserved for provenance; they no longer mean
+that the default checkout is empty.
 
 ## What must land together
 
