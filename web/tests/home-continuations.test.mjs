@@ -132,3 +132,27 @@ test('Home source links require a matched live World and process in independent 
     { ...bootstrap, serviceInstanceId: '' }, observation), null);
   assert.equal(verifiedHomePulse('world-a', bootstrap, null), null);
 });
+
+test('Home can reveal every live approval and failed Work beyond the quiet first three', () => {
+  const waiting = Array.from({ length: 8 }, (_, index) => ({
+    ...work('waiting-' + index),
+    status: index % 2 === 0 ? 'needs_attention' : 'error',
+    updatedAt: `2026-10-30T18:${String(index).padStart(2, '0')}:00Z`,
+  }));
+  const unrelated = { ...work('finished'), status: 'idle', updatedAt: '2026-10-30T19:00:00Z' };
+  const live = [...waiting, unrelated, { id: 'home', kind: 'home', status: 'needs_attention' }];
+  const preview = homeWorkNeedsAttention(live);
+  const expanded = homeWorkNeedsAttention(live, live.length);
+  assert.equal(preview.length, 3);
+  assert.equal(expanded.length, 8);
+  assert.deepEqual(expanded.slice(0, 3), preview);
+  assert.deepEqual(expanded.map(page => page.id), [
+    'waiting-6', 'waiting-4', 'waiting-2', 'waiting-0',
+    'waiting-7', 'waiting-5', 'waiting-3', 'waiting-1',
+  ]);
+  // Only current native page statuses appear; settled and Home cannot leak in.
+  assert.ok(!expanded.some(page => page.id === 'finished' || page.id === 'home'));
+  assert.deepEqual(homeWorkNeedsAttention(live.map(page => (
+    page.id === 'waiting-6' ? { ...page, status: 'idle' } : page
+  )), live.length).map(page => page.id), expanded.map(page => page.id).filter(id => id !== 'waiting-6'));
+});
