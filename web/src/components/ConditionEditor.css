@@ -1,0 +1,9 @@
+.condition-editor { margin: 16px 0; }
+.condition-node { min-width: 0; margin: 10px 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.condition-node legend { max-width: 100%; padding: 0 5px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.condition-node textarea, .condition-node select { width: 100%; max-width: 100%; box-sizing: border-box; }
+.condition-actions { gap: 8px 14px; }
+@media (max-width: 520px) {
+  .condition-node { padding: 6px; }
+  .condition-actions button { min-height: 36px; }
+}

@@ -1,4 +1,4 @@
-import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
+import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
 import type { WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
@@ -128,7 +128,7 @@ export const api = {
   posture: (id: string, signal?: AbortSignal) => request<PostureView>(`${pagePath(id)}/posture`, { signal }),
   saveExample: (pageId: string, data: { sourceMessageId: string; feedbackMessageId?: string; title: string; excerpt: string; note: string }) =>
     request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/examples`, { method: 'POST', body: JSON.stringify(data) }),
-  reviseExperience: (pageId: string, experience: PostureExperience, changes: { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; note?: string; counterexamples?: string[]; shift?: LessonShift }, evidence?: string) =>
+  reviseExperience: (pageId: string, experience: PostureExperience, changes: { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; note?: string; conditions?: LessonCondition; counterexamples?: string[]; shift?: LessonShift }, evidence?: string) =>
     request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/experiences/${encodeURIComponent(experience.id)}`, {
       method: 'PATCH', body: JSON.stringify({ expectedRevision: experience.revision, changes, ...(evidence ? { evidence } : {}) }),
     }),
