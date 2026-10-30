@@ -87,3 +87,8 @@ python -m pytest -q tests/per_pulse/test_material_index_example.py
 
 These three checks cover active/ambiguous URL input, literal hostile markup,
 multilingual text and query preservation, and invalid material structure.
+The example is also included in the source distribution. An actual extracted
+sdist initially failed test collection because the program was omitted while
+its test was included; adding `/examples` to the existing sdist include list
+corrected that packaging error. The extracted package's checks and CLI run were
+then verified directly.
