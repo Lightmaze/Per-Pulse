@@ -338,6 +338,7 @@ class KernelHarnessRuntime:
         self._abort_before_create: dict[str, str] = {}
         self._runner_locks: dict[str, Any] = {}
         self._approval_calls = 0
+        self._abort_calls = 0
         self._shutdown_lock = threading.Lock()
         self._closed = False
         self._closing = False
@@ -959,6 +960,11 @@ class KernelHarnessRuntime:
     def abort(self, engram_id: str) -> None:
         assert self.kernel is not None
         with self._lock:
+            # close() owns cancellation once it seals admission. A late engine
+            # callback must not enter subordinate stores that may be closing.
+            if self._closing or self._closed:
+                return
+            self._abort_calls += 1
             scopes = tuple(
                 scope
                 for key, scope in self._active.items()
@@ -970,19 +976,27 @@ class KernelHarnessRuntime:
                     self._abort_before_create[scope.turn_id] = "world_abort"
                 else:
                     abortable.append(scope)
-        cancelled_work = self.work.cancel_subject(engram_id) if self.work is not None else 0
-        cancelled_work += self.team.cancel_subject(engram_id) if self.team is not None else 0
-        cancelled_work += self.posture.cancel_subject(engram_id) if self.posture is not None else 0
-        paused = self.cognition.pause_subject(engram_id) if self.cognition is not None else 0
-        if not scopes:
-            if paused or cancelled_work:
-                return
-            raise _error("kernel_turn_not_running", "Engram has no attached world turn")
-        for scope in abortable:
-            self.kernel._runtimes[scope.session_id].runner.abort(
-                scope,
-                reason="world_abort",
-            )
+        try:
+            cancelled_work = self.work.cancel_subject(engram_id) if self.work is not None else 0
+            cancelled_work += self.team.cancel_subject(engram_id) if self.team is not None else 0
+            cancelled_work += self.posture.cancel_subject(engram_id) if self.posture is not None else 0
+            paused = self.cognition.pause_subject(engram_id) if self.cognition is not None else 0
+            if not scopes:
+                if paused or cancelled_work:
+                    return
+                raise _error("kernel_turn_not_running", "Engram has no attached world turn")
+            for scope in abortable:
+                self.kernel._runtimes[scope.session_id].runner.abort(
+                    scope,
+                    reason="world_abort",
+                )
+        finally:
+            # The turn can detach before abort finishes projecting its return
+            # value. Retain the store until this physical caller also leaves,
+            # including when cancellation raises an actual error.
+            with self._lock:
+                self._abort_calls -= 1
+                self._lock.notify_all()
 
     def steer(self, engram_id: str, content: str) -> None:
         raise _error("kernel_steer_requires_world_input", "append the message through PulseWorld input; do not bypass its causal history")
@@ -1034,11 +1048,18 @@ class KernelHarnessRuntime:
                     else:
                         abortable.append(scope)
                 observed = 0 if self.kernel is None else len(self.kernel._runtimes)
-            if self.cognition is not None:
-                self.cognition.close()
             if self.kernel is not None:
                 for scope in abortable:
                     self.kernel._runtimes[scope.session_id].runner.abort(scope, reason="world_shutdown")
+            with self._lock:
+                # Admitted aborts can also be cancelling subordinate Work,
+                # posture or cognition activity. Drain them before closing
+                # any of those resources, after signalling active runners.
+                while self._abort_calls:
+                    self._lock.wait()
+            if self.cognition is not None:
+                self.cognition.close()
+            if self.kernel is not None:
                 with self._lock:
                     while self._active or self._approval_calls:
                         self._lock.wait()
