@@ -129,30 +129,36 @@ def test_casefold_example_correction_changes_next_work_material_without_rewritin
     fixture = ReadingExampleFixture(monkeypatch.setenv)
     with client_for(tmp_path, posture=True, model_factory=fixture.factory) as client:
         source, receiver = work(client), work(client)
+        # This long native posture journey can finish its Kernel round just
+        # after the short default wait on shared CI. Still wait for World
+        # settlement, with one bounded allowance for every step.
+        def step(page, **command):
+            return choose(client, page, fixture, timeout=30, **command)
+
         text = "Use Straße as an example of expansion."
         (tmp_path / "workspace" / "case.txt").write_text(text)
-        found = choose(client, source, fixture, op="find", path="case.txt", query="STRASSE", casefold=True)[0]["output"]
-        choose(client, source, fixture, op="follow", receipt_id=found["receipt_id"], match_index=0,
+        found = step(source, op="find", path="case.txt", query="STRASSE", casefold=True)[0]["output"]
+        step(source, op="follow", receipt_id=found["receipt_id"], match_index=0,
                retain={"title": "Expansion", "excerpt": "Straße", "note": "Use folded offsets to select the original text."})
         original = client.get(f"/api/pages/{source}/posture").json()["experiences"][0]
         endpoint = f"/api/pages/{source}/posture/experiences/{original['id']}"
         assert client.patch(endpoint, json={"expectedRevision": 1, "changes": {"scope": "subject"}}).status_code == 200
-        before = choose(client, receiver, fixture, op="get", experience_id=original["id"])[0]["output"]["experience"]
+        before = step(receiver, op="get", experience_id=original["id"])[0]["output"]["experience"]
         assert before["note"] == original["note"]
         feedback = send(client, source, "The folded string changes length. Keep the original passage and map whole-character boundaries before selecting it.")
-        wait_for(client, source, lambda v: any(m["id"] == feedback["messageId"] and m["status"] == "settled" for m in v["messages"]))
+        wait_for(client, source, lambda v: any(m["id"] == feedback["messageId"] and m["status"] == "settled" for m in v["messages"]), timeout=30)
         corrected = "Map complete original-character boundaries; do not use folded offsets on the original source."
-        response = choose(client, source, fixture, op="revise", experience_id=original["id"], expected_revision=2,
+        response = step(source, op="revise", experience_id=original["id"], expected_revision=2,
                           feedback_message_id=feedback["messageId"], changes={"note": corrected})
         assert response[0]["status"] == "succeeded"
-        wait_for(client, source, lambda _: client.get(f"/api/pages/{source}/posture").json()["experiences"][0]["revision"] == 3)
+        wait_for(client, source, lambda _: client.get(f"/api/pages/{source}/posture").json()["experiences"][0]["revision"] == 3, timeout=30)
         saved = client.get(f"/api/pages/{source}/posture").json()["experiences"][0]
         assert saved["source"] == original["source"] and saved["excerpt"] == "Straße"
         assert saved["feedback"][-1]["source"]["feedback_message_id"] == feedback["messageId"]
-        after = choose(client, receiver, fixture, op="get", experience_id=original["id"])[0]["output"]["experience"]
+        after = step(receiver, op="get", experience_id=original["id"])[0]["output"]["experience"]
         assert after["note"] == corrected and after["excerpt"] == "Straße"
         assert "The folded string changes length" not in json.dumps(after)  # no private feedback transfer
-        stale = choose(client, source, fixture, timeout=30, op="revise", experience_id=original["id"], expected_revision=2,
+        stale = step(source, op="revise", experience_id=original["id"], expected_revision=2,
                        feedback_message_id=feedback["messageId"], changes={"note": "Stale interpretation"})
         assert stale[0]["status"] == "failed"
     with client_for(tmp_path, posture=True, model_factory=None) as client:
