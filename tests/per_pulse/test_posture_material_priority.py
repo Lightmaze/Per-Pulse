@@ -11,7 +11,9 @@ import time
 
 import pytest
 
+from pulse_harness.core import HarnessScope
 from pulse_harness.plugins.posture import pack_posture_materials
+from pulse_system.service.expert_computation import ExpertRuntime
 from pulse_system.service.posture import PostureMemory
 from pulse_system.substrate.storage import Storage
 
@@ -81,8 +83,22 @@ def test_feedback_only_report_does_not_displace_newer_work_material(tmp_path, re
         assert [r["id"] for r in memory.list_experiences(
             subject_id=SUBJECT, context_id=TARGET)] == ["earlier", "later"]
 
-        material = memory.materials(subject_id=SUBJECT, context_id=TARGET)
+        # Native retrieval still exposes last-journal-update recency.
+        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET)) == [
+            "earlier", "later"]
+        material = memory.materials(subject_id=SUBJECT, context_id=TARGET, prioritize_content=True)
         assert _ids(material) == ["later", "earlier"]
+
+        # The existing expert's pre-action material path consumes this order,
+        # rather than a custom test-only selector or separate data store.
+        expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None,
+                               posture_memory=memory, expert_active=False)
+        try:
+            scope = HarnessScope("world", SUBJECT, "session", 0, "owner",
+                                 context_id=TARGET, turn_id="next")
+            assert _ids(expert.posture_materials(scope)) == ["later", "earlier"]
+        finally:
+            expert.close()
         assert material["episodes"][1]["feedback"] == [
             {"verdict": report, "revision": 1}]
         assert "PRIVATE_" not in json.dumps(material)
@@ -98,7 +114,7 @@ def test_feedback_only_report_does_not_displace_newer_work_material(tmp_path, re
             old["id"], expected_revision=2,
             changes={"lesson": "The corrected rule applies only to exploratory tasks."})
         assert revised["revision"] == 3
-        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET)) == [
+        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET, prioritize_content=True)) == [
             "earlier", "later"]
     finally:
         storage.close()
@@ -108,14 +124,14 @@ def test_feedback_only_report_does_not_displace_newer_work_material(tmp_path, re
     reopened = Storage(path)
     try:
         memory = PostureMemory(reopened, "world")
-        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET)) == [
+        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET, prioritize_content=True)) == [
             "earlier", "later"]
         withdrawn = memory.record_feedback(
             old["id"], expected_revision=3, verdict="withdrawn",
             evidence="This judgment was later withdrawn.",
         )
         assert not withdrawn["active"]
-        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET)) == [
+        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET, prioritize_content=True)) == [
             "later"]
         assert memory.materials(subject_id="different-subject", context_id=TARGET)["episodes"] == []
     finally:
@@ -133,15 +149,15 @@ def test_example_note_change_counts_but_outcome_report_does_not(tmp_path):
         memory.record_feedback(
             earlier["id"], expected_revision=1, verdict="not_useful",
             evidence="The receiving task had different constraints.")
-        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET)) == [
+        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET, prioritize_content=True)) == [
             "example-second", "example-first"]
         time.sleep(0.002)
         memory.revise_experience(
             earlier["id"], expected_revision=2,
             changes={"note": "The passage only applies to the original exhibit context."})
-        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET)) == [
+        assert _ids(memory.materials(subject_id=SUBJECT, context_id=TARGET, prioritize_content=True)) == [
             "example-first", "example-second"]
         assert "PRIVATE_EPISODE" not in json.dumps(
-            memory.materials(subject_id=SUBJECT, context_id=TARGET))
+            memory.materials(subject_id=SUBJECT, context_id=TARGET, prioritize_content=True))
     finally:
         storage.close()
