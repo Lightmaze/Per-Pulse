@@ -189,6 +189,21 @@ try {
   assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isEnabled(), false);
   await newLesson.fill(refinedLesson);
   await newExceptions.fill(refinedExceptions.join('\n'));
+  const conditions = lesson.locator('.condition-editor');
+  const firstCondition = conditions.getByRole('textbox').first();
+  const refinedConditions = structuredClone(beforeManualRefinement.conditions);
+  refinedConditions.all[0] = 'An interactive practice experience is the requested product';
+  await firstCondition.fill('');
+  assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isDisabled(), true);
+  await firstCondition.fill('界'.repeat(334));
+  await conditions.getByText('Shorten the conditions:', { exact: false }).waitFor();
+  assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isDisabled(), true);
+  await firstCondition.fill(refinedConditions.all[0]);
+  // An ordinary leaf edit must retain every nested alternative and exclusion.
+  if (screenshots) {
+    await conditions.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(screenshots, 'posture-conditions-desktop.png') });
+  }
   await lesson.getByText('Revise how this changes future choices', { exact: true }).click();
   const actionShift = lesson.getByRole('textbox', { name: 'Possible actions', exact: true });
   await actionShift.fill('');
@@ -207,6 +222,7 @@ try {
   assert.equal(afterManualRefinement.revision, beforeManualRefinement.revision + 1);
   assert.deepEqual(afterManualRefinement.counterexamples, refinedExceptions);
   assert.deepEqual(afterManualRefinement.shift, refinedShift);
+  assert.deepEqual(afterManualRefinement.conditions, refinedConditions);
   assert.equal(afterManualRefinement.feedback.length, beforeManualRefinement.feedback.length + 1);
   assert.equal(afterManualRefinement.feedback.at(-1).evidence, reportedRevision);
   assert.equal(afterManualRefinement.feedback.at(-1).source.kind, 'operator_described_refinement');
@@ -234,6 +250,7 @@ try {
   assert.equal(sharedView.lesson, refinedLesson);
   assert.deepEqual(sharedView.counterexamples, refinedExceptions);
   assert.deepEqual(sharedView.shift, refinedShift);
+  assert.deepEqual(sharedView.conditions, refinedConditions);
   assert.equal(sharedView.source, undefined);
   assert.equal(sharedView.encounter, undefined);
   await lesson.getByRole('button', { name: 'Go to correction', exact: true }).click();
@@ -540,6 +557,8 @@ try {
   const retainedDraft = 'Keep the first step usable, with a draft I have not yet saved.';
   const retainedEvidence = 'My unsent reason for refining this lesson.';
   await newLesson.fill(retainedDraft);
+  const retainedCondition = 'A visitor wants to try a practice exchange now';
+  await firstCondition.fill(retainedCondition);
   await lesson.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).fill(retainedEvidence);
   const latestLesson = 'Check the current task before offering a practice interaction.';
   const latestShift = { ...neutralReport.shift, candidates: 'Ask which task is current before choosing an action.' };
@@ -551,6 +570,7 @@ try {
   await page.getByRole('button', { name: 'Refresh experience', exact: true }).click();
   await lesson.getByText(latestLesson, { exact: true }).waitFor();
   assert.equal(await newLesson.inputValue(), retainedDraft);
+  assert.equal(await firstCondition.inputValue(), retainedCondition);
   assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isDisabled(), true,
     'Refreshing must not silently rebase old draft fields onto a newer revision.');
   await lesson.getByRole('alert').getByText('This experience changed while you were editing.', { exact: false }).waitFor();
@@ -559,6 +579,9 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await lesson.getByRole('alert').getByText('编辑期间，这条经验已被修改。', { exact: false }).waitFor();
   assert.equal(await lesson.getByRole('textbox', { name: '以后应当怎样做？', exact: true }).inputValue(), retainedDraft);
+  assert.equal(await conditions.getByRole('textbox').first().inputValue(), retainedCondition);
+  await conditions.scrollIntoViewIfNeeded();
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-conditions-mobile-zh.png') });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await lesson.getByRole('button', { name: '重新载入最新版本', exact: true }).scrollIntoViewIfNeeded();
   if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-stale-refinement-mobile-zh.png') });
@@ -570,6 +593,7 @@ try {
   assert.equal(unchanged.lesson, latestLesson);
   await lesson.getByRole('button', { name: 'Reload latest version', exact: true }).click();
   assert.equal(await newLesson.inputValue(), latestLesson);
+  assert.equal(await firstCondition.inputValue(), refinedConditions.all[0]);
   await lesson.getByText('Revise how this changes future choices', { exact: true }).click();
   assert.equal(await actionShift.inputValue(), latestShift.candidates);
   assert.equal(await lesson.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).inputValue(), '');
@@ -581,6 +605,42 @@ try {
   assert.equal(resolved.revision, neutralReport.revision + 2);
   assert.deepEqual(resolved.shift, latestShift);
   assert.deepEqual(resolved.source, neutralReport.source);
+  // Changing applicability alone is a meaningful revision. Build an alternate
+  // branch through visible controls, then keep it through native restart.
+  await lesson.getByRole('button', { name: 'Refine lesson', exact: true }).click();
+  const conditionRoot = conditions.locator(':scope > fieldset');
+  await conditionRoot.locator(':scope > select').selectOption('any');
+  await conditionRoot.locator(':scope > .condition-actions').getByRole('button', { name: 'Add condition', exact: true }).click();
+  assert.equal(await lesson.getByRole('button', { name: 'Save refinement', exact: true }).isDisabled(), true);
+  const added = conditionRoot.locator(':scope > fieldset').last();
+  await added.getByRole('textbox').fill('A mandatory registration workflow is the only requested result');
+  await added.getByRole('button', { name: 'Exclude this situation', exact: true }).click();
+  await added.getByText('This condition must not hold.', { exact: true }).waitFor();
+  const regroupedConditions = { any: [...resolved.conditions.all, { not: 'A mandatory registration workflow is the only requested result' }] };
+  await lesson.getByRole('button', { name: 'Save refinement', exact: true }).click();
+  await lesson.getByRole('button', { name: 'Refine lesson', exact: true }).waitFor();
+  const regrouped = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
+  assert.deepEqual(regrouped.conditions, regroupedConditions);
+  assert.equal(regrouped.lesson, resolved.lesson);
+  assert.deepEqual(regrouped.source, resolved.source);
+  assert.deepEqual(regrouped.encounter, resolved.encounter);
+  assert.deepEqual(regrouped.shift, resolved.shift);
+  assert.equal(regrouped.scope, resolved.scope);
+  assert.equal(regrouped.revision, resolved.revision + 1);
+  await close();
+  await stopServer(server);
+  server = startServer({ offline: true });
+  await wait(async () => { try { return (await fetch(base + '/api/health')).ok; } catch { return false; } }, 'condition revision survives restart');
+  await page.reload();
+  await openLessons();
+  const restoredConditions = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0].conditions;
+  assert.deepEqual(restoredConditions, regroupedConditions);
+  await lesson.getByRole('button', { name: 'Refine lesson', exact: true }).click();
+  // Explicit removal can simplify a draft; cancelling keeps the saved tree.
+  await conditions.locator(':scope > fieldset > fieldset').last().locator(':scope > .condition-actions').getByRole('button', { name: 'Remove condition', exact: true }).click();
+  assert.equal(await conditions.getByRole('textbox').count(), 2);
+  await lesson.getByRole('button', { name: 'Cancel editing', exact: true }).click();
+  assert.deepEqual((await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0].conditions, regroupedConditions);
   assert.deepEqual(errors, []);
   console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, receiving-Work outcome feedback without private source exposure, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
 } catch (error) {
