@@ -58,6 +58,17 @@ available, the existing pre-action allowance is at most two computations per
 turn, plus at most one delivery computation. Other enabled modules have their
 own costs.
 
+The native `list`/`find` tools and page journal retain latest-update order so
+a fresh receiving-Work report remains discoverable. **Automatic bounded
+pre-action and delivery work material** instead gives earlier placement to the
+last substantive change in a lesson, example note, scope, or active state.
+Appending `useful` or `not_useful` feedback without changing the experience
+keeps the attributed report but does not make that unchanged advice displace
+newer material at the prompt byte limit. The order is not a relevance score or
+a claim that a report improved behavior: the configured model still evaluates
+the actual task, structured conditions and counterexamples and may `PASS`.
+Withdrawn and disabled experiences remain ineligible, including after restart.
+
 Usage audit readers reconcile admitted receipts with the retained, fully
 source-bound expert and CoverMe traces. A cancellation before receipt admission
 does not erase a durable fork attempt or an earlier reviewer's completed usage;

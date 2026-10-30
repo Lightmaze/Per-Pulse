@@ -419,14 +419,40 @@ class PostureMemory:
             self._save(state, stop_control=control)
             return deepcopy(record)
 
-    def materials(self, *, subject_id: str, context_id: str) -> dict:
+    @staticmethod
+    def _content_revision_time(record: dict) -> str:
+        """Do not make a feedback-only update appear like a newly learned rule.
+
+        The journal itself stays newest-update-first. For limited automatic
+        work material, use the last change to content or eligibility. A report
+        is still included as evidence, but does not acquire attention priority
+        merely by being recent. Compare existing snapshots; persist no index.
+        """
+        fields = (*experience_content_fields(record), "scope", "active")
+        content_version = record
+        for previous in reversed(record.get("history", [])):
+            if any(previous.get(key) != record.get(key) for key in fields):
+                break
+            content_version = previous
+        return content_version["updated_at"]
+
+    def materials(self, *, subject_id: str, context_id: str,
+                  prioritize_content: bool = False) -> dict:
         """Offer eligible experiences, not allegedly relevant experiences.
 
         Context privacy is a hard boundary. Explicit subject transfer offers
         the lesson abstraction or explicitly shared example passage and note,
         never the originating context's full encounter or private feedback.
+
+        Native list/find keep their newest-journal-update order. Only the
+        optional model work packet prioritizes the last content or eligibility
+        edit, so an unchanged lesson's new feedback does not displace newer
+        candidates under the bounded prompt budget.
         """
         records = self.list_experiences(subject_id=subject_id, context_id=context_id)
+        if prioritize_content:
+            records.sort(key=lambda item: (self._content_revision_time(item), item["id"]),
+                         reverse=True)
         episodes = []
         for record in records:
             local = record["context_id"] == context_id
