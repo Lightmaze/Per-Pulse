@@ -7,7 +7,9 @@ from __future__ import annotations
 import argparse
 from html import escape
 import json
+import os
 from pathlib import Path
+import tempfile
 from urllib.parse import urlsplit
 
 
@@ -82,6 +84,32 @@ and <a href="https://docs.python.org/3.12/library/urllib.parse.html#url-parsing-
 '''
 
 
+
+def write_index(destination: Path, content: str) -> None:
+    """Make only a complete output visible, without replacing an existing file.
+
+    Stage in the destination directory, flush the complete bytes, and create
+    the final name with an atomic no-replace hard link. If publication fails,
+    the original destination remains untouched. An interrupted OS process
+    may leave a hidden staging file, never a partial final artifact.
+    """
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=destination.parent,
+            prefix=f".{destination.name}.", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Unlike os.replace/rename this fails when destination already exists.
+        os.link(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="UTF-8 JSON material list")
@@ -90,8 +118,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         page = render(json.loads(args.input.read_text(encoding="utf-8")), title=args.title)
-        with args.output.open("x", encoding="utf-8") as output:
-            output.write(page)
+        write_index(args.output, page)
     except (OSError, ValueError) as error:
         parser.exit(1, f"Could not build index: {error}\n")
 
