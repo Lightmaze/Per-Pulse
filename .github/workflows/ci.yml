@@ -59,6 +59,9 @@ jobs:
       - name: Verify native attention provenance and bilingual return in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_ATTENTION_SCREENSHOTS="$RUNNER_TEMP/per-pulse-attention-screenshots" node tests/browser/attention_flow.mjs
+      - name: Verify spontaneous result return from Home and Activity
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_ATTENTION_SCREENSHOTS="$RUNNER_TEMP/per-pulse-attention-screenshots" node tests/browser/background_result_flow.mjs
       - name: Verify original Work recovery after a process dies during a file effect
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_CRASH_SCREENSHOTS="$RUNNER_TEMP/per-pulse-crash-screenshots" node tests/browser/crash_recovery_flow.mjs

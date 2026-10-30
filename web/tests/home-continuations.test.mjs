@@ -13,6 +13,19 @@ const event = (eventId, pageId, changes = {}) => ({
 });
 const state = (...items) => ({ enabled: true, recentActivations: items });
 
+test('A spontaneous answer has its own verified message identity', () => {
+  const pulse = state(event('empty-input', 'receiver', {
+    kind: 'spontaneous', messageId: null, resultMessageId: 'actual-answer',
+  }));
+  const [row] = homeContinuations(pulse, pages);
+  assert.deepEqual(row.receiver, { pageId: 'receiver', messageId: 'actual-answer' });
+  assert.deepEqual(row.source, { pageId: 'source', messageId: 'original-empty-input' });
+  assert.deepEqual(homeContinuations(pulse, pages, 3, new Set(['empty-input'])), []);
+  assert.deepEqual(homeContinuations(state(event('running', 'receiver', {
+    status: 'running', messageId: null, resultMessageId: 'premature-answer',
+  })), pages), []);
+});
+
 test('Home projects settled original Work messages, latest one per context', () => {
   const rows = homeContinuations(state(
     event('new-receiver', 'receiver'),
