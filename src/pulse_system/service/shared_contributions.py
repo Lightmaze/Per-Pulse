@@ -39,10 +39,13 @@ def retained(runtime, owner_id: str, request) -> list[dict[str, Any]] | None:
     record = records[0]
     arguments = record.get('arguments', {})
     saved = record.get('shared_contributions')
-    if (arguments.get('op') != 'consult' or 'contributions' not in arguments
+    selected_target = (arguments.get('expert_id') if arguments.get('op') == 'consult'
+                       else (record.get('preference') or {}).get('selected_expert_id'))
+    if (arguments.get('op') not in {'consult', 'consult_adaptive'}
+            or 'contributions' not in arguments
             or not isinstance(saved, list) or len(saved) != len(arguments['contributions'])
             or record.get('world_id') != runtime.world_id
-            or arguments.get('expert_id') != request.metadata.get('admitted_target_id')
+            or selected_target != request.metadata.get('admitted_target_id')
             or any(s.get('source', {}).get('record_id') != a['record_id']
                 or s.get('source', {}).get('owner_id') != owner_id
                 for a, s in zip(arguments['contributions'], saved))

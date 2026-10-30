@@ -19,6 +19,8 @@ from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapte
 from pulse_system.service.kernel_runtime import KernelHarnessFactory
 from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
 from pulse_system.service.execution_preference import choose
+from pulse_system.service.shared_contributions import retained as retained_shared, selected_for_inspection
+from pulse_harness.core.errors import ScopeConflict
 
 
 INSTRUCTION = "Inspect the cache warmup and identify the exact source of startup latency."
@@ -59,11 +61,16 @@ def _model_factory(state, seen):
                     "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
                     "instruction": INSTRUCTION,
                 }
+                if "reference_record_id" in state:
+                    arguments["contributions"] = [{
+                        "record_id": state["reference_record_id"],
+                        "excerpt": state["reference_excerpt"],
+                    }]
                 return _stream({"tool_calls": [{
                     "index": 0, "id": "rim-choice", "type": "function",
                     "function": {"name": "team", "arguments": json.dumps(arguments)},
                 }]}, finish="tool_calls")
-            if last.get("content") == INSTRUCTION:
+            if (last.get("content") or "").startswith(INSTRUCTION):
                 return _answer("A real native TUNNEL contribution about cache warmup.")
             return _answer("The original Work received and used the collaboration.")
 
@@ -144,7 +151,25 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             assert update["outcome"] == outcome
             records.append(record_id)
 
-        assert len(world.storage.list_delegations(caller_id=owner)) == 2
+        # A real, separate Work already contains a completed collaborator
+        # result. Selecting one exact excerpt is a narrow material handoff,
+        # NOT a cross-Work RIM reward or permission to read its transcript.
+        reference_work = world.world.create_task_bundle_for_existing_engram(
+            "Earlier startup investigation", owner
+        ).front
+        world.storage.add_center_membership(reference_work.center_id, state["good"])
+        reference_id = world.delegate(
+            INSTRUCTION, to=state["good"], caller_id=owner,
+            center_id=reference_work.center_id, idempotency_key="source-reference",
+        )
+        _tick(world, lambda: world.storage.get_delegation(reference_id)["result_summary"] is not None
+              and world.causal_ledger.find_delegation_result_by_record_id(
+                  world.world_id, reference_id) is not None and not world.harness._active)
+        source_text = world.storage.get_delegation(reference_id)["result_summary"]
+        state["reference_record_id"] = reference_id
+        state["reference_excerpt"] = source_text[:96]
+        assert source_text.startswith("A real native TUNNEL contribution")
+        assert len(world.storage.list_delegations(caller_id=owner)) == 3
         world.send_task_front_message(front.id, START)
         # Hold the native dispatch while persisting exactly one model-selected
         # consultation: an interrupted process must not resample its target.
@@ -159,7 +184,9 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert len(preference["evidence"]) == 2
         assert all(len(item["sources"]) == 2 for item in preference["evidence"])
         assert preference["kl"] <= 0.15 + 1e-12
-        assert len(world.storage.list_delegations(caller_id=owner)) == 2
+        assert len(world.storage.list_delegations(caller_id=owner)) == 3
+        assert pending["shared_contributions"][0]["source"]["record_id"] == reference_id
+        assert pending["shared_contributions"][0]["source"]["work_id"] == reference_work.id
         saved_request_id = pending["request_id"]
         persisted_preference = json.dumps(preference, sort_keys=True)
     finally:
@@ -177,7 +204,7 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             if not requests or requests[0]["status"] != "delivered":
                 return False
             rows = reopened.storage.list_delegations(caller_id=owner)
-            if len(rows) != 3 or not all(row["result_summary"] is not None for row in rows):
+            if len(rows) != 4 or not all(row["result_summary"] is not None for row in rows):
                 return False
             selected = requests[0]["record_id"]
             return reopened.causal_ledger.find_delegation_result_by_record_id(
@@ -190,11 +217,22 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert json.dumps(recovered["preference"], sort_keys=True) == persisted_preference
         new_record = reopened.storage.get_delegation(recovered["record_id"])
         assert new_record["target_id"] == state["good"]
-        assert new_record["task"] == INSTRUCTION
+        assert new_record["task"].startswith(INSTRUCTION)
+        assert "Selected contributions shared for review" in new_record["task"]
+        assert reference_id in new_record["task"]
         assert new_record["outcome"] is None  # completion never becomes reward
         assert reopened.causal_ledger.find_delegation_result_by_record_id(
             reopened.world_id, new_record["id"]
         ) is not None
+        original_request = reopened.causal_ledger.get_event(
+            recovered["delegation_event_id"]
+        )
+        explicit_sources = retained_shared(reopened, owner, original_request)
+        assert len(explicit_sources) == 1
+        assert explicit_sources[0]["source"]["record_id"] == reference_id
+        assert selected_for_inspection(reopened, recovered, reference_id) == explicit_sources[0]
+        with pytest.raises(ScopeConflict):
+            selected_for_inspection(reopened, recovered, records[0])
 
         # Later explicit contrary feedback changes only the NEXT choice.
         reopened.record_delegation_outcome(new_record["id"], "discarded")
@@ -203,12 +241,22 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
             "instruction": INSTRUCTION,
         })
-        assert later["probabilities"][state["good"]] < preference["probabilities"][state["good"]]
+        # A contrary rated outcome must lower the underlying preference.
+        # At the KL bound, two different preference values can project to
+        # the same probabilities: an additional negative outcome may not
+        # shift an already-saturated candidate distribution.
+        assert (later["feedback_values"][state["good"]]
+                < preference["feedback_values"][state["good"]])
+        assert (later["probabilities"][state["good"]]
+                <= preference["probabilities"][state["good"]] + 1e-12)
+        if abs(later["probabilities"][state["good"]] - preference["probabilities"][state["good"]]) < 1e-10:
+            assert abs(preference["kl"] - 0.15) < 1e-8
+            assert abs(later["kl"] - 0.15) < 1e-8
         assert new_record["id"] in {row["id"] for row in later["evidence"]}
         assert recovered["preference"]["selected_expert_id"] == state["good"]
         for _ in range(3):
             reopened._native_team.drain()
-        assert len(reopened.storage.list_delegations(caller_id=owner)) == 3
+        assert len(reopened.storage.list_delegations(caller_id=owner)) == 4
 
         # The same words in an unrelated Work are NOT transferable evidence.
         other = reopened.world.create_task_bundle_for_existing_engram(
