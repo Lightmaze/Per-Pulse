@@ -107,6 +107,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   return <article hidden={hidden} className={`lesson ${experience.active ? '' : 'lesson-paused'}`}>
     <div className="lesson-heading"><h3>{experience.title}</h3><span>{t(experience.active ? 'learning.active' : 'learning.paused')} · v{experience.revision}</span></div>
     {experience.sourceRegime === 'replay' ? <p className="lesson-note replay-saved">{t('replay.saved')}</p> : null}
+    {experience.sourceKind === 'reading' ? <p className="lesson-note">{t('learning.readingExample')}</p> : null}
     {example ? <div className="saved-example">
       <p className="lesson-scope">{t('learning.example')}</p>
       <pre tabIndex={0} aria-label={t('learning.excerpt')}><code>{example.excerpt}</code></pre>
@@ -118,9 +119,18 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     {lesson ? <details><summary>{t('learning.when')}</summary><p>{describeCondition(lesson.conditions, t)}</p><h4>{t('learning.exclude')}</h4><ul>{lesson.counterexamples.map((value, index) => <li key={index}>{value}</li>)}</ul><h4>{t('learning.changes')}</h4><dl><dt>{t('learning.understanding')}</dt><dd>{lesson.shift.understanding}</dd><dt>{t('learning.actions')}</dt><dd>{lesson.shift.candidates}</dd><dt>{t('learning.delivery')}</dt><dd>{lesson.shift.delivery}</dd></dl></details> : null}
     {(experience.encounter || (experience.sourcePageId && (originalId || correctionId))) ? <details>
       <summary>{t('learning.source')}</summary>
+      {experience.readingSource ? <div className="lesson-note">
+        <p>{t('learning.readingSource')}: {experience.readingSource.path}</p>
+        <p>{t('learning.readingVersion')}</p>
+        <details><summary>{t('learning.readingDetails')}</summary>
+          <p>SHA-256: {experience.readingSource.digest}</p>
+          <p>{experience.readingSource.observedAt}</p>
+          <p>{experience.readingSource.receiptId}</p>
+        </details>
+      </div> : null}
       {experience.encounter ? <SourceEncounter experience={experience} pageId={pageId} navigate={navigate} /> : <p className="lesson-scope">{t('learning.sourcePrivate')}</p>}
       {experience.sourcePageId ? <div className="lesson-actions">
-        {originalId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, originalId)}>{t('learning.original')}</button> : null}
+        {originalId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, originalId)}>{t(experience.sourceKind === 'reading' ? 'learning.readingTurn' : 'learning.original')}</button> : null}
         {correctionId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, correctionId)}>{t('learning.correction')}</button> : null}
       </div> : null}
     </details> : null}

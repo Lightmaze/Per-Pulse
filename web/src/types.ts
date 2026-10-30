@@ -143,6 +143,8 @@ type ExperienceBase = {
   canReport: boolean;
   sourcePageId: string | null;
   sourceRegime?: 'replay' | null;
+  sourceKind?: 'reading';
+  readingSource?: { path: string; digest: string; receiptId: string; observedAt: string };
   sourceAnchor?: { resultMessageId: string; feedbackMessageId?: string };
   record_type: 'observed_episode' | 'constructed_fixture';
   encounter?: { situation: string; action: string; outcome?: string };
