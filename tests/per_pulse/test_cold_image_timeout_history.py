@@ -49,7 +49,10 @@ def timed_out_home(tmp_path, monkeypatch, request):
     factory = _factory(monkeypatch, requests, **options)
     with client_for(home, model_factory=factory, allow_workspace_actions=True) as client:
         runtime = client.app.state.pages.runtime
-        runtime._mgr._harness_turn_timeout_sec = 1.0
+        # Approval and tool scheduling on shared CI runners can exceed one
+        # second. Reach the real effect boundary before the native deadline;
+        # keep the deadline active, and still assert its actual cancellation.
+        runtime._mgr._harness_turn_timeout_sec = 5.0
         (home / 'workspace' / 'source.txt').write_bytes(SOURCE.encode())
         execution = PageExecution(runtime)
         instruction = ('HOLD_PROVIDER' if mode == 'model' else
@@ -66,8 +69,8 @@ def timed_out_home(tmp_path, monkeypatch, request):
                         future = pool.submit(execution.resolve_approval, page,
                                              pending['pendingActions'][0]['actionId'], 'allow_once')
                 if mode != 'approval':
-                    assert entered.wait(5), 'The planned physical boundary was not reached.'
-                deadline = time.monotonic() + 6
+                    assert entered.wait(12), 'The planned physical boundary was not reached.'
+                deadline = time.monotonic() + 14
                 while _rows(home, 'kernel.db', 'SELECT status FROM turns WHERE turn_id=?', (turn,)) != [('cancelled',)]:
                     assert time.monotonic() < deadline, 'The actual native deadline did not cancel its turn.'
                     time.sleep(.025)
