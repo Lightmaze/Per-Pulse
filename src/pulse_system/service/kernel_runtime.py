@@ -106,10 +106,11 @@ class _GuardedModel:
 
 
 class _WorldWorkspace(CommandWorkspaceToolProvider):
-    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, local=None, posture=None, attention=None, replay_authorize=None, background_main_round_limit=None, **kwargs):
+    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, local=None, posture=None, attention=None, replay_authorize=None, background_main_round_limit=None, rim_policy=False, **kwargs):
         self._guard, self._mutation_guard = guard, mutation_guard
         self._allow_mutations = allow_mutations
         self._background_main_round_limit = background_main_round_limit
+        self._rim_policy = rim_policy
         super().__init__(*args, command_guard=guard, command_start_guard=mutation_guard, **kwargs)
         self._life = life_hub
         self._work = work
@@ -154,7 +155,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
 
     def _team_descriptor(self):
         from .native_team import descriptor
-        return descriptor()
+        return descriptor(policy=self._rim_policy)
 
     def _work_descriptor(self):
         from .native_work import descriptor
@@ -313,6 +314,8 @@ class KernelHarnessRuntime:
         self.posture_enabled = posture_enabled() if enable_posture is None else enable_posture
         from .expert_computation import expert_enabled
         self._expert_enabled = expert_enabled()
+        from .execution_preference import enabled as rim_policy_enabled
+        self._rim_policy = rim_policy_enabled()
         from .coverme import load_selected_wiki
         self._coverme_index = load_selected_wiki(self.workspace)
         self._cognition_steps = self._cognition_allowance()
@@ -436,7 +439,8 @@ class KernelHarnessRuntime:
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
                     command_executor=self._command_executor, history_scopes=self._history_scopes, life_hub=self.life,
                     cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, posture=self.posture, replay_authorize=self.authorize_replay,
-                    background_main_round_limit=background_main_round_limit_for_turn),
+                    background_main_round_limit=background_main_round_limit_for_turn,
+                    rim_policy=self._rim_policy),
             )
             # The database lifetime mutex above proves the previous Python
             # owner has left. External containers can outlive that process;
@@ -544,8 +548,8 @@ class KernelHarnessRuntime:
             from .native_posture import SCHEMA, NAME
             adapter.extend_tool_schemas({NAME: SCHEMA})
         if self.team is not None:
-            from .native_team import SCHEMA, NAME
-            adapter.extend_tool_schemas({NAME: SCHEMA})
+            from .native_team import schema, NAME
+            adapter.extend_tool_schemas({NAME: schema(policy=self._rim_policy)})
         if self.local is not None:
             from .native_local import schema, NAME
             adapter.extend_tool_schemas({NAME: schema(allow_mutations=self._allow_mutations)})

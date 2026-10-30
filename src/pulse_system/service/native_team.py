@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import threading
+from copy import deepcopy
 import unicodedata
 from typing import Any, Mapping
 
@@ -40,10 +42,22 @@ SCHEMA = {'type': 'object', 'properties': {
 }, 'required': ['op'], 'additionalProperties': False}
 _FIELDS = {'feedback': set(), 'list': set(), 'search': {'query'}, 'inspect': {'record_id'},
            'propose_feedback': {'record_id', 'content', 'scope'},
-           'consult': {'expert_id', 'instruction'}, 'establish': {'name', 'instruction'}}
+           'consult': {'expert_id', 'instruction'}, 'consult_adaptive': {'candidates', 'instruction'},
+           'establish': {'name', 'instruction'}}
 
 
-def descriptor() -> ToolDescriptor:
+def schema(*, policy=False):
+    result = deepcopy(SCHEMA)
+    if policy:
+        result['properties']['op']['enum'].append('consult_adaptive')
+        result['properties']['candidates'] = {
+            'type': 'object', 'minProperties': 2, 'maxProperties': 8,
+            'additionalProperties': {'type': 'number', 'exclusiveMinimum': 0},
+        }
+    return result
+
+
+def descriptor(*, policy=False) -> ToolDescriptor:
     return ToolDescriptor(NAME,
         'Use existing collaborators with their own saved experience, not temporary roles. '
         'list() shows active participants already known from your owned Works and their '
@@ -100,17 +114,27 @@ def descriptor() -> ToolDescriptor:
         'Use scope=work unless the user explicitly wants this same collaborator and owner '
         'across Works. A proposal is authored by you, NOT saved human feedback. Only the '
         'operator Save action adopts it. Do not say remembered, saved or learned merely '
-        'because proposal generation succeeded; ordinary discussion need not create one.',
+        'because proposal generation succeeded; ordinary discussion need not create one.'
+        + (' With RIM policy enabled, consult_adaptive(candidates,instruction) requests '
+           'one persisted consultation from 2..8 known collaborator IDs and positive '
+           'relative weights. Verified, explicitly rated native outcomes in this Work '
+           'can shift the bounded selection. This is a local feedback proxy, not '
+           'model confidence or proof of learning. The tool result exposes the '
+           'source outcome IDs; the original Work turn must succeed before TUNNEL '
+           'dispatch, and its selection is never redrawn after a restart. '
+           'Use direct consult for an explicit single choice.' if policy else ''),
         capability='team.internal', source='pulse.native-team')
 
 
-def validate(arguments: Mapping[str, Any]) -> dict[str, Any]:
+def validate(arguments: Mapping[str, Any], *, policy=False) -> dict[str, Any]:
     if not isinstance(arguments, Mapping):
         raise ValueError('team arguments must be an object')
     a = dict(arguments)
     op = a.get('op')
     if not isinstance(op, str) or op not in _FIELDS:
         raise ValueError('unknown operation or incorrect team fields')
+    if op == 'consult_adaptive' and not policy:
+        raise ValueError('RIM execution preference is disabled')
     optional = ({'before_record_id'} if op == 'search' else
                 {'prior_record_id', 'contributions'} if op == 'consult' else set())
     required = {'op'} | _FIELDS[op]
@@ -118,8 +142,17 @@ def validate(arguments: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError('unknown operation or incorrect team fields')
     if 'contributions' in a:
         a['contributions'] = validate_citations(a['contributions'])
+    if op == 'consult_adaptive':
+        candidates = a['candidates']
+        if not isinstance(candidates, dict) or not 2 <= len(candidates) <= 8:
+            raise ValueError('adaptive consult needs 2..8 known candidates')
+        for identity, weight in candidates.items():
+            if (not isinstance(identity, str) or not identity.strip() or len(identity) > 160
+                    or '\x00' in identity or type(weight) not in (int, float)
+                    or not math.isfinite(weight) or weight <= 0):
+                raise ValueError('invalid candidate identity or reference weight')
     for key, val in a.items():
-        if key == 'contributions':
+        if key in {'contributions', 'candidates'}:
             continue
         limit = 8192 if key == 'instruction' else 2048 if key == 'content' else 256 if key == 'query' else 160 if key in {'expert_id', 'name'} else 200
         if not isinstance(val, str) or not val.strip() or len(val) > limit or '\x00' in val:
@@ -137,8 +170,12 @@ def established_id(request_id: str) -> str:
 
 
 def _target(record) -> str:
-    return (established_id(record['request_id']) if record['arguments']['op'] == 'establish'
-            else record['arguments']['expert_id'])
+    operation = record['arguments']['op']
+    if operation == 'establish':
+        return established_id(record['request_id'])
+    if operation == 'consult_adaptive':
+        return record['preference']['selected_expert_id']
+    return record['arguments']['expert_id']
 
 
 def _digest(value: Any) -> str:
@@ -222,7 +259,7 @@ class NativeTeam:
         r = self.runtime
         with self._lock:
             r._require_runtime_owner()
-            a = validate(call.arguments)
+            a = validate(call.arguments, policy=r.harness._rim_policy)
             self._authorize(scope, action_request_id, call, allow_consulted=a['op'] in {'feedback', 'inspect'})
             cancellation.raise_if_cancelled()
             if a['op'] == 'feedback':
@@ -324,6 +361,9 @@ class NativeTeam:
             front = self._front(scope, writable=True)
             if a['op'] == 'consult' and a['expert_id'] not in self._known(scope.engram_id):
                 raise ScopeConflict('expert is not an active known participant; no implicit new identity')
+            if a['op'] == 'consult_adaptive' and any(
+                    identity not in self._known(scope.engram_id) for identity in a['candidates']):
+                raise ScopeConflict('adaptive consultation requires active known collaborators')
             source = r.causal_ledger.get_turn_for_world(scope.turn_id, r.world_id)
             if source is None or source.engram_id != scope.engram_id or source.state is not HarnessTurnState.RUNNING:
                 raise ScopeConflict('consultation requires its live causal source turn')
@@ -353,6 +393,9 @@ class NativeTeam:
                         r.world_id, scope.engram_id, front.center_id, key).request_event_id,
                     'arguments': a, 'work_id': front.id, 'center_id': front.center_id,
                     'status': 'prepared', 'record_id': None, 'error_code': None}
+                if a['op'] == 'consult_adaptive':
+                    from .execution_preference import choose
+                    rec['preference'] = choose(self, scope, front, a)
                 if 'prior_record_id' in a:
                     from .prior_contribution import capture
                     rec['prior_contribution'] = capture(r, scope.engram_id,
@@ -367,6 +410,7 @@ class NativeTeam:
                 'effect': ('establish_persistent_participant' if a['op'] == 'establish'
                            else 'consult_existing_participant'),
                 'prior_experience': 'none' if a['op'] == 'establish' else 'read_original_sources',
+                **({'preference': rec['preference']} if a['op'] == 'consult_adaptive' else {}),
                 **({'prior_record_id': a['prior_record_id']} if 'prior_record_id' in a else {}),
                 **({'shared_record_ids': [c['record_id'] for c in a['contributions']]}
                     if 'contributions' in a else {})}
