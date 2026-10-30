@@ -168,10 +168,23 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
     monkeypatch.setattr(random.SystemRandom, "random", lambda self: 0.0)
     reopened = _world(tmp_path, factory)
     try:
-        _tick(reopened, lambda: reopened.storage.native_team_requests()[0]["status"]
-              == "delivered" and len(reopened.storage.list_delegations(caller_id=owner)) == 3
-              and all(row["result_summary"] is not None for row in
-                      reopened.storage.list_delegations(caller_id=owner)))
+        # A durable delegate's result_summary may arrive before the causal
+        # delivery is reconciled. Keep pumping the real native loop until the
+        # exact selected record has a settled result anchor too; checking only
+        # the SQLite summary would falsely declare the user-visible return done.
+        def _returned_with_origin():
+            requests = reopened.storage.native_team_requests()
+            if not requests or requests[0]["status"] != "delivered":
+                return False
+            rows = reopened.storage.list_delegations(caller_id=owner)
+            if len(rows) != 3 or not all(row["result_summary"] is not None for row in rows):
+                return False
+            selected = requests[0]["record_id"]
+            return reopened.causal_ledger.find_delegation_result_by_record_id(
+                reopened.world_id, selected
+            ) is not None
+
+        _tick(reopened, _returned_with_origin)
         recovered = reopened.storage.native_team_requests()[0]
         assert recovered["request_id"] == saved_request_id
         assert json.dumps(recovered["preference"], sort_keys=True) == persisted_preference
