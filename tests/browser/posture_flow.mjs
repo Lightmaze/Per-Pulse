@@ -391,7 +391,7 @@ try {
   await page.unroute('**/api/pages/home*');
 
   // A later Work can report the outcome of a shared lesson without returning
-  // to the source to manage it. The source alone retains private feedback.
+  // to the source to manage it. The source retains the original encounter and other receivers' reports.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.locator('.breadcrumbs').getByRole('button', { name: 'Home', exact: true }).click();
   await openLessons();
@@ -448,8 +448,17 @@ try {
   assert.equal(receivingLesson.canEdit, false);
   assert.equal(receivingLesson.canReport, false);
   assert.equal(receivingLesson.encounter, undefined);
-  assert.equal(receivingLesson.feedback, undefined);
   assert.equal(receivingLesson.source, undefined);
+  assert.equal(receivingLesson.feedback.length, 1);
+  assert.equal(receivingLesson.feedback[0].evidence, receiverOutcome);
+  assert.equal(receivingLesson.feedback[0].source.page_id, receiverId);
+  assert.equal(receivingLesson.feedback[0].source.result_message_id, reportedResult.id);
+  assert.equal(receivingLesson.feedback[0].source.result_evidence_class, 'TEST_DOUBLE');
+  assert.equal(receivingLesson.feedback[0].source.result_content_sha256, undefined);
+  await lesson.getByText('Later feedback (1)', { exact: true }).click();
+  await lesson.getByText(receiverOutcome, { exact: false }).waitFor();
+  assert.equal(await lesson.getByRole('button', { name: 'View reported result', exact: true }).count(), 1,
+    'The receiving Work should be able to reopen its own verified native outcome.');
   const originLesson = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
   assert.equal(originLesson.revision, 11);
   assert.equal(originLesson.feedback.at(-1).evidence, receiverOutcome);
@@ -514,7 +523,7 @@ try {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).count(), 0,
     'A late source response must not expose private source controls in a receiving Work.');
-  assert.equal(await lesson.getByText('Later feedback (4)', { exact: true }).count(), 0);
+  await lesson.getByText('Later feedback (1)', { exact: true }).waitFor();
   await page.unroute('**/api/pages/home/posture/experiences/*');
   // Refresh after a concurrent edit must preserve the person's unsent report.
   await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
@@ -538,7 +547,7 @@ try {
   assert.equal(await reportField.inputValue(), conflictDraft);
   await lesson.getByRole('button', { name: 'It helped', exact: true }).click();
   await lesson.getByText('In use · v14', { exact: true }).waitFor();
-  assert.equal(await lesson.getByText('Later feedback (5)', { exact: true }).count(), 0);
+  await lesson.getByText('Later feedback (2)', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
   await reportField.fill('The result was adequate, but I saw no clear benefit from this guidance.');
   await lesson.getByRole('button', { name: 'No clear benefit', exact: true }).click();
@@ -547,7 +556,7 @@ try {
   assert.equal(neutralReport.active, true);
   assert.equal(neutralReport.feedback.at(-1).verdict, 'not_useful');
   assert.equal(neutralReport.feedback.at(-1).source.page_id, receiverId);
-  assert.equal(await lesson.getByText('Later feedback (6)', { exact: true }).count(), 0);
+  await lesson.getByText('Later feedback (3)', { exact: true }).waitFor();
   // Refresh must not attach a newer revision to fields drafted from an older
   // lesson, otherwise an apparently current save overwrites another edit.
   await close();
@@ -642,7 +651,7 @@ try {
   await lesson.getByRole('button', { name: 'Cancel editing', exact: true }).click();
   assert.deepEqual((await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0].conditions, regroupedConditions);
   assert.deepEqual(errors, []);
-  console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, receiving-Work outcome feedback without private source exposure, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
+  console.log('PASS: browser learning, ordinary and operator refinement of an attributed lesson, preserved source and boundaries across Work, restart and shared projection, concurrent revision recovery, receiving-Work outcome feedback readback with verified result anchors and no foreign-source exposure, bilingual source navigation, and delayed-read races. Explicit synthetic transport only.');
 } catch (error) {
   if (activePage && !activePage.isClosed()) {
     console.error('Failure navigation state:', JSON.stringify({
