@@ -21,6 +21,18 @@ ask for a single native consultation using:
 }
 ```
 
+An adaptive consultation may also include `contributions` containing 1–8
+exact `record_id`/`excerpt` pairs from completed, owner-accessible collaborator
+results, including another Work. The existing native source reader captures
+those selected quotes before saving the request and re-verifies the original
+result and scope before first TUNNEL dispatch. Only the sampled collaborator
+receives the selected historical excerpts, not source transcripts, other
+contributors' histories, or private feedback. The delivered contribution
+retains this exact source selection and remains inspectable after restart.
+The quotes **do not** themselves change RIM candidate probabilities; only
+settled, operator-rated outcomes from the calling Work may do that. An
+explicit single-recipient `consult` still avoids probabilistic sharing.
+
 Candidate weights are the model's relative starting preferences, **not**
 provider-token probabilities or a learned optimal policy. The host reads at
 most 128 existing caller delegations, accepts only completed contributions
