@@ -309,7 +309,9 @@ class TurnRunner:
                 if action.status is ActionStatus.APPROVAL_PENDING:
                     self._transition_turn(scope, TurnStatus.WAITING_APPROVAL)
                     return self._waiting_outcome(scope, action.action_request_id, evidence)
-                if action.status in {ActionStatus.STARTING, ActionStatus.RUNNING}:
+                if action.status in {
+                    ActionStatus.INTENT, ActionStatus.STARTING, ActionStatus.RUNNING,
+                }:
                     # A new process must call RecoveryManager before resume.  A
                     # running row is never silently replayed by this runner.
                     if action.status is ActionStatus.RUNNING:
@@ -319,6 +321,32 @@ class TurnRunner:
                                 "running action requires recovery before resume",
                                 code="recovery_required",
                             ),
+                            evidence=evidence,
+                        )
+                    # Calls after an approval may not have been admitted yet.
+                    # A fresh read/internal action is still INTENT; execute it
+                    # through the same hook and guarded start as a live round,
+                    # rather than publishing a non-terminal result. Completed
+                    # actions above remain observation only on every resume.
+                    if not self._run_hook(
+                        scope,
+                        HookStage.BEFORE_TOOL,
+                        context,
+                        tool_call=persisted_call.call,
+                        action_request_id=persisted_call.action_request_id,
+                        evidence=evidence,
+                    ):
+                        if not action.terminal:
+                            self.store.terminal_action(
+                                scope,
+                                action.action_request_id,
+                                TerminalOutcome.FAILED,
+                                result={},
+                                error_code="hook_rejected",
+                            )
+                        return self._block_or_fail(
+                            scope,
+                            HookRejected("hook rejected tool execution"),
                             evidence=evidence,
                         )
                     try:
