@@ -279,7 +279,15 @@ def test_page_example_capture_share_report_and_restart_keep_native_sources(tmp_p
             "expectedRevision": 2, "verdict": "not_useful", "evidence": "PRIVATE_REPORT: the new requirement differed.",
         })
         assert report.status_code == 200 and report.json()["experience"]["active"]
-        assert "PRIVATE_REPORT" not in json.dumps(report.json())
+        # The receiving Work may revisit its own testimony, but never the
+        # source Work's private encounter or reports from other Works.
+        reported = report.json()["experience"]
+        assert reported["feedback"][0]["evidence"] == "PRIVATE_REPORT: the new requirement differed."
+        assert reported["feedback"][0]["source"] == {
+            "kind": "operator_report", "page_id": target, "relation": "shared_recipient",
+        }
+        assert "PRIVATE_ORIGINAL_REQUEST" not in json.dumps(reported)
+        assert all(field not in reported for field in ("encounter", "source"))
     with client_for(tmp_path, posture=True, model_factory=None) as client:
         source_view = client.get(f"/api/pages/{page_id}/posture").json()["experiences"][0]
         assert source_view["id"] == saved["id"] and source_view["revision"] == 3
