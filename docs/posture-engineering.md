@@ -37,7 +37,12 @@ Open **Settings → View this page’s experience** to inspect saved lessons and
 conditions, pause one, record what changed in the result, or explicitly make
 the lesson available across pages. A lesson is local to its source page until
 that transfer is requested. The shared abstraction can travel; the original
-conversation and raw feedback remain at the source.
+conversation and raw source feedback remain at the source. A receiving Work
+can report whether shared guidance helped its own finished result. That Work
+can revisit **its own** reports and its verified result message, including
+after restart or withdrawal, without seeing other receiving Works' reports or
+the original encounter. Such a report is attributed testimony, not proof that
+the guidance caused the result.
 
 **Save example** on a completed reply retains an exact selected passage without
 requiring a conditional lesson. It can be captured before evaluation, with an

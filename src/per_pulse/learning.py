@@ -121,7 +121,7 @@ class PageLearning:
         return {"pageId": source_page, "messageId": message_id,
                 **self.pages.materials.message(source_page, rows[0])}
 
-    def _public(self, record, context_id):
+    def _public(self, record, context_id, viewer_page_id):
         local = record["context_id"] == context_id
         result = {key: deepcopy(record[key]) for key in (
             "id", "revision", "scope", "active", "record_type", "created_at", "updated_at",
@@ -180,6 +180,32 @@ class PageLearning:
             sources = self._encounter_sources(record, source_page)
             if sources:
                 result["encounterSources"] = sources
+        else:
+            # The receiving Work can inspect the outcome reports it actually
+            # authored, including after withdrawal and restart. Never expose
+            # the source encounter, source-only revisions, or other receivers'
+            # evidence merely because the lesson was shared.
+            own_reports = []
+            for entry in record["feedback"]:
+                origin = entry.get("source", {})
+                if (origin.get("kind") != "operator_report"
+                        or origin.get("relation") != "shared_recipient"
+                        or origin.get("page_id") != viewer_page_id):
+                    continue
+                report_source = {"kind": "operator_report", "page_id": viewer_page_id,
+                                 "relation": "shared_recipient"}
+                # Native result anchors were verified when the report was
+                # accepted. Only fields used to open this Work's own result
+                # are projected, not the source turn or full result digest.
+                for key in ("result_message_id", "result_evidence_class", "result_execution_regime"):
+                    if key in origin:
+                        report_source[key] = origin[key]
+                own_reports.append({
+                    "verdict": entry["verdict"], "evidence": entry["evidence"],
+                    "source": report_source,
+                })
+            if own_reports:
+                result["feedback"] = own_reports
         return result
 
     def view(self, page_id):
@@ -191,7 +217,7 @@ class PageLearning:
                 subject_id=self._subject(page_id),
                 context_id=context_id, include_inactive=True,
             )
-            return {"enabled": True, "experiences": [self._public(r, context_id) for r in records]}
+            return {"enabled": True, "experiences": [self._public(r, context_id, page_id) for r in records]}
 
     def create(self, page_id, data):
         from pulse_system.service.native_posture import capture_encounter
@@ -218,7 +244,7 @@ class PageLearning:
                 raise self._invalid(error) from error
             except ScopeConflict as error:
                 raise PageError("invalid_experience_source", str(error), 422) from error
-            return {"experience": self._public(record, context_id)}
+            return {"experience": self._public(record, context_id, page_id)}
 
     def create_example(self, page_id, data):
         from pulse_system.service.native_posture import capture_example
@@ -245,7 +271,7 @@ class PageLearning:
                 raise self._invalid(error) from error
             except ScopeConflict as error:
                 raise PageError("invalid_experience_source", str(error), 422) from error
-            return {"experience": self._public(record, context_id)}
+            return {"experience": self._public(record, context_id, page_id)}
 
     def revise(self, page_id, experience_id, revision, changes, evidence=None):
         with self.pages._lock:
@@ -271,7 +297,7 @@ class PageLearning:
                     )
             except (ValueError, RedactionRequired) as error:
                 raise self._invalid(error) from error
-            return {"experience": self._public(updated, record["context_id"])}
+            return {"experience": self._public(updated, record["context_id"], page_id)}
 
     def feedback(self, page_id, experience_id, revision, verdict, evidence, *, result_message_id=None):
         """Let a receiving Work report an outcome of shared guidance.
@@ -317,4 +343,4 @@ class PageLearning:
                 raise self._invalid(error) from error
             # Never return source-only encounter or private feedback to a
             # receiving Work, including after a harmful rating pauses sharing.
-            return {"experience": self._public(updated, context_id)}
+            return {"experience": self._public(updated, context_id, page_id)}

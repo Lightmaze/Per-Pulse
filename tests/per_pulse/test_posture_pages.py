@@ -292,7 +292,14 @@ def test_receiving_work_can_report_shared_lesson_outcome_without_importing_priva
         projected = helpful.json()["experience"]
         assert projected["revision"] == 3 and projected["active"] and projected["canReport"]
         assert not projected["canEdit"]
-        assert all(field not in projected for field in ("source", "encounter", "feedback"))
+        assert all(field not in projected for field in ("source", "encounter"))
+        assert projected["feedback"] == [{
+            "verdict": "useful",
+            "evidence": "The shared guidance prompted a useful first interaction.",
+            "source": {"kind": "operator_report", "page_id": receiving_work,
+                       "relation": "shared_recipient"},
+        }]
+        assert client.get(f"/api/pages/{receiving_work}/posture").json()["experiences"][0]["feedback"] == projected["feedback"]
         assert client.post(receiving_endpoint + "/feedback", json={
             "expectedRevision": 2, "verdict": "harmful", "evidence": "Stale observation.",
         }).status_code == 409
@@ -304,13 +311,19 @@ def test_receiving_work_can_report_shared_lesson_outcome_without_importing_priva
         assert harmful.status_code == 200, harmful.text
         after = harmful.json()["experience"]
         assert after["revision"] == 4 and not after["active"] and not after["canReport"]
-        assert all(field not in after for field in ("source", "encounter", "feedback"))
+        assert all(field not in after for field in ("source", "encounter"))
+        assert [item["verdict"] for item in after["feedback"]] == ["useful", "harmful"]
         assert client.post(receiving_endpoint + "/feedback", json={
             "expectedRevision": 4, "verdict": "useful", "evidence": "No longer shared.",
         }).status_code == 404
 
         # The original owner retains full private records and native feedback
-        # attribution; no receiving Work gets the original correction content.
+        # attribution. A distinct receiving Work must see neither this Work's
+        # reports nor the original encounter, even when the lesson is paused.
+        unrelated_work = new_page(client, title="Unrelated Work")["page"]["id"]
+        other = client.get(f"/api/pages/{unrelated_work}/posture").json()["experiences"][0]
+        assert other["id"] == saved["id"]
+        assert all(field not in other for field in ("source", "encounter", "feedback"))
         owner = client.get(f"/api/pages/{source_work}/posture").json()["experiences"][0]
         assert owner["id"] == saved["id"] and owner["revision"] == 4
         assert owner["source"] == saved["source"] and owner["encounter"] == saved["encounter"]
@@ -327,6 +340,11 @@ def test_receiving_work_can_report_shared_lesson_outcome_without_importing_priva
         owner = client.get(f"/api/pages/{source_work}/posture").json()["experiences"][0]
         assert owner["revision"] == 4 and not owner["active"]
         assert owner["feedback"][-1]["source"]["page_id"] == receiving_work
+        own = client.get(f"/api/pages/{receiving_work}/posture").json()["experiences"][0]
+        assert [item["verdict"] for item in own["feedback"]] == ["useful", "harmful"]
+        assert all(field not in own for field in ("source", "encounter"))
+        other = client.get(f"/api/pages/{unrelated_work}/posture").json()["experiences"][0]
+        assert all(field not in other for field in ("source", "encounter", "feedback"))
 
 
 @pytest.mark.parametrize("from_source", [False, True])
@@ -355,7 +373,16 @@ def test_outcome_report_links_a_native_result_without_copying_it(tmp_path, monke
         assert report["source"]["relation"] == ("source" if from_source else "shared_recipient")
         assert result["content"] not in json.dumps(report)
         if not from_source:
-            assert all(key not in response.json()["experience"] for key in ("source", "encounter", "feedback"))
+            projected = response.json()["experience"]
+            assert all(key not in projected for key in ("source", "encounter"))
+            assert len(projected["feedback"]) == 1
+            own_report = projected["feedback"][0]
+            assert own_report["verdict"] == "useful" and own_report["evidence"] == "The first interaction was useful."
+            assert own_report["source"]["result_message_id"] == result["id"]
+            assert own_report["source"]["result_evidence_class"] == "TEST_DOUBLE"
+            assert own_report["source"]["page_id"] == report_page
+            assert "result_content_sha256" not in json.dumps(own_report)
+            assert result["content"] not in json.dumps(own_report)
         # The same optimistic revision check still applies to anchored reports.
         assert client.post(endpoint, json={
             "expectedRevision": 1, "verdict": "harmful", "evidence": "A stale report.",
@@ -425,7 +452,8 @@ def test_outcome_anchor_keeps_original_result_across_native_succession(tmp_path,
             receiver_id, saved["id"], 1, "useful", "The earlier result provided a usable first step.",
             result_message_id=result.result_event_id,
         )["experience"]
-        assert all(key not in response for key in ("source", "encounter", "feedback"))
+        assert all(key not in response for key in ("source", "encounter"))
+        assert response["feedback"][0]["source"]["result_message_id"] == result.result_event_id
         owner = pages.learning.view(source_id)["experiences"][0]
         report = owner["feedback"][-1]
         assert report["source"]["result_message_id"] == result.result_event_id
@@ -445,7 +473,9 @@ def test_outcome_anchor_keeps_original_result_across_native_succession(tmp_path,
             result_message_id=result.result_event_id,
         )["experience"]
         assert repeated["revision"] == 3 and repeated["active"]
-        assert all(key not in repeated for key in ("source", "encounter", "feedback"))
+        assert all(key not in repeated for key in ("source", "encounter"))
+        assert [item["verdict"] for item in repeated["feedback"]] == ["useful", "not_useful"]
+        assert repeated["feedback"][1]["source"]["result_message_id"] == result.result_event_id
     finally:
         pages.runtime.close()
 
