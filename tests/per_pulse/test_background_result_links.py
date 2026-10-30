@@ -101,8 +101,12 @@ def test_background_link_rejects_mismatched_native_evidence(completed_background
         'empty_answer': ("UPDATE causal_events SET content='' WHERE id=?", (result,)),
         'wrong_result_pointer': ("UPDATE harness_turns SET result_event_id=? WHERE event_id=?", (activation['sourceEventId'], activation['eventId'])),
     }[fault]
-    with runtime.storage._lock:
-        runtime.storage._conn.execute(statement, parameters)
+    with runtime.storage._lock, runtime.storage._immediate_transaction() as connection:
+        connection.execute(statement, parameters)
+    # Commit the malformed specimen before a normal scheduler lease check.
+    # Otherwise BEGIN IMMEDIATE rejects the open fixture transaction and its
+    # rollback can silently erase the fault before the projection observes it.
+    runtime._require_runtime_owner()
     current = client.get('/api/pulse').json()['recentActivations'][0]
     assert current.get('resultMessageId') is None
     assert current['eventId'] == activation['eventId']
