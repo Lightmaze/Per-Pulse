@@ -79,6 +79,27 @@ def test_unrelated_or_stale_outcomes_do_not_change_choice():
     assert old["probabilities"]["b"] - old["prior"]["b"] < 0.0000001
 
 
+def test_adaptive_explicit_source_quotes_are_validated_without_expanding_authority():
+    request = {"op": "consult_adaptive",
+               "candidates": {"expert-a": 0.6, "expert-b": 0.4},
+               "instruction": "Reconsider this startup change.",
+               "contributions": [{
+                   "record_id": "finished-other-work-record",
+                   "excerpt": "The previous reviewer identified the actual log line.",
+               }]}
+    assert validate(request, policy=True) == request
+    with pytest.raises(ValueError, match="disabled"):
+        validate(request, policy=False)
+    with pytest.raises(ValueError, match="select each contribution once"):
+        validate({**request, "contributions": request["contributions"] * 2}, policy=True)
+    with pytest.raises(ValueError, match="exact excerpt"):
+        validate({**request, "contributions": [{
+            "record_id": "finished-other-work-record", "excerpt": "",
+        }]}, policy=True)
+    with pytest.raises(ValueError, match="incorrect team fields"):
+        validate({**request, "prior_record_id": "cannot-pick-prior-author"}, policy=True)
+
+
 def test_persisted_selection_resolves_without_resampling():
     rec = {"request_id": "native-team-v1:source", "arguments": {
         "op": "consult_adaptive", "candidates": {"a": 0.6, "b": 0.4},
