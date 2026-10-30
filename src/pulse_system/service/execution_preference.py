@@ -114,11 +114,13 @@ def _distribution(candidates, query, evidence):
     def tilt(beta):
         if not admitted or beta == 0 or len(set(values.values())) == 1:
             return dict(prior)
-        logits = {k: math.log(prior[k]) + beta * relative_values[k] for k in prior}
+        logits = {k: math.log(prior[k]) + beta * relative_values[k]
+                  for k in prior if prior[k] > 0}
         peak = max(logits.values())
         weights = {k: math.exp(v - peak) for k, v in logits.items()}
         z = math.fsum(weights.values())
-        return {k: 0.05 * prior[k] + 0.95 * weights[k] / z for k in prior}
+        return {k: 0.05 * prior[k] + 0.95 * weights.get(k, 0.0) / z
+                for k in prior}
 
     beta = 3.0 if admitted else 0.0
     probabilities = tilt(beta)
