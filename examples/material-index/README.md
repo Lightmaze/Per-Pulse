@@ -14,7 +14,12 @@ python examples/material-index/build_index.py \
 Open the resulting file in a browser. Supply your own list of objects with
 `title`, `url`, and `note` strings; `url` and `note` are optional. `--title`
 changes the document title. The output must be a new file, so a second run
-cannot silently overwrite an earlier result.
+cannot silently overwrite an earlier result. The complete HTML is staged
+in the output directory and only then published under its final filename; a
+failed write cannot leave a partial *final* artifact. Publication requires
+local hard-link support and fails closed on filesystems without it. An abrupt
+process or machine death may leave a hidden temporary file, and this is not a
+guarantee of crash-durable directory metadata.
 
 Titles and notes stay literal, including markup, quotes, combining characters,
 and multilingual text. Eligible HTTP(S) addresses become links; other entries
