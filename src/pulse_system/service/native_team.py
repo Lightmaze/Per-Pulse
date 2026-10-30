@@ -122,7 +122,13 @@ def descriptor(*, policy=False) -> ToolDescriptor:
            'model confidence or proof of learning. The tool result exposes the '
            'source outcome IDs; the original Work turn must succeed before TUNNEL '
            'dispatch, and its selection is never redrawn after a restart. '
-           'Use direct consult for an explicit single choice.' if policy else ''),
+           'Use direct consult for an explicit single choice. '
+           'An adaptive consultation may also include contributions with 1..8 '
+           'exact source quotes from completed, owner-accessible prior Works. '
+           'The selected collaborator receives only those explicitly selected '
+           'results through the existing source-verified TUNNEL; peer histories '
+           'and feedback are not shared. Such quotes do not change the RIM '
+           'selection weights or authorize any additional tools.' if policy else ''),
         capability='team.internal', source='pulse.native-team')
 
 
@@ -136,7 +142,8 @@ def validate(arguments: Mapping[str, Any], *, policy=False) -> dict[str, Any]:
     if op == 'consult_adaptive' and not policy:
         raise ValueError('RIM execution preference is disabled')
     optional = ({'before_record_id'} if op == 'search' else
-                {'prior_record_id', 'contributions'} if op == 'consult' else set())
+                {'prior_record_id', 'contributions'} if op == 'consult' else
+                {'contributions'} if op == 'consult_adaptive' else set())
     required = {'op'} | _FIELDS[op]
     if not required <= set(a) or set(a) - required - optional:
         raise ValueError('unknown operation or incorrect team fields')
