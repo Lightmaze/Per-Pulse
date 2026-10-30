@@ -85,7 +85,8 @@ def _world(path, factory):
     )
     harness = KernelHarnessFactory(
         db_path=path / "kernel.db", workspace=path / "files",
-        model_factory=factory, allow_mutations=True,
+        model_factory=factory, allow_unconfigured=factory is None,
+        allow_mutations=True,
     )
     return RuntimeService(config, harness_factory=harness)
 
@@ -97,9 +98,14 @@ def _tick(world, predicate, *, seconds=12, drain=True):
             world.storage.native_team_requests(limit=64),
             world.storage.list_delegations(limit=16),
         )
-        world.engine.tick()
+        # Team TUNNEL results are reconciled outside engine.tick().
+        # Mirror the native runtime acceptance loop so rated prior
+        # delegations actually settle before we inspect their provenance.
         if drain:
             world._native_team.drain()
+            world._reconcile_durable_delegations()
+            world._native_work.drain()
+        world.engine.tick()
         time.sleep(0.01)
 
 
