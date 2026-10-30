@@ -62,7 +62,8 @@ containing both ampersands and quotes without manufacturing extra attributes.
    **Bring to Home** the selected result. Its source opens the exact Work result;
    the reading example's source separately returns to the original reading turn.
 
-This path was actually exercised on the main `8abbe175` source tree, with the
+This path was actually exercised on the main `8abbe175` source tree, then
+repeated after main `d2b10081` integrated the condition editor, with the
 generator in this directory and explicit host-mediated `TEST_DOUBLE` choices.
 Native reading, journal revision, denial before sharing, explicit sharing,
 approved file writing, exact artifact download, Home attribution, source return,
@@ -70,6 +71,8 @@ both Work drafts, and restart used the existing World/Kernel/SQLite. Desktop
 English and a Chinese 390px phone view completed with no page errors. The
 approved HTML included the corrected note and had SHA-256
 `18bb5e36d1652e914ec61d6d1cfe1f116fed5686616efce8dac465645b4f0489`.
+The combined candidate also passed 28 native/example checks, 62 frontend checks,
+the production build, and the existing condition-editing browser journey.
 
 The operator supplied the interpretation and renderer; this is a developer's
 completed learning/practice cycle and a native product-path check. It is not

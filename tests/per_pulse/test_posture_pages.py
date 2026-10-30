@@ -223,6 +223,9 @@ def test_operator_refinement_keeps_described_evidence_and_source_private(tmp_pat
         assert client.get("/api/pages/home/posture").json()["experiences"][0]["revision"] == 2
         revised = client.patch(target, json={"expectedRevision": 2, "changes": {
             "lesson": "Give an immediate trial only when the user requests an experience.",
+            "conditions": {"all": ["An interactive experience is requested", {
+                "any": ["No booking is required", {"not": "A required booking is unconfirmed"}],
+            }]},
             "counterexamples": ["A fixed registration form is requested."],
         }, "evidence": evidence})
         assert revised.status_code == 200, revised.text
@@ -236,6 +239,7 @@ def test_operator_refinement_keeps_described_evidence_and_source_private(tmp_pat
         assert entry["source"]["page_id"] == "home"
         exposed = client.get(f"/api/pages/{receiver}/posture").json()["experiences"][0]
         assert exposed["lesson"] == current["lesson"] and exposed["revision"] == 3
+        assert exposed["conditions"] == current["conditions"]
         assert not exposed["canEdit"]
         assert all(field not in exposed for field in ("source", "encounter", "feedback"))
         assert evidence not in json.dumps(exposed)
@@ -247,6 +251,7 @@ def test_operator_refinement_keeps_described_evidence_and_source_private(tmp_pat
         persisted = client.get("/api/pages/home/posture").json()["experiences"][0]
         assert persisted["source"] == initial["source"] and persisted["encounter"] == initial["encounter"]
         assert persisted["feedback"] == current["feedback"]
+        assert persisted["conditions"] == current["conditions"]
         assert persisted["revision"] == 3
 
 def test_receiving_work_can_report_shared_lesson_outcome_without_importing_private_history(tmp_path, monkeypatch):
