@@ -29,6 +29,7 @@ from pulse_system.core.pulse.context import ContextPulseConfig as PulseSettings
 from . import __version__
 from .execution import PageExecution
 from .artifacts import PageArtifacts
+from .background_results import background_result_message
 from .replay import PageReplay, RETURN_PREFIX
 from .materials import PageMaterials, material_footer
 from .language import RESPONSE_LANGUAGES, ResponseLanguage, install_language_advisor
@@ -248,6 +249,7 @@ class PageService:
                 receiver_page = page_id_for(activation["centerId"])
                 activation["pageId"] = receiver_page
                 activation["messageId"] = None
+                activation["resultMessageId"] = None
                 if receiver_page is not None:
                     try:
                         self._check_message(receiver_page, activation["eventId"])
@@ -255,6 +257,16 @@ class PageService:
                         pass
                     else:
                         activation["messageId"] = activation["eventId"]
+                    result_id = background_result_message(
+                        self.runtime, activation["eventId"], activation["centerId"],
+                    )
+                    if result_id is not None:
+                        try:
+                            self._check_message(receiver_page, result_id)
+                        except PageError:
+                            pass
+                        else:
+                            activation["resultMessageId"] = result_id
                 source_id = activation["sourceEventId"]
                 source = self.runtime.causal_ledger.get_event(source_id) if source_id else None
                 activation["sourceMessageId"] = None

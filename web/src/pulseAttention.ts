@@ -35,7 +35,14 @@ export function activationMessageTarget(
   if (!pageId || !validPageIds.has(pageId)) return null;
   const eventId = side === 'receiver' ? entry.eventId : entry.sourceEventId;
   const messageId = side === 'receiver' ? entry.messageId : entry.sourceMessageId;
-  // The backend checks original World, center and engram lineage; the UI
-  // additionally refuses an ID that does not match its claimed event.
-  return messageId && messageId === eventId ? { pageId, messageId } : { pageId };
+  // Preserve the existing source-checked activation-message destination.
+  if (messageId && messageId === eventId) return { pageId, messageId };
+  // An empty spontaneous input has no message of its own. The server may
+  // separately verify the actual answer through that input's native turn.
+  if (side === 'receiver' && entry.status === 'settled'
+      && ['spontaneous', 'propagation'].includes(entry.kind)
+      && typeof entry.resultMessageId === 'string' && entry.resultMessageId) {
+    return { pageId, messageId: entry.resultMessageId };
+  }
+  return { pageId };
 }

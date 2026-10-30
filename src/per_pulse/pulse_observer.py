@@ -155,10 +155,17 @@ def observe(
                             message_id = item.get("messageId")
                             if message_id is not None and message_id != event_id:
                                 raise ValueError("Invalid native receiving message identity")
+                            result_id = item.get("resultMessageId")
+                            if result_id is not None and (
+                                not isinstance(result_id, str) or not 1 <= len(result_id) <= 160
+                                or result_id == event_id or status != "settled"
+                            ):
+                                raise ValueError("Invalid native background result identity")
                             slim = {
                                 "eventId": event_id, "status": status,
                                 "kind": item.get("kind"), "pageId": item.get("pageId"),
                                 "messageId": message_id,
+                                "resultMessageId": result_id,
                                 "sourceEventId": item.get("sourceEventId"),
                                 "sourcePageId": item.get("sourcePageId"),
                             }
@@ -211,7 +218,8 @@ def observe(
                 and event["kind"] in {"spontaneous", "propagation"}
                 and isinstance(event["pageId"], str)
                 and event["pageId"] not in {"", "home"}
-                and event["messageId"] == event["eventId"]
+                and (event.get("resultMessageId")
+                     or event["messageId"] == event["eventId"])
             )
             summary = {
                 "type": "summary", "reason": exit_reason, "workspaceId": world_id,

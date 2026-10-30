@@ -282,7 +282,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
                 ? <button className="pulse-activity-link" type="button" onClick={() => {
                     const location = activationMessageTarget(activity, validIds, 'receiver');
                     if (location) jump(location.pageId, location.messageId);
-                  }}>{nameFor(activity.pageId)} · {t(activity.messageId === activity.eventId ? 'pulse.openActivityMessage' : 'pulse.openActivityPage')}</button>
+                  }}>{nameFor(activity.pageId)} · {t(activity.messageId === activity.eventId ? 'pulse.openActivityMessage' : activity.status === 'settled' && activity.resultMessageId ? 'pulse.openActivityResult' : 'pulse.openActivityPage')}</button>
                 : <span>{nameFor(activity.pageId, activity.centerId)}</span>}
               <span className="pulse-activity-state" title={activity.status}>{pulseActivityLabel(t, "status", activity.status)}</span>
             </div>

@@ -191,6 +191,8 @@ export type PulseActivation = {
   pageId: string | null;
   /** PageService-validated local message, not an inferred Kernel event. */
   messageId: string | null;
+  /** Original settled answer, verified against this activation's native turn and page lineage. */
+  resultMessageId?: string | null;
   kind: string;
   status: string;
   createdAt: string;
