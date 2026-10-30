@@ -437,6 +437,9 @@ class PostureMemory:
             item["representation"] = record.get("representation", "lesson")
             item["source"] = {"experience_id": record["id"], "revision": record["revision"],
                               "context_id": record["context_id"]}
+            if record["source"].get("kind") == "native_reading_example":
+                item["source"]["kind"] = "native_reading_example"
+                item["source"]["meaning"] = "retained_reading_observation_not_verified_source_or_outcome"
             if record["source"].get("execution_regime") == "replay":
                 # Share the meaning, not the original page's selected sources.
                 item["source"]["execution_regime"] = "replay"
