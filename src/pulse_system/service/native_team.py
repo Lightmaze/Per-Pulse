@@ -148,7 +148,7 @@ def validate(arguments: Mapping[str, Any], *, policy=False) -> dict[str, Any]:
             raise ValueError('adaptive consult needs 2..8 known candidates')
         for identity, weight in candidates.items():
             if (not isinstance(identity, str) or not identity.strip() or len(identity) > 160
-                    or '\\x00' in identity or type(weight) not in (int, float)
+                    or '\x00' in identity or type(weight) not in (int, float)
                     or not math.isfinite(weight) or weight <= 0):
                 raise ValueError('invalid candidate identity or reference weight')
     for key, val in a.items():
