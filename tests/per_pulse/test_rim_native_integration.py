@@ -211,7 +211,7 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
 @pytest.mark.parametrize("flag", ["0", "1"])
 def test_offline_runtime_never_invents_an_adaptive_team_action(tmp_path, monkeypatch, flag):
     monkeypatch.setenv("P_PULSE_RIM_POLICY", flag)
-    runtime = _world(tmp_path, model_factory=None)
+    runtime = _world(tmp_path, None)
     try:
         assert runtime.harness._rim_policy is (flag == "1")
         assert runtime.storage.native_team_requests(limit=64) == []
