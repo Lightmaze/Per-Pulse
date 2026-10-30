@@ -92,7 +92,7 @@ def test_adaptive_explicit_source_quotes_are_validated_without_expanding_authori
         validate(request, policy=False)
     with pytest.raises(ValueError, match="select each contribution once"):
         validate({**request, "contributions": request["contributions"] * 2}, policy=True)
-    with pytest.raises(ValueError, match="exact excerpt"):
+    with pytest.raises(ValueError, match="invalid contribution excerpt"):
         validate({**request, "contributions": [{
             "record_id": "finished-other-work-record", "excerpt": "",
         }]}, policy=True)
