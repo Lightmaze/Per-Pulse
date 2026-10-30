@@ -436,17 +436,23 @@ class PostureMemory:
             content_version = previous
         return content_version["updated_at"]
 
-    def materials(self, *, subject_id: str, context_id: str) -> dict:
+    def materials(self, *, subject_id: str, context_id: str,
+                  prioritize_content: bool = False) -> dict:
         """Offer eligible experiences, not allegedly relevant experiences.
 
         Context privacy is a hard boundary. Explicit subject transfer offers
         the lesson abstraction or explicitly shared example passage and note,
         never the originating context's full encounter or private feedback.
+
+        Native list/find keep their newest-journal-update order. Only the
+        optional model work packet prioritizes the last content or eligibility
+        edit, so an unchanged lesson's new feedback does not displace newer
+        candidates under the bounded prompt budget.
         """
         records = self.list_experiences(subject_id=subject_id, context_id=context_id)
-        # A 'not useful' report should not push an unchanged lesson ahead of
-        # newer candidates in the bounded pre-action model material.
-        records.sort(key=lambda item: (self._content_revision_time(item), item["id"]), reverse=True)
+        if prioritize_content:
+            records.sort(key=lambda item: (self._content_revision_time(item), item["id"]),
+                         reverse=True)
         episodes = []
         for record in records:
             local = record["context_id"] == context_id
