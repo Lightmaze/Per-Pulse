@@ -64,12 +64,21 @@ def timed_out_home(tmp_path, monkeypatch, request):
                 first = _wait(execution, page, lambda view: bool(view['turnId']))
                 turn = first['turnId']
                 if mode in {'approval', 'write', 'unknown_write'}:
-                    pending = _wait(execution, page, lambda view: bool(view['pendingActions']))
+                    # An action can be published before the turn enters
+                    # WAITING_APPROVAL. Follow the same readiness signal as
+                    # the UI before asking the native guard to resolve it.
+                    pending = _wait(execution, page, lambda view: bool(view['pendingActions'])
+                                    and view['pendingActions'][0]['canResolve'])
                     if mode != 'approval':
                         future = pool.submit(execution.resolve_approval, page,
                                              pending['pendingActions'][0]['actionId'], 'allow_once')
                 if mode != 'approval':
-                    assert entered.wait(12), 'The planned physical boundary was not reached.'
+                    if not entered.wait(12):
+                        # Preserve an early approval failure instead of
+                        # hiding it behind the later boundary wait.
+                        if future is not None and future.done():
+                            future.result()
+                        pytest.fail('The planned physical boundary was not reached.')
                 deadline = time.monotonic() + 14
                 while _rows(home, 'kernel.db', 'SELECT status FROM turns WHERE turn_id=?', (turn,)) != [('cancelled',)]:
                     assert time.monotonic() < deadline, 'The actual native deadline did not cancel its turn.'
