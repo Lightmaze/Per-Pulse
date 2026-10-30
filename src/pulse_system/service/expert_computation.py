@@ -75,7 +75,8 @@ class ExpertRuntime:
         if self.posture_memory is None:
             return None
         materials = self.posture_memory.materials(
-            subject_id=scope.engram_id, context_id=scope.context_id)
+            subject_id=scope.engram_id, context_id=scope.context_id,
+            prioritize_content=True)
         return pack_posture_materials(materials)
 
     def work_materials(self, scope, posture_packet):
