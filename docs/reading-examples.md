@@ -68,6 +68,14 @@ Other trials cover combining characters, emoji, exact whitespace, source
 deletion, denied cross-Work access, failed selecting turns, generation changes,
 and a cold image save/restore.
 
+A later integration trial searches for `STRASSE` with explicit casefolding,
+follows the original `Straße` passage, and retains it as an example. A real
+persisted user correction then revises its interpretation through native
+`posture.revise`. The next Work retrieves the corrected note, while the exact
+excerpt and original observation remain unchanged. A stale revision is refused;
+the revised experience survives restart. This exercises the existing revision
+contract on reading examples rather than introducing a separate learning store.
+
 The browser trial carries a short attributed W3C passage through actual native
 reading, retention, explicit sharing, denial before sharing, a later native file
 action with approval, exact file download, selected result return to Home, and

@@ -44,3 +44,10 @@ The complete run initially caught a product regression: a blocked/recoverable pr
 Model choices use explicit synthetic HTTP transports, and command lifecycle tests use explicit local fixtures. Actual SQLite/World/Kernel state, approval controls and physical file operations are exercised. These tests do not certify real-model task performance, external account permissions, Docker isolation or long-duration reliability. The shortened phase did not run an endurance test.
 
 The writer lane and unresolved-command quarantine coordinate participating writers in one process. They are not cross-process filesystem fences or a durable external-container inventory. Immutable artifact history, binary/download delivery, semantic mid-turn steering, durable spending reservations and native browser/connector admission remain recorded next-phase work in [the foundation plan](harness-foundation.md).
+
+The later [native command recovery work](command-recovery.md) adds exact
+container reconciliation after a host dies, using the existing Kernel action
+and recovery records. Its separate real-Docker regression covers physical
+process death, natural lease expiry, continuation in the original Work and a
+delayed inert create. That evidence does not retroactively change the synthetic
+Docker boundary of the October 23 checks above.

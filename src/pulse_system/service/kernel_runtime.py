@@ -28,7 +28,7 @@ from pulse_harness.adapters.chat_http import ChatHTTPModelAdapter, model_factory
 from pulse_harness.life.service import LifeHub
 from pulse_harness.life import tools as life_tools
 from pulse_harness.adapters.history import ConversationHistoryTools, HISTORY_SCHEMAS
-from pulse_harness.adapters.command import CommandWorkspaceToolProvider, DockerCommandExecutor
+from pulse_harness.adapters.command import CommandWorkspaceToolProvider, DockerCommandExecutor, recover_world_commands
 from pulse_harness.core import HarnessScope, ModelRoundStatus, SessionStatus, TurnStatus
 from pulse_harness.core.errors import HarnessError as KernelError, LeaseFenced, ScopeConflict
 from pulse_harness.core.lifecycle import HarnessRuntimeBootstrap
@@ -436,6 +436,14 @@ class KernelHarnessRuntime:
                     command_executor=self._command_executor, history_scopes=self._history_scopes, life_hub=self.life,
                     cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, posture=self.posture, replay_authorize=self.authorize_replay,
                     background_main_round_limit=background_main_round_limit_for_turn),
+            )
+            # The database lifetime mutex above proves the previous Python
+            # owner has left. External containers can outlive that process;
+            # reconcile their native action identities before any new writer
+            # (including material uploads) can enter this World. This also runs
+            # when the operator has disabled new command execution.
+            self.command_recovery = recover_world_commands(
+                self.kernel.store, world_id, self.workspace, guard=self._check,
             )
             if self._cognition_steps is not None:
                 if self.db_path == ":memory:":

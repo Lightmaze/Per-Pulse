@@ -14,10 +14,10 @@ from test_pages import client_for, new_page, send, wait_for
 from test_reading_continuity import work
 
 
-def choose(client, page_id, fixture, **command):
+def choose(client, page_id, fixture, *, timeout=8, **command):
     count = len(fixture.outcomes)
     sent = send(client, page_id, "READING_EXAMPLE_FIXTURE:" + json.dumps(command))
-    wait_for(client, page_id, lambda v: any(m["id"] == sent["messageId"] and m["status"] == "settled" for m in v["messages"]))
+    wait_for(client, page_id, lambda v: any(m["id"] == sent["messageId"] and m["status"] == "settled" for m in v["messages"]), timeout=timeout)
     assert len(fixture.outcomes) == count + 1, json.dumps([r["messages"][-1] for r in fixture.requests[-2:]])
     last = fixture.outcomes[-1][-1]
     if last.get("output", {}).get("status") == "prepared":
@@ -123,6 +123,41 @@ def test_source_search_can_be_followed_into_a_retained_original_example(tmp_path
         assert saved["source"]["reading_source"]["digest"] == hashlib.sha256(text.encode()).hexdigest()
         assert saved["source"]["reading_position"]["start_char"] == text.index("NEEDLE")
         assert "Introductory" not in json.dumps(saved)
+
+
+def test_casefold_example_correction_changes_next_work_material_without_rewriting_source(tmp_path, monkeypatch):
+    fixture = ReadingExampleFixture(monkeypatch.setenv)
+    with client_for(tmp_path, posture=True, model_factory=fixture.factory) as client:
+        source, receiver = work(client), work(client)
+        text = "Use Straße as an example of expansion."
+        (tmp_path / "workspace" / "case.txt").write_text(text)
+        found = choose(client, source, fixture, op="find", path="case.txt", query="STRASSE", casefold=True)[0]["output"]
+        choose(client, source, fixture, op="follow", receipt_id=found["receipt_id"], match_index=0,
+               retain={"title": "Expansion", "excerpt": "Straße", "note": "Use folded offsets to select the original text."})
+        original = client.get(f"/api/pages/{source}/posture").json()["experiences"][0]
+        endpoint = f"/api/pages/{source}/posture/experiences/{original['id']}"
+        assert client.patch(endpoint, json={"expectedRevision": 1, "changes": {"scope": "subject"}}).status_code == 200
+        before = choose(client, receiver, fixture, op="get", experience_id=original["id"])[0]["output"]["experience"]
+        assert before["note"] == original["note"]
+        feedback = send(client, source, "The folded string changes length. Keep the original passage and map whole-character boundaries before selecting it.")
+        wait_for(client, source, lambda v: any(m["id"] == feedback["messageId"] and m["status"] == "settled" for m in v["messages"]))
+        corrected = "Map complete original-character boundaries; do not use folded offsets on the original source."
+        response = choose(client, source, fixture, op="revise", experience_id=original["id"], expected_revision=2,
+                          feedback_message_id=feedback["messageId"], changes={"note": corrected})
+        assert response[0]["status"] == "succeeded"
+        wait_for(client, source, lambda _: client.get(f"/api/pages/{source}/posture").json()["experiences"][0]["revision"] == 3)
+        saved = client.get(f"/api/pages/{source}/posture").json()["experiences"][0]
+        assert saved["source"] == original["source"] and saved["excerpt"] == "Straße"
+        assert saved["feedback"][-1]["source"]["feedback_message_id"] == feedback["messageId"]
+        after = choose(client, receiver, fixture, op="get", experience_id=original["id"])[0]["output"]["experience"]
+        assert after["note"] == corrected and after["excerpt"] == "Straße"
+        assert "The folded string changes length" not in json.dumps(after)  # no private feedback transfer
+        stale = choose(client, source, fixture, timeout=30, op="revise", experience_id=original["id"], expected_revision=2,
+                       feedback_message_id=feedback["messageId"], changes={"note": "Stale interpretation"})
+        assert stale[0]["status"] == "failed"
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        retained = client.get(f"/api/pages/{source}/posture").json()["experiences"][0]
+        assert retained == saved
 
 
 @pytest.mark.parametrize("extra", [{"feedback_message_id": "invented"}, {"scope": "subject"},

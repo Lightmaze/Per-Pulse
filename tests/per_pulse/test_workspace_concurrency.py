@@ -254,7 +254,7 @@ def test_approved_command_excludes_file_mutation_until_executor_receipt(tmp_path
         def __init__(self, workspace):
             self.workspace = workspace
 
-        def execute(self, arguments, cancellation, *, guard, start_guard, output_limit):
+        def execute(self, arguments, cancellation, *, guard, start_guard, output_limit, invocation_name, on_created):
             with start_guard():
                 guard()
                 cancellation.raise_if_cancelled()
@@ -314,7 +314,7 @@ def test_queued_approved_command_cancels_before_executor_start(tmp_path, monkeyp
     class FixtureCommandExecutor:
         image_id = "sha256:" + "1" * 64
 
-        def execute(self, arguments, cancellation, *, guard, start_guard, output_limit):
+        def execute(self, arguments, cancellation, *, guard, start_guard, output_limit, invocation_name, on_created):
             with start_guard():
                 guard()
                 cancellation.raise_if_cancelled()
@@ -371,7 +371,7 @@ def test_running_command_cancellation_releases_lane_after_cleanup(tmp_path, monk
         def __init__(self, workspace):
             self.workspace = workspace
 
-        def execute(self, arguments, cancellation, *, guard, start_guard, output_limit):
+        def execute(self, arguments, cancellation, *, guard, start_guard, output_limit, invocation_name, on_created):
             with start_guard():
                 guard()
                 cancellation.raise_if_cancelled()
@@ -559,13 +559,16 @@ def test_docker_unconfirmed_cleanup_quarantines_until_close_verifies_removal(tmp
     executor._write_resource = workspace_write_resource(tmp_path)
     executor._lock = threading.Lock()
     executor._closed = False
-    executor._active, executor._unresolved = set(), set()
+    executor._active, executor._unresolved = set(), {}
     executor._env = {}
+    executor._prefix = []
     executor._config_dir = SimpleNamespace(cleanup=lambda: None)
-    executor.invocation = lambda *args: ["explicit-process-fixture"]
+    executor.invocation = lambda *args: ["create", "explicit-process-fixture"]
     removal_confirmed = False
 
     def control(*args):
+        if args[0] == "create":
+            return "0" * 64
         if not removal_confirmed:
             raise ProviderUnavailable("fixture daemon unavailable")
         return ""

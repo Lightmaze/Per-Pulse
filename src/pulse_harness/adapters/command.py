@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 import json
+import logging
 import math
 import os
 from pathlib import Path, PurePosixPath
@@ -54,6 +55,21 @@ except OSError:
 sys.exit(code if code>=0 else 128-code)
 """
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
+_PROTOCOL = "create-start-v2"
+_OPERATION_PREFIX = "docker-container-"
+_logger = logging.getLogger(__name__)
+
+
+def command_container_name(scope, action_request_id: str) -> str:
+    """An existing native action owns exactly one disposable container name."""
+    return "p-pulse-command-" + digest_json({"scope": scope.digest, "action": action_request_id})[:32]
+
+
+def command_workspace_identity(workspace: Path) -> dict:
+    root = workspace.resolve(strict=True)
+    info = root.stat()
+    return {"path": str(root), "device": info.st_dev, "inode": info.st_ino}
 
 
 def command_args(arguments: Mapping[str, Any]) -> tuple[list[str], str, float]:
@@ -76,18 +92,11 @@ def command_args(arguments: Mapping[str, Any]) -> tuple[list[str], str, float]:
     return list(argv), str(PurePosixPath(cwd)), float(timeout)
 
 
-class DockerCommandExecutor:
-    """Local-daemon command adapter; construction checks configuration, not a model."""
-    def __init__(self, workspace: Path, image: str):
+class _DockerControl:
+    """Local daemon access also used to clean up when commands are disabled."""
+    def __init__(self):
         if sys.platform != "linux":
             raise ProviderUnavailable("container commands currently require a Linux host", code="command_platform_unsupported")
-        if (not isinstance(image, str) or not image or len(image) > 256
-                or image.startswith('-') or any(c.isspace() for c in image)):
-            raise ProviderProtocolError("invalid operator-selected command image")
-        self.workspace = workspace.resolve(strict=True)
-        self._write_resource = workspace_write_resource(self.workspace)
-        if ',' in str(self.workspace):
-            raise ProviderProtocolError("Docker mount path must not contain a comma")
         self.docker = shutil.which("docker")
         if not self.docker:
             raise ProviderUnavailable("Docker CLI is not installed; no host command fallback", code="command_docker_unavailable")
@@ -96,6 +105,71 @@ class DockerCommandExecutor:
         # contexts, proxy values, credentials, and other inherited environment.
         self._env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": self._config_dir.name}
         self._prefix = [self.docker, "--config", self._config_dir.name, "--host", "unix:///var/run/docker.sock"]
+
+    def _control(self, *argv: str) -> str:
+        try:
+            result = subprocess.run([*self._prefix, *argv], stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self._env, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            raise ProviderUnavailable("local Docker control failed", code="command_docker_unavailable") from None
+        if result.returncode != 0:
+            raise ProviderUnavailable("local Docker/image unavailable; preinstall the selected image", code="command_docker_unavailable")
+        if len(result.stdout) > 16384:
+            raise ProviderUnavailable("local Docker control result exceeds its bound", code="command_docker_unavailable")
+        return result.stdout.decode("utf-8", errors="replace")
+
+    def _remove(self, name: str, *, container_id: str) -> None:
+        try:
+            self._control("rm", "--force", container_id)
+        except ProviderUnavailable:
+            pass
+        # A failed rm is not evidence of absence. Docker can briefly retain a
+        # removing container; require a successful empty immutable-ID lookup.
+        deadline = time.monotonic() + 2
+        while self._control("ps", "-aq", "--no-trunc", "--filter", "id=" + container_id).strip():
+            if time.monotonic() >= deadline:
+                raise ProviderUnavailable("command cleanup is unresolved", code="command_cleanup_unresolved")
+            time.sleep(.05)
+
+
+def _owned_container_id(control, workspace: Path, name: str, image_id: str,
+                        *, recorded_id: str | None = None) -> str | None:
+    selector = "id=" + recorded_id if recorded_id else "name=^/" + name + "$"
+    ids = control._control("ps", "-aq", "--no-trunc", "--filter", selector).split()
+    if not ids:
+        return None
+    if len(ids) != 1 or not _CONTAINER_ID.fullmatch(ids[0]) or (recorded_id and ids[0] != recorded_id):
+        raise ProviderUnavailable("ambiguous old command identity", code="command_cleanup_unresolved")
+    template = '{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},"labels":{{json .Config.Labels}},"mounts":{{json .Mounts}}}'
+    info = json.loads(control._control("inspect", "--format", template, ids[0]))
+    if not isinstance(info, dict):
+        raise ProviderUnavailable("command inspection is incomplete", code="command_cleanup_unresolved")
+    labels, mounts = info.get("labels") or {}, info.get("mounts") or []
+    if (not isinstance(labels, dict) or not isinstance(mounts, list)
+            or any(not isinstance(m, dict) for m in mounts)
+            or info.get("id") != ids[0] or (not recorded_id and info.get("name") != "/" + name)
+            or info.get("image") != image_id
+            or labels.get("io.ppulse.command") != "1"
+            or labels.get("io.ppulse.command.protocol") != _PROTOCOL
+            or labels.get("io.ppulse.command.invocation") != name
+            or len(mounts) != 1
+            or not any(m.get("Type") == "bind" and m.get("Source") == str(workspace.resolve())
+                       and m.get("Destination") == "/workspace" and m.get("RW") is True for m in mounts)):
+        raise ProviderUnavailable("old command container identity differs", code="command_cleanup_unresolved")
+    return ids[0]
+
+
+class DockerCommandExecutor(_DockerControl):
+    """Local-daemon command adapter; construction checks configuration, not a model."""
+    def __init__(self, workspace: Path, image: str):
+        if (not isinstance(image, str) or not image or len(image) > 256
+                or image.startswith('-') or any(c.isspace() for c in image)):
+            raise ProviderProtocolError("invalid operator-selected command image")
+        self.workspace = workspace.resolve(strict=True)
+        self._write_resource = workspace_write_resource(self.workspace)
+        if ',' in str(self.workspace):
+            raise ProviderProtocolError("Docker mount path must not contain a comma")
+        super().__init__()
         try:
             image_id = self._control("image", "inspect", "--format", "{{.Id}}", image).strip()
             if not _IMAGE_ID.fullmatch(image_id):
@@ -109,17 +183,7 @@ class DockerCommandExecutor:
         self._lock = threading.Lock()
         self._closed = False
         self._active: set[str] = set()
-        self._unresolved: set[str] = set()
-
-    def _control(self, *argv: str) -> str:
-        try:
-            result = subprocess.run([*self._prefix, *argv], stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self._env, timeout=10)
-        except (OSError, subprocess.TimeoutExpired):
-            raise ProviderUnavailable("local Docker control failed", code="command_docker_unavailable") from None
-        if result.returncode != 0:
-            raise ProviderUnavailable("local Docker/image unavailable; preinstall the selected image", code="command_docker_unavailable")
-        return result.stdout.decode("utf-8", errors="replace")[:4096]
+        self._unresolved: dict[str, str] = {}
 
     def invocation(self, name: str, argv: list[str], cwd: str, timeout: float) -> list[str]:
         target = self.workspace if cwd == '.' else self.workspace.joinpath(*PurePosixPath(cwd).parts)
@@ -132,8 +196,10 @@ class DockerCommandExecutor:
                 raise ProviderProtocolError("command cwd cannot traverse a symlink")
         if not target.is_dir() or not target.resolve().is_relative_to(self.workspace):
             raise ProviderProtocolError("command cwd is not an existing workspace directory")
-        return [*self._prefix, "run", "--rm", "--pull", "never", "--name", name,
-            "--label", "io.ppulse.command=1", "--init", "--network", "none", "--read-only",
+        return [*self._prefix, "create", "--pull", "never", "--name", name,
+            "--label", "io.ppulse.command=1", "--label", "io.ppulse.command.protocol=" + _PROTOCOL,
+            "--label", "io.ppulse.command.invocation=" + name,
+            "--init", "--network", "none", "--read-only",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "64",
             "--memory", "512m", "--memory-swap", "512m", "--cpus", "1", "--log-driver", "none",
             "--user", f"{self.uid}:{self.gid}", "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
@@ -142,9 +208,12 @@ class DockerCommandExecutor:
             "--entrypoint", "python3", self.image_id, "-I", "-u", "-c", _SUPERVISOR,
             str(timeout), json.dumps(argv, ensure_ascii=False)]
 
-    def execute(self, arguments, cancellation, *, guard: Callable[[], Any], start_guard, output_limit=4096):
+    def execute(self, arguments, cancellation, *, guard: Callable[[], Any], start_guard, output_limit=4096,
+                invocation_name: str | None = None, on_created=None):
         argv, cwd, timeout = command_args(arguments)
-        name = "p-pulse-command-" + uuid4().hex
+        name = invocation_name or "p-pulse-command-" + uuid4().hex
+        if not re.fullmatch(r"p-pulse-command-[0-9a-f]{32}", name):
+            raise ProviderProtocolError("invalid command invocation identity")
         invocation = self.invocation(name, argv, cwd, timeout)
         cancellation.raise_if_cancelled()
         guard()
@@ -157,11 +226,26 @@ class DockerCommandExecutor:
         counts = {"stdout": 0, "stderr": 0}
         forced = False
         cleaned = True
+        create_attempted = False
+        start_attempted = False
+        container_id = None
         try:
+            # Creation is inert. A delayed create after owner death cannot run
+            # a command. Starting is a separate request, guarded by the native
+            # owner and addressed by immutable container ID, never its name.
+            create_attempted = True
+            created_id = self._control(*invocation[len(self._prefix):]).strip()
+            if not _CONTAINER_ID.fullmatch(created_id):
+                raise ProviderUnavailable("Docker did not return a complete container identity")
+            container_id = created_id
+            guard()
+            if on_created is not None:
+                on_created(container_id)
             with start_guard():
                 cancellation.raise_if_cancelled()
                 guard()
-                process = subprocess.Popen(invocation, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                start_attempted = True
+                process = subprocess.Popen([*self._prefix, "start", "--attach", container_id], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, env=self._env, start_new_session=True)
             deadline = time.monotonic() + timeout + 10  # daemon startup/attach allowance
             with selectors.DefaultSelector() as sel:
@@ -184,11 +268,12 @@ class DockerCommandExecutor:
                         room = max(0, output_limit - len(streams[label]))
                         streams[label].extend(chunk[:room])
             if not forced:
-                code = process.wait(timeout=2)
-                if code == 125:
-                    # Docker did not provide an application exit. Do not infer
-                    # no effect after losing contact with the daemon.
+                process.wait(timeout=2)
+                state = json.loads(self._control("inspect", "--format", "{{json .State}}", container_id))
+                if (state.get("Running") is not False or state.get("Status") != "exited"
+                        or type(state.get("ExitCode")) is not int):
                     raise EffectUnknown("command daemon result unavailable", code="command_effect_unknown")
+                code = state["ExitCode"]
                 output = {label: redact_text(bytes(data).decode('utf-8', errors='replace'))[0]
                           for label, data in streams.items()}
                 return {"execution_status": "exited", "exit_code": code, **output,
@@ -197,17 +282,17 @@ class DockerCommandExecutor:
                         "workspace_changes": "possible; not checkpointed or automatically rolled back",
                         "exit_124": "deadline exceeded or program exit 124" if code == 124 else None}
         except BaseException:
-            if process is not None:
+            if start_attempted:
                 forced = True
             raise
         finally:
-            if process is not None:
-                if forced:
+            if create_attempted:
+                if process is not None and forced:
                     # Remove only this unguessable invocation name, never prune
                     # containers from another work/host. Repeat after the CLI
                     # exits to close its possible create-versus-cancel race.
                     try:
-                        self._control("rm", "--force", name)
+                        self._remove(name, container_id=container_id)
                     except ProviderUnavailable:
                         pass
                     if process.poll() is None:
@@ -216,26 +301,23 @@ class DockerCommandExecutor:
                         process.wait(timeout=3)
                     except subprocess.TimeoutExpired:
                         cleaned = False
-                    try:
-                        self._control("rm", "--force", name)
-                    except ProviderUnavailable:
-                        # A normal --rm exit is also absent. Absence is checked
-                        # via a successful list, not inferred from any error.
-                        try:
-                            if self._control("ps", "-aq", "--filter", "name=^/" + name + "$").strip():
-                                cleaned = False
-                        except ProviderUnavailable:
-                            cleaned = False
+                try:
+                    cleanup_id = container_id or _owned_container_id(self, self.workspace, name, self.image_id)
+                    if cleanup_id:
+                        self._remove(name, container_id=cleanup_id)
+                except ProviderUnavailable:
+                    cleaned = False
+            if process is not None:
                 for label in streams:
                     getattr(process, label).close()
             with self._lock:
                 self._active.discard(name)
-                if not cleaned:
-                    self._unresolved.add(name)
+                if not cleaned and start_attempted:
+                    self._unresolved[name] = container_id
                     # A possibly live container outlives the Python lock. Keep
                     # cooperating writers fenced until close confirms cleanup.
                     self._write_resource.quarantine(name)
-            if forced:
+            if forced or (start_attempted and not cleaned):
                 # Stopping the container never proves its prior writes did not
                 # occur. The kernel recovery path owns the uncertain action.
                 raise EffectUnknown("command stopped; prior effects may exist" if cleaned else
@@ -246,19 +328,85 @@ class DockerCommandExecutor:
         with self._lock:
             if self._active:
                 raise RuntimeError("cannot close command executor with active calls")
-            pending = tuple(self._unresolved)
-        for name in pending:
-            try:
-                self._control("rm", "--force", name)
-            except ProviderUnavailable:
-                if self._control("ps", "-aq", "--filter", "name=^/" + name + "$").strip():
-                    raise ProviderUnavailable("command cleanup is unresolved", code="command_cleanup_unresolved")
+            pending = tuple(self._unresolved.items())
+        for name, container_id in pending:
+            self._remove(name, container_id=container_id)
             with self._lock:
-                self._unresolved.discard(name)
+                self._unresolved.pop(name, None)
                 self._write_resource.confirm_cleanup(name)
         with self._lock:
             self._closed = True
         self._config_dir.cleanup()
+
+
+def recover_world_commands(store, world_id: str, workspace: Path, *, guard) -> dict:
+    """Fence old writers after the caller acquires the native DB lifetime lock.
+
+    The old Python owner can no longer issue a start request. With v2, a late
+    create can only leave an inert container, and an already-issued start uses
+    an ID that cleanup removes. An uncertain action remains uncertain even
+    after its external process is confirmed gone. Legacy run-based invocations
+    have no such proof and remain quarantined for operator investigation.
+    """
+    resource = workspace_write_resource(workspace)
+    pending = []
+    for session in store.sessions_for_world(world_id):
+        confirmed = {r.action_request_id for r in store.recovery_records_for_session(session.scope)
+                     if r.confirmed_exit}
+        for action in store.actions_for_session(session.scope, status=ActionStatus.UNCERTAIN):
+            if action.tool_name != "run_command":
+                continue
+            token = "recovered-command:" + action.action_request_id
+            if action.action_request_id in confirmed:
+                resource.confirm_cleanup(token)
+                resource.confirm_cleanup(command_container_name(action.scope, action.action_request_id))
+                continue
+            resource.quarantine(token)
+            pending.append((action, token))
+    report = {"confirmed": 0, "unresolved": 0}
+    control = None
+    try:
+        for action, token in pending:
+            guard()
+            authority = store.get_action_authority(action.scope, action.action_request_id)
+            identity = authority.get("identity", {}) if authority else {}
+            name = command_container_name(action.scope, action.action_request_id)
+            try:
+                if (not authority or authority.get("provider_source") != "pulse_harness.command"
+                        or identity.get("adapter") != "pulse_harness.command.v2"
+                        or identity.get("action_request_id") != action.action_request_id
+                        or identity.get("scope_digest") != action.scope.digest
+                        or identity.get("container_name") != name
+                        or identity.get("command_protocol") != _PROTOCOL
+                        or identity.get("command_workspace") != command_workspace_identity(workspace)
+                        or not _IMAGE_ID.fullmatch(identity.get("image_id", ""))):
+                    raise ProviderUnavailable("old command identity cannot prove safe cleanup", code="command_cleanup_unresolved")
+                if control is None:
+                    control = _DockerControl()
+                recorded_id = None
+                if action.operation_id is not None:
+                    operation = store.get_operation(action.scope, action.operation_id)
+                    recorded_id = operation.operation_id.removeprefix(_OPERATION_PREFIX)
+                    if (operation.action_request_id != action.action_request_id
+                            or not operation.operation_id.startswith(_OPERATION_PREFIX)
+                            or not _CONTAINER_ID.fullmatch(recorded_id)):
+                        raise ProviderUnavailable("command operation identity differs", code="command_cleanup_unresolved")
+                container_id = _owned_container_id(control, workspace, name, identity["image_id"], recorded_id=recorded_id)
+                if container_id:
+                    guard()
+                    control._remove(name, container_id=container_id)
+                guard()
+                store.confirm_recovery_exit(action.scope, action.action_request_id)
+                resource.confirm_cleanup(token)
+                resource.confirm_cleanup(name)
+                report["confirmed"] += 1
+            except (ProviderUnavailable, OSError, ValueError, TypeError) as error:
+                report["unresolved"] += 1
+                _logger.warning("Workspace writes remain blocked: cleanup unconfirmed for command action %s (%s)", action.action_request_id, error)
+    finally:
+        if control is not None:
+            control._config_dir.cleanup()
+    return report
 
 
 class CommandWorkspaceToolProvider(StructuredWorkspaceToolProvider):
@@ -292,9 +440,12 @@ class CommandWorkspaceToolProvider(StructuredWorkspaceToolProvider):
         if self.command_executor is None:
             raise ProviderUnavailable("command capability is not configured")
         command_args(call.arguments)
-        return {"adapter": "pulse_harness.command.v1", "action_request_id": action_request_id,
+        return {"adapter": "pulse_harness.command.v2", "action_request_id": action_request_id,
                 "scope_digest": scope.digest, "workspace_provenance": self._workspace_provenance,
                 "storage_identity": self._storage_identity(), "image_id": self.command_executor.image_id,
+                "container_name": command_container_name(scope, action_request_id),
+                "command_workspace": command_workspace_identity(self.workspace_root),
+                "command_protocol": _PROTOCOL,
                 "policy": "network-none-readonly-root-workspace-rw-v1"}
 
     def bind_action_authority(self, scope, call, *, action_request_id):
@@ -337,4 +488,7 @@ class CommandWorkspaceToolProvider(StructuredWorkspaceToolProvider):
             self._command_consumed.add(action_request_id)
         limit = max(128, min(4096, (self.store.max_payload_bytes - 2048) // 12))
         return self.command_executor.execute(call.arguments, cancellation, guard=self.command_guard,
-            start_guard=self.command_start_guard, output_limit=limit)
+            start_guard=self.command_start_guard, output_limit=limit,
+            invocation_name=command_container_name(scope, action_request_id),
+            on_created=lambda container_id: self.store.create_operation(
+                scope, action_request_id, operation_id=_OPERATION_PREFIX + container_id))
