@@ -93,6 +93,31 @@ class IndexTests(unittest.TestCase):
             self.assertFalse(path.exists())
             self.assertEqual(list(Path(directory).iterdir()), [])
 
+    def test_durability_failure_keeps_output_absent(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "index.html"
+            with mock.patch.object(_module.os, "fsync", side_effect=OSError("injected disk failure")):
+                with self.assertRaises(OSError):
+                    _module.write_index(path, "incomplete")
+            self.assertFalse(path.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_concurrent_winner_cannot_be_overwritten_at_publish(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "index.html"
+            actual_link = _module.os.link
+
+            def publish_after_competitor(source, destination):
+                Path(destination).write_text("other Work's result", encoding="utf-8")
+                return actual_link(source, destination)
+
+            with mock.patch.object(_module.os, "link", side_effect=publish_after_competitor):
+                with self.assertRaises(FileExistsError):
+                    _module.write_index(path, "late Work's result")
+            self.assertEqual(path.read_text(encoding="utf-8"), "other Work's result")
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+
 
 if __name__ == "__main__":
     unittest.main()
