@@ -241,7 +241,17 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
             "instruction": INSTRUCTION,
         })
-        assert later["probabilities"][state["good"]] < preference["probabilities"][state["good"]]
+        # A contrary rated outcome must lower the underlying preference.
+        # At the KL bound, two different preference values can project to
+        # the same probabilities: an additional negative outcome may not
+        # shift an already-saturated candidate distribution.
+        assert (later["feedback_values"][state["good"]]
+                < preference["feedback_values"][state["good"]])
+        assert (later["probabilities"][state["good"]]
+                <= preference["probabilities"][state["good"]] + 1e-12)
+        if abs(later["probabilities"][state["good"]] - preference["probabilities"][state["good"]]) < 1e-10:
+            assert abs(preference["kl"] - 0.15) < 1e-8
+            assert abs(later["kl"] - 0.15) < 1e-8
         assert new_record["id"] in {row["id"] for row in later["evidence"]}
         assert recovered["preference"]["selected_expert_id"] == state["good"]
         for _ in range(3):
