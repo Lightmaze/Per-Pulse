@@ -49,6 +49,10 @@ def handler(request):
     requests.append({"material": material, "tools": [t.get("function", {}).get("name")
                        for t in body.get("tools", [])]})
     if "WORK_MATERIAL_JSON" in material:
+        # An explicitly requested form is the practice-first counterexample.
+        # Its shared lesson reaches the fork, which should decline the change.
+        if "BUILD_FIXED_REGISTRATION_ARTIFACT" in material:
+            return streamed(text="PASS")
         # Native Posture computes a scoped semantic contribution first. The
         # later main turn sees that contribution, not the private old episode.
         if LESSON in material and '"candidate_response"' not in material:
@@ -87,6 +91,13 @@ def handler(request):
             })
         return streamed(text="I will offer an interaction before optional setup. [Synthetic browser fixture]")
 
+    if "BUILD_FIXED_REGISTRATION_ARTIFACT" in task:
+        if not tool_results:
+            return streamed(tool="mutate_file", arguments={
+                "path": "registration.txt", "expected_digest": None,
+                "content": "Required registration fields.\n"})
+        return streamed(text="The required registration file is complete. [Synthetic browser fixture]")
+
     if "BUILD_PRACTICE_ARTIFACT" in task:
         if not tool_results:
             learned = LESSON in material
@@ -124,10 +135,22 @@ if __name__ == "__main__":
                  if "BUILD_PRACTICE_ARTIFACT" in r["material"]
                  and "WORK_MATERIAL_JSON" not in r["material"]
                  and '"role": "tool"' not in r["material"]]
+        fixed_reviews = [r["material"] for r in requests
+                         if "BUILD_FIXED_REGISTRATION_ARTIFACT" in r["material"]
+                         and "WORK_MATERIAL_JSON" in r["material"]]
+        fixed_main = [r["material"] for r in requests
+                      if "BUILD_FIXED_REGISTRATION_ARTIFACT" in r["material"]
+                      and "WORK_MATERIAL_JSON" not in r["material"]
+                      and '"role": "tool"' not in r["material"]]
         return {"files": sorted(p.name for p in (state / "workspace").glob("*.txt")),
                 "tasks": [{"hasLesson": LESSON in t, "leaksCorrection": CORRECTION in t,
                            "leaksOriginal": "The first screen is a twelve-field intake form." in t}
                           for t in tasks],
+                "fixedReviews": [{"hasLesson": LESSON in t,
+                                  "leaksCorrection": CORRECTION in t,
+                                  "leaksOriginal": "The first screen is a twelve-field intake form." in t}
+                                 for t in fixed_reviews],
+                "fixedMain": [{"hasLesson": LESSON in t} for t in fixed_main],
                 "fixtureTrace": [{"tools": r["tools"], "hasCorrection": CORRECTION in r["material"],
                                   "hasLesson": LESSON in r["material"],
                                   "end": r["material"][-700:]}
