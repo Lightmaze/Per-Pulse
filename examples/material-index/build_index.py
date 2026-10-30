@@ -84,7 +84,6 @@ and <a href="https://docs.python.org/3.12/library/urllib.parse.html#url-parsing-
 '''
 
 
-
 def write_index(destination: Path, content: str) -> None:
     """Make only a complete output visible, without replacing an existing file.
 
