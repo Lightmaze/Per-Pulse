@@ -215,8 +215,13 @@ try {
   assert.equal(afterWithdrawal.tasks.at(-1)?.hasLesson, false);
   assert.equal(afterWithdrawal.tasks.at(-1)?.leaksCorrection, false);
   assert.equal(afterWithdrawal.tasks.at(-1)?.leaksOriginal, false);
-  const invisible = await (await fetch(base + '/api/pages/' + withdrawnId + '/posture')).json();
-  assert.equal(invisible.experiences.length, 0);
+  // Inactive history stays inspectable in the receiving Work; eligibility
+  // for automatic action materials is separately fail-closed.
+  const pausedProjection = await (await fetch(base + '/api/pages/' + withdrawnId + '/posture')).json();
+  assert.equal(pausedProjection.experiences.length, 1);
+  assert.equal(pausedProjection.experiences[0].active, false);
+  assert.equal(pausedProjection.experiences[0].canEdit, false);
+  assert.equal('encounter' in pausedProjection.experiences[0], false);
   await page.getByRole('button', { name: 'Decline', exact: true }).click();
   checks.push('source withdrawal removes influence from another Work without executing its file');
 
@@ -226,8 +231,10 @@ try {
   const sourceAfterRestart = await (await fetch(base + '/api/pages/' + originalId + '/posture')).json();
   assert.equal(sourceAfterRestart.experiences[0].active, false);
   const targetAfterRestart = await (await fetch(base + '/api/pages/' + withdrawnId + '/posture')).json();
-  assert.equal(targetAfterRestart.experiences.length, 0);
-  checks.push('withdrawal and privacy survive another real SQLite restart');
+  assert.equal(targetAfterRestart.experiences.length, 1);
+  assert.equal(targetAfterRestart.experiences[0].active, false);
+  assert.equal('encounter' in targetAfterRestart.experiences[0], false);
+  checks.push('inactive audit visibility, revoked influence and privacy survive SQLite restart');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({
     passed: checks.length, checks, sourceWork: originalId, comparisonWork: beforeId,
