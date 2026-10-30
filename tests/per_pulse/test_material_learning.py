@@ -47,7 +47,7 @@ def test_source_experience_projects_original_input_and_feedback_files_without_sh
         assert record["encounter"] == saved["encounter"]
         changed = deepcopy(record)
         changed["encounter"]["situation"] = "Altered text " + changed["encounter"]["situation"]
-        projected = pages.learning._public(changed, pages.learning._context(page_id))
+        projected = pages.learning._public(changed, pages.learning._context(page_id), page_id)
         assert "situation" not in projected["encounterSources"]
         assert projected["encounter"]["situation"] == changed["encounter"]["situation"]
 
@@ -60,7 +60,7 @@ def test_source_experience_projects_original_input_and_feedback_files_without_sh
         assert first["path"] not in str(transferred) and second["sha256"] not in str(transferred)
         foreign_result = wait_for(client, receiver, lambda view: view["messages"][-1]["role"] == "assistant")["messages"][-1]
         changed["source"]["source_message_id"] = foreign_result["id"]
-        assert "encounterSources" not in pages.learning._public(changed, pages.learning._context(page_id))
+        assert "encounterSources" not in pages.learning._public(changed, pages.learning._context(page_id), page_id)
 
     with client_for(tmp_path, posture=True, model_factory=None) as client:
         restored = client.get(f"/api/pages/{page_id}/posture").json()["experiences"][0]
@@ -147,12 +147,12 @@ def test_native_revision_feedback_has_original_message_and_file_links_after_rest
         ]:
             changed = deepcopy(record)
             changed["feedback"][0]["source"].update(changes)
-            projected = pages.learning._public(changed, pages.learning._context(page_id))
+            projected = pages.learning._public(changed, pages.learning._context(page_id), page_id)
             assert "evidenceSource" not in projected["feedback"][0]
             assert projected["feedback"][0]["evidence"] == entry["evidence"]
         changed = deepcopy(record)
         changed["feedback"][0]["evidence"] += " Not the original message."
-        assert "evidenceSource" not in pages.learning._public(changed, pages.learning._context(page_id))["feedback"][0]
+        assert "evidenceSource" not in pages.learning._public(changed, pages.learning._context(page_id), page_id)["feedback"][0]
 
         assert client.patch(f"/api/pages/{page_id}/posture/experiences/{saved['id']}",
             json={"expectedRevision": 2, "changes": {"scope": "subject"}}).status_code == 200
