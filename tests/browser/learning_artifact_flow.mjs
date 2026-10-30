@@ -183,6 +183,51 @@ try {
   const persistedLesson = await (await fetch(base + '/api/pages/' + learnedId + '/posture')).json();
   assert.equal(persistedLesson.experiences.length, 1);
   checks.push('same Work, shared abstract lesson and attributed Home return persist after restart');
+
+  // The user explicitly asks for a form. The shared experience reaches the
+  // native expert fork but should not displace that adequate simple solution.
+  const registrationId = await create('Required registration', 'BUILD_FIXED_REGISTRATION_ARTIFACT');
+  await page.getByText('Your approval is needed', { exact: true }).waitFor();
+  assert.match(await page.locator('body').innerText(), /registration[.]txt/);
+  const fixed = await status();
+  assert.equal(fixed.fixedReviews.some(item => item.hasLesson
+    && !item.leaksCorrection && !item.leaksOriginal), true);
+  assert.equal(fixed.fixedMain.at(-1)?.hasLesson, false);
+  assert.equal(fixed.files.includes('registration.txt'), false);
+  await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+  await page.getByRole('button', { name: /registration[.]txt/ }).waitFor();
+  await page.getByRole('button', { name: /registration[.]txt/ }).click();
+  await page.getByText('Required registration fields.', { exact: true }).waitFor();
+  assert.equal((await status()).files.includes('registration.txt'), true);
+  checks.push('shared experience preserves an explicitly required form and approved real file');
+
+  // Only the original Work can pause this shared lesson. The next ordinary
+  // Work must lose its influence without receiving the private source history.
+  await page.goto(base + '/page/' + originalId);
+  await openLessons();
+  await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).click();
+  await lesson.getByText('Paused · v3', { exact: true }).waitFor();
+  await closeDialog();
+  const withdrawnId = await create('After withdrawal', 'BUILD_PRACTICE_ARTIFACT');
+  await page.getByText('Your approval is needed', { exact: true }).waitFor();
+  assert.match(await page.locator('body').innerText(), /intake[.]txt/);
+  const afterWithdrawal = await status();
+  assert.equal(afterWithdrawal.tasks.at(-1)?.hasLesson, false);
+  assert.equal(afterWithdrawal.tasks.at(-1)?.leaksCorrection, false);
+  assert.equal(afterWithdrawal.tasks.at(-1)?.leaksOriginal, false);
+  const invisible = await (await fetch(base + '/api/pages/' + withdrawnId + '/posture')).json();
+  assert.equal(invisible.experiences.length, 0);
+  await page.getByRole('button', { name: 'Decline', exact: true }).click();
+  checks.push('source withdrawal removes influence from another Work without executing its file');
+
+  await stopServer(server);
+  server = startServer();
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'withdrawn lesson restart');
+  const sourceAfterRestart = await (await fetch(base + '/api/pages/' + originalId + '/posture')).json();
+  assert.equal(sourceAfterRestart.experiences[0].active, false);
+  const targetAfterRestart = await (await fetch(base + '/api/pages/' + withdrawnId + '/posture')).json();
+  assert.equal(targetAfterRestart.experiences.length, 0);
+  checks.push('withdrawal and privacy survive another real SQLite restart');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({
     passed: checks.length, checks, sourceWork: originalId, comparisonWork: beforeId,
