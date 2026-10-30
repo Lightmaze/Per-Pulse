@@ -49,7 +49,8 @@ const post = async (path, body) => {
 try {
   await wait(async () => (await fetch(base + '/api/health')).ok, 'native example service', 40000);
   const source = await post('/api/pages/home/messages', { content: 'Explore a result and bring one concrete observation back.' });
-  const work = await post('/api/pages', { title: 'Field result', instruction: 'Authored interface specimen, not model output.', sourcePageId: 'home', sourceMessageId: source.messageId });
+  const parent = await post('/api/pages', { title: 'Field method', instruction: 'Keep the parent distinct from the actual return location.', sourcePageId: 'home', sourceMessageId: source.messageId });
+  const work = await post('/api/pages', { title: 'Field result', instruction: 'Authored interface specimen, not model output.', sourcePageId: parent.page.id });
   const reference = await post('/api/pages', { title: 'Reference notebook', instruction: 'Keep the original observation here.', sourcePageId: work.page.id });
   const code = '# Reference notebook is literal code.\nmessage = "Keep  two  spaces"\nprint(message)\n';
   const quote = 'A finished local result can stand while the wider question remains open.';
@@ -128,11 +129,24 @@ try {
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname, '/');
   const returned = page.locator('.message').filter({ has: page.getByText(quote, { exact: true }) }).last();
+  const homeComposer = page.getByRole('textbox', { name: 'Message Home', exact: true });
+  const homeDraft = 'Keep the Home draft while I revisit the nested result.';
+  await homeComposer.fill(homeDraft);
+  const returnedId = await returned.getAttribute('data-message-id');
   await returned.locator('.source-line').getByRole('link', { name: 'Field result', exact: true }).click();
   await article.waitFor();
   assert.equal(new URL(page.url()).hash, '#message-' + result.messageId);
   assert.equal(await composer.inputValue(), draft);
-  checks.push('formatted reference navigation and selected passage return retain exact source and unsent draft');
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await homeComposer.waitFor();
+  assert.equal(new URL(page.url()).pathname, '/');
+  assert.equal(await homeComposer.inputValue(), homeDraft);
+  await wait(() => page.evaluate(id => document.activeElement?.id === 'message-' + id, returnedId), 'return focus to the exact Home message');
+  await returned.locator('.source-line').getByRole('link', { name: 'Field result', exact: true }).click();
+  await article.waitFor();
+  assert.equal(new URL(page.url()).hash, '#message-' + result.messageId);
+  assert.equal(await composer.inputValue(), draft);
+  checks.push('nested source return reaches the exact Home message, preserves both drafts and can reopen the original result');
 
   await article.scrollIntoViewIfNeeded();
   if (screenshots) await page.screenshot({ path: join(screenshots, 'results-desktop.png') });
