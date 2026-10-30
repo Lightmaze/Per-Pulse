@@ -7,6 +7,8 @@ import unittest
 
 import importlib.util
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest import mock
 
 _path = Path(__file__).resolve().parents[2] / "examples/material-index/build_index.py"
 _spec = importlib.util.spec_from_file_location("material_index_example", _path)
@@ -56,6 +58,41 @@ class IndexTests(unittest.TestCase):
         for value in [{}, [None], [{"title": ""}], [{"title": "X", "note": 12}]]:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 render(value)
+
+    def test_complete_artifact_is_visible_only_at_publish(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "index.html"
+            html = render([{"title": "Observed source", "url": "https://example.org"}])
+            actual_link = _module.os.link
+
+            def inspect_before_publish(source, destination):
+                self.assertEqual(Path(source).read_text(encoding="utf-8"), html)
+                self.assertFalse(Path(destination).exists())
+                return actual_link(source, destination)
+
+            with mock.patch.object(_module.os, "link", side_effect=inspect_before_publish):
+                _module.write_index(path, html)
+            self.assertEqual(path.read_text(encoding="utf-8"), html)
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_existing_approved_artifact_is_not_replaced(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "index.html"
+            path.write_text("previous approved result", encoding="utf-8")
+            with self.assertRaises(FileExistsError):
+                _module.write_index(path, "a different result")
+            self.assertEqual(path.read_text(encoding="utf-8"), "previous approved result")
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_failed_publish_does_not_leave_partial_artifact(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "index.html"
+            with mock.patch.object(_module.os, "link", side_effect=OSError("link unavailable")):
+                with self.assertRaises(OSError):
+                    _module.write_index(path, "content")
+            self.assertFalse(path.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
 
 
 if __name__ == "__main__":
