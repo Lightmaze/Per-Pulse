@@ -94,6 +94,5 @@ class IndexTests(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [])
 
 
-
 if __name__ == "__main__":
     unittest.main()
