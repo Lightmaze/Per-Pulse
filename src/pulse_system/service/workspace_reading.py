@@ -8,6 +8,8 @@ No sidecar bookmark store, semantic scheduler or file write is involved.
 """
 from __future__ import annotations
 
+from array import array
+from bisect import bisect_left
 from collections.abc import Mapping
 from datetime import datetime, timezone
 import hashlib
@@ -27,21 +29,27 @@ from pulse_harness.core.secrets import looks_like_bare_credential
 
 NAME = "reading"
 KIND = "pulse.reading-passage.v1"
+FIND_KIND = "pulse.reading-find.v1"
 VIEW = "utf8-line-redacted.v1"
 MAX_CHARS = 8000
 MAX_RECENT_ACTIONS = 128
 SCHEMA = {
     "type": "object",
     "properties": {
-        "op": {"type": "string", "enum": ["open", "continue", "resume", "recent", "find"]},
+        "op": {"type": "string", "enum": ["open", "continue", "resume", "recent", "find", "follow"]},
         "path": {"type": "string", "maxLength": 2048,
                  "description": "Workspace-relative UTF-8 text path, for open or find."},
         "expected_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$",
                             "description": "Optional original SHA-256, for open/find; refuse changed bytes before exposing text."},
         "receipt_id": {"type": "string", "maxLength": 256,
-                       "description": "Exact saved receipt_id for continue or resume; never invent offsets."},
+                       "description": "Exact saved receipt_id for continue, resume or follow; never invent offsets."},
+        "match_index": {"type": "integer", "minimum": 0, "maximum": 7,
+                        "description": "For follow: the zero-based match_index from an exposed find result."},
         "query": {"type": "string", "minLength": 2, "maxLength": 120},
         "case_sensitive": {"type": "boolean"},
+        "casefold": {"type": "boolean", "description":
+                     "For find: opt into full Unicode casefold matching of whole original characters. "
+                     "No normalization or locale rules; incompatible with case_sensitive=true."},
         "max_matches": {"type": "integer", "minimum": 1, "maximum": 8},
         "max_chars": {"type": "integer", "minimum": 1, "maximum": MAX_CHARS},
         "limit": {"type": "integer", "minimum": 1, "maximum": 8},
@@ -65,6 +73,16 @@ def descriptor() -> ToolDescriptor:
         "find(path, query, expected_digest?, max_matches?) locates exact literal "
         "phrases with bounded excerpts and source coordinates in the redacted view; "
         "it is not a semantic search or proof of reading the whole file. "
+        "The default keeps Python regex case-insensitive matching. For Unicode "
+        "expansions such as Straße/STRASSE, explicitly set casefold=true; matches "
+        "must cover whole original characters and still return original view "
+        "coordinates. This adds no normalization or locale rules and cannot be "
+        "combined with case_sensitive=true. "
+        "follow(receipt_id, match_index, max_chars?) reads from one of those "
+        "observed matches, checking the full source and workspace again. Use the "
+        "find receipt and its zero-based match_index, never an invented offset. "
+        "The new passage can then be continued normally. After moving a workspace, "
+        "run find again before following a match. "
         "recent(limit?) finds the "
         "latest exposed positions in THIS logical session, including after reopen, "
         "without opening files. Use an older receipt to reread its following page; "
@@ -91,7 +109,8 @@ def validate(args: Mapping[str, Any]) -> str:
         "open": {"op", "path", "max_chars", "expected_digest"},
         "continue": {"op", "receipt_id", "max_chars"},
         "resume": {"op", "receipt_id", "max_chars"},
-        "find": {"op", "path", "query", "expected_digest", "max_matches", "case_sensitive"},
+        "find": {"op", "path", "query", "expected_digest", "max_matches", "case_sensitive", "casefold"},
+        "follow": {"op", "receipt_id", "match_index", "max_chars"},
         "recent": {"op", "limit"},
     }
     if not isinstance(op, str) or op not in allowed or set(args) - allowed[op]:
@@ -100,7 +119,7 @@ def validate(args: Mapping[str, Any]) -> str:
         digest = args["expected_digest"]
         if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ProviderProtocolError("reading source digest is invalid", code="reading_arguments_invalid")
-    field = "path" if op in {"open", "find"} else "receipt_id" if op in {"continue", "resume"} else None
+    field = "path" if op in {"open", "find"} else "receipt_id" if op in {"continue", "resume", "follow"} else None
     if field:
         value = args.get(field)
         maximum = 2048 if field == "path" else 256
@@ -113,12 +132,58 @@ def validate(args: Mapping[str, Any]) -> str:
                 raise ProviderProtocolError("reading query is invalid", code="reading_arguments_invalid")
             if type(args.get("case_sensitive", False)) is not bool:
                 raise ProviderProtocolError("reading case sensitivity is invalid", code="reading_arguments_invalid")
+            if (type(args.get("casefold", False)) is not bool
+                    or (args.get("casefold", False) and args.get("case_sensitive", False))):
+                raise ProviderProtocolError("reading casefold mode is invalid", code="reading_arguments_invalid")
             _integer(args.get("max_matches", 5), 1, 8)
         else:
             _integer(args.get("max_chars", 4000), 1, MAX_CHARS)
+            if op == "follow":
+                _integer(args.get("match_index"), 0, 7)
     else:
         _integer(args.get("limit", 5), 1, 8)
     return op
+
+
+def _casefold_spans(text: str, query: str, cancellation: CancellationToken):
+    """Yield greedy non-overlapping matches in the original character space.
+
+    A folded substring is a match only when BOTH ends are original character
+    boundaries. For example, ``as`` must not match half of the final ß in Aß.
+    The compact cumulative array avoids a Python object per folded character.
+    """
+    needle, folded = query.casefold(), text.casefold()
+    start = folded.find(needle)
+    cancellation.raise_if_cancelled()
+    if start < 0:
+        return
+    # Every ASCII source character maps to exactly one folded character, even
+    # when the query itself contains an expansion. No offset map is needed.
+    boundaries = None
+    if not text.isascii():
+        boundaries = array("I", [0])
+        total = 0
+        for index, character in enumerate(text):
+            if index % 4096 == 0:
+                cancellation.raise_if_cancelled()
+            total += len(character.casefold())
+            boundaries.append(total)
+    while start >= 0:
+        cancellation.raise_if_cancelled()
+        end = start + len(needle)
+        if boundaries is None:
+            left, right = start, end
+            valid = True
+        else:
+            left, right = bisect_left(boundaries, start), bisect_left(boundaries, end)
+            valid = boundaries[left] == start and boundaries[right] == end
+        if valid:
+            yield left, right
+            cursor = end
+        else:
+            # Advancing by the whole query would miss the valid ß in sß/ss.
+            cursor = start + 1
+        start = folded.find(needle, cursor)
 
 
 def _view(text: str) -> tuple[str, bool]:
@@ -148,14 +213,15 @@ def _size(value: Mapping[str, Any]) -> int:
     return len(json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode("utf-8"))
 
 
-def _receipt(provider, scope, receipt_id):
+def _receipt(provider, scope, receipt_id, *, kind=KIND):
     previous_scope = provider.store.action_scope_for_session(scope.session_scope(), receipt_id)
     record = provider.store.get_action(previous_scope, receipt_id)
     output = (record.result or {}).get("output")
     if (record.tool_name != NAME or record.status != ActionStatus.SUCCEEDED
             or not record.result_delivered or not isinstance(output, Mapping)
-            or output.get("kind") != KIND or output.get("receipt_id") != receipt_id):
-        raise ScopeConflict("reading reference is not an exposed passage in this session")
+            or output.get("kind") != kind or output.get("receipt_id") != receipt_id
+            or (record.result or {}).get("_truncated") is True):
+        raise ScopeConflict("reading reference is not a complete exposed receipt in this session")
     return record, output
 
 
@@ -194,8 +260,9 @@ def _recent(provider, scope, args, cancellation):
             "next": output["next"],
             "source_turn_id": record.scope.turn_id,
         }
-        if "resumed_from" in output:
-            item["resumed_from"] = output["resumed_from"]
+        for name in ("resumed_from", "followed_from"):
+            if name in output:
+                item[name] = output[name]
         result["passages"].append(item)
         if _size(result) > provider.store.max_payload_bytes // 2:
             result["passages"].pop()
@@ -235,6 +302,20 @@ def execute(
         _, prior = _receipt(provider, scope, call.arguments["receipt_id"])
         path = prior["source"]["path"]
         offset = prior["position"]["end_char"]
+    elif op == "follow":
+        _, prior = _receipt(provider, scope, call.arguments["receipt_id"], kind=FIND_KIND)
+        matches = prior.get("matches")
+        index = call.arguments["match_index"]
+        if not isinstance(matches, list) or index >= len(matches):
+            raise ScopeConflict("reading match is not part of the exposed find result")
+        match = matches[index]
+        if (not isinstance(match, Mapping) or match.get("match_index") != index
+                or type(match.get("start_char")) is not int
+                or type(match.get("end_char")) is not int
+                or not 0 <= match["start_char"] < match["end_char"]):
+            raise ScopeConflict("saved reading match is invalid")
+        path = prior["source"]["path"]
+        offset = match["start_char"]
     else:
         path = call.arguments["path"]
     path = _normalize_relative_path(path)
@@ -254,26 +335,31 @@ def execute(
         query = call.arguments["query"]
         maximum = call.arguments.get("max_matches", 5)
         flags = 0 if call.arguments.get("case_sensitive", False) else re.IGNORECASE
+        casefold = call.arguments.get("casefold", False)
+        spans = (_casefold_spans(text, query, cancellation) if casefold else
+                 (found.span() for found in re.finditer(re.escape(query), text, flags=flags)))
         result = {
-            "kind": "pulse.reading-find.v1", "source": source,
+            "kind": FIND_KIND, "receipt_id": action_request_id, "source": source,
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "scope": "current_action_source", "observation_only": True,
             "redacted": redacted, "searched_entire_redacted_view": True,
             "coordinates": "unicode_characters_in_redacted_view",
+            "case_mode": "unicode_casefold" if casefold else "case_sensitive" if not flags else "regex_ignorecase",
             "matches": [], "more_matches": False,
         }
         limit = provider.store.max_payload_bytes // 2
-        for found in re.finditer(re.escape(query), text, flags=flags):
+        for start, end in spans:
             cancellation.raise_if_cancelled()
             if len(result["matches"]) >= maximum:
                 result["more_matches"] = True
                 result["searched_entire_redacted_view"] = False
                 break
-            left = max(0, found.start() - 72)
-            right = min(len(text), found.end() + 96)
+            left = max(0, start - 72)
+            right = min(len(text), end + 96)
             excerpt, clipped = _view(text[left:right])
             match = {
-                "start_char": found.start(), "end_char": found.end(),
+                "match_index": len(result["matches"]),
+                "start_char": start, "end_char": end,
                 "excerpt_start_char": left, "excerpt": excerpt,
                 "excerpt_redacted": clipped,
             }
@@ -297,12 +383,16 @@ def execute(
             raise WorkspaceDigestConflict(
                 "reading source or text view changed; use open to inspect the new version",
                 code="reading_source_changed")
-        if op == "continue" and previous != source:
+        if op in {"continue", "follow"} and previous != source:
             raise WorkspaceDigestConflict(
+                "reading workspace changed; run find again before following its match"
+                if op == "follow" else
                 "reading workspace changed; use resume to explicitly recheck this source at its saved position",
                 code="reading_workspace_changed")
     if type(offset) is not int or not 0 <= offset <= len(text):
         raise ScopeConflict("saved reading position is invalid")
+    if op == "follow" and match["end_char"] > len(text):
+        raise ScopeConflict("saved reading match exceeds its source")
     end = min(len(text), offset + call.arguments.get("max_chars", 4000))
     result = {
         "kind": KIND, "receipt_id": action_request_id, "source": source,
@@ -318,6 +408,12 @@ def execute(
             "workspace_digest": prior["source"]["workspace_digest"],
             "observed_at": prior["observed_at"],
             "meaning": "new_read_of_verified_unchanged_source_at_saved_position",
+        }
+    elif op == "follow":
+        result["followed_from"] = {
+            "receipt_id": call.arguments["receipt_id"], "match_index": index,
+            "start_char": match["start_char"], "end_char": match["end_char"],
+            "observed_at": prior["observed_at"], "meaning": "new_read_at_observed_match",
         }
 
     def set_end(stop):

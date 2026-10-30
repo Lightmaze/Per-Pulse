@@ -307,6 +307,24 @@ searches literal text in the redacted view and returns up to eight short excerpt
 with exact source coordinates and digests. It checks an optional expected file
 version, identifies when more matches remain, and reports when its search stopped
 early. Finding a passage is distinct from reading or understanding the whole file.
+To read more at a selected hit, use `reading.follow(receipt_id, match_index)`
+with the find result's receipt and zero-based match index. It starts a bounded
+passage at that original match and supplies a normal continuation receipt.
+Follow rechecks the complete source bytes, redacted view and workspace root;
+it accepts neither an invented offset nor another Work's private receipt.
+After relocating a workspace, run find again before following a hit. The
+coordinate unit is Python Unicode characters in the redacted view, not raw
+UTF-8 bytes or JavaScript UTF-16 indices.
+
+For expansion-aware Unicode matching, explicitly pass `casefold=true` to
+`reading.find`: `STRASSE` can locate the original `Straße`, and `FFI` can
+locate `ﬃ`. Matches cover whole original characters; `fi` does not match
+part of `ﬃ`. The returned `case_mode` records the selected semantics, and
+follow/continue still use the original source coordinates. The default
+remains Python regex case-insensitive matching; `case_sensitive=true` selects
+exact case and cannot be combined with `casefold=true`. Casefold adds neither
+accent normalization nor locale rules. See [Unicode source search](docs/unicode-source-search.md)
+for examples and the actual prototype experiment.
 
 A lost upload response is shown as unconfirmed and never retried automatically.
 Open **Materials → uploads/** to inspect the saved file and add it to the draft.
@@ -334,9 +352,10 @@ is not assumed to be interchangeable. Save refuses an active World or
 unfinished Kernel turns/actions. Restore checks member digests and the
 matching Python implementation before writing, preserves the native
 World/Kernel identities and source links, and does not start any model.
-Historical World turns marked uncertain after process recovery block export
-by default. To deliberately keep that history in a private copy, after
-recovering the original workspace and stopping any pending turn, use:
+Historical World turns marked uncertain after process recovery or a native
+turn timeout block export by default. To deliberately keep that history in a
+private copy, after recovering the original workspace and stopping any pending
+turn, use:
 
 ```sh
 per-pulse image save ./per-pulse-private.zip --data-dir ~/.local/share/per-pulse --include-recovered-history
@@ -344,8 +363,11 @@ per-pulse image save ./per-pulse-private.zip --data-dir ~/.local/share/per-pulse
 
 This option requires a released World lease, finished Kernel turns/actions
 and operations, and an exact matching Kernel turn for each recovered World
-record. It cannot carry an uncertain file or other tool effect. The archive
-and restore receipt list `retained_uncertain_turns`; those original messages
+record. A retained native timeout must have accepted input, the original
+settled uncertain event and its exact cancelled Kernel turn. A completed read
+or file write can travel with that history; a write with an unknown outcome
+still blocks export. The option cannot carry an uncertain file or other tool
+effect. The archive and restore receipt list `retained_uncertain_turns`; those original messages
 and records stay uncertain in both copies. Restore verifies that list against
 the native history, and never retries an old request or action. A completed
 Stop alone does not establish that every effect can be safely copied.

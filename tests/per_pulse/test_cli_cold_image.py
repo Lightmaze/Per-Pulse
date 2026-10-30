@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import zipfile
 
 from fastapi.testclient import TestClient
@@ -101,6 +102,33 @@ def test_cold_image_refuses_live_world_and_existing_restore_destination(tmp_path
     with pytest.raises(SystemExit) as stopped:
         main(["image", "restore", str(archive), "--data-dir", str(home)])
     assert stopped.value.code == 2
+    assert archive.exists()
+
+
+@pytest.mark.parametrize("journal", ["world.db", "kernel.db"])
+def test_cold_image_writer_contention_refuses_without_partial_archive_or_held_locks(tmp_path, capsys, journal):
+    home, archive = tmp_path / "source", tmp_path / "copy.zip"
+    _seed_stopped_home(home)
+    writer = sqlite3.connect(home / journal, timeout=0, isolation_level=None)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        with pytest.raises(SystemExit) as stopped:
+            main(["image", "save", str(archive), "--data-dir", str(home), "--include-recovered-history"])
+        assert stopped.value.code == 2
+        assert "stop the source cleanly" in capsys.readouterr().err
+        assert writer.in_transaction
+        assert not archive.exists() and not list(tmp_path.glob(".pulse-image-*"))
+        # A later journal's refusal must release the earlier World reservation.
+        if journal == "kernel.db":
+            probe = sqlite3.connect(home / "world.db", timeout=0, isolation_level=None)
+            try:
+                probe.execute("BEGIN IMMEDIATE")
+            finally:
+                probe.close()
+    finally:
+        writer.close()
+    main(["image", "save", str(archive), "--data-dir", str(home)])
+    assert json.loads(capsys.readouterr().out)["model_calls"] == 0
     assert archive.exists()
 
 

@@ -137,6 +137,28 @@ class PageLearning:
         # Shared experiences expose only the original message anchors so the
         # reader can inspect their provenance without copying the raw episode.
         source = record.get("source", {})
+        reading = source.get("kind") == "native_reading_example"
+        if reading:
+            result["sourceKind"] = "reading"
+            if local:
+                result["readingSource"] = {
+                    "path": source["reading_source"]["path"],
+                    "digest": source["reading_source"]["digest"],
+                    "receiptId": source["reading_receipt_id"],
+                    "observedAt": source["observed_at"],
+                }
+            # Navigation points to the actual reading turn's final reply. It
+            # does not claim that the selected material came from that reply.
+            turn = self.pages.runtime.causal_ledger.get_turn_for_world(
+                source["original_turn_id"], self.pages.runtime.world_id)
+            if source_page and turn and turn.result_event_id:
+                from pulse_system.service.native_posture import _settled_result
+                try:
+                    original, _ = _settled_result(self.pages.runtime, self._subject(source_page),
+                                                  source_context, turn.result_event_id)
+                    result["sourceAnchor"] = {"resultMessageId": original.id}
+                except ScopeConflict:
+                    pass
         result["sourceRegime"] = "replay" if source.get("execution_regime") == "replay" else None
         if source_page is not None and isinstance(source, dict):
             original, correction = source.get("source_message_id"), source.get("feedback_message_id")

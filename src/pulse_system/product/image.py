@@ -80,6 +80,16 @@ def _implementation():
 
 
 def _inventory(home):
+    try:
+        return _scan_inventory(home)
+    except (FileNotFoundError, NotADirectoryError):
+        # A live checkpoint writer can rename a temporary file between
+        # scandir and stat, before the journal/lease checks are reached.
+        # Refuse the changing body without exposing its private path.
+        raise ImageError('stop the source cleanly first; source files changed during inspection') from None
+
+
+def _scan_inventory(home):
     files, directories = {}, []
     for name in DATABASES:
         p = home/name
@@ -121,30 +131,34 @@ def _stopped(db, *, include_recovered_history=False):
 def _recovered_history(world, kernel, world_id):
     """Verify retained recovery evidence without changing either native store.
 
-    A World recovery record deliberately remains uncertain after its Kernel
-    turn is cancelled. It is history, not permission to replay a request or an
-    effect. Only this narrow, settled recovery case can opt into a cold copy.
+    A recovered or timed-out World record remains uncertain after its Kernel
+    turn finishes. It is history, not permission to replay a request or an
+    effect. Native timeouts additionally require accepted input and the exact
+    cancelled Kernel turn; unfinished/uncertain effects are rejected separately.
     """
     rows = world.execute(
         "SELECT t.id, t.engram_id, t.execution_context, t.error_code, "
-        "t.error_phase, t.settled_at, e.world_id, e.engram_id, e.status, e.settled_at "
+        "t.error_phase, t.settled_at, e.world_id, e.engram_id, e.status, e.settled_at, t.prompt_accepted "
         "FROM harness_turns t LEFT JOIN causal_events e ON e.id = t.event_id "
         "WHERE t.state = 'uncertain' ORDER BY t.id"
     ).fetchall()
     _check(len(rows) <= MAX_ENTRIES, 'too many recovered turns for an image manifest')
-    for turn_id, engram_id, context, code, phase, settled, event_world, event_engram, status, event_settled in rows:
+    for turn_id, engram_id, context, code, phase, settled, event_world, event_engram, status, event_settled, accepted in rows:
+        recovered = code == 'process_recovered' and phase == 'recovery'
+        timed_out = code == 'world_turn_timeout' and phase == 'kernel' and accepted == 1
         _check(isinstance(turn_id, str) and 0 < len(turn_id) <= 256
-               and code == 'process_recovered' and phase == 'recovery' and bool(settled)
+               and (recovered or timed_out) and bool(settled)
                and event_world == world_id and event_engram == engram_id
                and status == 'uncertain' and bool(event_settled),
-               'uncertain World history is not a settled process recovery')
+               'uncertain World history is not a settled process recovery or native timeout')
         matches = kernel.execute(
             "SELECT world_id, engram_id, context_id, status FROM turns WHERE turn_id = ?",
             (turn_id,),
         ).fetchall()
         expected_context = '' if context == 'home' else context
         _check(len(matches) == 1 and matches[0][:3] == (world_id, engram_id, expected_context)
-               and matches[0][3] in ('succeeded', 'failed', 'cancelled'),
+               and matches[0][3] in (('cancelled',) if timed_out else ('succeeded', 'failed', 'cancelled')),
+               'timed-out World history has no matching cancelled Kernel turn' if timed_out else
                'recovered World history has no matching finished Kernel turn')
     return [row[0] for row in rows]
 
@@ -195,7 +209,12 @@ def save(home: Path, archive: Path, *, include_recovered_history: bool = False) 
                 continue
             db = stack.enter_context(closing(sqlite3.connect((home/name).as_uri()+'?mode=rw', uri=True,
                                                             timeout=0, isolation_level=None)))
-            db.execute('BEGIN IMMEDIATE')
+            try:
+                db.execute('BEGIN IMMEDIATE')
+            except sqlite3.OperationalError as exc:
+                if (getattr(exc, 'sqlite_errorcode', 0) & 0xff) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                    raise ImageError('stop the source cleanly first; a source journal is still being written') from None
+                raise
             locks[name] = db
         _stopped(locks['world.db'], include_recovered_history=include_recovered_history)
         _no_pending(locks['kernel.db'])

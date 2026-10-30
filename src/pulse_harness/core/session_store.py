@@ -6713,6 +6713,38 @@ class HarnessStore:
                 )
             return tuple(records)
 
+    def confirm_recovery_exit(self, scope: HarnessScope, action_request_id: str) -> RecoveryRecord:
+        """Record confirmed external exit without settling an unknown effect.
+
+        Called only by the owning host after reconciling the v2 command's
+        exact container. This adds no execution permission and never changes
+        an action terminal, receipt, or the original uncertainty record.
+        """
+        with self._lock:
+            with self._transaction():
+                action = self._action_row(action_request_id)
+                self._assert_action_scope(action, scope)
+                if action["tool_name"] != "run_command" or action["status"] != ActionStatus.UNCERTAIN.value:
+                    raise InvalidTransition("exit confirmation requires an uncertain command action")
+                authority_row = self._action_authority_row(action_request_id)
+                authority = self._action_authority_from_row(authority_row) if authority_row else {}
+                identity = authority.get("identity", {})
+                if identity.get("adapter") != "pulse_harness.command.v2" or identity.get("command_protocol") != "create-start-v2":
+                    raise InvalidTransition("command exit confirmation requires the create/start protocol")
+                recovery = self._terminal_recovery_locked(action, reason="command_cleanup")
+                if not recovery.confirmed_exit:
+                    self._db.execute("UPDATE recoveries SET confirmed_exit = 1 WHERE recovery_id = ?", (recovery.recovery_id,))
+                    self._append_event_locked(EventDraft(
+                        scope=scope, event_type="recovery.exit_confirmed", source="recovery", phase="recovery",
+                        status="uncertain", action_request_id=action_request_id,
+                        approval_id=action["approval_id"], operation_id=action["operation_id"],
+                        payload={"container_name": identity.get("container_name"),
+                                 "authority_digest": digest_json(authority), "prior_effects": "uncertain"},
+                    ))
+                return RecoveryRecord(recovery_id=recovery.recovery_id, action_request_id=action_request_id,
+                    scope=scope, state="uncertain", reason=recovery.reason, confirmed_exit=True,
+                    created_at=recovery.created_at)
+
     def _terminal_recovery_locked(
         self, row: sqlite3.Row, *, reason: str
     ) -> RecoveryRecord:
