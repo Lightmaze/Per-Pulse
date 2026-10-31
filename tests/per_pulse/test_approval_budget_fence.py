@@ -126,3 +126,47 @@ def test_native_approval_completed_provider_usage_blocks_extra_admission(
             original["pendingActions"][0]["actionId"]
         )
         assert not (tmp_path / "workspace" / "approval-budget-0.txt").exists()
+
+        # A late human decision is still executed by the ORIGINAL Kernel turn.
+        # Parking only releases compute capacity: it must not defer the action
+        # to the queued Work or waive its original approval requirement.
+        decision = execution.resolve_approval(
+            first, original["pendingActions"][0]["actionId"], "allow_once",
+        )
+        assert decision["accepted"] and not decision["repeated"]
+        _wait(
+            execution, first,
+            lambda state: state["status"] == "idle"
+            and state["turnId"] == original["turnId"]
+            and not state["pendingActions"],
+            timeout=12,
+        )
+        assert (tmp_path / "workspace" / "approval-budget-0.txt").read_text() == (
+            "Only after explicit approval.\\n"
+        )
+        repeated = execution.resolve_approval(
+            first, original["pendingActions"][0]["actionId"], "allow_once",
+        )
+        assert repeated["accepted"] and repeated["repeated"]
+        scope = runtime.kernel_service.store.action_scope_for_session(
+            execution._scope(first), original["pendingActions"][0]["actionId"],
+        )
+        assert runtime.kernel_service.store.action_terminal_count(
+            scope, original["pendingActions"][0]["actionId"],
+        ) == 1
+
+        # Both 100-token provider rounds now settle through the sole original
+        # Pulse Future. The temporary admission debit must not be charged a
+        # second time when that Future finishes.
+        deadline = time.monotonic() + 5
+        while runtime._engine._runtime.snapshot()["total_pulses"] < 1:
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        settled = runtime._engine._runtime.snapshot()
+        assert settled["total_pulses"] == 1
+        assert settled["billable_tokens_this_hour"] == 200
+        assert settled["billable_tokens_today"] == 200
+        assert runtime._engine._runtime.get_budget() == 0
+        with call_lock:
+            assert len(calls) == 1
+        assert execution.snapshot(second)["turnId"] is None
