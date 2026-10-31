@@ -454,6 +454,11 @@ def create_app(
     def reference(page_id: str, body: NewReference, request: Request):
         return pages(request).add_reference(page_id, body.targetPageId, body.sourceMessageId, body.label)
 
+    @app.post("/api/pages/{page_id}/transfer", status_code=201)
+    def transfer_work(page_id: str, body: TransferToWork, request: Request):
+        return pages(request).transfer_work(page_id, body.targetPageId, body.messageId,
+                                            body.excerpt, body.instruction)
+
     @app.post("/api/pages/{page_id}/return", status_code=201)
     def return_home(page_id: str, body: ReturnHome, request: Request):
         return pages(request).return_home(page_id, body.content, body.messageId, include_materials=body.includeMaterials)
