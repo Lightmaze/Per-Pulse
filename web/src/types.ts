@@ -24,7 +24,7 @@ export type PageReference = {
   sourceMessageId: string | null;
   targetPageId: string;
   label: string;
-  kind: 'created' | 'reference' | 'return';
+  kind: 'created' | 'reference' | 'return' | 'transfer';
   createdAt: string;
 };
 
