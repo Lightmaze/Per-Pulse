@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from './api';
+import { messageBody } from './messageBody';
 import { useLanguage } from './i18n';
 import { useWorkspace } from './useWorkspace';
 import { getPageActivity } from './status';
@@ -301,7 +302,7 @@ export default function App() {
           {syncError && !error && !sendError ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} /> : null}
-          {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onTransfer={(message, excerpt) => openModal({ kind: 'transfer', message, excerpt })} onSaveExample={bootstrap?.postureEnabled ? (message, content) => openModal({ kind: 'save-example', message, content }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
+          {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onTransfer={(message, excerpt, needsExactExcerpt) => openModal({ kind: 'transfer', message, excerpt, needsExactExcerpt })} onSaveExample={bootstrap?.postureEnabled ? (message, content) => openModal({ kind: 'save-example', message, content }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
           {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
@@ -314,7 +315,8 @@ export default function App() {
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} materials={modal.message.materials} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'transfer' ? <TransferWorkDialog key={`${route.id}/${modal.message.id}`} excerpt={modal.excerpt}
-      sourceTitle={view?.page.title} destinations={pages.filter(page => page.kind === 'work' && page.id !== route.id)}
+      sourceTitle={view?.page.title} sourceText={messageBody(modal.message)} needsExactExcerpt={modal.needsExactExcerpt}
+      destinations={pages.filter(page => page.kind === 'work' && page.id !== route.id)}
       busy={busy} error={modalError} close={closeModal} send={transferWork} /> : null}
     {modal?.kind === 'rename' ? <RenameDialog initial={view?.page.title ?? ''} busy={busy} error={modalError} close={closeModal} rename={renamePage} /> : null}
     {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast(t('app.connectionChecked'))).catch(problem => setToast(errorText(problem)))} /> : null}
