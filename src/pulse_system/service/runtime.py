@@ -6597,11 +6597,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         # attached to their original durable causal events.
         native_approval_parked = None
         native_approval_parked_limit = 0
-        if (
-            self._harness_kind == "kernel"
-            and callable(getattr(self._harness, "configure_approval_compute", None))
-            and callable(getattr(self._harness, "approval_is_parked", None))
-        ):
+        if self._harness_kind == "kernel" and _is_native_kernel_runtime(self._harness):
             self._harness.configure_approval_compute(c.pulse_worker_capacity)
             native_approval_parked = self._harness.approval_is_parked
             native_approval_parked_limit = min(16, 2 * c.pulse_worker_capacity)
