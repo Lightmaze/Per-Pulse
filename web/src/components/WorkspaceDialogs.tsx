@@ -5,6 +5,7 @@ import type { Bootstrap, Material, Message, PageSummary, ResponseLanguage } from
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { messageBody } from '../messageBody';
+import { isExactWorkHandoffExcerpt } from '../workHandoffExcerpt';
 import { providerSetupCommand, type ProviderShell } from '../providerSetup';
 import { CopyButton } from './CopyButton';
 
@@ -12,7 +13,7 @@ export type Modal =
   | { kind: 'create'; message?: Message }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'return'; message: Message; content: string }
-  | { kind: 'transfer'; message: Message; excerpt: string }
+  | { kind: 'transfer'; message: Message; excerpt: string; needsExactExcerpt?: boolean }
   | { kind: 'settings' }
   | { kind: 'learning' }
   | { kind: 'save-example'; message: Message; content: string }
@@ -70,28 +71,41 @@ export function PagePickerDialog({ pages, mode, busy, error, close, select, crea
   </Dialog>;
 }
 
-export function TransferWorkDialog({ excerpt, destinations, busy, error, close, send, sourceTitle }: {
-  excerpt: string; destinations: PageSummary[]; busy: boolean; error: string; close: () => void;
+export function TransferWorkDialog({ excerpt, sourceText, needsExactExcerpt = false, destinations, busy, error, close, send, sourceTitle }: {
+  excerpt: string; sourceText: string; needsExactExcerpt?: boolean;
+  destinations: PageSummary[]; busy: boolean; error: string; close: () => void;
   send: (targetId: string, excerpt: string, instruction: string) => void; sourceTitle?: string;
 }) {
   const { t } = useLanguage();
   const [targetId, setTargetId] = useState(destinations[0]?.id ?? '');
+  const [chosenExcerpt, setChosenExcerpt] = useState(excerpt);
   const [instruction, setInstruction] = useState('');
-  const tooLong = excerpt.length + instruction.length + 100 > 32_000;
-  const canSend = !!targetId && !!excerpt.trim() && !!instruction.trim() && !tooLong;
+  const isExact = isExactWorkHandoffExcerpt(sourceText, chosenExcerpt);
+  const tooLong = chosenExcerpt.length + instruction.length + 100 > 32_000;
+  const canSend = !!targetId && isExact && !!instruction.trim() && !tooLong;
   return <Dialog title={t('dialogs.transferTitle')} onClose={close}>
     <p className="dialog-description">{t('dialogs.transferDescription')}</p>
     <p className="lesson-note">{t('dialogs.from')} <strong>{sourceTitle || t('dialogs.thisPage')}</strong></p>
-    <form onSubmit={event => { event.preventDefault(); if (canSend && !busy) send(targetId, excerpt, instruction.trim()); }}>
+    <form onSubmit={event => { event.preventDefault(); if (canSend && !busy) send(targetId, chosenExcerpt, instruction.trim()); }}>
       <label className="field-label" htmlFor="transfer-work-target">{t('dialogs.transferDestination')}</label>
       <select id="transfer-work-target" value={targetId} onChange={event => setTargetId(event.target.value)} required disabled={busy}>
         {destinations.map(page => <option key={page.id} value={page.id}>{page.title}</option>)}
       </select>
       <label className="field-label" htmlFor="transfer-work-excerpt">{t('dialogs.transferExcerpt')}</label>
-      <textarea id="transfer-work-excerpt" readOnly value={excerpt} rows={6} />
+      {needsExactExcerpt ? <p className="lesson-note" role="status">{t('dialogs.transferSelectionMismatch')}</p> : null}
+      <textarea id="transfer-work-excerpt" value={chosenExcerpt} onChange={event => setChosenExcerpt(event.target.value)}
+        rows={6} aria-invalid={Boolean(chosenExcerpt.trim()) && !isExact} disabled={busy} autoFocus={needsExactExcerpt} />
+      {chosenExcerpt.trim() && !isExact ? <p role="alert" className="form-error">{t('dialogs.transferInvalidExcerpt')}</p> : null}
+      <details>
+        <summary>{t('dialogs.transferRawSource')}</summary>
+        <textarea aria-label={t('dialogs.transferRawSource')} readOnly value={sourceText} rows={6} />
+      </details>
+      <button className="text-button" type="button" disabled={busy} onClick={() => setChosenExcerpt(sourceText)}>
+        {t('dialogs.transferFullResult')}
+      </button>
       <label className="field-label" htmlFor="transfer-work-instruction">{t('dialogs.transferInstruction')}</label>
       <textarea id="transfer-work-instruction" value={instruction} onChange={event => setInstruction(event.target.value)}
-        placeholder={t('dialogs.transferPlaceholder')} rows={3} maxLength={2000} required autoFocus disabled={busy} />
+        placeholder={t('dialogs.transferPlaceholder')} rows={3} maxLength={2000} required autoFocus={!needsExactExcerpt} disabled={busy} />
       {tooLong ? <p role="alert" className="form-error">{t('dialogs.transferTooLong')}</p> : null}
       {error ? <p role="alert" className="form-error">{error}</p> : null}
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button>
