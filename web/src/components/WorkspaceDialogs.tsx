@@ -5,6 +5,8 @@ import type { Bootstrap, Material, Message, PageSummary, ResponseLanguage } from
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { messageBody } from '../messageBody';
+import { providerSetupCommand, type ProviderShell } from '../providerSetup';
+import { CopyButton } from './CopyButton';
 
 export type Modal =
   | { kind: 'create'; message?: Message }
@@ -90,6 +92,8 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
   const [language, setLanguage] = useState<ResponseLanguage>(bootstrap?.settings?.responseLanguage ?? 'auto');
   const [saving, setSaving] = useState(false);
   const [languageError, setLanguageError] = useState('');
+  const [setupShell, setSetupShell] = useState<ProviderShell>('posix');
+  const setupCommand = providerSetupCommand(setupShell);
   const changeLanguage = async (next: ResponseLanguage) => {
     if (saving || next === language) return;
     setSaving(true);
@@ -109,7 +113,15 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
       {bootstrap && !bootstrap.provider.configured && !bootstrap.example ? <details className="provider-setup">
         <summary>{t('settings.connectGuide')}</summary>
         <p>{t('settings.connectSteps')}</p>
-        <pre aria-label={t('settings.connectCommand')}><code>{"export P_PULSE_CHAT_ENDPOINT='https://your-provider.example/v1/chat/completions'\nexport P_PULSE_CHAT_MODEL='your-model-id'\nexport P_PULSE_API_KEY='your-api-key'\nper-pulse"}</code></pre>
+        <label className="field-label" htmlFor="provider-terminal-shell">{t('settings.terminalShell')}</label>
+        <select id="provider-terminal-shell" value={setupShell}
+          onChange={event => setSetupShell(event.target.value as ProviderShell)}>
+          <option value="posix">{t('settings.shellPosix')}</option>
+          <option value="powershell">{t('settings.shellPowerShell')}</option>
+        </select>
+        <pre aria-label={t('settings.connectCommand')}><code>{setupCommand}</code></pre>
+        <CopyButton text={setupCommand} label={t('settings.copySetup')} />
+        <p className="settings-detail">{t('settings.doctorHint')}</p>
         <p>{t('settings.connectionSafety')}</p>
       </details> : null}</div>
     <div className="settings-section">
