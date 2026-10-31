@@ -5,8 +5,8 @@ import { useLanguage } from '../i18n';
 import type { Message } from '../types';
 import { Dialog } from './Dialog';
 
-export function SaveExampleDialog({ pageId, message, initial, messages, close, saved }: {
-  pageId: string; message: Message; initial: string; messages: Message[];
+export function SaveExampleDialog({ pageId, message, initial, needsExactExcerpt = false, messages, close, saved }: {
+  pageId: string; message: Message; initial: string; needsExactExcerpt?: boolean; messages: Message[];
   close: () => void; saved: () => void;
 }) {
   const { t, errorText } = useLanguage();
@@ -44,6 +44,7 @@ export function SaveExampleDialog({ pageId, message, initial, messages, close, s
   };
   return <Dialog title={t('learning.saveExample')} onClose={() => { if (!writing.current) close(); }} className="save-example-dialog">
     <p className="dialog-description">{t('learning.saveExampleHelp')}</p>
+    {needsExactExcerpt ? <p className="lesson-note" role="status">{t('learning.selectionMismatch')}</p> : null}
     {message.replay ? <p className="lesson-note">{t('replay.saved')}</p> : null}
     <form onSubmit={event => { event.preventDefault(); void save(); }}>
       <label className="field-label" htmlFor="example-title">{t('learning.exampleTitle')}</label>
@@ -52,6 +53,15 @@ export function SaveExampleDialog({ pageId, message, initial, messages, close, s
       <label className="field-label" htmlFor="example-excerpt">{t('learning.excerpt')}</label>
       <textarea id="example-excerpt" rows={8} value={excerpt} onChange={event => setExcerpt(event.target.value)} aria-describedby="example-excerpt-help" disabled={busy} required />
       <p className="lesson-note" id="example-excerpt-help">{t('learning.excerptHelp')}</p>
+      {needsExactExcerpt ? <>
+        <details>
+          <summary>{t('learning.showOriginal')}</summary>
+          <textarea aria-label={t('learning.showOriginal')} readOnly value={message.content} rows={6} />
+        </details>
+        <button className="text-button" type="button" disabled={busy} onClick={() => setExcerpt(message.content)}>
+          {t('learning.useFullReply')}
+        </button>
+      </> : null}
       {!exact && excerpt ? <p className="form-error">{t('learning.excerptMismatch')}</p> : null}
       {excerptBytes > 8000 ? <p className="form-error">{t('learning.excerptLong')}</p> : null}
       <label className="field-label" htmlFor="example-note">{t('learning.exampleNote')}</label>

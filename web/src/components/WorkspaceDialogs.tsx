@@ -16,7 +16,7 @@ export type Modal =
   | { kind: 'transfer'; message: Message; excerpt: string; needsExactExcerpt?: boolean }
   | { kind: 'settings' }
   | { kind: 'learning' }
-  | { kind: 'save-example'; message: Message; content: string }
+  | { kind: 'save-example'; message: Message; content: string; needsExactExcerpt?: boolean }
   | { kind: 'history'; beforeMessageId: string }
   | { kind: 'message-search' }
   | { kind: 'materials'; materialId?: string; pageId?: string }

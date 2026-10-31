@@ -91,6 +91,30 @@ try {
   await article.waitFor();
   const draft = 'Unsent source draft remains in this Work.';
   await page.getByRole('textbox', { name: 'Message Notice source', exact: true }).fill(draft);
+  // Rendered selections can span UI controls and Markdown structure. Such
+  // a selection must never silently turn into an entire shareable example.
+  await article.evaluate(node => {
+    const range = document.createRange(); range.selectNodeContents(node);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    const button = [...node.querySelectorAll('button')].find(element => element.textContent?.trim() === 'Save example');
+    if (!button) throw new Error('Save example action was not found');
+    button.click();
+  });
+  const unsafeEditor = page.getByRole('dialog', { name: 'Save example', exact: true });
+  await unsafeEditor.waitFor();
+  await unsafeEditor.getByRole('textbox', { name: 'Example name', exact: true }).fill('Must not silently copy');
+  assert.equal(await unsafeEditor.getByRole('textbox', { name: 'Original passage', exact: true }).inputValue(), '');
+  assert.equal(await unsafeEditor.getByRole('button', { name: 'Save example', exact: true }).isDisabled(), true);
+  await unsafeEditor.getByText('The highlighted text is not a contiguous passage', { exact: false }).waitFor();
+  await unsafeEditor.getByText('Show original reply for copying', { exact: true }).click();
+  assert.equal(await unsafeEditor.getByRole('textbox', { name: 'Show original reply for copying', exact: true }).inputValue(), original.content);
+  await unsafeEditor.getByRole('button', { name: 'Use entire original reply', exact: true }).click();
+  assert.equal(await unsafeEditor.getByRole('textbox', { name: 'Original passage', exact: true }).inputValue(), original.content);
+  await unsafeEditor.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await unsafeEditor.waitFor({ state: 'hidden' });
+  assert.equal((await experiences(origin)).length, 0);
+  checks.push('nonliteral selection cannot silently save an entire example; source expansion requires an explicit choice');
+
   await article.locator('.message-content p').first().evaluate(node => {
     const range = document.createRange(); range.selectNodeContents(node);
     const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
