@@ -400,6 +400,61 @@ class KernelHarnessRuntime:
         except (KernelError, sqlite3.Error, ValueError, KeyError):
             return False
 
+    def unsettled_provider_usage(self) -> tuple[int, int, int] | None:
+        """Read completed provider use on still-attached original Kernel turns.
+
+        Return (input, output, cache writes), NOT an additional charge. The
+        Pulse coordinator subtracts these committed rounds only while their
+        original Future is unsettled; final settlement owns actual accounting.
+        Unknown non-test provider usage or a failed evidence read fails closed.
+        """
+        with self._lock:
+            if self._closing or self._closed or self.kernel is None:
+                return None
+            kernel = self.kernel
+            scopes = tuple(self._active.values())
+        totals = [0, 0, 0]
+        try:
+            from .coverme import recorded_fork_usage
+            from .expert_computation import recorded_expert_usage
+
+            for scope in scopes:
+                runner = kernel._runtimes.get(scope.session_id)
+                if runner is None:
+                    return None
+                test_only = runner.runner.model_adapter.capabilities.test_only
+                for round_record in kernel.store.model_rounds_for_turn(scope):
+                    if round_record.status is not ModelRoundStatus.COMPLETED:
+                        continue
+                    usage = round_record.provider_usage
+                    if usage is None:
+                        if not test_only:
+                            return None
+                        continue
+                    totals[0] += int(usage["input_tokens"])
+                    totals[1] += int(usage["output_tokens"])
+                    totals[2] += int(usage["cache_write_tokens"])
+
+                for usage, accounted in (
+                    recorded_fork_usage(
+                        kernel.store, scope,
+                        trace=self.coverme.store if self.coverme is not None else None,
+                    ),
+                    recorded_expert_usage(
+                        kernel.store, scope,
+                        trace=self.expert.trace if self.expert is not None else None,
+                    ),
+                ):
+                    if not accounted and not test_only:
+                        return None
+                    if accounted:
+                        totals[0] += int(usage["input_tokens"])
+                        totals[1] += int(usage["output_tokens"])
+                        totals[2] += int(usage["cache_write_tokens"])
+        except Exception:  # noqa: BLE001 - invalid/unreadable facts are not free
+            return None
+        return tuple(totals)
+
     @staticmethod
     def _cognition_allowance():
         flag = os.environ.get("P_PULSE_COGNITION", "0")

@@ -6596,10 +6596,12 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         # actual model/tool execution while parked logical turns remain
         # attached to their original durable causal events.
         native_approval_parked = None
+        native_unsettled_provider_usage = None
         native_approval_parked_limit = 0
         if self._harness_kind == "kernel" and _is_native_kernel_runtime(self._harness):
             self._harness.configure_approval_compute(c.pulse_worker_capacity)
             native_approval_parked = self._harness.approval_is_parked
+            native_unsettled_provider_usage = self._harness.unsettled_provider_usage
             native_approval_parked_limit = min(16, 2 * c.pulse_worker_capacity)
         self._engine = PulseEngine(
             storage=self._storage,
@@ -6618,6 +6620,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             scheduler=self._scheduler,
             admission_filter=(self._context_pulse.admits if self._context_pulse else None),
             approval_parked=native_approval_parked,
+            unsettled_provider_usage=native_unsettled_provider_usage,
             runtime_fence=self._current_runtime_fence(),
             execution_context=(
                 self._native_kernel_execution_context

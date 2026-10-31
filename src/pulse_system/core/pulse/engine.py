@@ -324,6 +324,7 @@ class PulseEngine:
         execution_context: Callable[[PulseEvent], str] | None = None,
         admission_filter: Callable[[PulseEvent, datetime], bool] | None = None,
         approval_parked: Callable[[str, str], bool] | None = None,
+        unsettled_provider_usage: Callable[[], tuple[int, int, int] | None] | None = None,
     ):
         self._storage = storage
         self._engram_mgr = engram_manager
@@ -421,6 +422,11 @@ class PulseEngine:
         ):
             raise ValueError("approval parking requires a native background execution probe")
         self._approval_parked = approval_parked if parked_limit else None
+        if unsettled_provider_usage is not None and not callable(unsettled_provider_usage):
+            raise ValueError("unsettled_provider_usage must be callable or null")
+        self._unsettled_provider_usage = (
+            unsettled_provider_usage if parked_limit else None
+        )
         # Runtime-owned engines receive one permit-bearing lifecycle fence.
         # A reservation may confirm owner/epoch, but it must never be used to
         # reconstruct a weaker fence that drops the revocable publication
@@ -1379,8 +1385,21 @@ class PulseEngine:
         cooling_execution_keys = self._cooling_execution_keys(now)
         succession_excluded = self._succession_excluded_engrams()
 
-        # 5. Budget check
-        budget = min(self._runtime.get_budget(), self._config.budget_per_tick)
+        # 5. Budget check. A human-held native turn can already have committed
+        # provider usage in Kernel SQLite although its original Pulse Future
+        # has not settled. Count that outstanding evidence *for admission*
+        # without charging or rewriting the original causal result.
+        if self._unsettled_provider_usage is None:
+            budget = self._runtime.get_budget()
+        else:
+            try:
+                unsettled_usage = self._unsettled_provider_usage()
+            except Exception:  # noqa: BLE001 - unknown spend fails closed
+                unsettled_usage = None
+            budget = self._runtime.get_budget(
+                unsettled_provider_usage=unsettled_usage,
+            )
+        budget = min(budget, self._config.budget_per_tick)
         worker_available = (
             self._worker_allocation()[3]
             if self._config.background_dispatch
