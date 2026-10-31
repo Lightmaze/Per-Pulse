@@ -179,7 +179,7 @@ def test_unapproved_kernel_turns_occupy_pulse_capacity_until_one_is_cancelled(
         )
         assert final["turnId"] == original_turn
         changed = tmp_path / "workspace" / "approval-pressure-1.txt"
-        assert changed.read_text() == "Only written after explicit approval 1.\\n"
+        assert changed.read_text() == "Only written after explicit approval 1.\n"
         repeated = execution.resolve_approval(original_work, original_action, "allow_once")
         assert repeated["accepted"] and repeated["repeated"]
         scope = runtime.kernel_service.store.action_scope_for_session(
