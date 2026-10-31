@@ -12,6 +12,7 @@ export type Modal =
   | { kind: 'create'; message?: Message }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'return'; message: Message; content: string }
+  | { kind: 'transfer'; message: Message; excerpt: string }
   | { kind: 'settings' }
   | { kind: 'learning' }
   | { kind: 'save-example'; message: Message; content: string }
@@ -66,6 +67,36 @@ export function PagePickerDialog({ pages, mode, busy, error, close, select, crea
     <p id={`${pickerId}-hint`} className="picker-keyboard-hint">{t('dialogs.chooseHint', { action: mode === 'search' ? t('dialogs.openAction') : t('dialogs.linkAction') })}</p>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     <button className="create-from-picker" disabled={busy} onClick={create}><Icon name="plus" size={18} />{t('dialogs.createNewPage')}</button>
+  </Dialog>;
+}
+
+export function TransferWorkDialog({ excerpt, destinations, busy, error, close, send, sourceTitle }: {
+  excerpt: string; destinations: PageSummary[]; busy: boolean; error: string; close: () => void;
+  send: (targetId: string, excerpt: string, instruction: string) => void; sourceTitle?: string;
+}) {
+  const { t } = useLanguage();
+  const [targetId, setTargetId] = useState(destinations[0]?.id ?? '');
+  const [instruction, setInstruction] = useState('');
+  const tooLong = excerpt.length + instruction.length + 100 > 32_000;
+  const canSend = !!targetId && !!excerpt.trim() && !!instruction.trim() && !tooLong;
+  return <Dialog title={t('dialogs.transferTitle')} onClose={close}>
+    <p className="dialog-description">{t('dialogs.transferDescription')}</p>
+    <p className="lesson-note">{t('dialogs.from')} <strong>{sourceTitle || t('dialogs.thisPage')}</strong></p>
+    <form onSubmit={event => { event.preventDefault(); if (canSend && !busy) send(targetId, excerpt, instruction.trim()); }}>
+      <label className="field-label" htmlFor="transfer-work-target">{t('dialogs.transferDestination')}</label>
+      <select id="transfer-work-target" value={targetId} onChange={event => setTargetId(event.target.value)} required disabled={busy}>
+        {destinations.map(page => <option key={page.id} value={page.id}>{page.title}</option>)}
+      </select>
+      <label className="field-label" htmlFor="transfer-work-excerpt">{t('dialogs.transferExcerpt')}</label>
+      <textarea id="transfer-work-excerpt" readOnly value={excerpt} rows={6} />
+      <label className="field-label" htmlFor="transfer-work-instruction">{t('dialogs.transferInstruction')}</label>
+      <textarea id="transfer-work-instruction" value={instruction} onChange={event => setInstruction(event.target.value)}
+        placeholder={t('dialogs.transferPlaceholder')} rows={3} maxLength={2000} required autoFocus disabled={busy} />
+      {tooLong ? <p role="alert" className="form-error">{t('dialogs.transferTooLong')}</p> : null}
+      {error ? <p role="alert" className="form-error">{error}</p> : null}
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button>
+        <button type="submit" className="primary-button" disabled={busy || !canSend}>{busy ? t('dialogs.saving') : t('dialogs.transferAction')}</button></div>
+    </form>
   </Dialog>;
 }
 

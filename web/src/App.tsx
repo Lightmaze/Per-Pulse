@@ -20,7 +20,7 @@ import { HistoryDialog } from './components/HistoryDialog';
 import { MessageSearchDialog } from './components/MessageSearchDialog';
 import { MaterialsDialog } from './components/MaterialsDialog';
 import { MaterialDialog } from './components/MaterialDialog';
-import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
+import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, TransferWorkDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 export default function App() {
   const { t, pageTitle, errorText } = useLanguage();
@@ -221,6 +221,22 @@ export default function App() {
     finally { setBusy(false); }
   };
 
+  const transferWork = async (targetId: string, excerpt: string, instruction: string) => {
+    if (modal?.kind !== 'transfer') return;
+    const sourceId = route.id;
+    const messageId = modal.message.id;
+    setBusy(true); setModalError('');
+    try {
+      const response = await api.transferWork(sourceId, targetId, messageId, excerpt, instruction);
+      applyView(response.view);
+      // Back returns to the exact originating message; the selected source
+      // remains a link on the receiving native message. Unsent drafts stay put.
+      navigate(targetId, { pageId: sourceId, messageId }, response.messageId);
+      setToast(t('app.transferredToWork'));
+    } catch (problem) { setModalError(errorText(problem)); }
+    finally { setBusy(false); }
+  };
+
   const renamePage = async (title: string) => {
     setBusy(true); setModalError('');
     try { const next = await api.rename(route.id, title); applyView(next); setModal(null); }
@@ -285,7 +301,7 @@ export default function App() {
           {syncError && !error && !sendError ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} /> : null}
-          {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onSaveExample={bootstrap?.postureEnabled ? (message, content) => openModal({ kind: 'save-example', message, content }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
+          {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection) => openModal({ kind: 'return', message, content: selection })} onTransfer={(message, excerpt) => openModal({ kind: 'transfer', message, excerpt })} onSaveExample={bootstrap?.postureEnabled ? (message, content) => openModal({ kind: 'save-example', message, content }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
           {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
@@ -297,6 +313,9 @@ export default function App() {
     {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} materials={modal.message.materials} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
+    {modal?.kind === 'transfer' ? <TransferWorkDialog key={`${route.id}/${modal.message.id}`} excerpt={modal.excerpt}
+      sourceTitle={view?.page.title} destinations={pages.filter(page => page.kind === 'work' && page.id !== route.id)}
+      busy={busy} error={modalError} close={closeModal} send={transferWork} /> : null}
     {modal?.kind === 'rename' ? <RenameDialog initial={view?.page.title ?? ''} busy={busy} error={modalError} close={closeModal} rename={renamePage} /> : null}
     {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast(t('app.connectionChecked'))).catch(problem => setToast(errorText(problem)))} /> : null}
     {modal?.kind === 'learning' ? <LearningDialog key={`${workspaceId}/${route.id}`} pageId={route.id} pageTitle={view?.page.title ?? t('dialogs.thisPage')} messages={view?.messages ?? []} close={closeModal} navigate={navigate} /> : null}

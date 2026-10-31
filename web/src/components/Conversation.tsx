@@ -8,8 +8,8 @@ import { CopyButton } from './CopyButton';
 import { ReplayOrigin } from './ReplayOrigin';
 import { messageBody } from '../messageBody';
 
-export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
-  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
+export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
+  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string) => void; onTransfer?: (message: Message, excerpt: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
   onSaveExample?: (message: Message, excerpt: string) => void;
   onMaterial?: (materialId: string, pageId: string) => void;
 }) {
@@ -42,6 +42,14 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
             // source. The editor always starts with an exact source passage.
             onSaveExample(message, text.trim() && message.content.includes(text) ? text : message.content);
           }}>{t('learning.saveExample')}</button> : null}
+          {onTransfer && view.page.kind === 'work' && message.role === 'assistant' && message.status === 'settled'
+            && pages.some(page => page.kind === 'work' && page.id !== view.page.id) ? <button onClick={() => {
+            const selected = window.getSelection();
+            const node = document.getElementById(`message-${message.id}`);
+            const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString().trim() : '';
+            const canonical = messageBody(message);
+            onTransfer(message, text && canonical.includes(text) ? text : canonical);
+          }} title={t('conversation.transferTitle')}><Icon name="link" size={14} />{t('conversation.transfer')}</button> : null}
           {view.page.kind === 'work' ? <button onClick={() => {
             const selected = window.getSelection();
             const node = document.getElementById(`message-${message.id}`);

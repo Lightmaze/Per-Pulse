@@ -235,6 +235,40 @@ try {
   assert.equal(targetAfterRestart.experiences[0].active, false);
   assert.equal('encounter' in targetAfterRestart.experiences[0], false);
   checks.push('inactive audit visibility, revoked influence and privacy survive SQLite restart');
+
+  // A user may carry one real settled result into an existing Work without
+  // copying the source transcript or losing either Work's unfinished draft.
+  await page.goto(base + '/page/' + beforeId);
+  await page.locator('.composer textarea').fill('Receiver draft stays here.');
+  await page.goto(base + '/page/' + originalId);
+  await page.locator('.composer textarea').fill('Original draft stays here.');
+  const selectedSource = page.locator('.message-assistant').filter({
+    hasText: 'The first screen is a twelve-field intake form. [Synthetic browser fixture]',
+  }).first();
+  await selectedSource.getByRole('button', { name: 'Use in another Work', exact: true }).click();
+  const transferDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
+  await transferDialog.waitFor();
+  await transferDialog.locator('#transfer-work-target').selectOption(beforeId);
+  assert.match(await transferDialog.locator('#transfer-work-excerpt').inputValue(), /twelve-field intake form/);
+  await transferDialog.locator('#transfer-work-instruction').fill('Use this precise finding to improve the next draft.');
+  await transferDialog.getByRole('button', { name: 'Send to Work', exact: true }).click();
+  await page.getByRole('heading', { name: 'Uninformed delivery', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Receiver draft stays here.');
+  const imported = page.locator('.message-user').filter({
+    hasText: 'Selected excerpt from another Work',
+  }).last();
+  const sourceLink = imported.locator('.source-line a.session-link');
+  await sourceLink.waitFor();
+  assert.match(await imported.innerText(), /Use this precise finding to improve the next draft/);
+  assert.ok(!(await imported.innerText()).includes('The intake form hides the product'),
+    'Only the selected result, not the private correction, reaches the receiving Work');
+  await sourceLink.click();
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
+  const sourceResults = (await (await fetch(base + '/api/pages/' + beforeId)).json()).messages;
+  assert.ok(sourceResults.some(m => m.sourcePageId === originalId && m.sourceMessageId),
+    'The native receiving message preserves the original Work result source');
+  checks.push('explicit settled Work excerpt changes another Work with exact source and both drafts intact');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({
     passed: checks.length, checks, sourceWork: originalId, comparisonWork: beforeId,

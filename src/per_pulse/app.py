@@ -73,6 +73,13 @@ class ExistingMaterial(Input):
     sha256: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 
+class TransferToWork(Input):
+    targetPageId: Identifier
+    messageId: Identifier
+    excerpt: Content
+    instruction: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)]
+
+
 class ReturnHome(Input):
     content: Annotated[str, StringConstraints(strip_whitespace=True, max_length=32_000)]
     messageId: Identifier | None = None
@@ -446,6 +453,11 @@ def create_app(
     @app.post("/api/pages/{page_id}/references", status_code=201)
     def reference(page_id: str, body: NewReference, request: Request):
         return pages(request).add_reference(page_id, body.targetPageId, body.sourceMessageId, body.label)
+
+    @app.post("/api/pages/{page_id}/transfer", status_code=201)
+    def transfer_work(page_id: str, body: TransferToWork, request: Request):
+        return pages(request).transfer_work(page_id, body.targetPageId, body.messageId,
+                                            body.excerpt, body.instruction)
 
     @app.post("/api/pages/{page_id}/return", status_code=201)
     def return_home(page_id: str, body: ReturnHome, request: Request):
