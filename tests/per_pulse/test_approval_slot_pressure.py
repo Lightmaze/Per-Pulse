@@ -12,7 +12,9 @@ import threading
 import time
 
 import httpx
+import pytest
 
+import per_pulse.service as page_service_module
 from per_pulse.execution import PageExecution
 from per_pulse.service import PulseSettings
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
@@ -20,14 +22,15 @@ from test_execution import _new_page, _wait
 from test_pulse_integration import client_for
 
 
-def test_four_unapproved_kernel_turns_occupy_four_pulse_slots_until_one_is_cancelled(
-    tmp_path, monkeypatch,
+@pytest.mark.parametrize("capacity", (2, 4))
+def test_unapproved_kernel_turns_occupy_pulse_capacity_until_one_is_cancelled(
+    tmp_path, monkeypatch, capacity,
 ):
-    """Prove the actual shared-capacity bottleneck before changing its ownership.
+    """Observe the same native bottleneck at capacities two and four.
 
-    A fifth Work must not be misrepresented as waiting for approval: it has
-    not reached its first model round while all four native workers wait.
-    Cancellation is a diagnostic release, *not* the intended product fix.
+    A queued newcomer has no Kernel turn or model round. Cancellation is
+    solely diagnostic, not a product fix; a remaining original approval
+    must still act on its exact turn and perform its file effect only once.
     """
     monkeypatch.setenv("PER_PULSE_APPROVAL_PRESSURE_KEY", "explicit-test-credential")
     calls = []
@@ -81,6 +84,13 @@ def test_four_unapproved_kernel_turns_occupy_four_pulse_slots_until_one_is_cance
     settings = PulseSettings(
         enabled=True, spontaneous_rate=0, check_interval_seconds=0.02,
     )
+    # Keep the real World/Kernel/SQLite construction but vary only the
+    # runtime-owned execution capacity. This is not a simulated queue state.
+    base_config = page_service_module.RuntimeServiceConfig
+    monkeypatch.setattr(
+        page_service_module, "RuntimeServiceConfig",
+        lambda **kwargs: base_config(**kwargs, pulse_worker_capacity=capacity),
+    )
     with client_for(
         tmp_path, pulse=settings, model_factory=factory,
         allow_workspace_actions=True,
@@ -88,7 +98,7 @@ def test_four_unapproved_kernel_turns_occupy_four_pulse_slots_until_one_is_cance
         runtime = client.app.state.pages.runtime
         execution = PageExecution(runtime)
         waiting = []
-        for index in range(4):
+        for index in range(capacity):
             work = _new_page(client, f"WRITE_APPROVAL_PRESSURE_{index}")
             observed = _wait(
                 execution, work,
@@ -100,57 +110,88 @@ def test_four_unapproved_kernel_turns_occupy_four_pulse_slots_until_one_is_cance
             waiting.append((work, observed["turnId"], observed["pendingActions"][0]["actionId"]))
 
         before = runtime.scheduling_snapshot()
-        assert before["capacity"]["worker_limit"] == 4
-        assert before["capacity"]["worker_running"] == 4
+        assert before["capacity"]["worker_limit"] == capacity
+        assert before["capacity"]["worker_running"] == capacity
         assert before["capacity"]["worker_available"] == 0
-        assert len(calls) == 4
+        assert len(calls) == capacity
         assert not list((tmp_path / "workspace").glob("approval-pressure-*.txt"))
 
-        fifth = _new_page(client, "WRITE_APPROVAL_PRESSURE_4")
+        newcomer = _new_page(client, f"WRITE_APPROVAL_PRESSURE_{capacity}")
         # A small bounded observation window captures the real pressure:
-        # the fifth request is durable, but no model execution slot exists.
+        # the new user request is durable, but no model execution slot exists.
         time.sleep(0.25)
         saturated = runtime.scheduling_snapshot()
-        assert saturated["capacity"]["worker_running"] == 4
+        assert saturated["capacity"]["worker_running"] == capacity
         assert saturated["capacity"]["worker_available"] == 0
-        assert len(calls) == 4
-        fifth_before = execution.snapshot(fifth)
-        assert fifth_before["pendingActions"] == []
+        assert len(calls) == capacity
+        newcomer_before = execution.snapshot(newcomer)
+        assert newcomer_before["pendingActions"] == []
         # A queued Work has no Kernel session yet, so the read-only page
         # execution projection legitimately reports "idle". That is not
         # evidence of a completed or admitted turn; the provider call count,
         # absence of a turn, and saturated native capacity prove the hold.
-        assert fifth_before["status"] == "idle"
-        assert fifth_before["sessionId"] is None
-        assert fifth_before["turnId"] is None
+        assert newcomer_before["status"] == "idle"
+        assert newcomer_before["sessionId"] is None
+        assert newcomer_before["turnId"] is None
         print(json.dumps({
             "transport": "TEST_DOUBLE",
             "limit": before["capacity"]["worker_limit"],
             "held": len(waiting),
-            "fifthBefore": fifth_before["status"],
+            "newcomerBefore": newcomer_before["status"],
             "runningBefore": before["capacity"]["worker_running"],
             "runningSaturated": saturated["capacity"]["worker_running"],
             "modelCallsBeforeRelease": len(calls),
         }, sort_keys=True))
 
         # Demonstrate capacity causality without granting any file action.
-        # The first Work is explicitly cancelled: the other three remain
-        # in their original WAITING_APPROVAL turns, with unchanged action IDs.
+        # The first Work is explicitly cancelled: every other original
+        # approval retains its source turn and action ID.
         work, turn, _action = waiting[0]
         stopped = execution.cancel(work, turn)
         assert stopped["accepted"], stopped
         admitted = _wait(
-            execution, fifth,
+            execution, newcomer,
             lambda state: state["status"] == "needs_attention"
             and len(state["pendingActions"]) == 1
             and state["pendingActions"][0]["canResolve"],
             timeout=12,
         )
         assert admitted["turnId"]
-        assert len(calls) == 5
+        assert len(calls) == capacity + 1
         for other_work, other_turn, other_action in waiting[1:]:
             observed = execution.snapshot(other_work)
             assert observed["turnId"] == other_turn
             assert observed["status"] == "needs_attention"
             assert observed["pendingActions"][0]["actionId"] == other_action
         assert not list((tmp_path / "workspace").glob("approval-pressure-*.txt"))
+
+        # A *late* user decision on one of the original waiting Works still
+        # reaches its original durable Kernel action, not the newcomer.
+        original_work, original_turn, original_action = waiting[1]
+        result = execution.resolve_approval(original_work, original_action, "allow_once")
+        assert result["accepted"] and not result["repeated"], result
+        final = _wait(
+            execution, original_work,
+            lambda state: state["turnId"] == original_turn
+            and state["status"] == "idle"
+            and state["pendingActions"] == [],
+            timeout=12,
+        )
+        assert final["turnId"] == original_turn
+        changed = tmp_path / "workspace" / "approval-pressure-1.txt"
+        assert changed.read_text() == "Only written after explicit approval 1.\\n"
+        repeated = execution.resolve_approval(original_work, original_action, "allow_once")
+        assert repeated["accepted"] and repeated["repeated"]
+        scope = runtime.kernel_service.store.action_scope_for_session(
+            execution._scope(original_work), original_action,
+        )
+        assert runtime.kernel_service.store.action_terminal_count(scope, original_action) == 1
+        for other_work, other_turn, other_action in waiting[2:]:
+            observed = execution.snapshot(other_work)
+            assert observed["turnId"] == other_turn
+            assert observed["status"] == "needs_attention"
+            assert observed["pendingActions"][0]["actionId"] == other_action
+        assert execution.snapshot(newcomer)["turnId"] == admitted["turnId"]
+        assert sorted(path.name for path in (tmp_path / "workspace").glob("approval-pressure-*.txt")) == [
+            "approval-pressure-1.txt",
+        ]
