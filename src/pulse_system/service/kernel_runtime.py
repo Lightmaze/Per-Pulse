@@ -383,10 +383,13 @@ class KernelHarnessRuntime:
         """Read-only proof that the exact attached turn awaits a human."""
         if not isinstance(engram_id, str) or not isinstance(context_id, str):
             return False
+        # Pulse's execution-key display uses "home"; native Kernel's
+        # historical Home session is deliberately stored under empty context.
+        owned_context = "" if context_id == "home" else context_id
         with self._lock:
             if self._closing or self._closed or self.kernel is None:
                 return False
-            scope = self._active.get((engram_id, context_id))
+            scope = self._active.get((engram_id, owned_context))
             if scope is None or scope.turn_id in self._starting_turn_ids:
                 return False
         try:
