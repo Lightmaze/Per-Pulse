@@ -12,6 +12,7 @@ export type Modal =
   | { kind: 'create'; message?: Message }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'return'; message: Message; content: string }
+  | { kind: 'transfer'; message: Message; excerpt: string }
   | { kind: 'settings' }
   | { kind: 'learning' }
   | { kind: 'save-example'; message: Message; content: string }
