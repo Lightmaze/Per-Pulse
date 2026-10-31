@@ -11,7 +11,7 @@ import { initialWorkHandoffExcerpt } from '../workHandoffExcerpt';
 
 export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
   view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
-  onSaveExample?: (message: Message, excerpt: string) => void;
+  onSaveExample?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void;
   onMaterial?: (materialId: string, pageId: string) => void;
 }) {
   const { t, pageTitle } = useLanguage();
@@ -39,9 +39,10 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
             const selected = window.getSelection();
             const node = document.getElementById(`message-${message.id}`);
             const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString() : '';
-            // Rendered Markdown may join text that was not contiguous in the
-            // source. The editor always starts with an exact source passage.
-            onSaveExample(message, text.trim() && message.content.includes(text) ? text : message.content);
+            // A rendered selection that differs from its original must not
+            // silently become a whole example exposed to other Works.
+            const { excerpt, needsExactExcerpt } = initialWorkHandoffExcerpt(message.content, text);
+            onSaveExample(message, excerpt, needsExactExcerpt);
           }}>{t('learning.saveExample')}</button> : null}
           {onTransfer && view.page.kind === 'work' && message.role === 'assistant' && message.status === 'settled'
             && pages.some(page => page.kind === 'work' && page.id !== view.page.id) ? <button onClick={() => {
