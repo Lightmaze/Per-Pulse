@@ -74,7 +74,18 @@ try {
   for (const variable of ['P_PULSE_CHAT_ENDPOINT', 'P_PULSE_CHAT_MODEL', 'P_PULSE_API_KEY']) {
     assert.ok(instructions.includes(variable), variable + ' missing from first-use guidance');
   }
+  assert.ok(instructions.includes('per-pulse doctor'), 'Offline provider preflight is offered before launch');
+  await page.locator('#provider-terminal-shell').selectOption('powershell');
+  const windowsCommand = await setup.locator('code').innerText();
+  assert.ok(windowsCommand.includes("$env:P_PULSE_CHAT_ENDPOINT = '"), 'PowerShell environment syntax is usable on Windows');
+  assert.ok(windowsCommand.includes('per-pulse doctor'), 'Windows setup includes a local preflight');
+  assert.ok(!windowsCommand.includes('export P_PULSE_CHAT_'), 'Windows must not show POSIX shell commands');
   await page.locator('#interface-language').selectOption('zh-CN');
+  await page.locator('#provider-terminal-shell').selectOption('posix');
+  assert.ok((await setup.locator('code').innerText()).startsWith('export P_PULSE_CHAT_ENDPOINT='));
+  await page.locator('#provider-terminal-shell').selectOption('powershell');
+  assert.ok((await setup.locator('code').innerText()).startsWith('$env:P_PULSE_CHAT_ENDPOINT'));
+  assert.equal(await page.getByRole('button', { name: '复制终端配置命令' }).count(), 1);
   await page.getByText('如何连接模型', { exact: true }).waitFor();
   await page.locator('#interface-language').selectOption('en');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
