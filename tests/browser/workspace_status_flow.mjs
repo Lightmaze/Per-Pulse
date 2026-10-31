@@ -77,9 +77,9 @@ try {
     assert.equal(await home.inputValue(), 'Keep writing at Home while the other Work finishes.');
     assert.equal(await home.evaluate(el => el === document.activeElement), true);
     assert.equal((await data('/__fixture/status')).requests, before.requests);
-    // One actual failed provider turn and four real native approval holds.
-    // The fifth simultaneous approval cannot be assumed to reach the model
-    // while the current foreground admission limit is occupied.
+    // One real failure and FIVE simultaneous native approval holds. With
+    // parked human decisions, the fifth user Work must reach its own original
+    // Kernel action without approving or cancelling any of the first four.
     const failed = await fetch(base + '/api/pages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -90,7 +90,7 @@ try {
     await wait(async () => (await data('/api/pages/' + failedId)).page.status === 'error',
       'native Work failure retained for Home');
     const pending = [];
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       const title = 'Pending review ' + i;
       const created = await fetch(base + '/api/pages', {
         method: 'POST',
@@ -107,11 +107,11 @@ try {
     const reviewSection = page.locator('section.home-continuations').filter({
       has: page.getByRole('heading', { name: 'Work needing attention', exact: true }),
     });
-    const reveal = reviewSection.getByRole('button', { name: 'Show all 5 Works needing attention' });
+    const reveal = reviewSection.getByRole('button', { name: 'Show all 6 Works needing attention' });
     await reveal.waitFor({ timeout: 35000 });
     assert.equal(await reviewSection.getByRole('button', { name: /^Open Pending review / }).count(), 3);
     await reveal.click();
-    assert.equal(await reviewSection.getByRole('button', { name: /^Open Pending review / }).count(), 4);
+    assert.equal(await reviewSection.getByRole('button', { name: /^Open Pending review / }).count(), 5);
     assert.equal(await reviewSection.getByRole('button', { name: 'Open Failed review' }).count(), 1);
     // A Work outside the default top three opens at its real pending
     // approval. The Home draft remains untouched, with no approval at Home.
@@ -121,10 +121,14 @@ try {
     await page.locator('button.return-to-thread').click();
     await home.waitFor();
     assert.equal(await home.inputValue(), 'Keep writing at Home while the other Work finishes.');
-    assert.equal((await data('/api/pages/' + pending[0].id)).page.status, 'needs_attention');
+    for (const item of pending) {
+      assert.equal((await data('/api/pages/' + item.id)).page.status, 'needs_attention',
+        'opening and returning from a different Work cannot resolve ' + item.title);
+    }
     assert.equal((await data('/api/pages/' + failedId)).page.status, 'error');
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ checks: ['native Work completion clears its sidebar marker while Home is idle',
+      'five original approvals remain pending while sixth attention item is a real failed Work',
       'read-only status refresh retains Home route, draft and focus and makes no model request'], errors }));
   }
   if (screenshots) await page.screenshot({ path: join(screenshots, 'work-completed-from-home.png') });

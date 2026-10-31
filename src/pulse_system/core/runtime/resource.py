@@ -6,6 +6,7 @@ Does NOT make cognitive decisions (the non-cognitive infrastructure boundary).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -64,17 +65,36 @@ class RuntimeManager:
     def config(self) -> RuntimeConfig:
         return self._config
 
-    def get_budget(self) -> int:
-        """Return how many pulses can still fire this tick based on token budget.
+    def get_budget(
+        self, *, unsettled_provider_usage: tuple[int, int, int] | None = (0, 0, 0),
+    ) -> int:
+        """Admit against settled spend *and* source-verified attached spend.
 
-        The remaining window is converted to a pulse count using the running
-        average billable cost per pulse, so a nearly-exhausted budget admits
-        proportionally fewer pulses instead of a full batch.
+        The optional (input, output, cache-write) triple is a conservative
+        upper bound for already completed provider calls on still-attached
+        native Kernel turns. Cached reads count at their full input price.
+        It is NOT charged to stats here: the original causal Future charges
+        once at final settlement. None means unavailable/unknown evidence and
+        denies new admission rather than treating unknown spend as zero.
         """
+        if unsettled_provider_usage is None:
+            return 0
+        if (
+            not isinstance(unsettled_provider_usage, tuple)
+            or len(unsettled_provider_usage) != 3
+            or any(type(value) is not int or value < 0 for value in unsettled_provider_usage)
+            or unsettled_provider_usage[2] > unsettled_provider_usage[0]
+        ):
+            raise ValueError("unsettled_provider_usage must be non-negative (input, output, cache-write)")
+        pending_input, pending_output, pending_writes = unsettled_provider_usage
+        pending_upper = (
+            pending_input + pending_output
+            + math.ceil(pending_writes * max(0.0, self._config.cache_write_premium))
+        )
         self._maybe_reset_windows()
         hourly_remaining = self._config.hourly_token_budget - self._stats.tokens_this_hour
         daily_remaining = self._config.daily_token_budget - self._stats.tokens_today
-        remaining = min(hourly_remaining, daily_remaining)
+        remaining = min(hourly_remaining, daily_remaining) - pending_upper
         if remaining <= 0:
             return 0
         if self._stats.total_pulses > 0:

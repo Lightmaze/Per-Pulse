@@ -259,6 +259,11 @@ class PulseEngineConfig:
     # world's coordination clock. Direct/unit-test engines retain the legacy
     # synchronous tick contract unless this is explicitly enabled.
     background_dispatch: bool = False
+    # Native Kernel may park a bounded number of *human-waiting* logical
+    # turns beyond the active model/tool compute limit. Every parked turn
+    # still owns its original Future, reservation, ledger and Kernel action.
+    # Zero preserves the existing behavior for Pi, mocks and direct engines.
+    approval_parked_limit: int = 0
     # Blocking summary/rotation work has its own bounded execution domain.
     # It must never consume the ordinary pulse fleet or mutate world state.
     max_parallel_successions: int = 2
@@ -318,6 +323,8 @@ class PulseEngine:
         runtime_fence: RuntimeFence | None = None,
         execution_context: Callable[[PulseEvent], str] | None = None,
         admission_filter: Callable[[PulseEvent, datetime], bool] | None = None,
+        approval_parked: Callable[[str, str], bool] | None = None,
+        unsettled_provider_usage: Callable[[], tuple[int, int, int] | None] | None = None,
     ):
         self._storage = storage
         self._engram_mgr = engram_manager
@@ -403,6 +410,23 @@ class PulseEngine:
         # claim a turn: rejected candidates remain durable and are reconsidered
         # on the next coordinator observation.
         self._admission_filter = admission_filter
+        parked_limit = self._config.approval_parked_limit
+        if type(parked_limit) is not int or not 0 <= parked_limit <= 64:
+            raise ValueError("approval_parked_limit must be an integer from 0 to 64")
+        if approval_parked is not None and not callable(approval_parked):
+            raise ValueError("approval_parked must be callable or null")
+        if parked_limit and (
+            approval_parked is None
+            or execution_context is None
+            or not self._config.background_dispatch
+        ):
+            raise ValueError("approval parking requires a native background execution probe")
+        self._approval_parked = approval_parked if parked_limit else None
+        if unsettled_provider_usage is not None and not callable(unsettled_provider_usage):
+            raise ValueError("unsettled_provider_usage must be callable or null")
+        self._unsettled_provider_usage = (
+            unsettled_provider_usage if parked_limit else None
+        )
         # Runtime-owned engines receive one permit-bearing lifecycle fence.
         # A reservation may confirm owner/epoch, but it must never be used to
         # reconstruct a weaker fence that drops the revocable publication
@@ -474,7 +498,7 @@ class PulseEngine:
         self._pulse_executor: ThreadPoolExecutor | None = None
         if self._config.background_dispatch:
             self._pulse_executor = ThreadPoolExecutor(
-                max_workers=workers,
+                max_workers=workers + self._config.approval_parked_limit,
                 thread_name_prefix="pulse-turn",
             )
         self._succession_executor: ThreadPoolExecutor | None = None
@@ -545,12 +569,40 @@ class PulseEngine:
 
         return self._causal_ledger
 
+    def _worker_allocation(self) -> tuple[int, int, int, int]:
+        """(computing, human-parked, attached, available) under bounded capacity.
+
+        Durable causal work and its original Future stay attached while a human
+        decides. Only a source-checked, still-pending Kernel action can be
+        counted as parked. No event/reservation is settled by this projection.
+        """
+        with self._shutdown_lock:
+            entries = tuple(self._inflight.values())
+        parked = 0
+        if self._approval_parked is not None:
+            for event, _reservation in entries:
+                try:
+                    if self._approval_parked(*self._execution_key(event)):
+                        parked += 1
+                except Exception:  # noqa: BLE001 - fail closed on lost owner
+                    continue
+        attached = len(entries)
+        computing = attached - parked
+        physical_free = max(
+            0, self._config.max_parallel_pulses
+            + self._config.approval_parked_limit - attached,
+        )
+        available = min(
+            max(0, self._config.max_parallel_pulses - computing),
+            physical_free,
+        )
+        return computing, parked, attached, available
+
     def capacity_snapshot(self) -> dict[str, int | bool]:
-        """Content-free facts about the bounded pulse worker fleet."""
+        """Content-free facts about both compute and retained approval ownership."""
 
         limit = self._config.max_parallel_pulses
-        with self._shutdown_lock:
-            running = len(self._inflight)
+        running, parked, attached, available = self._worker_allocation()
         with self._succession_lock:
             succession_running = len(self._succession_inflight)
             succession_pending = len(self._succession_pending)
@@ -567,7 +619,10 @@ class PulseEngine:
             "background_dispatch": self._config.background_dispatch,
             "worker_limit": limit,
             "worker_running": running,
-            "worker_available": max(0, limit - running),
+            "worker_parked": parked,
+            "worker_attached": attached,
+            "worker_available": available,
+            "approval_parked_limit": self._config.approval_parked_limit,
             "succession_worker_limit": self._config.max_parallel_successions,
             "succession_workers_running": succession_running,
             "succession_subjects_pending": succession_pending,
@@ -1330,10 +1385,23 @@ class PulseEngine:
         cooling_execution_keys = self._cooling_execution_keys(now)
         succession_excluded = self._succession_excluded_engrams()
 
-        # 5. Budget check
-        budget = min(self._runtime.get_budget(), self._config.budget_per_tick)
+        # 5. Budget check. A human-held native turn can already have committed
+        # provider usage in Kernel SQLite although its original Pulse Future
+        # has not settled. Count that outstanding evidence *for admission*
+        # without charging or rewriting the original causal result.
+        if self._unsettled_provider_usage is None:
+            budget = self._runtime.get_budget()
+        else:
+            try:
+                unsettled_usage = self._unsettled_provider_usage()
+            except Exception:  # noqa: BLE001 - unknown spend fails closed
+                unsettled_usage = None
+            budget = self._runtime.get_budget(
+                unsettled_provider_usage=unsettled_usage,
+            )
+        budget = min(budget, self._config.budget_per_tick)
         worker_available = (
-            self._config.max_parallel_pulses - len(self._inflight)
+            self._worker_allocation()[3]
             if self._config.background_dispatch
             else budget
         )

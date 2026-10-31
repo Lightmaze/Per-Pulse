@@ -331,6 +331,9 @@ class KernelHarnessRuntime:
         self._input_for_turn = None
         self._publication = None
         self._lock = threading.Condition(threading.RLock())
+        # Human WAITING_APPROVAL turns retain original Kernel ownership,
+        # but do not hold a model/tool execution permit while waiting.
+        self._compute_permits: threading.BoundedSemaphore | None = None
         # Turn admission is serialized per subject-owned context. Lifecycle
         # operations (abort, succession, shutdown) remain subject-wide.
         self._active: dict[tuple[str, str], HarnessScope] = {}
@@ -345,6 +348,112 @@ class KernelHarnessRuntime:
         self._shutdown_lock = threading.Lock()
         self._closed = False
         self._closing = False
+
+    def configure_approval_compute(self, capacity: int) -> None:
+        """Set one native compute gate before admitting any Pulse workers."""
+        if type(capacity) is not int or not 1 <= capacity <= 64:
+            raise ValueError("native Kernel compute capacity must be 1..64")
+        with self._lock:
+            if self._compute_permits is not None or self._active or self._closing:
+                raise RuntimeError("Kernel compute capacity cannot change during execution")
+            self._compute_permits = threading.BoundedSemaphore(capacity)
+
+    @contextmanager
+    def _compute_permit(self, scope):
+        permits = self._compute_permits
+        if permits is None:
+            yield
+            return
+        # A queued approval continuation must observe Stop/owner loss.
+        # The original durable turn and permission remain the sole authority.
+        while True:
+            self._check()
+            if self.kernel is not None and self.kernel.store.get_turn(scope).status is TurnStatus.CANCELLED:
+                raise _error("kernel_turn_cancelled_while_queued",
+                             "the original Kernel turn was cancelled", accepted=True)
+            if permits.acquire(timeout=0.05):
+                break
+        try:
+            self._check()
+            yield
+        finally:
+            permits.release()
+
+    def approval_is_parked(self, engram_id: str, context_id: str) -> bool:
+        """Read-only proof that the exact attached turn awaits a human."""
+        if not isinstance(engram_id, str) or not isinstance(context_id, str):
+            return False
+        # Pulse's execution-key display uses "home"; native Kernel's
+        # historical Home session is deliberately stored under empty context.
+        owned_context = "" if context_id == "home" else context_id
+        with self._lock:
+            if self._closing or self._closed or self.kernel is None:
+                return False
+            scope = self._active.get((engram_id, owned_context))
+            if scope is None or scope.turn_id in self._starting_turn_ids:
+                return False
+        try:
+            return (
+                self.kernel.store.get_turn(scope).status is TurnStatus.WAITING_APPROVAL
+                and bool(self.kernel.store.pending_actions(scope))
+            )
+        except (KernelError, sqlite3.Error, ValueError, KeyError):
+            return False
+
+    def unsettled_provider_usage(self) -> tuple[int, int, int] | None:
+        """Read completed provider use on still-attached original Kernel turns.
+
+        Return (input, output, cache writes), NOT an additional charge. The
+        Pulse coordinator subtracts these committed rounds only while their
+        original Future is unsettled; final settlement owns actual accounting.
+        Unknown non-test provider usage or a failed evidence read fails closed.
+        """
+        with self._lock:
+            if self._closing or self._closed or self.kernel is None:
+                return None
+            kernel = self.kernel
+            scopes = tuple(self._active.values())
+        totals = [0, 0, 0]
+        try:
+            from .coverme import recorded_fork_usage
+            from .expert_computation import recorded_expert_usage
+
+            for scope in scopes:
+                runner = kernel._runtimes.get(scope.session_id)
+                if runner is None:
+                    return None
+                test_only = runner.runner.model_adapter.capabilities.test_only
+                for round_record in kernel.store.model_rounds_for_turn(scope):
+                    if round_record.status is not ModelRoundStatus.COMPLETED:
+                        continue
+                    usage = round_record.provider_usage
+                    if usage is None:
+                        if not test_only:
+                            return None
+                        continue
+                    totals[0] += int(usage["input_tokens"])
+                    totals[1] += int(usage["output_tokens"])
+                    totals[2] += int(usage["cache_write_tokens"])
+
+                for usage, accounted in (
+                    recorded_fork_usage(
+                        kernel.store, scope,
+                        trace=self.coverme.store if self.coverme is not None else None,
+                    ),
+                    recorded_expert_usage(
+                        kernel.store, scope,
+                        trace=self.expert.trace if self.expert is not None else None,
+                    ),
+                ):
+                    if not accounted and not test_only:
+                        return None
+                    if accounted:
+                        totals[0] += int(usage["input_tokens"])
+                        totals[1] += int(usage["output_tokens"])
+                        totals[2] += int(usage["cache_write_tokens"])
+        except Exception:  # noqa: BLE001 - invalid/unreadable facts are not free
+            return None
+        return tuple(totals)
 
     @staticmethod
     def _cognition_allowance():
@@ -677,11 +786,12 @@ class KernelHarnessRuntime:
             # execution lease. A fast user click must wait for that yield,
             # not approve an action and then fail to resume an active runner.
             with run_lock:
-                with self._lock:
-                    self._check()
-                    if self._active.get(active_key) != scope:
-                        raise ScopeConflict("approval has no attached world turn; cancel or reconcile it instead")
-                yield
+                with self._compute_permit(scope):
+                    with self._lock:
+                        self._check()
+                        if self._active.get(active_key) != scope:
+                            raise ScopeConflict("approval has no attached world turn; cancel or reconcile it instead")
+                    yield
         finally:
             with self._lock:
                 self._approval_calls -= 1
@@ -861,8 +971,9 @@ class KernelHarnessRuntime:
                 timer.daemon = True
                 timer.start()
             with run_lock:
-                self._check()
-                result = runtime.runner.run(scope, prompt=None if internal is not None else submitted)
+                with self._compute_permit(scope):
+                    self._check()
+                    result = runtime.runner.run(scope, prompt=None if internal is not None else submitted)
             while result.status not in _TERMINAL:
                 self._check()
                 time.sleep(0.025)
