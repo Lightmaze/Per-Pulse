@@ -95,6 +95,8 @@ export const workspaceEnglish = {
   'conversation.linkPage': 'Link page',
   'conversation.bringHomeTitle': 'Bring selected text or this message to Home',
   'conversation.bringHome': 'Bring to Home',
+  'conversation.transfer': 'Use in another Work',
+  'conversation.transferTitle': 'Send exact selected result to another Work, keeping its source',
   'conversation.emptyHome': 'Start a conversation, and give each idea a place of its own.',
   'conversation.emptyPage': 'This is a space to work things through. Pick up the conversation below.',
   'composer.placeholder': 'What would you like to work on?',
