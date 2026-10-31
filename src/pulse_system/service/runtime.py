@@ -6591,6 +6591,20 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                     if self._harness_kind == "kernel" and c.context_pulse.enabled else None),
             ) if c.context_pulse is not None else None
         )
+        # Only the native, shared Kernel knows which original turns are
+        # genuinely waiting on a user's approval. Its compute gate bounds
+        # actual model/tool execution while parked logical turns remain
+        # attached to their original durable causal events.
+        native_approval_parked = None
+        native_approval_parked_limit = 0
+        if (
+            self._harness_kind == "kernel"
+            and callable(getattr(self._harness, "configure_approval_compute", None))
+            and callable(getattr(self._harness, "approval_is_parked", None))
+        ):
+            self._harness.configure_approval_compute(c.pulse_worker_capacity)
+            native_approval_parked = self._harness.approval_is_parked
+            native_approval_parked_limit = min(16, 2 * c.pulse_worker_capacity)
         self._engine = PulseEngine(
             storage=self._storage,
             engram_manager=self._mgr,
@@ -6607,6 +6621,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             spontaneous_emitter=self._spontaneous_dispatch_for_engram,
             scheduler=self._scheduler,
             admission_filter=(self._context_pulse.admits if self._context_pulse else None),
+            approval_parked=native_approval_parked,
             runtime_fence=self._current_runtime_fence(),
             execution_context=(
                 self._native_kernel_execution_context
@@ -6622,6 +6637,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 topology_interval_ticks=c.topology_interval_ticks,
                 connectivity_interval_ticks=c.connectivity_interval_ticks,
                 max_parallel_pulses=c.pulse_worker_capacity,
+                approval_parked_limit=native_approval_parked_limit,
                 max_parallel_successions=max(
                     1,
                     min(4, c.pulse_worker_capacity),
