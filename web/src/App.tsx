@@ -221,6 +221,22 @@ export default function App() {
     finally { setBusy(false); }
   };
 
+  const transferWork = async (targetId: string, excerpt: string, instruction: string) => {
+    if (modal?.kind !== 'transfer') return;
+    const sourceId = route.id;
+    const messageId = modal.message.id;
+    setBusy(true); setModalError('');
+    try {
+      const response = await api.transferWork(sourceId, targetId, messageId, excerpt, instruction);
+      applyView(response.view);
+      // Back returns to the exact originating message; the selected source
+      // remains a link on the receiving native message. Unsent drafts stay put.
+      navigate(targetId, { pageId: sourceId, messageId }, response.messageId);
+      setToast(t('app.transferredToWork'));
+    } catch (problem) { setModalError(errorText(problem)); }
+    finally { setBusy(false); }
+  };
+
   const renamePage = async (title: string) => {
     setBusy(true); setModalError('');
     try { const next = await api.rename(route.id, title); applyView(next); setModal(null); }
