@@ -86,7 +86,7 @@ export default function App() {
   }, [view?.page.kind, view?.page.title]);
 
   useEffect(() => {
-    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' || previous?.kind === 'save-example' ? null : previous);
+    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' || previous?.kind === 'save-example' || previous?.kind === 'transfer' ? null : previous);
   }, [route.id, route.serial, workspaceId, bootstrap?.serviceInstanceId]);
 
   useEffect(() => () => window.clearTimeout(scrollTimer.current), [route.id]);
