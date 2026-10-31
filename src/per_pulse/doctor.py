@@ -24,6 +24,7 @@ def inspect_provider() -> dict:
         "schema": SCHEMA,
         "state": "invalid_config",
         "credential_variable": None,
+        "credentialless_loopback": False,
         "network_request_sent": False,
         "remote_streaming_verified": False,
         "remote_tools_verified": False,
@@ -41,9 +42,13 @@ def inspect_provider() -> dict:
     adapter = None
     try:
         adapter = factory(HarnessScope("per-pulse-doctor", "config", "config", 0, "config"))
-        # This name is validated by ChatHTTPConfig and is not a credential value.
-        report["credential_variable"] = adapter.config.credential_env
-        adapter.preflight_stream()  # local credential presence only; no network
+        # A no-auth exception is granted only by the validated loopback config.
+        # The diagnostic reveals neither the endpoint nor any credential.
+        report["credentialless_loopback"] = adapter.config.no_auth_local
+        report["credential_variable"] = (
+            None if adapter.config.no_auth_local else adapter.config.credential_env
+        )
+        adapter.preflight_stream()  # configuration only, no network
         report["state"] = "locally_configured"
     except ProviderUnavailable as exc:
         report["state"] = (
@@ -71,7 +76,7 @@ def run(argv: list[str]) -> None:
     else:
         messages = {
             "disconnected": "No model configured. The local workspace can be used disconnected.",
-            "locally_configured": "Local model configuration and credential presence passed.",
+            "locally_configured": "Local model configuration passed. Remote model behavior is not verified.",
             "credential_missing": "The configured credential environment variable is missing or empty.",
             "invalid_config": "Model configuration is incomplete or invalid. Check the endpoint, model and adapter options.",
         }
