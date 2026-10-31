@@ -274,6 +274,52 @@ try {
   await mismatchDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
   checks.push('nonliteral rendered selection cannot silently disclose an entire Work result');
+
+  // A completed native handoff must not steal Home/another Work if the user
+  // navigates while the request is still in flight. Its event still persists
+  // in the intended recipient, and both drafts remain locally owned.
+  // Make a same-document Home → Work history entry. Browser Back from the
+  // modal will then exercise the real popstate route without reloading the app
+  // or aborting its pending native request.
+  await page.locator('nav.breadcrumbs .crumb-ancestor').first().click();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  await page.locator('nav.page-nav a.nav-row').filter({ hasText: 'Original product brief' }).click();
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  const delayedTransferUrl = `**/api/pages/${originalId}/transfer`;
+  let releaseTransfer;
+  let notifyIntercepted;
+  const interceptedTransfer = new Promise(resolve => { notifyIntercepted = resolve; });
+  const transferGate = new Promise(resolve => { releaseTransfer = resolve; });
+  await page.route(delayedTransferUrl, async route => {
+    notifyIntercepted();
+    await transferGate;
+    await route.continue();
+  });
+  await selectedSource.getByRole('button', { name: 'Use in another Work', exact: true }).click();
+  const pendingDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
+  await pendingDialog.locator('#transfer-work-target').selectOption(beforeId);
+  await pendingDialog.locator('#transfer-work-instruction').fill('Carry this finding without moving my current page.');
+  await pendingDialog.getByRole('button', { name: 'Send to Work', exact: true }).click();
+  await interceptedTransfer;
+  await page.goBack();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  const lateResponse = page.waitForResponse(response =>
+    response.url().includes(`/api/pages/${originalId}/transfer`) && response.request().method() === 'POST');
+  releaseTransfer();
+  assert.equal((await lateResponse).status(), 201); // Native transfer creates a sourced user event.
+  await wait(async () => {
+    const recipient = await (await fetch(base + '/api/pages/' + beforeId)).json();
+    return recipient.messages.some(message => message.sourcePageId === originalId &&
+      message.content?.includes('Carry this finding without moving my current page.'));
+  }, 'late sourced transfer persists in intended Work');
+  await page.waitForTimeout(200);
+  assert.equal(new URL(page.url()).pathname, '/', 'late transfer must not hijack the current Home route');
+  await page.unroute(delayedTransferUrl);
+  await page.goto(base + '/page/' + originalId);
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
+  checks.push('late settled transfer stays in receiving Work without hijacking user navigation');
+
   await selectedSource.getByRole('button', { name: 'Use in another Work', exact: true }).click();
   const transferDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
   await transferDialog.waitFor();

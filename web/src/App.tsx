@@ -31,6 +31,8 @@ export default function App() {
   const [pulseOpen, setPulseOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
+  const currentModal = useRef(modal);
+  currentModal.current = modal;
   const [modalError, setModalError] = useState('');
   const [busy, setBusy] = useState(false);
   const [sendingPages, setSendingPages] = useState<Record<string, boolean>>({});
@@ -50,6 +52,8 @@ export default function App() {
   const workspaceId = bootstrap?.workspaceId;
   const currentPage = useRef(route.id);
   currentPage.current = route.id;
+  const currentRouteSerial = useRef(route.serial);
+  currentRouteSerial.current = route.serial;
   const draftKey = `${workspaceId ?? ''}/${route.id}`;
   const draft = workspaceId ? drafts[draftKey] ?? readDraft(workspaceId, route.id) : EMPTY_DRAFT;
   const sending = sendingPages[draftKey] === true;
@@ -82,7 +86,7 @@ export default function App() {
   }, [view?.page.kind, view?.page.title]);
 
   useEffect(() => {
-    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' || previous?.kind === 'save-example' ? null : previous);
+    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' || previous?.kind === 'save-example' || previous?.kind === 'transfer' ? null : previous);
   }, [route.id, route.serial, workspaceId, bootstrap?.serviceInstanceId]);
 
   useEffect(() => () => window.clearTimeout(scrollTimer.current), [route.id]);
@@ -226,16 +230,24 @@ export default function App() {
     if (modal?.kind !== 'transfer') return;
     const sourceId = route.id;
     const messageId = modal.message.id;
+    const sourceSerial = route.serial;
+    const sourceModal = modal;
+    // The native transfer may settle after the user has opened a different
+    // Work. Store its result, but never move an unrelated active route.
+    const stillHere = () => currentPage.current === sourceId
+      && currentRouteSerial.current === sourceSerial && currentModal.current === sourceModal;
     setBusy(true); setModalError('');
     try {
       const response = await api.transferWork(sourceId, targetId, messageId, excerpt, instruction);
       applyView(response.view);
-      // Back returns to the exact originating message; the selected source
-      // remains a link on the receiving native message. Unsent drafts stay put.
-      navigate(targetId, { pageId: sourceId, messageId }, response.messageId);
+      // Back returns to the exact originating message only when this is
+      // still the active transfer. Both Works retain their unsent drafts.
+      if (stillHere()) navigate(targetId, { pageId: sourceId, messageId }, response.messageId);
       setToast(t('app.transferredToWork'));
-    } catch (problem) { setModalError(errorText(problem)); }
-    finally { setBusy(false); }
+    } catch (problem) {
+      if (stillHere()) setModalError(errorText(problem));
+      else setToast(errorText(problem));
+    } finally { setBusy(false); }
   };
 
   const renamePage = async (title: string) => {
