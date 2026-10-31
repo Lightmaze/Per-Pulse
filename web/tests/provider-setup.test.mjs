@@ -20,7 +20,8 @@ test('POSIX terminal setup uses exports and never embeds a real secret', () => {
   assert.ok(!command.includes('$env:'), 'POSIX must not receive PowerShell syntax');
   for (const shell of ['posix', 'powershell']) {
     const lines = providerSetupCommand(shell).split('\n');
-    assert.equal(lines.length, 5);
+    assert.equal(lines.length, 6);
+    assert.ok(command.includes('P_PULSE_LOCAL_NO_AUTH'), 'keyed mode disables local no-auth carryover');
     assert.ok(lines.every(line => !line.includes('sk-')), 'Templates never contain real credentials');
   }
 });
@@ -35,7 +36,8 @@ test('explicit local-model mode offers both terminal types without a credential'
     assert.ok(!command.includes('your-api-key'));
     assert.ok(command.endsWith('per-pulse doctor\nper-pulse'));
     const lines = command.split('\n');
-    assert.equal(lines.length, 6);
+    assert.equal(lines.length, 7);
+    assert.ok(command.includes('P_PULSE_PROVIDER_NAMESPACE'), 'local mode clears an inherited remote namespace');
     if (shell === 'powershell') {
       assert.match(command, /^\$env:P_PULSE_CHAT_ENDPOINT/);
       assert.ok(!command.includes('export '));
