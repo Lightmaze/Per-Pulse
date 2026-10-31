@@ -105,17 +105,25 @@ try {
   assert.equal(new URL(page.url()).hash, '#message-' + result.messageId);
   // A rendered paragraph joins the bold span to plain text, but those
   // characters are not one contiguous excerpt in the authored Markdown.
-  // Keep the canonical source instead of presenting a synthesized quotation.
+  // Never silently export the entire original when the selected scope differs.
   await article.locator('.message-content p').first().evaluate(node => {
     const range = document.createRange(); range.selectNodeContents(node);
     const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
   });
   await article.getByRole('button', { name: 'Bring to Home', exact: true }).click();
   const crossFormatDialog = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
-  assert.equal(await crossFormatDialog.getByRole('textbox', { name: 'What would you like to bring back?', exact: true }).inputValue(), content);
+  const crossFormatInput = crossFormatDialog.getByRole('textbox', { name: 'What would you like to bring back?', exact: true });
+  assert.equal(await crossFormatInput.inputValue(), '');
+  assert.equal(await crossFormatDialog.getByRole('button', { name: 'Bring to Home', exact: true }).isDisabled(), true);
+  await crossFormatDialog.getByText('The highlighted text does not match a contiguous passage', { exact: false }).waitFor();
+  await crossFormatDialog.getByText('Show original text for copying', { exact: true }).click();
+  assert.equal(await crossFormatDialog.getByRole('textbox', { name: 'Show original text for copying', exact: true }).inputValue(), content);
+  await crossFormatDialog.getByRole('button', { name: 'Use entire source result', exact: true }).click();
+  assert.equal(await crossFormatInput.inputValue(), content);
+  assert.equal(await crossFormatDialog.getByRole('button', { name: 'Bring to Home', exact: true }).isEnabled(), true);
   await page.keyboard.press('Escape');
   await crossFormatDialog.waitFor({ state: 'hidden' });
-  checks.push('a rendered cross-format selection falls back to the exact authored source');
+  checks.push('a cross-format selection cannot disclose the full source without explicit consent');
 
   await article.locator('blockquote').evaluate(node => {
     const range = document.createRange(); range.selectNodeContents(node);
