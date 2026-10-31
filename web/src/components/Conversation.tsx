@@ -8,7 +8,7 @@ import { CopyButton } from './CopyButton';
 import { ReplayOrigin } from './ReplayOrigin';
 import { messageBody } from '../messageBody';
 
-export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
+export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
   view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
   onSaveExample?: (message: Message, excerpt: string) => void;
   onMaterial?: (materialId: string, pageId: string) => void;
