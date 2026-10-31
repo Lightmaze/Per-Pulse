@@ -73,6 +73,13 @@ class ExistingMaterial(Input):
     sha256: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 
+class TransferToWork(Input):
+    targetPageId: Identifier
+    messageId: Identifier
+    excerpt: Content
+    instruction: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)]
+
+
 class ReturnHome(Input):
     content: Annotated[str, StringConstraints(strip_whitespace=True, max_length=32_000)]
     messageId: Identifier | None = None
