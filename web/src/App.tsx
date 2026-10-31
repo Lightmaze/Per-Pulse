@@ -20,7 +20,7 @@ import { HistoryDialog } from './components/HistoryDialog';
 import { MessageSearchDialog } from './components/MessageSearchDialog';
 import { MaterialsDialog } from './components/MaterialsDialog';
 import { MaterialDialog } from './components/MaterialDialog';
-import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
+import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, TransferWorkDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 export default function App() {
   const { t, pageTitle, errorText } = useLanguage();
