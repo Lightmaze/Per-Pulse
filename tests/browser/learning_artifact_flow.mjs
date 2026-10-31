@@ -156,11 +156,9 @@ try {
   }).last();
   // A rendered selection spanning formatting and controls is not verbatim
   // source text. The Home return must not silently disclose the full reply.
-  await page.evaluate(() => {
-    const articles = [...document.querySelectorAll('.message-assistant')]
-      .filter(node => node.textContent?.includes('The file task finished. [Synthetic browser fixture]'));
-    const article = articles.at(-1);
-    if (!article) throw new Error('Settled Work result was not found');
+  // Locator.evaluate waits for the settled result to appear; an immediate
+  // page.evaluate can race the last native response and miss this message.
+  await result.evaluate(article => {
     const selection = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(article);
