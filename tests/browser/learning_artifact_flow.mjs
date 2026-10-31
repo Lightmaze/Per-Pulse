@@ -306,7 +306,7 @@ try {
   const lateResponse = page.waitForResponse(response =>
     response.url().includes(`/api/pages/${originalId}/transfer`) && response.request().method() === 'POST');
   releaseTransfer();
-  assert.equal((await lateResponse).status(), 200);
+  assert.equal((await lateResponse).status(), 201); // Native transfer creates a sourced user event.
   await wait(async () => {
     const recipient = await (await fetch(base + '/api/pages/' + beforeId)).json();
     return recipient.messages.some(message => message.sourcePageId === originalId &&
