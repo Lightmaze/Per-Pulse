@@ -80,7 +80,20 @@ try {
   assert.ok(windowsCommand.includes("$env:P_PULSE_CHAT_ENDPOINT = '"), 'PowerShell environment syntax is usable on Windows');
   assert.ok(windowsCommand.includes('per-pulse doctor'), 'Windows setup includes a local preflight');
   assert.ok(!windowsCommand.includes('export P_PULSE_CHAT_'), 'Windows must not show POSIX shell commands');
+  await page.locator('#provider-connection-mode').selectOption('loopback');
+  const localWindows = await setup.locator('code').innerText();
+  assert.ok(localWindows.includes('127.0.0.1:11434/v1/chat/completions'));
+  assert.ok(localWindows.includes('$env:P_PULSE_LOCAL_NO_AUTH'));
+  assert.ok(localWindows.includes('$env:P_PULSE_ALLOW_LOCAL_HTTP'));
+  assert.ok(!localWindows.includes('P_PULSE_API_KEY'), 'Local model setup never asks for a key');
+  await page.locator('#provider-terminal-shell').selectOption('posix');
+  const localPosix = await setup.locator('code').innerText();
+  assert.ok(localPosix.includes('export P_PULSE_LOCAL_NO_AUTH'));
+  assert.ok(!localPosix.includes('$env:'));
   await page.locator('#interface-language').selectOption('zh-CN');
+  assert.equal(await page.locator('#provider-connection-mode option:checked').innerText(),
+    '本机模型服务（无需 API 密钥）');
+  await page.locator('#provider-connection-mode').selectOption('keyed');
   await page.locator('#provider-terminal-shell').selectOption('posix');
   assert.ok((await setup.locator('code').innerText()).startsWith('export P_PULSE_CHAT_ENDPOINT='));
   await page.locator('#provider-terminal-shell').selectOption('powershell');

@@ -14,6 +14,7 @@ PROVIDER_ENV = (
     "P_PULSE_CREDENTIAL_ENV", "P_PULSE_CHAT_TIMEOUT", "P_PULSE_MAX_OUTPUT_TOKENS",
     "P_PULSE_MAX_REQUEST_BYTES", "P_PULSE_REASONING_FIELD",
     "P_PULSE_PROVIDER_NAMESPACE", "P_PULSE_ALLOW_LOCAL_HTTP",
+    "P_PULSE_LOCAL_NO_AUTH",
 )
 
 
@@ -90,3 +91,36 @@ def test_invalid_endpoint_with_query_does_not_expose_embedded_token(monkeypatch,
     assert json.loads(text)["state"] == "invalid_config"
     assert token not in text
     assert "another-private-token" not in text
+
+def test_explicit_loopback_works_without_an_api_key_and_sends_no_requests(
+    monkeypatch, capsys,
+):
+    import httpx
+
+    def forbidden_network(*_args, **_kwargs):
+        raise AssertionError("doctor must not connect to the local model")
+
+    monkeypatch.setattr(httpx.Client, "send", forbidden_network)
+    monkeypatch.setenv(
+        "P_PULSE_CHAT_ENDPOINT", "http://127.0.0.1:11434/v1/chat/completions"
+    )
+    monkeypatch.setenv("P_PULSE_CHAT_MODEL", "user-installed-local-model")
+    monkeypatch.setenv("P_PULSE_ALLOW_LOCAL_HTTP", "1")
+    monkeypatch.setenv("P_PULSE_LOCAL_NO_AUTH", "1")
+    cli.main(["doctor", "--json"])
+    report = read_report(capsys)
+    assert report["state"] == "locally_configured"
+    assert report["credentialless_loopback"] is True
+    assert report["credential_variable"] is None
+
+
+def test_no_auth_flag_with_remote_endpoint_fails_local_preflight(monkeypatch, capsys):
+    monkeypatch.setenv("P_PULSE_CHAT_ENDPOINT", "https://provider.example/v1/chat/completions")
+    monkeypatch.setenv("P_PULSE_CHAT_MODEL", "remote-model")
+    monkeypatch.setenv("P_PULSE_LOCAL_NO_AUTH", "1")
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["doctor", "--json"])
+    assert exc.value.code == 2
+    report = read_report(capsys)
+    assert report["state"] == "invalid_config"
+    assert report["credentialless_loopback"] is False

@@ -126,6 +126,9 @@ class ChatHTTPConfig:
     allow_local_http: bool = False
     reasoning_field: str | None = None
     provider_namespace: str | None = None
+    # Explicitly allow a credential-free *loopback HTTP* model. This is never
+    # inferred from a missing key and never enabled for a remote HTTPS host.
+    no_auth_local: bool = False
 
     def __post_init__(self) -> None:
         url = urlsplit(self.endpoint)
@@ -137,6 +140,10 @@ class ChatHTTPConfig:
             raise ValueError("model endpoint must not contain credentials, query or fragment")
         if not self.model.strip() or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.credential_env):
             raise ValueError("model and credential environment variable must be valid")
+        if type(self.no_auth_local) is not bool:
+            raise ValueError("no_auth_local must be a boolean")
+        if self.no_auth_local and (not local_http or self.provider_namespace is not None):
+            raise ValueError("credential-free model calls require explicitly enabled loopback HTTP only")
         if isinstance(self.timeout_seconds, bool) or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be finite and positive")
         for value in (self.max_output_tokens, self.max_response_bytes, self.max_request_bytes):
@@ -245,7 +252,7 @@ class ChatHTTPModelAdapter:
     def preflight_stream(self) -> None:
         if self._closed:
             raise ProviderUnavailable("model adapter is closed", code="provider_closed")
-        if not os.environ.get(self.config.credential_env):
+        if not self.config.no_auth_local and not os.environ.get(self.config.credential_env):
             raise ProviderUnavailable("configured model credential is missing", code="provider_credential_missing")
 
     def request_body(self, request: ModelRequest) -> dict[str, Any]:
@@ -365,11 +372,14 @@ class _ChatStream:
         try:
             if self._cancelled():
                 return
-            key = os.environ.get(self.adapter.config.credential_env)
-            if not key:
-                raise ProviderUnavailable("configured model credential is missing", code="provider_credential_missing")
+            headers = {"Accept": "text/event-stream"}
+            if not self.adapter.config.no_auth_local:
+                key = os.environ.get(self.adapter.config.credential_env)
+                if not key:
+                    raise ProviderUnavailable("configured model credential is missing", code="provider_credential_missing")
+                headers["Authorization"] = f"Bearer {key}"
             request = self.adapter._client.build_request("POST", self.adapter.config.endpoint,
-                headers={"Authorization": f"Bearer {key}", "Accept": "text/event-stream"}, json=self.body)
+                headers=headers, json=self.body)
             # Check the actual encoded HTTP body, including tool schemas and
             # temporary image parts, before *any* network send. Never truncate
             # the continuing history invisibly to fit this transport guard.
@@ -571,6 +581,7 @@ def model_factory_from_env():
         reasoning_field=os.environ.get("P_PULSE_REASONING_FIELD") or None,
         allow_local_http=os.environ.get("P_PULSE_ALLOW_LOCAL_HTTP") == "1",
         provider_namespace=os.environ.get("P_PULSE_PROVIDER_NAMESPACE") or None,
+        no_auth_local=os.environ.get("P_PULSE_LOCAL_NO_AUTH") == "1",
     )
     def factory(_scope):
         return ChatHTTPModelAdapter(config)
