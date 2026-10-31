@@ -278,6 +278,13 @@ try {
   // A completed native handoff must not steal Home/another Work if the user
   // navigates while the request is still in flight. Its event still persists
   // in the intended recipient, and both drafts remain locally owned.
+  // Make a same-document Home → Work history entry. Browser Back from the
+  // modal will then exercise the real popstate route without reloading the app
+  // or aborting its pending native request.
+  await page.locator('nav.breadcrumbs .crumb-ancestor').first().click();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  await page.locator('nav.page-nav a.nav-row').filter({ hasText: 'Original product brief' }).click();
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
   const delayedTransferUrl = `**/api/pages/${originalId}/transfer`;
   let releaseTransfer;
   let notifyIntercepted;
@@ -294,7 +301,7 @@ try {
   await pendingDialog.locator('#transfer-work-instruction').fill('Carry this finding without moving my current page.');
   await pendingDialog.getByRole('button', { name: 'Send to Work', exact: true }).click();
   await interceptedTransfer;
-  await page.locator('nav.breadcrumbs .crumb-ancestor').first().click();
+  await page.goBack();
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
   const lateResponse = page.waitForResponse(response =>
     response.url().includes(`/api/pages/${originalId}/transfer`) && response.request().method() === 'POST');
