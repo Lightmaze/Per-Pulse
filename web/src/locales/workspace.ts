@@ -283,6 +283,8 @@ export const workspaceChinese = {
   'conversation.linkPage': '引用页面',
   'conversation.bringHomeTitle': '将选中的文字或这条消息带回主页',
   'conversation.bringHome': '带回主页',
+  'conversation.transfer': '用于另一项工作',
+  'conversation.transferTitle': '将选定的原文成果用于另一项工作，并保留来源',
   'conversation.emptyHome': '从一段对话开始，让每个想法都有自己的空间。',
   'conversation.emptyPage': '在这里慢慢展开，从下面继续对话。',
   'composer.placeholder': '你想从什么开始？',
