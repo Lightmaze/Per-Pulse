@@ -15,15 +15,16 @@ from test_execution import _factory, _new_page, _wait
 from test_pulse_integration import client_for
 
 
-def test_stop_one_of_two_parked_approvals_admits_next_work_without_replaying_peers(
+def test_stop_one_of_three_attached_approvals_admits_next_work_without_replaying_peers(
     tmp_path, monkeypatch,
 ):
     """Bounded parked capacity must be recyclable by a scoped explicit Stop.
 
-    At capacity one, two original human approvals use both permitted parked
-    threads. A third Work cannot enter yet. Stopping only the first original
-    turn must allow the third to reach its own approval, while the second
-    original keeps its turn, action identity and later once-only file effect.
+    At compute capacity one, the executor has one compute position plus two
+    additional parked positions. THREE original human approvals fill those
+    three physical threads. A FOURTH Work cannot enter yet. Stopping only
+    the first original turn must admit the fourth, while the other two
+    original approvals retain their identities and later effects.
     """
     requests = []
     base_config = page_service_module.RuntimeServiceConfig
@@ -58,27 +59,38 @@ def test_stop_one_of_two_parked_approvals_admits_next_work_without_replaying_pee
             and state["pendingActions"][0]["canResolve"],
             timeout=12,
         )
+        third_held = _new_page(client, "WRITE_ONE")
+        original_third = _wait(
+            execution, third_held,
+            lambda state: state["status"] == "needs_attention"
+            and len(state["pendingActions"]) == 1
+            and state["pendingActions"][0]["canResolve"],
+            timeout=12,
+        )
         first_turn = original_first["turnId"]
         second_turn = original_second["turnId"]
+        third_turn = original_third["turnId"]
         second_action = original_second["pendingActions"][0]["actionId"]
-        assert first_turn and second_turn and first_turn != second_turn
+        assert first_turn and second_turn and third_turn
+        assert len({first_turn, second_turn, third_turn}) == 3
         assert second_action != original_first["pendingActions"][0]["actionId"]
 
         deadline = time.monotonic() + 5
         while True:
             slots = runtime.scheduling_snapshot()["capacity"]
-            if slots["worker_parked"] == 2:
+            if slots["worker_parked"] == 3:
                 break
             assert time.monotonic() < deadline, slots
             time.sleep(0.025)
         assert slots["worker_limit"] == 1
         assert slots["worker_running"] == 0
-        assert slots["worker_attached"] == 2
+        assert slots["worker_attached"] == 3
+        assert slots["approval_parked_limit"] == 2
 
-        third = _new_page(client, "WRITE_TWO")
+        queued = _new_page(client, "WRITE_TWO")
         time.sleep(0.3)
-        assert execution.snapshot(third)["turnId"] is None
-        assert len(requests) == 2
+        assert execution.snapshot(queued)["turnId"] is None
+        assert len(requests) == 3
         assert not (tmp_path / "workspace" / "one.txt").exists()
         assert not (tmp_path / "workspace" / "two.txt").exists()
 
@@ -94,18 +106,24 @@ def test_stop_one_of_two_parked_approvals_admits_next_work_without_replaying_pee
         )
 
         third_wait = _wait(
-            execution, third,
+            execution, queued,
             lambda state: state["status"] == "needs_attention"
             and len(state["pendingActions"]) == 1
             and state["pendingActions"][0]["canResolve"],
             timeout=12,
         )
-        assert third_wait["turnId"] not in {first_turn, second_turn}
+        assert third_wait["turnId"] not in {first_turn, second_turn, third_turn}
         peer = execution.snapshot(second)
         assert peer["turnId"] == second_turn
         assert peer["status"] == "needs_attention"
         assert peer["pendingActions"][0]["actionId"] == second_action
-        assert len(requests) == 3
+        still_waiting = execution.snapshot(third_held)
+        assert still_waiting["turnId"] == third_turn
+        assert still_waiting["status"] == "needs_attention"
+        assert still_waiting["pendingActions"][0]["actionId"] == (
+            original_third["pendingActions"][0]["actionId"]
+        )
+        assert len(requests) == 4
         assert not (tmp_path / "workspace" / "one.txt").exists()
         assert not (tmp_path / "workspace" / "two.txt").exists()
 
@@ -131,6 +149,7 @@ def test_stop_one_of_two_parked_approvals_admits_next_work_without_replaying_pee
             scope, second_action,
         ) == 1
         assert execution.snapshot(first)["status"] == "stopped"
-        assert execution.snapshot(third)["pendingActions"][0]["actionId"] == (
+        assert execution.snapshot(third_held)["turnId"] == third_turn
+        assert execution.snapshot(queued)["pendingActions"][0]["actionId"] == (
             third_wait["pendingActions"][0]["actionId"]
         )
