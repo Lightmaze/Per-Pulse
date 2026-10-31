@@ -181,3 +181,116 @@ def test_waiting_approvals_park_without_starving_new_work_or_replaying_approval(
         assert sorted(path.name for path in (tmp_path / "workspace").glob("approval-pressure-*.txt")) == [
             "approval-pressure-1.txt",
         ]
+
+
+def test_one_live_model_limit_is_preserved_when_old_approvals_are_parked(
+    tmp_path, monkeypatch,
+):
+    """Human parking must not silently multiply actual concurrent model calls.
+
+    Capacity one has an old pending approval and a deliberately slow new
+    provider round. A third Work must remain unadmitted until that *model*
+    releases its permit, then run without cancelling either older Work.
+    """
+    monkeypatch.setenv("PER_PULSE_APPROVAL_GATE_KEY", "synthetic-only")
+    lock = threading.Lock()
+    entered = threading.Event()
+    release = threading.Event()
+    activity = {"started": 0, "live": 0, "peak": 0}
+
+    def factory(scope):
+        def respond(request):
+            messages = json.loads(request.content)["messages"]
+            has_tool = any(message.get("role") == "tool" for message in messages)
+            if has_tool:
+                delta, finish = {"content": "The approved action has finished."}, "stop"
+            else:
+                with lock:
+                    ordinal = activity["started"]
+                    activity["started"] += 1
+                    activity["live"] += 1
+                    activity["peak"] = max(activity["peak"], activity["live"])
+                try:
+                    if ordinal == 1:
+                        entered.set()
+                        if not release.wait(timeout=12):
+                            raise TimeoutError("Test model barrier was not released")
+                    delta, finish = ({
+                        "tool_calls": [{
+                            "index": 0, "id": "fixture-gated",
+                            "type": "function",
+                            "function": {
+                                "name": "mutate_file",
+                                "arguments": json.dumps({
+                                    "path": f"approval-gated-{ordinal}.txt",
+                                    "expected_digest": None,
+                                    "content": f"Requires an explicit human decision {ordinal}.\n",
+                                }),
+                            },
+                        }],
+                    }, "tool_calls")
+                finally:
+                    with lock:
+                        activity["live"] -= 1
+            chunks = [
+                {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
+            ]
+            stream = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks)
+            return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                                  content=stream + "data: [DONE]\n\n")
+
+        return ChatHTTPModelAdapter(
+            ChatHTTPConfig(
+                "https://fixture.invalid/chat/completions", "gated-fixture",
+                credential_env="PER_PULSE_APPROVAL_GATE_KEY",
+            ), transport=httpx.MockTransport(respond),
+        )
+
+    base_config = page_service_module.RuntimeServiceConfig
+    monkeypatch.setattr(
+        page_service_module, "RuntimeServiceConfig",
+        lambda **kwargs: base_config(**kwargs, pulse_worker_capacity=1),
+    )
+    settings = PulseSettings(enabled=True, spontaneous_rate=0,
+                             check_interval_seconds=0.02)
+    with client_for(tmp_path, pulse=settings, model_factory=factory,
+                    allow_workspace_actions=True) as client:
+        runtime = client.app.state.pages.runtime
+        execution = PageExecution(runtime)
+        try:
+            old = _new_page(client, "GATED_OLD_APPROVAL")
+            previous = _wait(
+                execution, old,
+                lambda state: state["status"] == "needs_attention",
+                timeout=12,
+            )
+            assert previous["turnId"] and len(previous["pendingActions"]) == 1
+            slow = _new_page(client, "GATED_SLOW_MODEL")
+            assert entered.wait(timeout=8), "second user Work must start"
+            newcomer = _new_page(client, "GATED_THIRD_MODEL")
+            time.sleep(0.2)
+            capacity = runtime.scheduling_snapshot()["capacity"]
+            assert capacity["worker_limit"] == 1
+            assert capacity["worker_parked"] == 1
+            assert capacity["worker_running"] == 1
+            assert capacity["worker_available"] == 0
+            assert execution.snapshot(newcomer)["turnId"] is None
+            with lock:
+                assert activity["started"] == 2
+                assert activity["peak"] == 1
+            assert execution.snapshot(old)["turnId"] == previous["turnId"]
+            release.set()
+            third = _wait(
+                execution, newcomer,
+                lambda state: state["status"] == "needs_attention",
+                timeout=12,
+            )
+            assert third["turnId"] is not None
+            assert execution.snapshot(old)["turnId"] == previous["turnId"]
+            with lock:
+                assert activity["started"] == 3
+                assert activity["peak"] == 1, "approval parking must not expand live provider concurrency"
+            assert not list((tmp_path / "workspace").glob("approval-gated-*.txt"))
+        finally:
+            release.set()
