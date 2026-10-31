@@ -331,6 +331,9 @@ class KernelHarnessRuntime:
         self._input_for_turn = None
         self._publication = None
         self._lock = threading.Condition(threading.RLock())
+        # Human WAITING_APPROVAL turns retain original Kernel ownership,
+        # but do not hold a model/tool execution permit while waiting.
+        self._compute_permits: threading.BoundedSemaphore | None = None
         # Turn admission is serialized per subject-owned context. Lifecycle
         # operations (abort, succession, shutdown) remain subject-wide.
         self._active: dict[tuple[str, str], HarnessScope] = {}
@@ -345,6 +348,54 @@ class KernelHarnessRuntime:
         self._shutdown_lock = threading.Lock()
         self._closed = False
         self._closing = False
+
+    def configure_approval_compute(self, capacity: int) -> None:
+        """Set one native compute gate before admitting any Pulse workers."""
+        if type(capacity) is not int or not 1 <= capacity <= 64:
+            raise ValueError("native Kernel compute capacity must be 1..64")
+        with self._lock:
+            if self._compute_permits is not None or self._active or self._closing:
+                raise RuntimeError("Kernel compute capacity cannot change during execution")
+            self._compute_permits = threading.BoundedSemaphore(capacity)
+
+    @contextmanager
+    def _compute_permit(self, scope):
+        permits = self._compute_permits
+        if permits is None:
+            yield
+            return
+        # A queued approval continuation must observe Stop/owner loss.
+        # The original durable turn and permission remain the sole authority.
+        while True:
+            self._check()
+            if self.kernel is not None and self.kernel.store.get_turn(scope).status is TurnStatus.CANCELLED:
+                raise _error("kernel_turn_cancelled_while_queued",
+                             "the original Kernel turn was cancelled", accepted=True)
+            if permits.acquire(timeout=0.05):
+                break
+        try:
+            self._check()
+            yield
+        finally:
+            permits.release()
+
+    def approval_is_parked(self, engram_id: str, context_id: str) -> bool:
+        """Read-only proof that the exact attached turn awaits a human."""
+        if not isinstance(engram_id, str) or not isinstance(context_id, str):
+            return False
+        with self._lock:
+            if self._closing or self._closed or self.kernel is None:
+                return False
+            scope = self._active.get((engram_id, context_id))
+            if scope is None or scope.turn_id in self._starting_turn_ids:
+                return False
+        try:
+            return (
+                self.kernel.store.get_turn(scope).status is TurnStatus.WAITING_APPROVAL
+                and bool(self.kernel.store.pending_actions(scope))
+            )
+        except (KernelError, sqlite3.Error, ValueError, KeyError):
+            return False
 
     @staticmethod
     def _cognition_allowance():
@@ -677,11 +728,12 @@ class KernelHarnessRuntime:
             # execution lease. A fast user click must wait for that yield,
             # not approve an action and then fail to resume an active runner.
             with run_lock:
-                with self._lock:
-                    self._check()
-                    if self._active.get(active_key) != scope:
-                        raise ScopeConflict("approval has no attached world turn; cancel or reconcile it instead")
-                yield
+                with self._compute_permit(scope):
+                    with self._lock:
+                        self._check()
+                        if self._active.get(active_key) != scope:
+                            raise ScopeConflict("approval has no attached world turn; cancel or reconcile it instead")
+                    yield
         finally:
             with self._lock:
                 self._approval_calls -= 1
@@ -861,8 +913,9 @@ class KernelHarnessRuntime:
                 timer.daemon = True
                 timer.start()
             with run_lock:
-                self._check()
-                result = runtime.runner.run(scope, prompt=None if internal is not None else submitted)
+                with self._compute_permit(scope):
+                    self._check()
+                    result = runtime.runner.run(scope, prompt=None if internal is not None else submitted)
             while result.status not in _TERMINAL:
                 self._check()
                 time.sleep(0.025)
