@@ -12,7 +12,7 @@ import { CopyButton } from './CopyButton';
 export type Modal =
   | { kind: 'create'; message?: Message }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
-  | { kind: 'return'; message: Message; content: string }
+  | { kind: 'return'; message: Message; content: string; needsExactExcerpt?: boolean }
   | { kind: 'transfer'; message: Message; excerpt: string; needsExactExcerpt?: boolean }
   | { kind: 'settings' }
   | { kind: 'learning' }
@@ -114,17 +114,34 @@ export function TransferWorkDialog({ excerpt, sourceText, needsExactExcerpt = fa
   </Dialog>;
 }
 
-export function ReturnDialog({ initial, busy, error, close, send, sourceTitle, materials = [] }: { initial: string; busy: boolean; error: string; close: () => void; send: (content: string, includeMaterials: boolean) => void; sourceTitle?: string; materials?: Material[] }) {
+export function ReturnDialog({ initial, sourceText, needsExactExcerpt = false, busy, error, close, send, sourceTitle, materials = [] }: {
+  initial: string; sourceText: string; needsExactExcerpt?: boolean; busy: boolean; error: string;
+  close: () => void; send: (content: string, includeMaterials: boolean) => void;
+  sourceTitle?: string; materials?: Material[];
+}) {
   const { t } = useLanguage();
   const [content, setContent] = useState(initial);
   const [includeMaterials, setIncludeMaterials] = useState(materials.length > 0);
-  const canReturn = !!content.trim() || includeMaterials;
+  // Files-only returns remain supported normally. A failed text selection,
+  // however, must be resolved deliberately before any Home disclosure.
+  const canReturn = (!!content.trim() || includeMaterials) && (!needsExactExcerpt || !!content.trim());
   return <Dialog title={t("dialogs.returnTitle")} onClose={close}>
     <p className="dialog-description">{t('dialogs.returnDescription')}</p>
     <div className="return-preview"><span className="return-preview-source">{t('dialogs.from')} <strong>{sourceTitle || t('dialogs.thisPage')}</strong></span><span aria-hidden="true">→</span><span className="return-preview-destination">{t('sidebar.home')}</span></div>
     <form onSubmit={event => { event.preventDefault(); if (canReturn && !busy) send(content.trim(), includeMaterials); }}>
       <label className="field-label" htmlFor="return-content">{t('dialogs.returnContent')}</label>
-      <textarea id="return-content" autoFocus value={content} onChange={event => setContent(event.target.value)} rows={7} required={!includeMaterials} />
+      {needsExactExcerpt ? <p className="lesson-note" role="status">{t('dialogs.returnSelectionMismatch')}</p> : null}
+      <textarea id="return-content" autoFocus value={content} onChange={event => setContent(event.target.value)} rows={7}
+        required={!includeMaterials || needsExactExcerpt} disabled={busy} />
+      {needsExactExcerpt ? <>
+        <details>
+          <summary>{t('dialogs.returnRawSource')}</summary>
+          <textarea aria-label={t('dialogs.returnRawSource')} readOnly value={sourceText} rows={6} />
+        </details>
+        <button className="text-button" type="button" disabled={busy} onClick={() => setContent(sourceText)}>
+          {t('dialogs.returnFullResult')}
+        </button>
+      </> : null}
       {materials.length ? <div className="return-materials"><label><input type="checkbox" checked={includeMaterials} disabled={busy} onChange={event => setIncludeMaterials(event.target.checked)} />{t('materials.include')}</label><p className="lesson-note">{materials.map(item => item.name).join(', ')}</p></div> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button className="primary-button" type="submit" disabled={busy || !canReturn}>{busy ? t('dialogs.saving') : t('dialogs.bringHome')}</button></div>

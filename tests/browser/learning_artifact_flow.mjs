@@ -154,9 +154,27 @@ try {
   const result = page.locator('.message-assistant').filter({
     hasText: 'The file task finished. [Synthetic browser fixture]',
   }).last();
-  await result.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  // A rendered selection spanning formatting and controls is not verbatim
+  // source text. The Home return must not silently disclose the full reply.
+  // Locator.evaluate waits for the settled result to appear; an immediate
+  // page.evaluate can race the last native response and miss this message.
+  await result.evaluate(article => {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(article);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const button = [...article.querySelectorAll('button')]
+      .find(node => node.textContent?.trim() === 'Bring to Home');
+    if (!button) throw new Error('Home return action was not found');
+    button.click();
+  });
   const dialog = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
   await dialog.waitFor();
+  assert.equal(await dialog.locator('#return-content').inputValue(), '');
+  assert.equal(await dialog.getByRole('button', { name: 'Bring to Home', exact: true }).isDisabled(), true);
+  await dialog.getByRole('button', { name: 'Use entire source result', exact: true }).click();
+  assert.match(await dialog.locator('#return-content').inputValue(), /The file task finished/);
   await dialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
   await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
   const homeResult = page.locator('.message-user').filter({
@@ -170,7 +188,7 @@ try {
   await page.getByRole('heading', { name: 'Informed delivery', exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname.endsWith('/' + learnedId), true);
   assert.equal(await page.locator('.composer textarea').inputValue(), draft);
-  checks.push('selected original Work result returns to Home with a precise source, then restores Work draft');
+  checks.push('nonliteral Home selection requires explicit full-result consent, then restores sourced Work draft');
 
   await stopServer(server);
   server = startServer();

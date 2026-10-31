@@ -10,7 +10,7 @@ import { messageBody } from '../messageBody';
 import { initialWorkHandoffExcerpt } from '../workHandoffExcerpt';
 
 export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
-  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string) => void; onTransfer?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
+  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
   onSaveExample?: (message: Message, excerpt: string) => void;
   onMaterial?: (materialId: string, pageId: string) => void;
 }) {
@@ -54,11 +54,11 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
           {view.page.kind === 'work' ? <button onClick={() => {
             const selected = window.getSelection();
             const node = document.getElementById(`message-${message.id}`);
-            const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString().trim() : '';
-            const canonical = messageBody(message);
-            // Rendered Markdown may join text that is not contiguous in the
-            // original. Only label an exact source substring as a selection.
-            onReturn(message, text && canonical.includes(text) ? text : canonical);
+            const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString() : '';
+            // A rendered Markdown selection need not be contiguous in the
+            // original. Never silently turn that selection into the full Work.
+            const { excerpt, needsExactExcerpt } = initialWorkHandoffExcerpt(messageBody(message), text);
+            onReturn(message, excerpt, needsExactExcerpt);
           }} title={t("conversation.bringHomeTitle")}><Icon name="return" size={14} />{t("conversation.bringHome")}</button> : null}
         </div>
       </div>
