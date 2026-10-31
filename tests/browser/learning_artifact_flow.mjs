@@ -245,6 +245,35 @@ try {
   const selectedSource = page.locator('.message-assistant').filter({
     hasText: 'The first screen is a twelve-field intake form. [Synthetic browser fixture]',
   }).first();
+  // A DOM selection can contain rendered labels/Markdown not contiguous in
+  // the native result. It must never silently expand into the full source.
+  await page.evaluate(() => {
+    const article = [...document.querySelectorAll('.message-assistant')]
+      .find(node => node.textContent?.includes('The first screen is a twelve-field intake form. [Synthetic browser fixture]'));
+    if (!article) throw new Error('Original settled result was not found');
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(article);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const button = [...article.querySelectorAll('button')]
+      .find(node => node.textContent?.trim() === 'Use in another Work');
+    if (!button) throw new Error('Result handoff action was not found');
+    button.click();
+  });
+  const mismatchDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
+  await mismatchDialog.waitFor();
+  assert.equal(await mismatchDialog.locator('#transfer-work-excerpt').inputValue(), '');
+  await mismatchDialog.locator('#transfer-work-instruction').fill('Use only an exact quote.');
+  assert.equal(await mismatchDialog.getByRole('button', { name: 'Send to Work', exact: true }).isDisabled(), true);
+  await mismatchDialog.locator('#transfer-work-excerpt').fill('A fabricated quote');
+  assert.equal(await mismatchDialog.getByRole('button', { name: 'Send to Work', exact: true }).isDisabled(), true);
+  await mismatchDialog.getByRole('button', { name: 'Use entire source result', exact: true }).click();
+  assert.match(await mismatchDialog.locator('#transfer-work-excerpt').inputValue(), /twelve-field intake form/);
+  assert.equal(await mismatchDialog.getByRole('button', { name: 'Send to Work', exact: true }).isEnabled(), true);
+  await mismatchDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  checks.push('nonliteral rendered selection cannot silently disclose an entire Work result');
   await selectedSource.getByRole('button', { name: 'Use in another Work', exact: true }).click();
   const transferDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
   await transferDialog.waitFor();
