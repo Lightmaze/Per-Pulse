@@ -313,6 +313,9 @@ export default function App() {
     {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} materials={modal.message.materials} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
+    {modal?.kind === 'transfer' ? <TransferWorkDialog key={`${route.id}/${modal.message.id}`} excerpt={modal.excerpt}
+      sourceTitle={view?.page.title} destinations={pages.filter(page => page.kind === 'work' && page.id !== route.id)}
+      busy={busy} error={modalError} close={closeModal} send={transferWork} /> : null}
     {modal?.kind === 'rename' ? <RenameDialog initial={view?.page.title ?? ''} busy={busy} error={modalError} close={closeModal} rename={renamePage} /> : null}
     {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast(t('app.connectionChecked'))).catch(problem => setToast(errorText(problem)))} /> : null}
     {modal?.kind === 'learning' ? <LearningDialog key={`${workspaceId}/${route.id}`} pageId={route.id} pageTitle={view?.page.title ?? t('dialogs.thisPage')} messages={view?.messages ?? []} close={closeModal} navigate={navigate} /> : null}
