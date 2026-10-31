@@ -116,7 +116,13 @@ def test_four_unapproved_kernel_turns_occupy_four_pulse_slots_until_one_is_cance
         assert len(calls) == 4
         fifth_before = execution.snapshot(fifth)
         assert fifth_before["pendingActions"] == []
-        assert fifth_before["status"] not in {"needs_attention", "idle"}
+        # A queued Work has no Kernel session yet, so the read-only page
+        # execution projection legitimately reports "idle". That is not
+        # evidence of a completed or admitted turn; the provider call count,
+        # absence of a turn, and saturated native capacity prove the hold.
+        assert fifth_before["status"] == "idle"
+        assert fifth_before["sessionId"] is None
+        assert fifth_before["turnId"] is None
         print(json.dumps({
             "transport": "TEST_DOUBLE",
             "limit": before["capacity"]["worker_limit"],
