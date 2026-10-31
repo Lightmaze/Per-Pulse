@@ -10,7 +10,13 @@ In an existing Work containing a **settled assistant result**, select a literal
 passage (or use the entire result), choose **Use in another Work**, pick an
 existing destination Work and describe what that Work should do with it.
 Only the selected exact text and the new request become a normal user event in
-the receiving Work. The original message, its Work and the receiving Work's
+the receiving Work. If a highlighted Markdown passage does not match a
+contiguous portion of the stored original text, the dialog starts **empty**:
+the UI must not silently replace the requested passage with the entire reply.
+The user can copy a literal passage from the raw source preview or explicitly
+choose **Use entire source result**. The dialog and native API both reject an
+edited or fabricated quote. A click with **no** highlighted text still proposes
+the full result, visibly in the editable dialog, before confirmation. The original message, its Work and the receiving Work's
 own history are not copied.
 
 The receiving message has a **native-origin link** to the exact original
