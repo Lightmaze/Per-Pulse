@@ -19,6 +19,7 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
   workspaceId: string;
 }) {
   const { t, pageTitle } = useLanguage();
+  const [showAllPending, setShowAllPending] = useState(false);
   const [visited, setVisited] = useState<{ workspaceId: string; eventIds: string[] }>(() => ({
     workspaceId, eventIds: readVisitedLocalEvents(workspaceId),
   }));
@@ -91,7 +92,10 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
   const visitedIds = visited.workspaceId === workspaceId
     ? visited.eventIds : readVisitedLocalEvents(workspaceId);
   const items = homeContinuations(freshPages ? pulse : null, freshPages ?? [], 3, new Set(visitedIds));
-  const needAttention = homeWorkNeedsAttention(freshPages ?? []);
+  // Show the first three without burying additional decisions or failed Works.
+  // Expansion uses the same live, World-verified bootstrap; never cached page names.
+  const pending = homeWorkNeedsAttention(freshPages ?? [], freshPages?.length ?? 0);
+  const needAttention = showAllPending ? pending : pending.slice(0, 3);
   if (!items.length && !needAttention.length) return null;
 
   const titleOf = (id: string) => id === 'home' ? t('app.home')
@@ -119,6 +123,10 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
           </span>
         </li>)}
       </ol>
+      {pending.length > 3 ? <button type="button" className="text-button"
+        aria-expanded={showAllPending} onClick={() => setShowAllPending(value => !value)}>
+        {showAllPending ? t('pulse.homeReview.showFewer') : t('pulse.homeReview.showAll', { count: pending.length })}
+      </button> : null}
     </section> : null}
     {items.length ? <section className="home-continuations" aria-label={t('pulse.home.title')}>
       <h2>{t('pulse.home.title')}</h2>
