@@ -65,6 +65,7 @@ export const commonChinese: Record<keyof typeof commonEnglish, string> = {
   'app.pageCreated': '页面已创建，并保留了返回来源的链接。',
   'app.pageLinked': '已链接到「{title}」。',
   'app.broughtHome': '已带回主页，并保留来源。',
+  'app.transferredToWork': '已把选定成果送入另一项工作，并保留来源。',
   'app.connectionChecked': '已检查连接。',
   'error.generic': '出了点问题，请重试。',
   'error.network': '无法连接工作区，请重试。',
