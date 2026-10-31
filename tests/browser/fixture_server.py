@@ -65,6 +65,11 @@ def handler(request):
     messages = body['messages']
     text = json.dumps(messages)
     has_tool = any(m.get('role') == 'tool' for m in messages)
+    # A real native failed Work is needed alongside approval holds: the
+    # foreground admission limit must not be bypassed by synthetic statuses.
+    if 'FAIL_FOR_REVIEW' in text:
+        return httpx.Response(400, headers={'content-type': 'application/json'},
+                              json={'error': {'message': 'Explicit synthetic provider rejection'}})
     if 'SLOW_AFTER_APPROVAL' in text and has_tool:
         entered.set()
         release.wait(30)
