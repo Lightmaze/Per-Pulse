@@ -21,6 +21,7 @@ export const commonEnglish = {
   'app.pageCreated': 'A new page, with a link back to where it began.',
   'app.pageLinked': 'Linked to {title}.',
   'app.broughtHome': 'Brought to Home, with its source.',
+  'app.transferredToWork': 'Selected result delivered to another Work, with its source.',
   'app.connectionChecked': 'Connection checked.',
   'error.generic': 'Something went wrong. Please try again.',
   'error.network': 'Your workspace could not be reached. Please try again.',
