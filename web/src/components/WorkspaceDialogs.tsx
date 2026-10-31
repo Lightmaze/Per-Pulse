@@ -6,7 +6,7 @@ import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { messageBody } from '../messageBody';
 import { isExactWorkHandoffExcerpt } from '../workHandoffExcerpt';
-import { providerSetupCommand, type ProviderShell } from '../providerSetup';
+import { providerSetupCommand, type ProviderMode, type ProviderShell } from '../providerSetup';
 import { CopyButton } from './CopyButton';
 
 export type Modal =
@@ -155,7 +155,8 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
   const [saving, setSaving] = useState(false);
   const [languageError, setLanguageError] = useState('');
   const [setupShell, setSetupShell] = useState<ProviderShell>('posix');
-  const setupCommand = providerSetupCommand(setupShell);
+  const [setupMode, setSetupMode] = useState<ProviderMode>('keyed');
+  const setupCommand = providerSetupCommand(setupShell, setupMode);
   const changeLanguage = async (next: ResponseLanguage) => {
     if (saving || next === language) return;
     setSaving(true);
@@ -175,6 +176,13 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
       {bootstrap && !bootstrap.provider.configured && !bootstrap.example ? <details className="provider-setup">
         <summary>{t('settings.connectGuide')}</summary>
         <p>{t('settings.connectSteps')}</p>
+        <label className="field-label" htmlFor="provider-connection-mode">{t('settings.connectionMode')}</label>
+        <select id="provider-connection-mode" value={setupMode}
+          onChange={event => setSetupMode(event.target.value as ProviderMode)}>
+          <option value="keyed">{t('settings.modeKeyed')}</option>
+          <option value="loopback">{t('settings.modeLoopback')}</option>
+        </select>
+        {setupMode === 'loopback' ? <p className="settings-detail">{t('settings.localModelHint')}</p> : null}
         <label className="field-label" htmlFor="provider-terminal-shell">{t('settings.terminalShell')}</label>
         <select id="provider-terminal-shell" value={setupShell}
           onChange={event => setSetupShell(event.target.value as ProviderShell)}>
@@ -184,7 +192,7 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
         <pre aria-label={t('settings.connectCommand')}><code>{setupCommand}</code></pre>
         <CopyButton text={setupCommand} label={t('settings.copySetup')} />
         <p className="settings-detail">{t('settings.doctorHint')}</p>
-        <p>{t('settings.connectionSafety')}</p>
+        <p>{t(setupMode === 'loopback' ? 'settings.localModelSafety' : 'settings.connectionSafety')}</p>
       </details> : null}</div>
     <div className="settings-section">
       <h3>{t('settings.languageHeading')}</h3>
