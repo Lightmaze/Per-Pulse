@@ -142,7 +142,7 @@ def test_native_approval_completed_provider_usage_blocks_extra_admission(
             timeout=12,
         )
         assert (tmp_path / "workspace" / "approval-budget-0.txt").read_text() == (
-            "Only after explicit approval.\\n"
+            "Only after explicit approval.\n"
         )
         repeated = execution.resolve_approval(
             first, original["pendingActions"][0]["actionId"], "allow_once",
