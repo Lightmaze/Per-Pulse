@@ -8,6 +8,7 @@ const exampleValues = [
   ['P_PULSE_CHAT_ENDPOINT', 'https://your-provider.example/v1/chat/completions'],
   ['P_PULSE_CHAT_MODEL', 'your-model-id'],
   ['P_PULSE_API_KEY', 'your-api-key'],
+  ['P_PULSE_LOCAL_NO_AUTH', '0'],
 ] as const;
 
 const loopbackValues = [
@@ -15,6 +16,7 @@ const loopbackValues = [
   ['P_PULSE_CHAT_MODEL', 'your-local-model-id'],
   ['P_PULSE_ALLOW_LOCAL_HTTP', '1'],
   ['P_PULSE_LOCAL_NO_AUTH', '1'],
+  ['P_PULSE_PROVIDER_NAMESPACE', ''],
 ] as const;
 
 /** A user-editable terminal template, not a request to send secrets to the UI. */
