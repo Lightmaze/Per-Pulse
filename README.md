@@ -99,6 +99,8 @@ per-pulse
 
 Replace the placeholders with your provider's values. The endpoint is a complete URL, not a base URL. Credentials stay in the server environment; the browser never receives them. You can use `P_PULSE_CREDENTIAL_ENV` to name a different environment variable containing the key.
 
+For Windows PowerShell, use `$env:P_PULSE_CHAT_ENDPOINT = '...'`, `$env:P_PULSE_CHAT_MODEL = '...'`, and `$env:P_PULSE_API_KEY = '...'` in the **same PowerShell session** before running `per-pulse doctor` and `per-pulse`. When disconnected, **Settings → How to connect a model** now provides a POSIX or PowerShell terminal template and a copy control. It contains only placeholders; never enter your real API key into the browser. The local `doctor` preflight sends no provider request and cannot verify remote connectivity, model behavior, or spending limits.
+
 If neither endpoint nor model is set, the workspace runs disconnected. Setting only one is a configuration error. Restart after changing provider configuration. Queued input from the ordinary workspace can be processed after connecting a model, so use a separate data directory when you want a fresh conversation.
 
 Before starting a provider-backed Work or a paid posture experiment, check the
