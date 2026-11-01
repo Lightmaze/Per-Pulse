@@ -87,12 +87,13 @@ export function PageArtifacts({ view, onUseInHome }: { view: PageView; onUseInHo
           {result.truncated ? <p>{t('artifacts.limited')}</p> : null}
           {result.redacted ? <p>{t('artifacts.redacted')}</p> : null}
           <p className="artifact-provenance">{t('artifacts.provenance', { time: new Date(artifact.createdAt).toLocaleString() })}</p>
-          {!result.redacted ? <div className="artifact-actions">
+          {result.downloadable ? <div className="artifact-actions">
             <button type="button" className="secondary-button" disabled={downloadState === 'loading' || carrying} onClick={() => void download(artifact)}>{t(downloadState === 'loading' ? 'artifacts.downloading' : 'artifacts.download')}</button>
             {onUseInHome && view.page.kind === 'work' ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => void useInHome(artifact)}>{t(carrying ? 'library.artifactToHomeBusy' : 'library.artifactToHome')}</button> : null}
             {downloadState === 'started' ? <span role="status">{t('artifacts.downloadStarted')}</span> : null}
           </div> : null}
-          {onUseInHome && view.page.kind === 'work' && !result.redacted ? <p className="artifact-intro">{t('library.artifactToHomeHint')}</p> : null}
+          {!result.downloadable && !result.redacted ? <p className="artifact-intro">{t('artifacts.originalUnavailable')}</p> : null}
+          {onUseInHome && view.page.kind === 'work' && result.downloadable ? <p className="artifact-intro">{t('library.artifactToHomeHint')}</p> : null}
         </> : result?.state === 'changed' ? <p role="status">{t('artifacts.changed')}</p> : result ? <p role="status">{unavailableReason(result.reason, t)}</p> : null}
         {!loading ? <button type="button" className="text-button" onClick={() => void read(artifact, true)}>{t('artifacts.refresh')}</button> : null}
       </div> : null}
