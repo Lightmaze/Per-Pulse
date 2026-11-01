@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,8 +27,8 @@ let serverLog = '';
 let server;
 let browser;
 
-function start() {
-  const child = spawn(python, ['-m', 'per_pulse.cli', '--data-dir', directory, '--port', String(port)],
+function start(dataDir = directory) {
+  const child = spawn(python, ['-m', 'per_pulse.cli', '--data-dir', dataDir, '--port', String(port)],
     { cwd: directory, env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', data => { serverLog += data; });
   child.stderr.on('data', data => { serverLog += data; });
@@ -213,14 +213,49 @@ try {
   const restored = await (await fetch(base + '/api/bootstrap')).json();
   assert.equal(restored.workspaceId, bootstrap.workspaceId);
   assert.equal(restored.provider.configured, false);
+  assert.notEqual(restored.serviceInstanceId, bootstrap.serviceInstanceId);
+
+  // Exercise a real replacement World on the same local port without reloading
+  // the browser. The old Home projection contains private messages and must
+  // disappear as soon as the native page identity mismatches the old bootstrap.
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('link', { name: 'Home', exact: true }).click();
+  const oldMarker = 'PRIVATE_OLD_WORLD_HOME_NOTE_20261101';
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).fill(oldMarker);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await page.getByText(oldMarker, { exact: true }).waitFor();
+  await page.getByRole('link', { name: 'A real disconnected Work', exact: true }).click();
+  await page.getByRole('heading', { name: 'A real disconnected Work', exact: true }).waitFor();
+
+  const nextWorldDirectory = join(directory, 'replacement-world');
+  await mkdir(nextWorldDirectory);
+  await stop(server);
+  server = start(nextWorldDirectory);
+  await ready();
+  const otherWorld = await (await fetch(base + '/api/bootstrap')).json();
+  assert.notEqual(otherWorld.workspaceId, bootstrap.workspaceId);
+  assert.notEqual(otherWorld.serviceInstanceId, restored.serviceInstanceId);
+  await page.getByRole('link', { name: 'Home', exact: true }).click();
+  await page.locator('.sync-notice').waitFor({ timeout: 20000 });
+  assert.equal(await page.getByText(oldMarker, { exact: true }).count(), 0,
+    'A page from the old World must not remain visible after a new native page response');
+  await page.getByRole('button', { name: 'Refresh updates', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  assert.equal(await page.getByText(oldMarker, { exact: true }).count(), 0);
+  assert.equal(await page.getByRole('link', { name: 'A real disconnected Work', exact: true }).count(), 0,
+    'The replacement World cannot inherit the old Work navigation');
+  const current = await (await fetch(base + '/api/bootstrap')).json();
+  assert.equal(current.workspaceId, otherWorld.workspaceId);
+  assert.deepEqual(current.pages.map(item => item.id), ['home']);
 
   console.log(JSON.stringify({
-    passed: 7,
+    passed: 8,
     checks: ['isolated wheel starts without credentials', 'browser offers local provider setup',
       'English/Chinese first-use instructions work', 'real disconnected Work accepts queued input',
       'two Works stay writable across a delayed origin request without losing its result or draft',
       'late origin save failures are visible at their source without hijacking another Work',
-      'original World, Work and note persist after clean restart'],
+      'original World, Work and note persist after clean restart',
+      'switching to a different native World hides the old Home and Work without a browser reload'],
     provider: 'none; no synthetic model replies',
   }, null, 2));
 } finally {
