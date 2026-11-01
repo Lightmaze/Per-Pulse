@@ -12,13 +12,15 @@ function unavailableReason(reason: string | null, t: Translate): string {
   return t('artifacts.missing');
 }
 
-export function PageArtifacts({ view }: { view: PageView }) {
+export function PageArtifacts({ view, onUseInHome }: { view: PageView; onUseInHome?: (artifact: Artifact) => Promise<void> }) {
   const { t, errorText } = useLanguage();
   const [opened, setOpened] = useState<string | null>(null);
   const [result, setResult] = useState<ArtifactRead | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [downloadState, setDownloadState] = useState<'ready' | 'loading' | 'started'>('ready');
+  const [carrying, setCarrying] = useState(false);
+  const carryingRequest = useRef(false);
   const downloadRequest = useRef<AbortController | null>(null);
   const requestId = useRef(0);
   useEffect(() => () => { requestId.current++; downloadRequest.current?.abort(); }, []);
@@ -58,6 +60,18 @@ export function PageArtifacts({ view }: { view: PageView }) {
     } finally { if (downloadRequest.current === controller) downloadRequest.current = null; }
   };
 
+  const useInHome = async (artifact: Artifact) => {
+    if (!onUseInHome || carryingRequest.current) return;
+    carryingRequest.current = true; setCarrying(true); setError(null);
+    try {
+      await onUseInHome(artifact);
+    } catch (problem) {
+      setError(problem);
+    } finally {
+      carryingRequest.current = false; setCarrying(false);
+    }
+  };
+
   return <section className="page-artifacts" aria-label={t('artifacts.title')}>
     <h2>{t('artifacts.title')}</h2>
     <p className="artifact-intro">{t('artifacts.intro')}</p>
@@ -74,9 +88,11 @@ export function PageArtifacts({ view }: { view: PageView }) {
           {result.redacted ? <p>{t('artifacts.redacted')}</p> : null}
           <p className="artifact-provenance">{t('artifacts.provenance', { time: new Date(artifact.createdAt).toLocaleString() })}</p>
           {!result.redacted ? <div className="artifact-actions">
-            <button type="button" className="secondary-button" disabled={downloadState === 'loading'} onClick={() => void download(artifact)}>{t(downloadState === 'loading' ? 'artifacts.downloading' : 'artifacts.download')}</button>
+            <button type="button" className="secondary-button" disabled={downloadState === 'loading' || carrying} onClick={() => void download(artifact)}>{t(downloadState === 'loading' ? 'artifacts.downloading' : 'artifacts.download')}</button>
+            {onUseInHome && view.page.kind === 'work' ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => void useInHome(artifact)}>{t(carrying ? 'library.artifactToHomeBusy' : 'library.artifactToHome')}</button> : null}
             {downloadState === 'started' ? <span role="status">{t('artifacts.downloadStarted')}</span> : null}
           </div> : null}
+          {onUseInHome && view.page.kind === 'work' && !result.redacted ? <p className="artifact-intro">{t('library.artifactToHomeHint')}</p> : null}
         </> : result?.state === 'changed' ? <p role="status">{t('artifacts.changed')}</p> : result ? <p role="status">{unavailableReason(result.reason, t)}</p> : null}
         {!loading ? <button type="button" className="text-button" onClick={() => void read(artifact, true)}>{t('artifacts.refresh')}</button> : null}
       </div> : null}

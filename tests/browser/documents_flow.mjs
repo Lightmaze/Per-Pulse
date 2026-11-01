@@ -139,6 +139,7 @@ try {
   await page.locator('#interface-language').selectOption('zh-CN');
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await page.getByRole('button', { name: '下载文件', exact: true }).waitFor();
+  await page.getByRole('button', { name: '将完整文件加入主页草稿', exact: true }).waitFor();
   await page.getByRole('button', { name: '原文', exact: true }).click();
   assert.equal(await page.locator('.document-source').textContent(), fixture.content);
   await page.getByRole('button', { name: '设置', exact: true }).click();
@@ -147,6 +148,39 @@ try {
   await page.getByRole('button', { name: 'Read', exact: true }).click();
   checks.push('Bilingual reading and saving controls preserve the authored file');
 
+  // Another Home tab already has unsent writing. The file handoff must add
+  // to that draft, never replace it with the artifact description.
+  const homeTab = await context.newPage();
+  await homeTab.goto(base);
+  await homeTab.locator('.composer textarea').fill('Preserve my existing Home plan.');
+  await homeTab.close();
+  // A confirmed native file is useful work, not just a download: prepare the
+  // complete version in the existing Home draft without making a model call.
+  await page.getByRole('button', { name: 'Add full file to Home draft', exact: true }).click();
+  await page.waitForURL(base + '/');
+  await page.locator('.composer-materials').getByText(fixture.path.split('/').at(-1)).waitFor();
+  const homeText = await page.locator('.composer textarea').inputValue();
+  assert.ok(homeText.startsWith('Preserve my existing Home plan.'));
+  assert.match(homeText, /Readable result/);
+  assert.ok(homeText.includes(fixture.path));
+  await page.locator('.composer-materials').getByText(fixture.path.split('/').at(-1)).waitFor();
+  const homeFiles = await fetch(base + '/api/pages/home/materials').then(response => response.json());
+  assert.equal(homeFiles.materials.length, 1);
+  assert.equal(homeFiles.materials[0].sha256, fixture.sha256);
+  assert.equal(homeFiles.materials[0].source, 'workspace_reference');
+  assert.equal((await fetch(base + '/__fixture/status').then(r => r.json())).requests, 0,
+    'Putting a verified file into an unsent Home draft cannot start another model round');
+  await page.reload();
+  await page.locator('.composer textarea').waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), homeText);
+  await page.goBack();
+  await page.waitForURL('**/page/' + firstId);
+  await page.getByRole('heading', { name: 'Readable result', exact: true }).waitFor();
+  await wait(async () => await page.locator('.composer textarea').inputValue() ===
+    'Keep this draft while I save and inspect the result.', 'source Work draft restored');
+  await page.locator('.artifact-open').filter({ hasText: fixture.path }).click();
+  await page.locator('.markdown-document').getByRole('heading', { name: 'A field note', exact: true }).waitFor();
+  checks.push('Approved Work document becomes a version-bound, unsent Home attachment with source and both drafts preserved');
   // A different Work changes the real shared file while this preview remains open.
   const other = await context.newPage();
   await other.goto(base);
@@ -165,11 +199,18 @@ try {
   assert.equal(rejected.status, 409);
   assert.ok(!(await rejected.text()).includes('PRIVATE_LATER_WORK_RESULT'));
   await save(other, { path: fixture.path, content: fixture.revision, sha256: createHash('sha256').update(fixture.revision).digest('hex') });
+  // The previously opened file is stale. Returning it to Home must not
+  // create a new reference, navigate, or expose the later Work's private bytes.
+  await page.getByRole('button', { name: 'Add full file to Home draft', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'changed' }).waitFor();
+  assert.equal(new URL(page.url()).pathname, '/page/' + firstId);
+  assert.equal((await fetch(base + '/api/pages/home/materials').then(r => r.json())).materials.length, 1);
+  checks.push('A replaced native file cannot be reattached or navigate Home from a stale preview');
   assert.notEqual(secondId, firstId);
   checks.push('Saving rechecks the native version after another Work changes the file; no later content leaks under the old result');
   assert.deepEqual(pageErrors, []);
   assert.deepEqual(unexpectedImages, []);
-  assert.ok(networkErrors.every(error => error.status === 409 && error.url.endsWith('/download')), JSON.stringify(networkErrors));
+  assert.ok(networkErrors.every(error => error.status === 409 && (error.url.endsWith('/download') || error.url.endsWith('/materials/reference'))), JSON.stringify(networkErrors));
   console.log(JSON.stringify({ ok: true, checks, browserErrors: pageErrors, expectedVersionConflicts: networkErrors.length,
     provider: 'explicit synthetic HTTP choices; actual World/Kernel, approvals, file effects and browser downloads' }, null, 2));
 } catch (error) {

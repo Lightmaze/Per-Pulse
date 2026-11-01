@@ -15,6 +15,7 @@ The alpha candidate provides English and 简体中文 interface controls, a sepa
 - Continue in the linked page and return to the source while retaining your unsent draft and reading position.
 - See a running page finish in the sidebar while you keep writing in another page.
 - Bring selected text back to Home with a reference to its source page and message.
+- Carry a digest-verified native Work file into the **unsent Home draft**, preserving its source Work and any existing Home or Work text. The whole file is attached only after you choose the action, and is not sent until you press Send; changed file versions are refused.
 - Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
 - Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.
 - Open **Materials** beside the message composer to upload and preview a text file, reuse an existing file, and attach the version you inspected to your draft.

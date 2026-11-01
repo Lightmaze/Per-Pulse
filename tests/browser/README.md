@@ -119,6 +119,13 @@ another Work replace the file while the first preview stays open: saving the old
 result must fail without exposing the later Work's content. This is a mechanism
 and rendered-use check, not an assessment of a real model's writing quality.
 
+It also carries the approved file into an **unsent Home draft** using the
+existing native, exact-version workspace reference. The same Chromium flow
+verifies source attribution, preservation of both drafts, Home reload and
+browser Back, no extra model call, English/Chinese controls, and a stale-file
+negative control after another Work changes the original bytes. This does not
+create another World or automatically authorize a tool or provider request.
+
 ## One rendered correction-to-artifact journey
 
 ```sh
