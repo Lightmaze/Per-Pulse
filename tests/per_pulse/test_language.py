@@ -53,8 +53,16 @@ def test_settings_persist_without_changing_conversations_and_are_workspace_scope
     with client_for(tmp_path / "ordinary", model_factory=None) as client:
         assert client.get("/api/settings").json() == {"responseLanguage": "zh-CN"}
         assert client.get("/api/bootstrap").json()["workspaceId"] == workspace_id
-        assert client.get("/api/pages/home").json() == before_home
-        assert client.get(f"/api/pages/{page_id}").json() == before_page
+        restarted_home = client.get("/api/pages/home").json()
+        restarted_page = client.get(f"/api/pages/{page_id}").json()
+        # Views retain the original World and content, but a fresh service
+        # incarnation must have a fresh projection identity.
+        assert restarted_home["serviceInstanceId"] == restarted_page["serviceInstanceId"]
+        assert restarted_home["serviceInstanceId"] != before_home["serviceInstanceId"]
+        for before, after in ((before_home, restarted_home), (before_page, restarted_page)):
+            assert {key: value for key, value in after.items() if key != "serviceInstanceId"} == {
+                key: value for key, value in before.items() if key != "serviceInstanceId"
+            }
     with client_for(tmp_path / "other", model_factory=None) as client:
         assert client.get("/api/settings").json() == {"responseLanguage": "auto"}
         assert client.get("/api/bootstrap").json()["workspaceId"] != workspace_id

@@ -13,6 +13,17 @@ The original public Pulse baseline is [Lightmaze/pulse](https://github.com/Light
 
 Home and Work retain one continuity subject. A session page is a view over a native Work, with its own context. References and source anchors are lightweight metadata in the same World database. No parallel conversation database or replacement turn runner is introduced.
 
+Every native page view now carries its issuing `workspaceId` (World identity) and
+`serviceInstanceId` (local service incarnation), just as bootstrap already
+does. The browser never renders a cached page against a different identity,
+or applies a late response from an older service to the current World. A new
+process serving the same World triggers a fresh page read without copying or
+resetting that World's underlying history. If a different data directory is
+started on the same local port, the old Work text is hidden and the user can
+reconnect through **Refresh updates**; old page IDs are not treated as part of
+the new subject. This is a projection fence, not live World synchronization,
+model learning, or a substitute for the native action approval boundary.
+
 The inherited source includes modules beyond this first interface's scope. Shipping a module does not mean its complete UI, provider behavior, or research claims have been verified by this release. The new product entry point and focused tests define the supported initial path.
 
 ## Private state stays outside source

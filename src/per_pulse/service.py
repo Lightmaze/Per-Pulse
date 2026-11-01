@@ -629,6 +629,8 @@ class PageService:
             if page_id != "home" and "home" not in seen:
                 crumbs.append({"id": "home", "title": "Home"})
             return {
+                "workspaceId": self.runtime.world_id,
+                "serviceInstanceId": self.service_instance_id,
                 "page": self._summary(page_id, summary_rows), "messages": messages,
                 "references": refs,
                 "backlinks": [dict(r) for r in self._state["references"] if r["targetPageId"] == page_id],

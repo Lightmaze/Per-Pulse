@@ -103,6 +103,8 @@ export type AdaptiveWorkChoices = {
 };
 
 export type PageView = {
+  workspaceId: string;
+  serviceInstanceId: string;
   page: PageSummary;
   messages: Message[];
   references: PageReference[];
