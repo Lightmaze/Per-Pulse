@@ -388,3 +388,31 @@ def test_collaboration_choice_read_is_original_work_scoped_and_offline(tmp_path)
     with client_for(tmp_path, model_factory=None) as client:
         assert client.get(f"/api/pages/{first}/team/choices").json()["choices"] == []
         assert client.get(f"/api/pages/{second}/team/choices").json()["choices"] == []
+
+
+def test_collaboration_projection_rejects_cross_work_source_links(tmp_path, monkeypatch):
+    """Even a corrupted source ID cannot create a navigable foreign Work link."""
+    with client_for(tmp_path, model_factory=None) as client:
+        one = new_page(client, title="Decision owner")["page"]["id"]
+        other = new_page(client, title="Unrelated private source")["page"]["id"]
+        own_message = send(client, one, "Owner's original Work note")["messageId"]
+        foreign_message = send(client, other, "PRIVATE_OTHER_WORK_SOURCE")["messageId"]
+        native = client.app.state.pages.runtime._native_team
+        monkeypatch.setattr(native, "adaptive_choices_for_work", lambda subject, work_id: {
+            "workId": work_id, "historyMayBeIncomplete": False,
+            "choices": [{
+                "recordId": "explicit-injected-projection", "workId": work_id,
+                "resultMessageId": foreign_message,
+                "evidence": [
+                    {"recordId": "foreign", "sourceMessageId": foreign_message},
+                    {"recordId": "same-work", "sourceMessageId": own_message},
+                ],
+            }],
+        })
+        response = client.get(f"/api/pages/{one}/team/choices")
+        assert response.status_code == 200, response.text
+        choice = response.json()["choices"][0]
+        assert choice["resultMessageId"] is None
+        assert choice["evidence"][0]["sourceMessageId"] is None
+        assert choice["evidence"][1]["sourceMessageId"] == own_message
+        assert "PRIVATE_OTHER_WORK_SOURCE" not in response.text
