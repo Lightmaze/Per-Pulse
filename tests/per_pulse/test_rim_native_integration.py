@@ -257,6 +257,21 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert inspected_output["record_id"] == new_record["id"]
         assert inspected_output["adaptive_preference"] == preference
         assert inspected_output["result"].startswith("A real native TUNNEL contribution")
+        # Operator-facing Work projection is the same persisted selection,
+        # with source references, and cannot become a cross-Work history feed.
+        visible = reopened._native_team.adaptive_choices_for_work(owner, front.id)
+        assert visible["workId"] == front.id
+        assert len(visible["choices"]) == 1
+        projected = visible["choices"][0]
+        assert projected["recordId"] == new_record["id"]
+        assert projected["selectedExpertId"] == preference["selected_expert_id"]
+        assert projected["changedFromReference"] == preference["changed"]
+        assert {item["recordId"] for item in projected["evidence"]} == set(records)
+        assert projected["resultMessageId"] == reopened.causal_ledger.find_delegation_result_by_record_id(
+            reopened.world_id, new_record["id"]).id
+        assert reopened._native_team.adaptive_choices_for_work(owner, reference_work.id)["choices"] == []
+        assert reopened._native_team.adaptive_choices_for_work(state["bad"], front.id)["choices"] == []
+
         explicit_sources = retained_shared(reopened, owner, original_request)
         assert len(explicit_sources) == 1
         assert explicit_sources[0]["source"]["record_id"] == reference_id
