@@ -25,6 +25,7 @@ from pulse_harness.core.errors import ScopeConflict
 
 INSTRUCTION = "Inspect the cache warmup and identify the exact source of startup latency."
 START = "Select one collaborator with prior work outcomes"
+INSPECT = "Inspect the earlier selected consultation in this Work."
 
 
 def _stream(delta, finish="stop"):
@@ -55,6 +56,13 @@ def _model_factory(state, seen):
                 if isinstance(payload, dict) and "output" in payload:
                     state["tool_output"] = payload["output"]
                 return _answer("Consultation prepared in the original Work.")
+            if last.get("content") == INSPECT:
+                return _stream({"tool_calls": [{
+                    "index": 0, "id": "rim-inspect", "type": "function",
+                    "function": {"name": "team", "arguments": json.dumps({
+                        "op": "inspect", "record_id": state["inspect_record_id"],
+                    })},
+                }]}, finish="tool_calls")
             if last.get("content") == START:
                 arguments = {
                     "op": "consult_adaptive",
@@ -227,6 +235,28 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         original_request = reopened.causal_ledger.get_event(
             recovered["delegation_event_id"]
         )
+        # An operator can inspect the original, fixed choice and its native
+        # source IDs after restart, without recomputation or unrelated Works.
+        inspected_choice = reopened._native_team._retained_adaptive_choice(
+            owner, new_record, original_request, front)
+        assert inspected_choice == preference
+        assert inspected_choice is not recovered["preference"]
+        assert {entry["id"] for entry in inspected_choice["evidence"]} == set(records)
+        assert reopened._native_team._retained_adaptive_choice(
+            owner, new_record, original_request, reference_work) is None
+        # Exercise the ordinary model-facing team.inspect action in the same
+        # native Work (not only the read helper). A completed tool response is
+        # source-bound and must still show the original selection after reboot.
+        state["inspect_record_id"] = new_record["id"]
+        state.pop("tool_output", None)
+        reopened.send_task_front_message(front.id, INSPECT)
+        _tick(reopened, lambda: isinstance(state.get("tool_output"), dict)
+              and "adaptive_preference" in state["tool_output"]
+              and not reopened.harness._active)
+        inspected_output = state["tool_output"]
+        assert inspected_output["record_id"] == new_record["id"]
+        assert inspected_output["adaptive_preference"] == preference
+        assert inspected_output["result"].startswith("A real native TUNNEL contribution")
         explicit_sources = retained_shared(reopened, owner, original_request)
         assert len(explicit_sources) == 1
         assert explicit_sources[0]["source"]["record_id"] == reference_id
