@@ -13,6 +13,7 @@ import { Conversation } from './components/Conversation';
 import { Composer } from './components/Composer';
 import { ExecutionStatus } from './components/ExecutionStatus';
 import { PageArtifacts } from './components/PageArtifacts';
+import { CollaboratorChoices } from './components/CollaboratorChoices';
 import { PulseActivity } from './components/PulseActivity';
 import { HomeContinuations } from './components/HomeContinuations';
 import { LearningDialog } from './components/LearningDialog';
