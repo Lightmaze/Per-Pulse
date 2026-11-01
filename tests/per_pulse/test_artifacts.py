@@ -445,6 +445,41 @@ def test_preview_redacts_and_bounds_text_after_verifying_original_bytes(tmp_path
         assert denied.json()["error"]["code"] == "artifact_download_redacted"
         assert "password=abc" not in denied.text
 
+def test_preview_rejects_hidden_marker_beyond_bounded_prefix(tmp_path, monkeypatch):
+    """A safe-looking preview cannot authorize carrying an unsafe complete file."""
+    import per_pulse.artifacts as module
+
+    monkeypatch.setattr(module, "MAX_PREVIEW_BYTES", 256)
+    before = "Draft status.\n" + "Public details only.\n" * 32 + "[REDACTED]\n"
+    after = before.replace("Draft status.", "Final status.", 1)
+    factory = _factory(monkeypatch, {"PATCH_LATE_MARKER": {
+        "path": "late-marker.txt", "expected_digest": _sha(before),
+        "patch": {"edits": [{"old": "Draft status.", "new": "Final status."}]},
+    }}, [])
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        (tmp_path / "workspace" / "late-marker.txt").write_text(before)
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        page_id = _page(client, "PATCH_LATE_MARKER")
+        waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action_id = waiting["pendingActions"][0]["actionId"]
+        try:
+            execution.resolve_approval(page_id, action_id, "allow_once")
+        except ExecutionError as error:
+            assert error.code == "redaction_required"
+        preview = artifacts.read(page_id, action_id)
+        assert preview["state"] == "current"
+        assert preview["observedSha256"] == _sha(after)
+        assert preview["truncated"]
+        assert "[REDACTED]" not in preview["content"]
+        # The entire file contains a persisted redaction marker *after* the
+        # displayed portion. Both actions must agree it is not transferable.
+        assert preview["redacted"]
+        assert preview["downloadable"] is False
+        denied = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert denied.status_code == 422
+        assert denied.json()["error"]["code"] == "artifact_download_redacted"
+
 
 def test_download_keeps_complete_utf8_bytes_and_filename_after_restart(tmp_path, monkeypatch):
     from urllib.parse import quote
@@ -470,6 +505,7 @@ def test_download_keeps_complete_utf8_bytes_and_filename_after_restart(tmp_path,
         action_id = _approve(PageExecution(client.app.state.pages.runtime), page_id)
         preview = client.get(f"/api/pages/{page_id}/artifacts/{action_id}").json()
         assert preview["state"] == "current" and preview["truncated"]
+        assert preview["downloadable"] is True  # Preview clipping is not stored file truncation.
         download = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
         assert download.status_code == 200, download.text
         assert download.content == after.encode("utf-8")

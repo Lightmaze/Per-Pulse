@@ -179,6 +179,7 @@ class PageArtifacts:
             "bytes": None,
             "redacted": False,
             "truncated": False,
+            "downloadable": False,
             "reason": None,
             **self._limits(),
         }
@@ -200,11 +201,18 @@ class PageArtifacts:
         # text. A redacted preview must never be mistaken for raw file bytes.
         clean, redacted = redact_text(current["content"])
         content, bound_redacted, truncated = bound_text(clean, MAX_PREVIEW_BYTES)
-        stored_redacted, _ = stored_text_flags(content)
+        # The preview may end before a persisted redaction/truncation marker.
+        # Judge the *whole verified original*, as download() does; otherwise
+        # a clean-looking prefix could enable carrying the entire unsafe file.
+        stored_redacted, stored_truncated = stored_text_flags(current["content"])
         response.update({
             "state": "current", "content": content,
             "redacted": bool(redacted or bound_redacted or stored_redacted),
-            "truncated": truncated,
+            "truncated": bool(truncated or stored_truncated),
+            # A clipped but otherwise complete file may still be transferred.
+            # A stored truncation marker is NOT such a file, even if it is
+            # readable and contains no concealed secrets.
+            "downloadable": not (redacted or bound_redacted or stored_redacted or stored_truncated),
         })
         response["artifact"] = {**item, "state": "current"}
         return response
