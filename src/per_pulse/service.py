@@ -401,6 +401,34 @@ class PageService:
             raise PageError("page_not_found", "This page does not exist.", 404)
         return front
 
+    def adaptive_choices(self, page_id: str) -> dict:
+        """Read only decisions actually made in the original owned Work."""
+        with self._lock:
+            front = self._front(page_id)
+            if front is None:
+                return {"workId": "home", "choices": [], "historyMayBeIncomplete": False}
+            projection = self.runtime._native_team.adaptive_choices_for_work(
+                front.focal_engram_id, front.id)
+            # Do not expose a navigable causal link merely because a persisted
+            # preference contains an event identifier. Only this same Work's
+            # original displayable messages can become source links.
+            for choice in projection["choices"]:
+                result_id = choice["resultMessageId"]
+                try:
+                    self._check_message(page_id, result_id)
+                except PageError:
+                    choice["resultMessageId"] = None
+                for evidence in choice["evidence"]:
+                    source_id = evidence.get("sourceMessageId")
+                    if not isinstance(source_id, str):
+                        evidence["sourceMessageId"] = None
+                        continue
+                    try:
+                        self._check_message(page_id, source_id)
+                    except PageError:
+                        evidence["sourceMessageId"] = None
+            return projection
+
     def _rows(self, page_id: str, *, limit: int = MAX_MESSAGES + 1,
               event_id: str | None = None, before_seq: int | None = None,
               content_query: str | None = None) -> list[dict]:
