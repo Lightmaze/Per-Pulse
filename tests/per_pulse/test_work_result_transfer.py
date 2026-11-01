@@ -72,7 +72,7 @@ def test_explicit_selected_source_reaches_another_work_with_native_provenance(tm
         assert transferred["sourcePageId"] == source_id
         assert transferred["sourceMessageId"] == original["id"]
         assert transferred["references"][0]["kind"] == "transfer"
-        assert excerpt in transferred["content"]
+        # JSON escapes source line breaks; exact equality is checked below.
         assert "Apply the selected finding" in transferred["content"]
         assert "SOURCE_PRIVATE_4719" not in transferred["content"]
         assert "TARGET_PRIVATE_6251" not in transferred["content"]
