@@ -179,6 +179,7 @@ class PageArtifacts:
             "bytes": None,
             "redacted": False,
             "truncated": False,
+            "downloadable": False,
             "reason": None,
             **self._limits(),
         }
@@ -208,6 +209,10 @@ class PageArtifacts:
             "state": "current", "content": content,
             "redacted": bool(redacted or bound_redacted or stored_redacted),
             "truncated": bool(truncated or stored_truncated),
+            # A clipped but otherwise complete file may still be transferred.
+            # A stored truncation marker is NOT such a file, even if it is
+            # readable and contains no concealed secrets.
+            "downloadable": not (redacted or bound_redacted or stored_redacted or stored_truncated),
         })
         response["artifact"] = {**item, "state": "current"}
         return response
