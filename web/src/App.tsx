@@ -5,7 +5,7 @@ import { useLanguage } from './i18n';
 import { useWorkspace } from './useWorkspace';
 import { getPageActivity } from './status';
 import { EMPTY_DRAFT, readDraft, readPosition, saveDraft, savePosition } from './storage';
-import type { Draft, Message, NavigationOrigin, PageSummary } from './types';
+import type { Artifact, Draft, Message, NavigationOrigin, PageSummary } from './types';
 import { Icon } from './components/Icon';
 import { Sidebar } from './components/Sidebar';
 import { SessionLink, type Navigate } from './components/SessionLink';
@@ -226,6 +226,48 @@ export default function App() {
     finally { setBusy(false); }
   };
 
+  const prepareArtifactHome = async (artifact: Artifact) => {
+    if (!bootstrap || !workspaceId || route.id === 'home' || artifact.pageId !== route.id || !view) return;
+    const sourceId = route.id;
+    const sourceSerial = route.serial;
+    const sourceTitle = view.page.title;
+    const homeKey = `${workspaceId}/home`;
+    const before = draftsRef.current[homeKey] ?? readDraft(workspaceId, 'home');
+    if ((before.materials?.length ?? 0) >= 5) throw new Error(t('materials.selectionFull'));
+    // Existing native file version/reference contract: same World, no copy,
+    // no model call, and no implicit message or action permission.
+    const response = await api.referenceMaterial('home', artifact, bootstrap);
+    if (response.workspaceId !== workspaceId || response.serviceInstanceId !== bootstrap.serviceInstanceId
+      || response.material.pageId !== 'home' || response.material.sha256 !== artifact.sha256
+      || response.material.path !== artifact.path) {
+      throw new Error(t('library.referenceUnconfirmed'));
+    }
+    // Read again after the native call: Home may have been edited in another
+    // local route while the file version was being verified.
+    const current = draftsRef.current[homeKey] ?? readDraft(workspaceId, 'home');
+    if ((current.materials?.length ?? 0) >= 5 && !current.materials?.some(item => item.id === response.material.id)) {
+      throw new Error(t('materials.selectionFull'));
+    }
+    if (!current.materials?.some(item => item.id === response.material.id)) {
+      const sourceLine = t('library.artifactToHomeSource', { title: sourceTitle, path: artifact.path });
+      const next: Draft = {
+        ...current,
+        text: current.text ? `${current.text}\n\n${sourceLine}` : sourceLine,
+        references: [...current.references.filter(item => item.targetPageId !== sourceId),
+          { targetPageId: sourceId, label: sourceTitle }],
+        materials: [...(current.materials ?? []), { id: response.material.id, name: response.material.name }],
+      };
+      const updated = { ...draftsRef.current, [homeKey]: next };
+      draftsRef.current = updated;
+      setDrafts(updated);
+      saveDraft(workspaceId, 'home', next);
+    }
+    // Never steal the user's focus if they navigated elsewhere during I/O.
+    if (currentPage.current === sourceId && currentRouteSerial.current === sourceSerial) {
+      navigate('home', { pageId: sourceId });
+    }
+    setToast(t('library.artifactToHomeAdded'));
+  };
   const transferWork = async (targetId: string, excerpt: string, instruction: string) => {
     if (modal?.kind !== 'transfer') return;
     const sourceId = route.id;
@@ -313,7 +355,7 @@ export default function App() {
           {sendError && !error ? <div className="error-notice" role="alert"><span>{sendError}</span><button disabled={isRefreshing} onClick={() => { setSendErrors(previous => ({ ...previous, [draftKey]: '' })); refreshWorkspace().catch(problem => setError(errorText(problem))); }}>{t('app.retry')}</button></div> : null}
           {syncError && !error && !sendError ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
-          {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} /> : null}
+          {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} onUseInHome={view.page.kind === 'work' ? prepareArtifactHome : undefined} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection, needsExactExcerpt) => openModal({ kind: 'return', message, content: selection, needsExactExcerpt })} onTransfer={(message, excerpt, needsExactExcerpt) => openModal({ kind: 'transfer', message, excerpt, needsExactExcerpt })} onSaveExample={bootstrap?.postureEnabled ? (message, content, needsExactExcerpt) => openModal({ kind: 'save-example', message, content, needsExactExcerpt }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
           {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
