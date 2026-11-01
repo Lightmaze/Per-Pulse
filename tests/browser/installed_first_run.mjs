@@ -219,7 +219,7 @@ try {
   // the browser. The old Home projection contains private messages and must
   // disappear as soon as the native page identity mismatches the old bootstrap.
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
-  await page.getByRole('link', { name: 'Home', exact: true }).click();
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Home', exact: true }).click();
   const oldMarker = 'PRIVATE_OLD_WORLD_HOME_NOTE_20261101';
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).fill(oldMarker);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -235,7 +235,7 @@ try {
   const otherWorld = await (await fetch(base + '/api/bootstrap')).json();
   assert.notEqual(otherWorld.workspaceId, bootstrap.workspaceId);
   assert.notEqual(otherWorld.serviceInstanceId, restored.serviceInstanceId);
-  await page.getByRole('link', { name: 'Home', exact: true }).click();
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Home', exact: true }).click();
   await page.locator('.sync-notice').waitFor({ timeout: 20000 });
   assert.equal(await page.getByText(oldMarker, { exact: true }).count(), 0,
     'A page from the old World must not remain visible after a new native page response');
