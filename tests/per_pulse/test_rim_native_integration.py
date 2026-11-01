@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import json
 import random
+import threading
 import time
 
 import httpx
 import pytest
 
+from per_pulse.service import PageService
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 from pulse_system.service.kernel_runtime import KernelHarnessFactory
 from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
@@ -271,6 +273,21 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             reopened.world_id, new_record["id"]).id
         assert reopened._native_team.adaptive_choices_for_work(owner, reference_work.id)["choices"] == []
         assert reopened._native_team.adaptive_choices_for_work(state["bad"], front.id)["choices"] == []
+
+        # Reuse the actual product source-link gate with this same native
+        # RuntimeService, rather than standing up a second World or provider.
+        page_projection = object.__new__(PageService)
+        page_projection.runtime = reopened
+        page_projection._lock = threading.RLock()
+        user_read = page_projection.adaptive_choices(front.id)
+        assert len(user_read["choices"]) == 1
+        assert user_read["choices"][0]["resultMessageId"] == projected["resultMessageId"]
+        assert {item["sourceMessageId"] for item in user_read["choices"][0]["evidence"]} == {
+            item["sourceMessageId"] for item in projected["evidence"]
+        }
+        assert all(item["sourceMessageId"] for item in user_read["choices"][0]["evidence"])
+        assert page_projection.adaptive_choices(reference_work.id)["choices"] == []
+
 
         explicit_sources = retained_shared(reopened, owner, original_request)
         assert len(explicit_sources) == 1
