@@ -80,7 +80,7 @@ export type Artifact = {
 export type ArtifactRead = {
   pageId: string; artifact: Artifact; state: 'current' | 'changed' | 'unavailable';
   content: string | null; observedSha256: string | null; bytes: number | null;
-  redacted: boolean; truncated: boolean; reason: string | null;
+  redacted: boolean; truncated: boolean; downloadable: boolean; reason: string | null;
   limitBytes: number; previewLimitBytes: number;
 };
 
