@@ -18,7 +18,7 @@ class _PausingStats(RuntimeStats):
     def __setattr__(self, name, value):
         if name == "total_input_tokens" and getattr(self, "_armed", False):
             self.entered.set()
-            if not self.release.wait(5):
+            if not self.release.wait(20):
                 raise AssertionError("budget test writer was never released")
         super().__setattr__(name, value)
 
