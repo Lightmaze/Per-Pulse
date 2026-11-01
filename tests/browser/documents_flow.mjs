@@ -148,12 +148,19 @@ try {
   await page.getByRole('button', { name: 'Read', exact: true }).click();
   checks.push('Bilingual reading and saving controls preserve the authored file');
 
+  // Another Home tab already has unsent writing. The file handoff must add
+  // to that draft, never replace it with the artifact description.
+  const homeTab = await context.newPage();
+  await homeTab.goto(base);
+  await homeTab.locator('.composer textarea').fill('Preserve my existing Home plan.');
+  await homeTab.close();
   // A confirmed native file is useful work, not just a download: prepare the
   // complete version in the existing Home draft without making a model call.
   await page.getByRole('button', { name: 'Add full file to Home draft', exact: true }).click();
   await page.waitForURL(base + '/');
   await page.locator('.composer-materials').getByText(fixture.path.split('/').at(-1)).waitFor();
   const homeText = await page.locator('.composer textarea').inputValue();
+  assert.ok(homeText.startsWith('Preserve my existing Home plan.'));
   assert.match(homeText, /Readable result/);
   assert.ok(homeText.includes(fixture.path));
   await page.locator('.composer-materials').getByText(fixture.path.split('/').at(-1)).waitFor();
