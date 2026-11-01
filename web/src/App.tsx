@@ -249,12 +249,17 @@ export default function App() {
       throw new Error(t('materials.selectionFull'));
     }
     if (!current.materials?.some(item => item.id === response.material.id)) {
-      const sourceLine = t('library.artifactToHomeSource', { title: sourceTitle, path: artifact.path });
+      // A pre-existing Home link can have a user-chosen label. Preserve it
+      // rather than overwriting the reference with the Work's current title.
+      const existingLink = current.references.find(item => item.targetPageId === sourceId);
+      const sourceLine = t('library.artifactToHomeSource', {
+        title: existingLink?.label ?? sourceTitle, path: artifact.path,
+      });
       const next: Draft = {
         ...current,
         text: current.text ? `${current.text}\n\n${sourceLine}` : sourceLine,
-        references: [...current.references.filter(item => item.targetPageId !== sourceId),
-          { targetPageId: sourceId, label: sourceTitle }],
+        references: existingLink ? current.references
+          : [...current.references, { targetPageId: sourceId, label: sourceTitle }],
         materials: [...(current.materials ?? []), { id: response.material.id, name: response.material.name }],
       };
       const updated = { ...draftsRef.current, [homeKey]: next };
