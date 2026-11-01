@@ -150,6 +150,10 @@ class RuntimeManager:
         cache writes add `cache_write_premium` on top of their nominal cost
         (they are already part of input_tokens), per the provider's contract.
         """
+        # Settlement may be the first allocator interaction after an hour/day
+        # boundary. Roll the windows *before* charging it; otherwise the next
+        # admission read resets this just-observed provider usage to zero.
+        self._maybe_reset_windows()
         cached = min(max(cached_input_tokens, 0), input_tokens)
         writes = min(max(cache_write_tokens, 0), input_tokens - cached)
         billable = (
