@@ -23,6 +23,12 @@ def test_first_settlement_in_new_hour_is_not_erased_at_next_admission(
     allocator = RuntimeManager(RuntimeConfig(
         budget_per_tick=3, hourly_token_budget=10, daily_token_budget=100,
     ))
+    # RuntimeStats dataclass captured its default_factory at import time;
+    # patching resource_module._now does not set the constructor's epoch.
+    # Anchor both windows explicitly so this test is independent of CI wall time.
+    stats = allocator.get_stats()
+    stats.hour_start = start
+    stats.day_start = start
     allocator.consume_budget(2, 1)
     assert allocator.snapshot()["billable_tokens_this_hour"] == 3
 
@@ -49,6 +55,12 @@ def test_first_settlement_after_day_rollover_is_charged_to_new_day(monkeypatch):
     allocator = RuntimeManager(RuntimeConfig(
         budget_per_tick=3, hourly_token_budget=100, daily_token_budget=5,
     ))
+    # RuntimeStats dataclass captured its default_factory at import time;
+    # patching resource_module._now does not set the constructor's epoch.
+    # Anchor both windows explicitly so this test is independent of CI wall time.
+    stats = allocator.get_stats()
+    stats.hour_start = start
+    stats.day_start = start
     allocator.consume_budget(2, 1)
     assert allocator.snapshot()["billable_tokens_today"] == 3
 
