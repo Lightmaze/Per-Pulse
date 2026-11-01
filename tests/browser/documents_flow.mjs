@@ -150,19 +150,19 @@ try {
 
   // Explicit UI projection fixture only: the separate native integration
   // regression verifies real SQLite/Kernel/TUNNEL choice ownership and replay.
-  const original = (await (await fetch(base + '/api/pages/' + firstId)).json())
+  const originalChoiceSource = (await (await fetch(base + '/api/pages/' + firstId)).json())
     .messages.filter(message => message.role === 'assistant' && message.status === 'settled').at(-1);
-  assert.ok(original?.id);
+  assert.ok(originalChoiceSource?.id);
   await page.route('**/api/pages/' + firstId + '/team/choices', route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({
       workId: firstId, historyMayBeIncomplete: false,
       choices: [{ recordId: 'explicit-ui-fixture', workId: firstId,
         selectedExpertId: 'fixture-expert', selectedName: 'Fixture collaborator',
-        resultMessageId: original.id, changedFromReference: true, historyIncomplete: false,
+        resultMessageId: originalChoiceSource.id, changedFromReference: true, historyIncomplete: false,
         kind: 'operator_rated_outcome_proxy_not_quality_proof',
         candidates: [{ expertId: 'fixture-expert', name: 'Fixture collaborator',
           referenceWeight: 0.4, choiceWeight: 0.7 }],
-        evidence: [{ recordId: 'rated-fixture', sourceMessageId: original.id, outcomeProxy: 1 }],
+        evidence: [{ recordId: 'rated-fixture', sourceMessageId: originalChoiceSource.id, outcomeProxy: 1 }],
       }],
     }),
   }));
@@ -170,9 +170,9 @@ try {
   await page.getByText('Selected Fixture collaborator', { exact: false }).waitFor();
   assert.match(await page.locator('.collaborator-choices').innerText(), /Selection weight 70.0%/);
   const originalResultLink = page.getByRole('link', { name: 'Open the original collaborator result', exact: true });
-  assert.equal(await originalResultLink.getAttribute('href'), '/page/' + firstId + '#message-' + original.id);
+  assert.equal(await originalResultLink.getAttribute('href'), '/page/' + firstId + '#message-' + originalChoiceSource.id);
   await originalResultLink.click();
-  assert.equal(new URL(page.url()).hash, '#message-' + original.id);
+  assert.equal(new URL(page.url()).hash, '#message-' + originalChoiceSource.id);
   await page.unroute('**/api/pages/' + firstId + '/team/choices');
   checks.push('Read-only collaboration UI shows historical weights and opens the exact native Work result; fixture data is not a native choice');
 
