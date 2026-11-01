@@ -106,7 +106,7 @@ export const api = {
     }
     return result;
   },
-  referenceMaterial: (pageId: string, file: WorkspaceFile, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
+  referenceMaterial: (pageId: string, file: Pick<WorkspaceFile, 'path' | 'sha256'>, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
     request<WorkspaceFileIdentity & { material: Material; repeated: boolean }>(`${pagePath(pageId)}/materials/reference`, {
       method: 'POST', headers: pulseWriteHeaders(identity), signal,
       body: JSON.stringify({ path: file.path, sha256: file.sha256 }),
