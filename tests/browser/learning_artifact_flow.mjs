@@ -362,6 +362,15 @@ try {
     'Rendered transfer must not expose raw transport JSON to the reader');
   assert.ok(!(await imported.innerText()).includes('The intake form hides the product'),
     'Only the selected result, not the private correction, reaches the receiving Work');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.locator('#interface-language').selectOption('zh-CN');
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  assert.match(await sourceSection.innerText(), /选定的来源原文/);
+  assert.match(await requestSection.innerText(), /你对这项工作的请求/);
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Receiver draft stays here.');
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.locator('#interface-language').selectOption('en');
+  await closeDialog();
   await sourceLink.click();
   await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
