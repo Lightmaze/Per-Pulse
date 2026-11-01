@@ -227,6 +227,15 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         original_request = reopened.causal_ledger.get_event(
             recovered["delegation_event_id"]
         )
+        # An operator can inspect the original, fixed choice and its native
+        # source IDs after restart, without recomputation or unrelated Works.
+        inspected_choice = reopened._native_team._retained_adaptive_choice(
+            owner, new_record, original_request, front)
+        assert inspected_choice == preference
+        assert inspected_choice is not recovered["preference"]
+        assert {entry["id"] for entry in inspected_choice["evidence"]} == set(records)
+        assert reopened._native_team._retained_adaptive_choice(
+            owner, new_record, original_request, reference_work) is None
         explicit_sources = retained_shared(reopened, owner, original_request)
         assert len(explicit_sources) == 1
         assert explicit_sources[0]["source"]["record_id"] == reference_id
