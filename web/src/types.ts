@@ -91,6 +91,17 @@ export type Material = {
 export type MaterialList = { pageId: string; materials: Material[]; truncated: boolean; limitBytes: number };
 export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number; downloadable: boolean };
 
+export type AdaptiveWorkChoices = {
+  workId: string; historyMayBeIncomplete: boolean;
+  choices: {
+    recordId: string; workId: string; selectedExpertId: string; selectedName: string;
+    resultMessageId: string | null; changedFromReference: boolean; historyIncomplete: boolean;
+    kind: 'operator_rated_outcome_proxy_not_quality_proof';
+    candidates: { expertId: string; name: string; referenceWeight: number; choiceWeight: number }[];
+    evidence: { recordId: string; sourceMessageId: string | null; outcomeProxy: number }[];
+  }[];
+};
+
 export type PageView = {
   page: PageSummary;
   messages: Message[];
