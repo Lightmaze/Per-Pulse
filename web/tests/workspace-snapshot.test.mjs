@@ -6,7 +6,7 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../src/workspaceSnapshot.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
-const { mergeWorkspaceSnapshot } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { mergeWorkspaceSnapshot, pageBelongsToWorkspace } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const snapshot = pages => ({ workspaceId: 'world', serviceInstanceId: 'instance', pages });
 
 test('a delayed workspace read cannot undo a rename or a newly settled local result', () => {
@@ -29,4 +29,16 @@ test('explicit observations from a new World or service never merge old page sum
     const observed = { ...snapshot([{ id: 'home', title: 'Current context' }]), ...identity };
     assert.equal(mergeWorkspaceSnapshot(current, observed, {}, { home: 2 }), observed);
   }
+});
+
+
+test('page views render only in the exact native World and process that produced them', () => {
+  const current = snapshot([{ id: 'home', title: 'Private old context' }]);
+  const original = { workspaceId: current.workspaceId, serviceInstanceId: current.serviceInstanceId };
+  assert.equal(pageBelongsToWorkspace(original, current), true);
+  assert.equal(pageBelongsToWorkspace({ ...original, workspaceId: 'different-world' }, current), false);
+  assert.equal(pageBelongsToWorkspace({ ...original, serviceInstanceId: 'new-process' }, current), false);
+  assert.equal(pageBelongsToWorkspace(original, null), false);
+  assert.equal(pageBelongsToWorkspace(null, current), false);
+  assert.equal(pageBelongsToWorkspace({ ...original, serviceInstanceId: '' }, current), false);
 });
