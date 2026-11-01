@@ -467,6 +467,10 @@ def create_app(
     def rename(page_id: str, body: Rename, request: Request):
         return pages(request).rename(page_id, body.title)
 
+    @app.get("/api/pages/{page_id}/team/choices")
+    def adaptive_choices(page_id: str, request: Request):
+        return pages(request).adaptive_choices(page_id)
+
     @app.get("/api/pages/{page_id}/posture")
     def learning(page_id: str, request: Request):
         return pages(request).learning.view(page_id)
