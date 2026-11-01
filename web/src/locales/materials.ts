@@ -32,6 +32,11 @@ export const materialsEnglish = {
   'library.draftHint': 'Attach this version to your draft, then send it with what you want to do.',
   'library.add': 'Add to draft',
   'library.referenceUnconfirmed': 'The file reference was not confirmed. Reopen the material before trying again.',
+  'library.artifactToHome': 'Add full file to Home draft',
+  'library.artifactToHomeHint': 'Attach this exact full file to your unsent Home draft with its source Work. Nothing is sent until you choose Send.',
+  'library.artifactToHomeBusy': 'Adding file…',
+  'library.artifactToHomeSource': 'Verified file from {title}: {path}',
+  'library.artifactToHomeAdded': 'The verified file is ready in your Home draft.',
 };
 
 export const materialsChinese: Record<keyof typeof materialsEnglish, string> = {
@@ -68,4 +73,9 @@ export const materialsChinese: Record<keyof typeof materialsEnglish, string> = {
   'library.draftHint': '把这个版本附到草稿中，再写明你想做什么并发送。',
   'library.add': '加入草稿',
   'library.referenceUnconfirmed': '无法确认文件引用是否已保存。请重新打开材料后再试。',
+  'library.artifactToHome': '将完整文件加入主页草稿',
+  'library.artifactToHomeHint': '将这一版本的完整文件及来源工作关联到尚未发送的主页草稿。只有你主动发送后才会交给模型。',
+  'library.artifactToHomeBusy': '正在附加文件…',
+  'library.artifactToHomeSource': '来自「{title}」的已验证文件：{path}',
+  'library.artifactToHomeAdded': '文件已加入主页草稿，尚未发送。',
 };
