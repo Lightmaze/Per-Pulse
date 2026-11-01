@@ -445,14 +445,12 @@ def test_preview_redacts_and_bounds_text_after_verifying_original_bytes(tmp_path
         assert denied.json()["error"]["code"] == "artifact_download_redacted"
         assert "password=abc" not in denied.text
 
-
-
 def test_preview_rejects_hidden_marker_beyond_bounded_prefix(tmp_path, monkeypatch):
     """A safe-looking preview cannot authorize carrying an unsafe complete file."""
     import per_pulse.artifacts as module
 
     monkeypatch.setattr(module, "MAX_PREVIEW_BYTES", 256)
-    before = "Draft status.\\n" + "Public details only.\\n" * 32 + "[REDACTED]\\n"
+    before = "Draft status.\n" + "Public details only.\n" * 32 + "[REDACTED]\n"
     after = before.replace("Draft status.", "Final status.", 1)
     factory = _factory(monkeypatch, {"PATCH_LATE_MARKER": {
         "path": "late-marker.txt", "expected_digest": _sha(before),
