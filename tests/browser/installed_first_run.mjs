@@ -149,7 +149,7 @@ try {
   // the handler can race teardown and throw "Route is already handled".
   await forwardedRequest;
   await page.unroute(delayedPattern);
-  await page.getByRole('link', { name: 'A real disconnected Work', exact: true }).click();
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'A real disconnected Work', exact: true }).click();
   await page.getByText('Saved in the first Work after visiting another Work.', { exact: true }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), '',
     'Late origin save clears only its own unchanged draft');
@@ -206,7 +206,7 @@ try {
   server = start();
   await ready();
   await page.reload();
-  await page.getByRole('link', { name: 'A real disconnected Work', exact: true }).click();
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'A real disconnected Work', exact: true }).click();
   await page.getByText('A note to continue after restart.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   assert.equal(await page.locator('details.provider-setup').count(), 1);
@@ -224,7 +224,7 @@ try {
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).fill(oldMarker);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText(oldMarker, { exact: true }).waitFor();
-  await page.getByRole('link', { name: 'A real disconnected Work', exact: true }).click();
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'A real disconnected Work', exact: true }).click();
   await page.getByRole('heading', { name: 'A real disconnected Work', exact: true }).waitFor();
 
   const nextWorldDirectory = join(directory, 'replacement-world');
