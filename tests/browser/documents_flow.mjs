@@ -152,6 +152,7 @@ try {
   // complete version in the existing Home draft without making a model call.
   await page.getByRole('button', { name: 'Add full file to Home draft', exact: true }).click();
   await page.waitForURL(base + '/');
+  await page.locator('.composer-materials').getByText(fixture.path.split('/').at(-1)).waitFor();
   const homeText = await page.locator('.composer textarea').inputValue();
   assert.match(homeText, /Readable result/);
   assert.ok(homeText.includes(fixture.path));
@@ -167,8 +168,9 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), homeText);
   await page.goBack();
   await page.waitForURL('**/page/' + firstId);
-  assert.equal(await page.locator('.composer textarea').inputValue(),
-    'Keep this draft while I save and inspect the result.');
+  await page.getByRole('heading', { name: 'Readable result', exact: true }).waitFor();
+  await wait(async () => await page.locator('.composer textarea').inputValue() ===
+    'Keep this draft while I save and inspect the result.', 'source Work draft restored');
   await page.locator('.artifact-open').filter({ hasText: fixture.path }).click();
   await page.locator('.markdown-document').getByRole('heading', { name: 'A field note', exact: true }).waitFor();
   checks.push('Approved Work document becomes a version-bound, unsent Home attachment with source and both drafts preserved');
