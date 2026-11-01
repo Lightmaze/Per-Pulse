@@ -366,3 +366,25 @@ def test_old_source_link_resolves_in_own_page_without_exposing_other_context(tmp
         assert len(within_window["messages"]) == 500
         assert client.get(f"/api/pages/{work_id}", params={"sourceMessageId": source}).status_code == 404
         assert client.get("/api/pages/home", params={"sourceMessageId": "nonexistent-id"}).status_code == 404
+
+
+def test_collaboration_choice_read_is_original_work_scoped_and_offline(tmp_path):
+    """No fabricated RIM preference in disconnected Home or unrelated Works."""
+    with client_for(tmp_path, model_factory=None) as client:
+        first = new_page(client, title="Original decision")["page"]["id"]
+        second = new_page(client, title="Unrelated Work")["page"]["id"]
+        assert client.get("/api/pages/home/team/choices").json() == {
+            "workId": "home", "choices": [], "historyMayBeIncomplete": False,
+        }
+        for work in (first, second):
+            response = client.get(f"/api/pages/{work}/team/choices")
+            assert response.status_code == 200, response.text
+            assert response.json() == {
+                "workId": work, "choices": [], "historyMayBeIncomplete": False,
+            }
+        assert client.get("/api/pages/nonexistent-work/team/choices").status_code == 404
+
+    # A restart cannot turn ordinary Work history into a fabricated choice.
+    with client_for(tmp_path, model_factory=None) as client:
+        assert client.get(f"/api/pages/{first}/team/choices").json()["choices"] == []
+        assert client.get(f"/api/pages/{second}/team/choices").json()["choices"] == []
