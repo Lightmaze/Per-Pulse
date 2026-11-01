@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { messageFromLocation, pageFromLocation, pageHref, readNavigationState, savePosition } from './storage';
-import { mergeWorkspaceSnapshot } from './workspaceSnapshot';
+import { mergeWorkspaceSnapshot, pageBelongsToWorkspace } from './workspaceSnapshot';
 import type { Bootstrap, NavigationOrigin, PageView } from './types';
 
 type Route = { id: string; serial: number; origin?: NavigationOrigin; samePageReturn?: NavigationOrigin; targetMessageId?: string; restoreFocus?: NavigationOrigin; canGoBack: boolean };
@@ -26,9 +26,22 @@ export function useWorkspace() {
   routeRef.current = route;
 
   const applyView = useCallback((view: PageView) => {
+    // An earlier fetch may finish after the local service switched Worlds or
+    // restarted. Never mix that page's private messages into another identity.
+    const current = bootstrapRef.current;
+    if (!pageBelongsToWorkspace(view, current)) {
+      if (current) {
+        setViews({});
+        setSyncError('The workspace restarted or changed. Refresh updates to reconnect.');
+      }
+      return;
+    }
     versions.current[view.page.id] = (versions.current[view.page.id] ?? 0) + 1;
     setViews(previous => ({ ...previous, [view.page.id]: view }));
-    setBootstrap(previous => previous ? { ...previous, provider: view.provider, pages: previous.pages.some(page => page.id === view.page.id) ? previous.pages.map(page => page.id === view.page.id ? view.page : page) : [...previous.pages, view.page] } : previous);
+    setBootstrap(previous => previous && pageBelongsToWorkspace(view, previous)
+      ? { ...previous, provider: view.provider, pages: previous.pages.some(page => page.id === view.page.id)
+        ? previous.pages.map(page => page.id === view.page.id ? view.page : page)
+        : [...previous.pages, view.page] } : previous);
     setSyncError('');
   }, []);
 
@@ -126,15 +139,19 @@ export function useWorkspace() {
   }, [bootstrap?.workspaceId]);
 
   useEffect(() => {
+    // A new bootstrap invalidates cached pages from the previous service.
+    // Fetch only after the current World identity is known.
+    if (!bootstrap?.workspaceId || !bootstrap?.serviceInstanceId) return;
     const controller = new AbortController();
     refreshPage(route.id, controller.signal).catch(problem => {
       if (!controller.signal.aborted) setError(problem instanceof Error ? problem.message : 'This page could not be loaded.');
     }).finally(() => { if (!controller.signal.aborted) setLoadedRouteSerial(route.serial); });
     return () => controller.abort();
-  }, [route.id, route.serial, refreshPage]);
+  }, [route.id, route.serial, refreshPage, bootstrap?.workspaceId, bootstrap?.serviceInstanceId]);
 
   const cachedView = views[route.id];
-  const activeView = cachedView && bootstrap ? { ...cachedView, provider: bootstrap.provider } : cachedView;
+  const activeView = pageBelongsToWorkspace(cachedView, bootstrap)
+    ? { ...cachedView!, provider: bootstrap!.provider } : undefined;
   const shouldPoll = activeView?.provider.configured && ['queued', 'working', 'needs_attention'].includes(activeView.page.status);
   const shouldPollWorkspace = bootstrap?.provider.configured && bootstrap.pages.some(page =>
     page.id !== route.id && ['queued', 'working', 'needs_attention'].includes(page.status));
