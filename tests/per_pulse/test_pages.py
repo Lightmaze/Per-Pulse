@@ -416,3 +416,33 @@ def test_collaboration_projection_rejects_cross_work_source_links(tmp_path, monk
         assert choice["evidence"][0]["sourceMessageId"] is None
         assert choice["evidence"][1]["sourceMessageId"] == own_message
         assert "PRIVATE_OTHER_WORK_SOURCE" not in response.text
+
+
+def test_page_views_are_bound_to_exact_world_and_service_incarnation(tmp_path):
+    """A same-path restart retains the World; switching data dirs cannot reuse its view."""
+    with client_for(tmp_path / "first", model_factory=None) as client:
+        identity = client.get("/api/bootstrap").json()
+        first_view = client.get("/api/pages/home").json()
+        assert {k: first_view[k] for k in ("workspaceId", "serviceInstanceId")} == {
+            k: identity[k] for k in ("workspaceId", "serviceInstanceId")
+        }
+        saved = send(client, "home", "This belongs only to the original World.")
+        assert saved["view"]["workspaceId"] == identity["workspaceId"]
+        assert saved["view"]["serviceInstanceId"] == identity["serviceInstanceId"]
+
+    with client_for(tmp_path / "first", model_factory=None) as client:
+        restarted = client.get("/api/bootstrap").json()
+        assert restarted["workspaceId"] == identity["workspaceId"]
+        assert restarted["serviceInstanceId"] != identity["serviceInstanceId"]
+        view = client.get("/api/pages/home").json()
+        assert view["workspaceId"] == restarted["workspaceId"]
+        assert view["serviceInstanceId"] == restarted["serviceInstanceId"]
+        assert "This belongs only to the original World." in str(view["messages"])
+
+    with client_for(tmp_path / "second", model_factory=None) as client:
+        replacement = client.get("/api/bootstrap").json()
+        assert replacement["workspaceId"] != identity["workspaceId"]
+        view = client.get("/api/pages/home").json()
+        assert view["workspaceId"] == replacement["workspaceId"]
+        assert view["serviceInstanceId"] == replacement["serviceInstanceId"]
+        assert view["messages"] == []
