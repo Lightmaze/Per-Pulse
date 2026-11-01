@@ -475,6 +475,7 @@ def test_preview_rejects_hidden_marker_beyond_bounded_prefix(tmp_path, monkeypat
         # The entire file contains a persisted redaction marker *after* the
         # displayed portion. Both actions must agree it is not transferable.
         assert preview["redacted"]
+        assert preview["downloadable"] is False
         denied = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
         assert denied.status_code == 422
         assert denied.json()["error"]["code"] == "artifact_download_redacted"
@@ -504,6 +505,7 @@ def test_download_keeps_complete_utf8_bytes_and_filename_after_restart(tmp_path,
         action_id = _approve(PageExecution(client.app.state.pages.runtime), page_id)
         preview = client.get(f"/api/pages/{page_id}/artifacts/{action_id}").json()
         assert preview["state"] == "current" and preview["truncated"]
+        assert preview["downloadable"] is True  # Preview clipping is not stored file truncation.
         download = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
         assert download.status_code == 200, download.text
         assert download.content == after.encode("utf-8")
