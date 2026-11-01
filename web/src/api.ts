@@ -1,5 +1,5 @@
 import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
-import type { WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
+import type { AdaptiveWorkChoices, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
 export type PulseWriteIdentity = Pick<PulseObservation, 'workspaceId' | 'serviceInstanceId'>;
@@ -71,6 +71,8 @@ export const api = {
   updateSettings: (responseLanguage: ResponseLanguage) => request<WorkspaceSettings>('/settings', { method: 'PATCH', body: JSON.stringify({ responseLanguage }) }),
   page: (id: string, signal?: AbortSignal, sourceMessageId?: string) =>
     request<PageView>(pagePath(id) + (sourceMessageId ? `?sourceMessageId=${encodeURIComponent(sourceMessageId)}` : ''), { signal }),
+  adaptiveChoices: (id: string, signal?: AbortSignal) =>
+    request<AdaptiveWorkChoices>(`${pagePath(id)}/team/choices`, { signal }),
   history: (id: string, beforeMessageId: string, signal?: AbortSignal) =>
     request<MessageHistory>(`${pagePath(id)}/messages?beforeMessageId=${encodeURIComponent(beforeMessageId)}`, { signal }),
   searchMessages: (id: string, query: string, beforeMessageId: string | null, signal?: AbortSignal) =>

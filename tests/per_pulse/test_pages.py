@@ -366,3 +366,53 @@ def test_old_source_link_resolves_in_own_page_without_exposing_other_context(tmp
         assert len(within_window["messages"]) == 500
         assert client.get(f"/api/pages/{work_id}", params={"sourceMessageId": source}).status_code == 404
         assert client.get("/api/pages/home", params={"sourceMessageId": "nonexistent-id"}).status_code == 404
+
+
+def test_collaboration_choice_read_is_original_work_scoped_and_offline(tmp_path):
+    """No fabricated RIM preference in disconnected Home or unrelated Works."""
+    with client_for(tmp_path, model_factory=None) as client:
+        first = new_page(client, title="Original decision")["page"]["id"]
+        second = new_page(client, title="Unrelated Work")["page"]["id"]
+        assert client.get("/api/pages/home/team/choices").json() == {
+            "workId": "home", "choices": [], "historyMayBeIncomplete": False,
+        }
+        for work in (first, second):
+            response = client.get(f"/api/pages/{work}/team/choices")
+            assert response.status_code == 200, response.text
+            assert response.json() == {
+                "workId": work, "choices": [], "historyMayBeIncomplete": False,
+            }
+        assert client.get("/api/pages/nonexistent-work/team/choices").status_code == 404
+
+    # A restart cannot turn ordinary Work history into a fabricated choice.
+    with client_for(tmp_path, model_factory=None) as client:
+        assert client.get(f"/api/pages/{first}/team/choices").json()["choices"] == []
+        assert client.get(f"/api/pages/{second}/team/choices").json()["choices"] == []
+
+
+def test_collaboration_projection_rejects_cross_work_source_links(tmp_path, monkeypatch):
+    """Even a corrupted source ID cannot create a navigable foreign Work link."""
+    with client_for(tmp_path, model_factory=None) as client:
+        one = new_page(client, title="Decision owner")["page"]["id"]
+        other = new_page(client, title="Unrelated private source")["page"]["id"]
+        own_message = send(client, one, "Owner's original Work note")["messageId"]
+        foreign_message = send(client, other, "PRIVATE_OTHER_WORK_SOURCE")["messageId"]
+        native = client.app.state.pages.runtime._native_team
+        monkeypatch.setattr(native, "adaptive_choices_for_work", lambda subject, work_id: {
+            "workId": work_id, "historyMayBeIncomplete": False,
+            "choices": [{
+                "recordId": "explicit-injected-projection", "workId": work_id,
+                "resultMessageId": foreign_message,
+                "evidence": [
+                    {"recordId": "foreign", "sourceMessageId": foreign_message},
+                    {"recordId": "same-work", "sourceMessageId": own_message},
+                ],
+            }],
+        })
+        response = client.get(f"/api/pages/{one}/team/choices")
+        assert response.status_code == 200, response.text
+        choice = response.json()["choices"][0]
+        assert choice["resultMessageId"] is None
+        assert choice["evidence"][0]["sourceMessageId"] is None
+        assert choice["evidence"][1]["sourceMessageId"] == own_message
+        assert "PRIVATE_OTHER_WORK_SOURCE" not in response.text

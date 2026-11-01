@@ -55,8 +55,30 @@ stored in the original team's durable request **before** a TUNNEL dispatch.
 The existing Kernel action and original source turn must both succeed.
 The selected collaborator must still be active at dispatch. Restart or
 recovery reuses the saved target, never draws a second one. No new tool
-permission, budget, participant, identity, API endpoint, model invocation,
-or automatic approval is introduced. Direct `consult` remains unchanged.
+permission, budget, participant, identity, model invocation, or automatic
+approval is introduced. Direct `consult` remains unchanged.
+
+## Work-visible choice and original sources
+
+The Work's quiet **How this Work chose collaborators** disclosure reads
+`GET /api/pages/{work_id}/team/choices` only when opened. This is an
+authenticated-local-browser, **read-only** projection through the original
+`NativeTeam` and the existing SQLite/Kernel/TUNNEL records, not another
+decision engine. It shows the originally selected collaborator, reference
+weight versus persisted selection weight, eligible rated source results,
+and the original completed result. Links are offered only for native events
+that pass this **same Work**'s original message/source check. Missing or
+foreign source links remain unavailable, never guessed. The endpoint returns
+an empty list for Home or an unrelated Work and rejects unknown pages.
+
+The projection rechecks delegation ownership, Work, matched request, delivery,
+and saved preference identity before display. It excludes raw correction
+transcripts and private feedback text, does not recalculate the old choice
+from later feedback, and never schedules a new collaborator, model turn or
+physical action. The read is bounded to 128 recent native requests and
+16 decisions; absence is **not** evidence that RIM was never active.
+This offers human source inspection of a decision, **not** proof that choosing
+that collaborator improved a delivered work artifact.
 
 ## Known limits and next acceptance
 
