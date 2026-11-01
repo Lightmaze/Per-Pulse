@@ -7,6 +7,7 @@ Does NOT make cognitive decisions (the non-cognitive infrastructure boundary).
 from __future__ import annotations
 
 import math
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -60,12 +61,28 @@ class RuntimeManager:
     def __init__(self, config: RuntimeConfig | None = None):
         self._config = config or RuntimeConfig()
         self._stats = RuntimeStats()
+        # Pulse turns, succession workers and coordinator observations share
+        # one in-process allocator. Keep counters and reads in one snapshot.
+        # This is NOT an across-process reservation or a provider billing cap.
+        self._lock = threading.RLock()
 
     @property
     def config(self) -> RuntimeConfig:
         return self._config
 
     def get_budget(
+        self, *, unsettled_provider_usage: tuple[int, int, int] | None = (0, 0, 0),
+    ) -> int:
+        """Observe one coherent in-process budget before Pulse admission.
+
+        This does not reserve provider spend or recover lost process state.
+        """
+        with self._lock:
+            return self._get_budget_unlocked(
+                unsettled_provider_usage=unsettled_provider_usage,
+            )
+
+    def _get_budget_unlocked(
         self, *, unsettled_provider_usage: tuple[int, int, int] | None = (0, 0, 0),
     ) -> int:
         """Admit against settled spend *and* source-verified attached spend.
@@ -106,6 +123,20 @@ class RuntimeManager:
         return self._config.budget_per_tick
 
     def consume_budget(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cached_input_tokens: int = 0,
+        cache_write_tokens: int = 0,
+    ) -> None:
+        """Atomically settle one observed Pulse usage increment in-process."""
+        with self._lock:
+            self._consume_budget_unlocked(
+                input_tokens, output_tokens,
+                cached_input_tokens, cache_write_tokens,
+            )
+
+    def _consume_budget_unlocked(
         self,
         input_tokens: int,
         output_tokens: int,
@@ -155,6 +186,11 @@ class RuntimeManager:
         return self._stats
 
     def snapshot(self) -> dict:
+        """Read counters and remaining allowances from one coherent instant."""
+        with self._lock:
+            return self._snapshot_unlocked()
+
+    def _snapshot_unlocked(self) -> dict:
         """Point-in-time view of budget and consumption, for CLI/monitoring."""
         self._maybe_reset_windows()
         s = self._stats
