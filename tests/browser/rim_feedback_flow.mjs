@@ -53,7 +53,7 @@ const wait = async (fn, label, timeout = 35000) => {
 };
 const get = async path => {
   const response = await fetch(base + path);
-  assert.equal(response.status, 200, path + ': ' + await response.text().catch(() => ''));
+  if (!response.ok) throw new Error(path + ': HTTP ' + response.status + ' ' + await response.text());
   return response.json();
 };
 const choices = id => get('/api/pages/' + id + '/team/choices');
