@@ -27,6 +27,17 @@ API: `POST /api/pages/{work_id}/team/choices/{record_id}/outcome`,
 JSON `{"outcome":"adopted"}` (or `revised` / `discarded`).
 The GET projection includes immutable `outcome` for bilingual display.
 
+When a later Work uses an eligible original rating, its historical RIM choice
+already retains the exact source Work, source result event and the native
+operator adoption proxy (1 = used, 0 = reworked, -1 = not used). The Work's
+existing explanation now labels each verified source result and identifies
+the original Work by its existing title, with a link to the original message.
+If the source cannot be displayed, the link remains unavailable; if a saved
+proxy is unrecognized, no rating is inferred. These labels inspect the
+**selection-time snapshot**, not a fresh RIM choice or a live evaluation.
+No model call, sharing consent, approval, stored weights or outcome is changed.
+The rating is a human utilization proxy, never a measured quality improvement.
+
 Native regression uses a real World, Kernel, and SQLite with explicitly
 scripted HTTP transport. It checks wrong Work, Home, invalid outcome,
 second-rating conflict, idempotent replay, same original result, and
@@ -39,7 +50,6 @@ Review the exact-head verify, Chromium, and real Docker recovery on one
 combined tree, then require independent main CI after merging. Success means
 a human can finish a collaborator task and record an outcome that affects
 a later choice—not merely inspect another statistics panel.
-
 
 ## Explicit original-Work sharing and withdrawal
 
