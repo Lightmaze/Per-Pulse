@@ -142,7 +142,11 @@ try {
   const secondMessage = second.messages.find(m => m.materials?.some(item => item.id === reused.id));
   await page.locator('[data-message-id="' + secondMessage.id + '"]').getByRole('button', { name: filename, exact: true }).click();
   await page.getByText('Original upload: Field notes', { exact: true }).waitFor();
+  const originalRead = page.waitForResponse(response =>
+    response.url().endsWith('/api/pages/' + firstId + '/materials/' + sourceReceipt.id) && response.status() === 200);
   await page.getByRole('button', { name: 'Open original material from its source page', exact: true }).click();
+  await originalRead;
+  await page.getByRole('button', { name: 'Open original material from its source page', exact: true }).waitFor({ state: 'detached' });
   await page.getByRole('dialog', { name: 'Materials', exact: true }).getByRole('heading', { name: filename, exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname.split('/').pop(), secondId, 'Inspecting the original source does not steal the active Work');
   assert.equal((await page.getByRole('dialog', { name: 'Materials', exact: true }).getByRole('region', { name: 'Source file preview' }).textContent()).includes('A useful source stays available'), true);
