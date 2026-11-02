@@ -62,6 +62,7 @@ def seed(data_dir: Path, model_factory, state):
                   and world.causal_ledger.find_delegation_result_by_record_id(
                       world.world_id, record_id) is not None
                   and not world.harness._active, seconds=20)
+            assert world.record_delegation_outcome(record_id, outcome)["outcome"] == outcome
 
         # Native RIM first selects and executes an actual adaptive team action
         # in the original Work. The UI can edit only its completed result.
