@@ -6819,14 +6819,38 @@ class Storage:
         return self._row_to_delegation(row) if row else None
 
     @_locked
-    def list_delegations(self, caller_id: str | None = None, *, limit: int | None = None) -> list[dict]:
+    def list_delegations(
+        self, caller_id: str | None = None, *, limit: int | None = None,
+        target_ids: tuple[str, ...] | None = None, rated_only: bool = False,
+    ) -> list[dict]:
+        """Apply eligibility filters before the bounded newest-record window.
+
+        RIM's continuing choices must not forget a rated collaborator outcome
+        merely because 128 later, unrated or unrelated tasks were recorded.
+        Source verification and active sharing are still checked separately.
+        """
         if limit is not None and (type(limit) is not int or not 1 <= limit <= 128):
             raise ValueError("delegation limit must be 1..128")
-        query = "SELECT * FROM delegations"
-        args = []
+        if target_ids is not None and (
+            not isinstance(target_ids, tuple) or not 1 <= len(target_ids) <= 8
+            or any(not isinstance(value, str) or not value for value in target_ids)
+            or len(set(target_ids)) != len(target_ids)
+        ):
+            raise ValueError("target_ids must be 1..8 distinct non-empty strings")
+        if type(rated_only) is not bool:
+            raise ValueError("rated_only must be a bool")
+        clauses, args = [], []
         if caller_id is not None:
-            query += " WHERE caller_id = ?"
+            clauses.append("caller_id = ?")
             args.append(caller_id)
+        if target_ids is not None:
+            clauses.append("target_id IN (" + ",".join("?" for _ in target_ids) + ")")
+            args.extend(target_ids)
+        if rated_only:
+            clauses.append("outcome IN ('adopted','revised','discarded')")
+        query = "SELECT * FROM delegations"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY created_at" + (" DESC, id DESC LIMIT ?" if limit is not None else "")
         if limit is not None:
             args.append(limit)
