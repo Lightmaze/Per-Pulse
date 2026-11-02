@@ -146,6 +146,9 @@ try {
     response.url().endsWith('/api/pages/' + firstId + '/materials/' + sourceReceipt.id) && response.status() === 200);
   await page.getByRole('button', { name: 'Open original material from its source page', exact: true }).click();
   await originalRead;
+  // Source inspection must preserve the mounted native dialog, not replace
+  // the parent modal while a Work send is still settling.
+  await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'visible' });
   await page.getByRole('button', { name: 'Open original material from its source page', exact: true }).waitFor({ state: 'detached' });
   await page.getByRole('dialog', { name: 'Materials', exact: true }).getByRole('heading', { name: filename, exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname.split('/').pop(), secondId, 'Inspecting the original source does not steal the active Work');

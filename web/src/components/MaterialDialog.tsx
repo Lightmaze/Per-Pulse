@@ -7,11 +7,15 @@ import { Dialog } from './Dialog';
 import { TextDocument } from './TextDocument';
 
 /** Inspect exactly the version identified by a native message attachment. */
-export function MaterialDialog({ identity, pageId, materialId, close, browse, openOriginal, pages }: {
+export function MaterialDialog({ identity, pageId, materialId, close, browse, pages }: {
   identity: WorkspaceFileIdentity; pageId: string; materialId: string; close: () => void; browse: () => void;
-  openOriginal: (pageId: string, materialId: string) => void; pages: PageSummary[];
+  pages: PageSummary[];
 }) {
   const { t, locale, errorText } = useLanguage();
+  // Keep one mounted native dialog while inspecting another verified source.
+  // Replacing the parent modal during a pending Work update can close it.
+  const [target, setTarget] = useState({ pageId, materialId });
+  useEffect(() => { setTarget({ pageId, materialId }); }, [pageId, materialId]);
   const [preview, setPreview] = useState<MaterialRead | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [reading, setReading] = useState(true);
@@ -22,12 +26,12 @@ export function MaterialDialog({ identity, pageId, materialId, close, browse, op
   useEffect(() => {
     const controller = new AbortController();
     setPreview(null); setError(null); setReading(true);
-    api.material(pageId, materialId, controller.signal).then(value => {
+    api.material(target.pageId, target.materialId, controller.signal).then(value => {
       if (!controller.signal.aborted) setPreview(value);
     }).catch(problem => { if (!controller.signal.aborted) setError(problem); })
       .finally(() => { if (!controller.signal.aborted) setReading(false); });
     return () => { controller.abort(); downloadRequest.current?.abort(); };
-  }, [pageId, materialId]);
+  }, [target.pageId, target.materialId]);
   useEffect(() => { if (preview) heading.current?.focus({ preventScroll: true }); }, [preview]);
   async function download() {
     if (!preview?.downloadable || downloadRequest.current) return;
@@ -35,7 +39,7 @@ export function MaterialDialog({ identity, pageId, materialId, close, browse, op
     downloadRequest.current = controller;
     setDownloading(true); setDownloadStarted(false); setError(null);
     try {
-      const file = await api.downloadMaterial(pageId, preview.material, identity, controller.signal);
+      const file = await api.downloadMaterial(target.pageId, preview.material, identity, controller.signal);
       if (controller.signal.aborted) return;
       const url = URL.createObjectURL(file.blob);
       const anchor = document.createElement('a');
@@ -73,8 +77,8 @@ export function MaterialDialog({ identity, pageId, materialId, close, browse, op
     <div className="material-source-actions">
       {preview?.downloadable ? <button className="secondary-button" disabled={downloading} onClick={() => void download()}>{t(downloading ? 'artifacts.downloading' : 'library.downloadOriginal')}</button> : null}
       {preview?.material.originPageId && preview.material.originMaterialId
-        && (preview.material.originPageId !== pageId || preview.material.originMaterialId !== materialId)
-        ? <button className="text-button" onClick={() => openOriginal(preview.material.originPageId!, preview.material.originMaterialId!)}>
+        && (preview.material.originPageId !== target.pageId || preview.material.originMaterialId !== target.materialId)
+        ? <button className="text-button" onClick={() => setTarget({ pageId: preview.material.originPageId!, materialId: preview.material.originMaterialId! })}>
             {t('materials.openOriginal')}
           </button> : null}
       <button className="text-button" onClick={browse}>{t('library.browse')}</button>
