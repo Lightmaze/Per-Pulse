@@ -151,9 +151,19 @@ try {
   await page.getByRole('heading', { name: 'Original collaborator outcome', exact: true }).waitFor();
   checks.push('another completed Work visibly links native selection to rated source and returns there');
 
-  await openDecisions();
-  await openFeedback();
+  // A source return must work with the same editor in Chinese, not merely
+  // leave translated strings in the locale bundle.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.locator('#interface-language').selectOption('zh-CN');
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await page.getByRole('button', { name: '查看这项工作的协作者选择', exact: true }).click();
+  await page.getByRole('button', { name: '这份成果留下的协作经验', exact: true }).click();
+  await editor().getByText('已允许同一协作者跨工作使用。', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.locator('#interface-language').selectOption('en');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await editor().getByText('Saved for this collaborator across Works.').waitFor();
+  checks.push('same source-bound guidance survives Chinese and English user navigation');
   await editor().getByRole('button', { name: 'Withdraw guidance', exact: true }).click();
   await editor().getByText('Withdraw this guidance from future use?', { exact: false }).waitFor();
   await editor().getByRole('button', { name: 'Confirm', exact: true }).click();
