@@ -8,6 +8,7 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import random
@@ -24,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "per_pulse"))
 from test_rim_native_integration import _model_factory, _tick, START, INSTRUCTION
 
 
-def seed(data_dir: Path, model_factory):
+def seed(data_dir: Path, model_factory, state):
     pages = PageService(data_dir, model_factory=model_factory, allow_workspace_actions=True)
     world = pages.runtime
     owner = world.continuity_engram_id
@@ -43,6 +44,7 @@ def seed(data_dir: Path, model_factory):
     first = world.engrams.create(auto_name=False).id
     second = world.engrams.create(auto_name=False).id
     bad, good = sorted([first, second])
+    state['bad'], state['good'] = bad, good
     for collaborator in (bad, good):
         world.storage.add_center_membership(source.center_id, collaborator)
         # The receiving Works need the same collaborators to make a real choice.
@@ -103,7 +105,12 @@ if __name__ == "__main__":
     # The test-only synthetic responder needs the same fixed collaborators
     # across the seeding session and the resumed HTTP service.
     data_dir = Path(args.data_dir)
-    metadata = seed(data_dir, model_factory)
+    snapshot = data_dir / "rim-fixture-works.json"
+    if snapshot.exists():
+        metadata = json.loads(snapshot.read_text(encoding="utf-8"))
+    else:
+        metadata = seed(data_dir, model_factory, state)
+        snapshot.write_text(json.dumps(metadata), encoding="utf-8")
     state["bad"], state["good"] = metadata["bad"], metadata["good"]
     app = create_app(data_dir, allow_workspace_actions=True, model_factory=model_factory)
 
