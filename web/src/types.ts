@@ -87,6 +87,8 @@ export type ArtifactRead = {
 export type Material = {
   id: string; pageId: string; name: string; path: string; bytes: number; sha256: string;
   createdAt: string; source: 'user_upload' | 'workspace_reference';
+  /** Verified original upload, when this workspace reference is derived from one. */
+  originPageId?: string; originMaterialId?: string;
 };
 export type MaterialList = { pageId: string; materials: Material[]; truncated: boolean; limitBytes: number };
 export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number; downloadable: boolean };

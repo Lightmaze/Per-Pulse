@@ -131,7 +131,31 @@ try {
   assert.ok((await page.locator('.composer textarea').inputValue()).startsWith('A different question about the same source.'));
   assert.equal((await files()).length, 1, 'The second Work reuses the file without uploading again');
   assert.equal(await page.getByText('Keep my question and its page link.', { exact: true }).count(), 0);
-  checks.push('A second Work reuses the native file without another upload or copying the first conversation');
+  const reused = (await fetch(base + '/api/pages/' + secondId + '/materials').then(r => r.json())).materials[0];
+  const sourceReceipt = first.messages.at(-1).materials[0];
+  assert.equal(reused.originPageId, firstId);
+  assert.equal(reused.originMaterialId, sourceReceipt.id);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => (await fetch(base + '/api/pages/' + secondId).then(r => r.json())).messages.some(m =>
+    m.materials?.some(item => item.id === reused.id)), 'second Work source input');
+  const second = await fetch(base + '/api/pages/' + secondId).then(r => r.json());
+  const secondMessage = second.messages.find(m => m.materials?.some(item => item.id === reused.id));
+  await page.locator('[data-message-id="' + secondMessage.id + '"]').getByRole('button', { name: filename, exact: true }).click();
+  await page.getByText('Original upload: Field notes', { exact: true }).waitFor();
+  const originalRead = page.waitForResponse(response =>
+    response.url().endsWith('/api/pages/' + firstId + '/materials/' + sourceReceipt.id) && response.status() === 200);
+  await page.getByRole('button', { name: 'Open original material from its source page', exact: true }).click();
+  await originalRead;
+  // The source inspector is titled "Source files"; the separate workspace
+  // picker is titled "Materials". Keep the exact source dialog visible
+  // throughout this native original-read transition.
+  await page.getByRole('dialog', { name: 'Source files', exact: true }).waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Open original material from its source page', exact: true }).waitFor({ state: 'detached' });
+  await page.getByRole('dialog', { name: 'Source files', exact: true }).getByRole('heading', { name: filename, exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname.split('/').pop(), secondId, 'Inspecting the original source does not steal the active Work');
+  assert.equal((await page.getByRole('dialog', { name: 'Source files', exact: true }).getByRole('region', { name: 'Source file preview' }).textContent()).includes('A useful source stays available'), true);
+  await close();
+  checks.push('A second Work reuses the native file, then opens the verified original upload without crossing into its private conversation');
 
   await open();
   const picker = page.getByLabel('Choose a text file', { exact: true });
@@ -244,7 +268,15 @@ try {
   assert.equal(home.messages.at(-1).sourcePageId, firstId);
   assert.ok(home.messages.at(-1).sourceMessageId);
   assert.equal(home.messages.some(m => m.content.includes('A different question')), false);
-  assert.equal((await fetch(base + '/api/pages/' + secondId).then(r => r.json())).messages.length, 1);
+  const receiverAfterReturn = await fetch(base + '/api/pages/' + secondId).then(r => r.json());
+  // Page creation already stored an opening instruction; the reused file adds
+  // another message. Returning a selected finding Home must not rewrite or
+  // append to either original receiver message.
+  assert.deepEqual(
+    receiverAfterReturn.messages.map(message => [message.id, message.content]),
+    second.messages.map(message => [message.id, message.content]),
+    'Bringing a finding Home must leave the receiving Work history unchanged',
+  );
   checks.push('An authored selected finding returns Home with its exact original Work and message source');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ ok: true, checks, browserErrors: errors, provider: 'disconnected', source: 'synthetic authored material' }, null, 2));

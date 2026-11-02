@@ -299,3 +299,72 @@ def test_materials_survive_native_succession_and_stopped_image_restore(tmp_path,
         assert not pages.runtime.kernel_service._runtimes
     finally:
         assert pages.runtime.close().clean
+
+
+def test_cross_work_material_preserves_verified_original_upload_without_copying_private_history(tmp_path):
+    """An explicitly selected shared file carries its real upload source, not an inferred Work."""
+    with client_for(tmp_path, model_factory=None) as client:
+        original_page = new_page(client)["page"]["id"]
+        receiving_page = new_page(client)["page"]["id"]
+        next_page = new_page(client)["page"]["id"]
+        original = upload(client, original_page, "source.md", b"PROVENANCE_SOURCE_ONLY\\n").json()["material"]
+        headers = {
+            "X-Per-Pulse-World": client.app.state.pages.runtime.world_id,
+            "X-Per-Pulse-Service-Instance": client.app.state.pages.service_instance_id,
+        }
+
+        def attach(page, path, digest):
+            response = client.post(f"/api/pages/{page}/materials/reference",
+                json={"path": path, "sha256": digest}, headers=headers)
+            assert response.status_code == 201, response.text
+            return response.json()["material"]
+
+        receiving = attach(receiving_page, original["path"], original["sha256"])
+        assert (receiving["source"], receiving["originPageId"], receiving["originMaterialId"]) == (
+            "workspace_reference", original_page, original["id"]
+        )
+        assert receiving["pageId"] == receiving_page and receiving["id"] != original["id"]
+        assert attach(receiving_page, original["path"], original["sha256"]) == receiving
+
+        next_reference = attach(next_page, receiving["path"], receiving["sha256"])
+        assert (next_reference["originPageId"], next_reference["originMaterialId"]) == (
+            original_page, original["id"]
+        )
+        assert next_reference["id"] not in (original["id"], receiving["id"])
+        assert client.get(f"/api/pages/{receiving_page}/materials/{receiving['id']}").json()["material"] == receiving
+        assert client.get(f"/api/pages/{receiving_page}/materials/{original['id']}").status_code == 404
+        assert client.get(f"/api/pages/{original_page}/materials/{receiving['id']}").status_code == 404
+
+        message = client.post(f"/api/pages/{receiving_page}/messages",
+            json={"content": "Use this specific version.", "materials": [receiving["id"]]})
+        assert message.status_code == 202
+        observed = message.json()["view"]["messages"][-1]
+        assert observed["materials"] == [receiving]
+        assert "PROVENANCE_SOURCE_ONLY" not in observed["content"]
+        assert receiving["originPageId"] not in observed["content"]
+        assert receiving["originMaterialId"] not in observed["content"]
+        returned = client.post(f"/api/pages/{receiving_page}/return",
+            json={"messageId": observed["id"], "content": "Selected work", "includeMaterials": True})
+        assert returned.status_code == 201
+        transferred = next(row for row in returned.json()["view"]["messages"]
+                           if row["id"] == returned.json()["messageId"])
+        assert transferred["materials"] == [receiving]
+
+        # A plain filesystem file has no known original Work. Never invent one.
+        scratch = tmp_path / "workspace" / "unattributed.txt"
+        scratch.write_text("Not a saved upload.\\n", encoding="utf-8")
+        unknown = attach(next_page, "unattributed.txt", hashlib.sha256(scratch.read_bytes()).hexdigest())
+        assert unknown["source"] == "workspace_reference"
+        assert "originPageId" not in unknown and "originMaterialId" not in unknown
+
+        changed = tmp_path / "workspace" / original["path"]
+        changed.write_text("CHANGED_FILE", encoding="utf-8")
+        stale = client.post(f"/api/pages/{next_page}/materials/reference",
+            json={"path": original["path"], "sha256": original["sha256"]}, headers=headers)
+        assert stale.status_code == 409
+        assert "CHANGED_FILE" not in stale.text
+
+    with client_for(tmp_path, model_factory=None) as client:
+        restored = client.get(f"/api/pages/{receiving_page}/materials").json()["materials"]
+        assert restored == [receiving]
+        assert client.get(f"/api/pages/{next_page}/materials").json()["materials"] == [unknown, next_reference]

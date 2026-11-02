@@ -150,10 +150,22 @@ class PageMaterials:
                         return {"material": dict(existing), "repeated": True}
                     if len(self._records()) >= MAX_MATERIALS:
                         raise MaterialError("material_capacity", "This workspace has reached its source-file limit.")
+                    # A shared workspace path is not its provenance. Resolve
+                    # an original upload only from an existing, byte-verified
+                    # native material receipt, never the caller's path or text.
+                    original = next(
+                        (record for record in matching if record.get("source") == "user_upload"),
+                        None,
+                    )
+                    source = (
+                        {"originPageId": original["pageId"], "originMaterialId": original["id"]}
+                        if original is not None else {}
+                    )
                     record = {"id": uuid4().hex, "pageId": page_id, "path": path,
                               "name": matching[0]["name"] if matching else PurePosixPath(path).name,
                               "sha256": expected_digest, "bytes": current["bytes"],
-                              "source": "workspace_reference", "createdAt": datetime.now(timezone.utc).isoformat()}
+                              "source": "workspace_reference", "createdAt": datetime.now(timezone.utc).isoformat(),
+                              **source}
                     state = deepcopy(pages._state)
                     state.setdefault("materials", {})[record["id"]] = record
                     try:
