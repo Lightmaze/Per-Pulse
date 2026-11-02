@@ -268,7 +268,15 @@ try {
   assert.equal(home.messages.at(-1).sourcePageId, firstId);
   assert.ok(home.messages.at(-1).sourceMessageId);
   assert.equal(home.messages.some(m => m.content.includes('A different question')), false);
-  assert.equal((await fetch(base + '/api/pages/' + secondId).then(r => r.json())).messages.length, 1);
+  const receiverAfterReturn = await fetch(base + '/api/pages/' + secondId).then(r => r.json());
+  // Page creation already stored an opening instruction; the reused file adds
+  // another message. Returning a selected finding Home must not rewrite or
+  // append to either original receiver message.
+  assert.deepEqual(
+    receiverAfterReturn.messages.map(message => [message.id, message.content]),
+    second.messages.map(message => [message.id, message.content]),
+    'Bringing a finding Home must leave the receiving Work history unchanged',
+  );
   checks.push('An authored selected finding returns Home with its exact original Work and message source');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ ok: true, checks, browserErrors: errors, provider: 'disconnected', source: 'synthetic authored material' }, null, 2));
