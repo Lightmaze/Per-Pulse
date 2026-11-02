@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage } from '../i18n';
-import type { AdaptiveWorkChoices, CollaboratorOutcome } from '../types';
+import type { AdaptiveWorkChoices, CollaboratorOutcome, PageSummary } from '../types';
+import { historicSourceRating, visibleRatedSourceWork } from '../collaborationEvidence';
 import { SessionLink, type Navigate } from './SessionLink';
 
 /** A read of an executed collaborator choice, not a live suggestion or reward. */
-export function CollaboratorChoices({ pageId, navigate }: { pageId: string; navigate: Navigate }) {
-  const { t, errorText } = useLanguage();
+export function CollaboratorChoices({ pageId, pages, navigate }: { pageId: string; pages: PageSummary[]; navigate: Navigate }) {
+  const { t, pageTitle, errorText } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   const [reading, setReading] = useState(false);
   const [choices, setChoices] = useState<AdaptiveWorkChoices | null>(null);
@@ -95,12 +96,24 @@ export function CollaboratorChoices({ pageId, navigate }: { pageId: string; navi
           </div> : null}
           {choice.evidence.length ? <details>
             <summary>{t('collaboration.evidence', { count: choice.evidence.length })}</summary>
-            <ul>{choice.evidence.map((item, index) => <li key={item.recordId}>
-              {item.sourceMessageId ? <SessionLink pageId={item.sourceWorkId || pageId}
-                label={t('collaboration.source', { number: index + 1 })}
-                origin={{ pageId }} navigate={navigate} targetMessageId={item.sourceMessageId} />
-                : t('collaboration.sourceUnavailable')}
-            </li>)}</ul>
+            <ul>{choice.evidence.map((item, index) => {
+              const originalWork = visibleRatedSourceWork(pages, item.sourceWorkId, item.sourceMessageId);
+              const sourceLabel = t('collaboration.source', { number: index + 1 })
+                + (originalWork ? ` · ${pageTitle(originalWork)}` : '');
+              const rating = historicSourceRating(item.outcomeProxy);
+              return <li key={item.recordId}>
+                {originalWork && item.sourceMessageId ? <SessionLink pageId={originalWork.id}
+                  label={sourceLabel} origin={{ pageId }} navigate={navigate}
+                  targetMessageId={item.sourceMessageId} />
+                  : t('collaboration.sourceUnavailable')}
+                {' · '}<span className="artifact-intro">{t(
+                  rating === 'adopted' ? 'collaboration.sourceRatedAdopted'
+                    : rating === 'revised' ? 'collaboration.sourceRatedRevised'
+                      : rating === 'discarded' ? 'collaboration.sourceRatedDiscarded'
+                        : 'collaboration.sourceRatingUnknown',
+                )}</span>
+              </li>;
+            })}</ul>
           </details> : <p className="artifact-intro">{t('collaboration.referenceOnly')}</p>}
           {choice.historyIncomplete ? <p className="artifact-intro">{t('collaboration.incomplete')}</p> : null}
         </article>;
