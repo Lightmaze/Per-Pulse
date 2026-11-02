@@ -16,7 +16,7 @@ import time
 import httpx
 import pytest
 
-from per_pulse.service import PageService
+from per_pulse.service import PageService, PageError
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 from pulse_system.service.kernel_runtime import KernelHarnessFactory
 from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
@@ -287,7 +287,17 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         }
         assert all(item["sourceMessageId"] for item in user_read["choices"][0]["evidence"])
         assert page_projection.adaptive_choices(reference_work.id)["choices"] == []
-
+        assert user_read["choices"][0]["outcome"] is None
+        with pytest.raises(PageError) as wrong_work:
+            page_projection.rate_adaptive_choice(reference_work.id, new_record["id"], "adopted")
+        assert wrong_work.value.code == "collaboration_outcome_unavailable"
+        with pytest.raises(PageError) as wrong_home:
+            page_projection.rate_adaptive_choice("home", new_record["id"], "adopted")
+        assert wrong_home.value.code == "collaboration_outcome_unavailable"
+        with pytest.raises(PageError) as wrong_value:
+            page_projection.rate_adaptive_choice(front.id, new_record["id"], "fabricated")
+        assert wrong_value.value.code == "collaboration_outcome_invalid"
+        assert reopened.storage.get_delegation(new_record["id"])["outcome"] is None
 
         explicit_sources = retained_shared(reopened, owner, original_request)
         assert len(explicit_sources) == 1
@@ -297,7 +307,14 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             selected_for_inspection(reopened, recovered, records[0])
 
         # Later explicit contrary feedback changes only the NEXT choice.
-        reopened.record_delegation_outcome(new_record["id"], "discarded")
+        written = page_projection.rate_adaptive_choice(front.id, new_record["id"], "discarded")
+        assert written["outcome"] == "discarded" and written["changed"]
+        again = page_projection.rate_adaptive_choice(front.id, new_record["id"], "discarded")
+        assert again["outcome"] == "discarded" and not again["changed"]
+        assert page_projection.adaptive_choices(front.id)["choices"][0]["outcome"] == "discarded"
+        with pytest.raises(PageError) as conflict:
+            page_projection.rate_adaptive_choice(front.id, new_record["id"], "adopted")
+        assert conflict.value.code == "collaboration_outcome_conflict"
         selection_scope = reopened.harness.scope_for(owner, "work:" + front.center_id)
         later = choose(reopened._native_team, selection_scope, front, {
             "candidates": {state["bad"]: 0.6, state["good"]: 0.4},

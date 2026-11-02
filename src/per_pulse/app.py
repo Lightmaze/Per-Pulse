@@ -104,6 +104,10 @@ class DecideAction(Input):
     decision: Literal["allow_once", "deny", "cancel"]
 
 
+class AssessCollaborator(Input):
+    outcome: Literal["adopted", "revised", "discarded"]
+
+
 class SettingsInput(Input):
     responseLanguage: ResponseLanguage
 
@@ -470,6 +474,10 @@ def create_app(
     @app.get("/api/pages/{page_id}/team/choices")
     def adaptive_choices(page_id: str, request: Request):
         return pages(request).adaptive_choices(page_id)
+
+    @app.post("/api/pages/{page_id}/team/choices/{record_id}/outcome")
+    def rate_adaptive_choice(page_id: str, record_id: str, body: AssessCollaborator, request: Request):
+        return pages(request).rate_adaptive_choice(page_id, record_id, body.outcome)
 
     @app.get("/api/pages/{page_id}/posture")
     def learning(page_id: str, request: Request):

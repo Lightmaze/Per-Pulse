@@ -478,6 +478,47 @@ class PageService:
                         evidence["sourceMessageId"] = None
             return projection
 
+    def rate_adaptive_choice(self, page_id: str, record_id: str, outcome: str) -> dict:
+        """Attach explicit operator feedback to a completed native Work choice.
+
+        A foreign Work or a forged record ID cannot create a learning signal.
+        The original Kernel and causal delegation ledger remain authoritative.
+        """
+        if outcome not in {"adopted", "revised", "discarded"}:
+            raise PageError("collaboration_outcome_invalid", "Choose a supported result assessment.", 422)
+        from pulse_harness.core.errors import ScopeConflict
+        with self._lock:
+            self.runtime._require_runtime_owner()
+            front = self._front(page_id)
+            if front is None:
+                raise PageError("collaboration_outcome_unavailable", "Only the original Work can assess this result.", 404)
+            team = self.runtime._native_team
+            try:
+                record, request, owned_front = team._record(front.focal_engram_id, record_id)
+                choice = team._retained_adaptive_choice(
+                    front.focal_engram_id, record, request, owned_front)
+                delivered = self.runtime.causal_ledger.find_delegation_result_by_record_id(
+                    self.runtime.world_id, record_id)
+                if (owned_front.id != page_id or choice is None
+                        or record["result_summary"] is None or delivered is None):
+                    raise ScopeConflict("not a completed adaptive choice from this Work")
+                self._check_message(page_id, delivered.id)
+            except (ScopeConflict, PageError) as exc:
+                raise PageError(
+                    "collaboration_outcome_unavailable",
+                    "Open the original completed collaborator result in its Work before assessing it.",
+                    404,
+                ) from exc
+            if record.get("outcome") not in (None, outcome):
+                raise PageError(
+                    "collaboration_outcome_conflict",
+                    "This result already has an immutable assessment. It cannot be replaced.",
+                    409,
+                )
+            update = self.runtime.record_delegation_outcome(record_id, outcome)
+            return {"recordId": record_id, "outcome": update["outcome"],
+                    "changed": update["changed"]}
+
     def _rows(self, page_id: str, *, limit: int = MAX_MESSAGES + 1,
               event_id: str | None = None, before_seq: int | None = None,
               content_query: str | None = None) -> list[dict]:
