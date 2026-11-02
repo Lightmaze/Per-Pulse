@@ -15,9 +15,10 @@ Otherwise those fields are absent: a plain filesystem file does not acquire a
 fictional Work of origin. Reattaching the same verified bytes in a third Work
 continues to identify the original upload, not the intermediate Work.
 
-Opening the attachment from another Work displays an **Open original material
-in its source Work** control (also in 简体中文) that opens the exact recorded
-original source material through the existing source-scoped API. This does not
+Opening the attachment from another Work names the original upload's
+Home/Work page and displays an **Open original material from its source page**
+control (also in 简体中文). It opens the exact recorded original source
+material through the existing source-scoped API. This does not
 navigate away from the user's active Work or change its unsent draft. If the
 original has been removed, has changed or belongs to another page, the
 existing native source endpoint refuses it; no private conversation transcript
