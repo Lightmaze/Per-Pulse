@@ -7,8 +7,9 @@ import { Dialog } from './Dialog';
 import { TextDocument } from './TextDocument';
 
 /** Inspect exactly the version identified by a native message attachment. */
-export function MaterialDialog({ identity, pageId, materialId, close, browse }: {
+export function MaterialDialog({ identity, pageId, materialId, close, browse, openOriginal }: {
   identity: WorkspaceFileIdentity; pageId: string; materialId: string; close: () => void; browse: () => void;
+  openOriginal: (pageId: string, materialId: string) => void;
 }) {
   const { t, locale, errorText } = useLanguage();
   const [preview, setPreview] = useState<MaterialRead | null>(null);
@@ -67,6 +68,11 @@ export function MaterialDialog({ identity, pageId, materialId, close, browse }: 
     </div>
     <div className="material-source-actions">
       {preview?.downloadable ? <button className="secondary-button" disabled={downloading} onClick={() => void download()}>{t(downloading ? 'artifacts.downloading' : 'library.downloadOriginal')}</button> : null}
+      {preview?.material.originPageId && preview.material.originMaterialId
+        && (preview.material.originPageId !== pageId || preview.material.originMaterialId !== materialId)
+        ? <button className="text-button" onClick={() => openOriginal(preview.material.originPageId!, preview.material.originMaterialId!)}>
+            {t('materials.openOriginal')}
+          </button> : null}
       <button className="text-button" onClick={browse}>{t('library.browse')}</button>
       {downloadStarted ? <span role="status">{t('artifacts.downloadStarted')}</span> : null}
     </div>
