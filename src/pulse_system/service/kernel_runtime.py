@@ -20,7 +20,6 @@ import os
 import sqlite3
 from pathlib import Path
 import threading
-import time
 from typing import Any
 from uuid import uuid4
 
@@ -345,6 +344,9 @@ class KernelHarnessRuntime:
         self._runner_locks: dict[str, Any] = {}
         self._approval_calls = 0
         self._abort_calls = 0
+        # Process-local wake hint only. The Kernel turn/action, not this
+        # generation counter, remains the durable human-approval authority.
+        self._terminal_notice_generation = 0
         self._shutdown_lock = threading.Lock()
         self._closed = False
         self._closing = False
@@ -795,6 +797,7 @@ class KernelHarnessRuntime:
         finally:
             with self._lock:
                 self._approval_calls -= 1
+                self._terminal_notice_generation += 1
                 self._lock.notify_all()
 
     def _check(self):
@@ -966,6 +969,12 @@ class KernelHarnessRuntime:
                     runtime.runner.abort(scope, reason="world_turn_timeout")
                 except KernelError:
                     pass
+                finally:
+                    # Timeout is not an approval callback. Wake the same
+                    # terminal waiter so it observes the original cancellation.
+                    with self._lock:
+                        self._terminal_notice_generation += 1
+                        self._lock.notify_all()
             if timeout_sec is not None:
                 timer = threading.Timer(timeout_sec, expire)
                 timer.daemon = True
@@ -974,10 +983,23 @@ class KernelHarnessRuntime:
                 with self._compute_permit(scope):
                     self._check()
                     result = runtime.runner.run(scope, prompt=None if internal is not None else submitted)
+            # A human may leave this durable action unanswered for hours.
+            # Avoid polling its SQLite terminal state 40 times per second per
+            # held turn. Approval, Stop and timeout signal this condition; a
+            # bounded fallback still detects owner loss and external changes.
+            # This does NOT release the Pulse worker's physical thread: the
+            # separate thread-free park/resume design remains outstanding.
             while result.status not in _TERMINAL:
+                with self._lock:
+                    notice_generation = self._terminal_notice_generation
                 self._check()
-                time.sleep(0.025)
                 result = runtime.runner._outcome(scope)
+                if result.status not in _TERMINAL:
+                    with self._lock:
+                        # A notification between the durable read and wait
+                        # must never be lost to the next wait interval.
+                        if self._terminal_notice_generation == notice_generation:
+                            self._lock.wait(timeout=0.25)
             self._check()
             rounds = self.kernel.store.model_rounds_for_turn(scope)
             if self.expert is not None:
@@ -1111,6 +1133,7 @@ class KernelHarnessRuntime:
             # including when cancellation raises an actual error.
             with self._lock:
                 self._abort_calls -= 1
+                self._terminal_notice_generation += 1
                 self._lock.notify_all()
 
     def steer(self, engram_id: str, content: str) -> None:
@@ -1154,6 +1177,8 @@ class KernelHarnessRuntime:
                 if self._closed:
                     return self._close_report
                 self._closing = True
+                self._terminal_notice_generation += 1
+                self._lock.notify_all()
                 self.life.close()  # revoke capture before waiting on model/approval owners
                 active = tuple(self._active.items())
                 abortable = []
