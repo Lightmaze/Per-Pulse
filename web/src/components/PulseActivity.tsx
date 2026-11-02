@@ -4,7 +4,7 @@ import { useLanguage } from '../i18n';
 import { PulseActivityRequestGate } from '../pulseActivityRequestGate';
 import { activationMessageTarget, attentionSourceTarget, localRetainedAttention } from '../pulseAttention';
 import { pulseActivityLabel } from '../pulseActivityLabels';
-import { pulseAdmissionHold } from '../pulseAdmission';
+import { pulseAdmissionHold, pulseWorkerPressure } from '../pulseAdmission';
 import { otherPendingPulseContexts, pulseQueueForPage } from '../pulseQueue';
 import type { PageSummary, PulseState } from '../types';
 import { Dialog } from './Dialog';
@@ -124,6 +124,11 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
   const admissionHold = pulse ? pulseAdmissionHold(pulse) : null;
   const localBacklog = pulseQueueForPage(pulse, pageId);
   const otherBacklogs = otherPendingPulseContexts(pulse, pageId);
+  const workerCapacity = pulse?.workerCapacity;
+  const workerPressure = pulse ? pulseWorkerPressure(pulse, pageId) : false;
+  // A page summary only proves attention is needed; it does not certify the
+  // specific pending native action. The original Work alone owns decisions.
+  const reviewPages = pages.filter(page => page.id !== pageId && page.status === 'needs_attention');
   // Older servers do not have partial-failure usage receipts. A receipt is a
   // proven lower bound, not a full provider bill or a released reservation.
   const budgetEvidence = pulse?.providerTokenBudget;
@@ -186,6 +191,16 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
         {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">{t('pulse.oldest', { time: eventTime(pulse.queue.oldestQueuedAt) })}</p> : null}
         {!pulse.providerConfigured ? <p className="pulse-activity-detail">{t('pulse.noProvider')}</p> : null}
       </section>
+      {workerPressure && workerCapacity ? <section className="pulse-activity-section" aria-label={t('pulse.slotPressureTitle')}>
+        <h3>{t('pulse.slotPressureTitle')}</h3>
+        <p role="status" className="pulse-activity-detail">{t('pulse.slotPressure', {
+          attached: workerCapacity.attached, parked: workerCapacity.approvalHeld,
+        })}</p>
+        {reviewPages.length ? <ul className="pulse-activity-list">{reviewPages.map(page =>
+          <li key={page.id}><button type="button" className="pulse-activity-link"
+            onClick={() => jump(page.id)}>{t('pulse.inspectAttention', { title: nameFor(page.id) })}</button></li>
+        )}</ul> : <p className="pulse-activity-detail">{t('pulse.noAttentionPages')}</p>}
+      </section> : null}
       {otherBacklogs.length ? <section className="pulse-activity-section" aria-label={t('pulse.otherBacklogs')}>
         <h3>{t('pulse.otherBacklogs')}</h3>
         <p className="pulse-activity-detail">{t('pulse.otherBacklogsInfo')}</p>

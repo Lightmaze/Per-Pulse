@@ -50,3 +50,25 @@ test('the English and Chinese notices preserve foreground and queued-work distin
   assert.match(continuityChinese['pulse.admissionCountHeld'], /已排队的工作仍可能继续/);
   assert.match(continuityChinese['pulse.admissionTokensHeld'], /前台输入不受影响/);
 });
+
+test('physical approval saturation is visible only for genuinely queued local work', async () => {
+  const { pulseWorkerPressure } = await import('../src/pulseAdmission.ts');
+  const capacity = {
+    computeLimit: 1, computeRunning: 0, approvalHeld: 3,
+    attached: 3, approvalParkedLimit: 2, available: 0,
+  };
+  const queued = [{ pageId: 'work-fourth', queued: 1 }];
+  const saturated = state({ workerCapacity: capacity, foregroundQueuedByPage: queued });
+  assert.equal(pulseWorkerPressure(saturated, 'work-fourth'), true);
+  assert.equal(pulseWorkerPressure(saturated, 'work-other'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, foregroundQueuedByPage: queued.map(e => ({ ...e, queued: 0 })) }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, queueByContext: [{ pageId: 'work-fourth', queued: 1 }], foregroundQueuedByPage: [] }), 'work-fourth'), true);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, attached: 2, available: 0 }, foregroundQueuedByPage: queued }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, approvalHeld: 0 }, foregroundQueuedByPage: queued }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, available: 1 }, foregroundQueuedByPage: queued }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, foregroundQueuedByPage: queued, providerConfigured: false }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, foregroundQueuedByPage: queued, running: false }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state(), 'work-fourth'), false);
+  assert.match(continuityEnglish['pulse.slotPressure'], /Nothing is approved automatically/);
+  assert.match(continuityChinese['pulse.slotPressure'], /不会自动批准/);
+});

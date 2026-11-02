@@ -235,6 +235,22 @@ class PageService:
                 # Raw center IDs remain available for historical, non-navigable
                 # Work; only a known actual Work can receive a page link.
                 backlog["pageId"] = page_id_for(backlog["center_id"])
+            # ContextPulse's queueByContext deliberately includes only native
+            # spontaneous/propagation activity. Real foreground user stimuli
+            # have a separate causal kind. Count those queued inputs without
+            # equating them with pending approvals or copying their content.
+            with self.runtime.storage._lock:
+                foreground_rows = self.runtime.storage._conn.execute(
+                    "SELECT center_id, COUNT(*) FROM causal_events "
+                    "WHERE world_id = ? AND kind = 'stimulus' AND source = 'user' "
+                    "AND status = 'queued' GROUP BY center_id",
+                    (self.runtime.world_id,),
+                ).fetchall()
+            state["foregroundQueuedByPage"] = [
+                {"pageId": page_id_for(center_id), "queued": queued}
+                for center_id, queued in foreground_rows
+                if page_id_for(center_id) is not None
+            ]
             for retained in state.get("retainedAttention", []):
                 # A model's retained local thought has its own original causal
                 # source. Do not infer a navigable message from a turn/action
@@ -301,6 +317,18 @@ class PageService:
                 else:
                     activation["sourceCenterId"] = None
                     activation["sourcePageId"] = None
+            # Physical approval parking preserves original Kernel ownership,
+            # but a finite attached-turn fleet can still fill. Report only
+            # native read-only capacity facts, never infer approval of a turn.
+            capacity = self.runtime.scheduling_snapshot()["capacity"]
+            state["workerCapacity"] = {
+                "computeLimit": capacity["worker_limit"],
+                "computeRunning": capacity["worker_running"],
+                "approvalHeld": capacity["worker_parked"],
+                "attached": capacity["worker_attached"],
+                "approvalParkedLimit": capacity["approval_parked_limit"],
+                "available": capacity["worker_available"],
+            }
             state["running"] = self.runtime.running and state["enabled"] and not state["paused"]
             state["providerConfigured"] = self.configured
             return state
