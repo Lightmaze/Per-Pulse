@@ -519,6 +519,24 @@ class PageService:
             return {"recordId": record_id, "outcome": update["outcome"],
                     "changed": update["changed"]}
 
+    def collaborator_feedback(self, page_id: str, record_id: str) -> dict:
+        """Read a source-bound operator annotation in its original Work only."""
+        with self._lock:
+            if self._front(page_id) is None:
+                raise PageError("collaboration_feedback_unavailable", "Open the original Work to inspect feedback.", 404)
+            # Native _source checks the exact completed contribution and owner.
+            return self.runtime._native_team.feedback.get(page_id, record_id)
+
+    def update_collaborator_feedback(self, page_id: str, record_id: str, details: dict) -> dict:
+        """Revise or withdraw consent through the original native CAS journal."""
+        with self._lock:
+            self.runtime._require_runtime_owner()
+            if self._front(page_id) is None:
+                raise PageError("collaboration_feedback_unavailable", "Open the original Work to edit feedback.", 404)
+            # Native put revalidates source, scope, revision, runtime lease and
+            # withdrawal atomically. A completed outcome never implies consent.
+            return self.runtime._native_team.feedback.put(page_id, record_id, details)
+
     def _rows(self, page_id: str, *, limit: int = MAX_MESSAGES + 1,
               event_id: str | None = None, before_seq: int | None = None,
               content_query: str | None = None) -> list[dict]:
