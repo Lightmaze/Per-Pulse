@@ -28,13 +28,13 @@ let browser;
 const checks = [];
 const errors = [];
 const start = () => {
-  const process = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
+  const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/rim_feedback_server.py'),
     '--data-dir', directory, '--port', String(port),
   ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
-  process.stdout.on('data', chunk => { serverLog += chunk; });
-  process.stderr.on('data', chunk => { serverLog += chunk; });
-  return process;
+  child.stdout.on('data', chunk => { serverLog += chunk; });
+  child.stderr.on('data', chunk => { serverLog += chunk; });
+  return child;
 };
 const stop = async child => {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
