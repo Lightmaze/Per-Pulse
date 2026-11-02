@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage } from '../i18n';
 import type { AdaptiveWorkChoices, CollaboratorOutcome, PageSummary } from '../types';
-import { historicSourceRating } from '../collaborationEvidence';
+import { historicSourceRating, visibleRatedSourceWork } from '../collaborationEvidence';
 import { SessionLink, type Navigate } from './SessionLink';
 
 /** A read of an executed collaborator choice, not a live suggestion or reward. */
@@ -97,13 +97,12 @@ export function CollaboratorChoices({ pageId, pages, navigate }: { pageId: strin
           {choice.evidence.length ? <details>
             <summary>{t('collaboration.evidence', { count: choice.evidence.length })}</summary>
             <ul>{choice.evidence.map((item, index) => {
-              const originalWorkId = item.sourceWorkId || pageId;
-              const originalWork = pages.find(page => page.id === originalWorkId && page.kind === 'work');
+              const originalWork = visibleRatedSourceWork(pages, item.sourceWorkId, item.sourceMessageId);
               const sourceLabel = t('collaboration.source', { number: index + 1 })
                 + (originalWork ? ` · ${pageTitle(originalWork)}` : '');
               const rating = historicSourceRating(item.outcomeProxy);
               return <li key={item.recordId}>
-                {item.sourceMessageId ? <SessionLink pageId={originalWorkId}
+                {originalWork && item.sourceMessageId ? <SessionLink pageId={originalWork.id}
                   label={sourceLabel} origin={{ pageId }} navigate={navigate}
                   targetMessageId={item.sourceMessageId} />
                   : t('collaboration.sourceUnavailable')}
