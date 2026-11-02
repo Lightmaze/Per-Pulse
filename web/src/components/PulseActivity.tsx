@@ -125,7 +125,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
   const localBacklog = pulseQueueForPage(pulse, pageId);
   const otherBacklogs = otherPendingPulseContexts(pulse, pageId);
   const workerCapacity = pulse?.workerCapacity;
-  const workerPressure = pulse ? pulseWorkerPressure(pulse, localBacklog?.queued ?? 0) : false;
+  const workerPressure = pulse ? pulseWorkerPressure(pulse, pageId) : false;
   // A page summary only proves attention is needed; it does not certify the
   // specific pending native action. The original Work alone owns decisions.
   const reviewPages = pages.filter(page => page.id !== pageId && page.status === 'needs_attention');

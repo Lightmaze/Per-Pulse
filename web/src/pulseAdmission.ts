@@ -23,12 +23,18 @@ export function pulseAdmissionHold(pulse: PulseState): PulseAdmissionHold {
  * admission-token limits. Reveal it only for actual queued local work, with a
  * verified native parked population; this is not a scheduler diagnosis or a
  * claim that an attention-needing Work is necessarily an approval.
+ *
+ * The native Pulse background count intentionally excludes user stimuli.
+ * Match the actual page in BOTH native queues rather than using an aggregate
+ * or stale page-summary status as a proxy for foreground work.
  */
-export function pulseWorkerPressure(pulse: PulseState, localQueued: number): boolean {
+export function pulseWorkerPressure(pulse: PulseState, pageId: string): boolean {
   const capacity = pulse.workerCapacity;
+  const background = pulse.queueByContext?.find(entry => entry.pageId === pageId)?.queued ?? 0;
+  const foreground = pulse.foregroundQueuedByPage?.find(entry => entry.pageId === pageId)?.queued ?? 0;
   return Boolean(
     capacity && pulse.enabled && pulse.running && !pulse.paused
-    && pulse.providerConfigured && localQueued > 0
+    && pulse.providerConfigured && background + foreground > 0
     && capacity.approvalHeld > 0 && capacity.available === 0
     && capacity.attached >= capacity.computeLimit + capacity.approvalParkedLimit
   );

@@ -57,15 +57,18 @@ test('physical approval saturation is visible only for genuinely queued local wo
     computeLimit: 1, computeRunning: 0, approvalHeld: 3,
     attached: 3, approvalParkedLimit: 2, available: 0,
   };
-  const saturated = state({ workerCapacity: capacity });
-  assert.equal(pulseWorkerPressure(saturated, 1), true);
-  assert.equal(pulseWorkerPressure(saturated, 0), false);
-  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, attached: 2, available: 0 } }), 1), false);
-  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, approvalHeld: 0 } }), 1), false);
-  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, available: 1 } }), 1), false);
-  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, providerConfigured: false }), 1), false);
-  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, running: false }), 1), false);
-  assert.equal(pulseWorkerPressure(state(), 1), false);
+  const queued = [{ pageId: 'work-fourth', queued: 1 }];
+  const saturated = state({ workerCapacity: capacity, foregroundQueuedByPage: queued });
+  assert.equal(pulseWorkerPressure(saturated, 'work-fourth'), true);
+  assert.equal(pulseWorkerPressure(saturated, 'work-other'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, foregroundQueuedByPage: queued.map(e => ({ ...e, queued: 0 })) }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, queueByContext: [{ pageId: 'work-fourth', queued: 1 }], foregroundQueuedByPage: [] }), 'work-fourth'), true);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, attached: 2, available: 0 }, foregroundQueuedByPage: queued }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, approvalHeld: 0 }, foregroundQueuedByPage: queued }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, available: 1 }, foregroundQueuedByPage: queued }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, foregroundQueuedByPage: queued, providerConfigured: false }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, foregroundQueuedByPage: queued, running: false }), 'work-fourth'), false);
+  assert.equal(pulseWorkerPressure(state(), 'work-fourth'), false);
   assert.match(continuityEnglish['pulse.slotPressure'], /Nothing is approved automatically/);
   assert.match(continuityChinese['pulse.slotPressure'], /不会自动批准/);
 });

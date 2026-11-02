@@ -337,13 +337,19 @@ def test_exhausted_physical_approval_slots_are_visible_and_recoverable(
         while True:
             observation = client.get("/api/pulse/observation").json()
             queue = [
-                entry for entry in observation["pulse"]["queueByContext"]
+                entry for entry in observation["pulse"]["foregroundQueuedByPage"]
                 if entry["pageId"] == newcomer and entry["queued"] > 0
             ]
             if queue:
                 break
             assert time.monotonic() < deadline, observation["pulse"]["queue"]
             time.sleep(0.02)
+        # Background local Pulse activity does not include foreground stimuli;
+        # cross-reading the two projections would hide a genuine queued Work.
+        assert not any(
+            entry["pageId"] == newcomer
+            for entry in observation["pulse"]["queueByContext"]
+        )
         capacity = observation["pulse"]["workerCapacity"]
         assert capacity == {
             "computeLimit": 1, "computeRunning": 0, "approvalHeld": 3,
