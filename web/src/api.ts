@@ -1,5 +1,5 @@
 import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
-import type { AdaptiveWorkChoices, CollaboratorOutcome, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
+import type { AdaptiveWorkChoices, CollaboratorOutcome, CollaboratorFeedbackScope, CollaboratorFeedbackView, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
 export type PulseWriteIdentity = Pick<PulseObservation, 'workspaceId' | 'serviceInstanceId'>;
@@ -77,6 +77,16 @@ export const api = {
     request<{ recordId: string; outcome: CollaboratorOutcome; changed: boolean }>(
       `${pagePath(pageId)}/team/choices/${encodeURIComponent(recordId)}/outcome`,
       { method: 'POST', body: JSON.stringify({ outcome }) },
+    ),
+  collaboratorFeedback: (pageId: string, recordId: string, signal?: AbortSignal) =>
+    request<CollaboratorFeedbackView>(
+      `${pagePath(pageId)}/team/choices/${encodeURIComponent(recordId)}/feedback`, { signal },
+    ),
+  updateCollaboratorFeedback: (pageId: string, recordId: string, expectedRevision: number,
+      content: string, scope: CollaboratorFeedbackScope, withdrawn: boolean) =>
+    request<CollaboratorFeedbackView>(
+      `${pagePath(pageId)}/team/choices/${encodeURIComponent(recordId)}/feedback`,
+      { method: 'PUT', body: JSON.stringify({ expectedRevision, content, scope, withdrawn }) },
     ),
   history: (id: string, beforeMessageId: string, signal?: AbortSignal) =>
     request<MessageHistory>(`${pagePath(id)}/messages?beforeMessageId=${encodeURIComponent(beforeMessageId)}`, { signal }),
