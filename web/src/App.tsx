@@ -217,14 +217,23 @@ export default function App() {
 
   const bringHome = async (content: string, includeMaterials = false) => {
     if (modal?.kind !== 'return') return;
+    const sourceId = route.id;
+    const sourceSerial = route.serial;
+    const sourceModal = modal;
+    // A completed native return belongs in Home even if the person has moved
+    // elsewhere. Never redirect a later route or replace its dialog/error.
+    const stillHere = () => currentPage.current === sourceId
+      && currentRouteSerial.current === sourceSerial && currentModal.current === sourceModal;
     setBusy(true); setModalError('');
     try {
-      const response = await api.bringHome(route.id, content, modal.message.id, includeMaterials);
+      const response = await api.bringHome(sourceId, content, sourceModal.message.id, includeMaterials);
       applyView(response.view);
-      navigate('home', undefined, response.messageId);
+      if (stillHere()) navigate('home', undefined, response.messageId);
       setToast(t('app.broughtHome'));
-    } catch (problem) { setModalError(errorText(problem)); }
-    finally { setBusy(false); }
+    } catch (problem) {
+      if (stillHere()) setModalError(errorText(problem));
+      else setToast(errorText(problem));
+    } finally { setBusy(false); }
   };
 
   const prepareArtifactHome = async (artifact: Artifact) => {

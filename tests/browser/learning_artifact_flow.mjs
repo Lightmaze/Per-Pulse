@@ -338,6 +338,52 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
   checks.push('late settled transfer stays in receiving Work without hijacking user navigation');
 
+  // Home return has the same native-settlement/foreground-navigation boundary
+  // as a Work handoff. A user may leave during the POST: Home must receive the
+  // exact sourced result, while their newer route and unfinished draft stay put.
+  await page.locator('nav.breadcrumbs .crumb-ancestor').first().click();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  const pendingHomeDraft = 'Continue writing in Home while a source return settles.';
+  await page.locator('.composer textarea').fill(pendingHomeDraft);
+  await page.locator('nav.page-nav a.nav-row').filter({ hasText: 'Original product brief' }).click();
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  const delayedReturnUrl = `**/api/pages/${originalId}/return`;
+  let releaseReturn;
+  let notifyReturnIntercepted;
+  const interceptedReturn = new Promise(resolve => { notifyReturnIntercepted = resolve; });
+  const returnGate = new Promise(resolve => { releaseReturn = resolve; });
+  await page.route(delayedReturnUrl, async route => {
+    notifyReturnIntercepted();
+    await returnGate;
+    await route.continue();
+  });
+  await selectedSource.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  const pendingReturnDialog = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
+  await pendingReturnDialog.locator('#return-content')
+    .fill('The first screen is a twelve-field intake form. [Synthetic browser fixture]');
+  await pendingReturnDialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  await interceptedReturn;
+  await page.goBack();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  const lateHomeResponse = page.waitForResponse(response =>
+    response.url().includes(`/api/pages/${originalId}/return`) && response.request().method() === 'POST');
+  releaseReturn();
+  assert.equal((await lateHomeResponse).status(), 201);
+  await wait(async () => {
+    const homeView = await (await fetch(base + '/api/pages/home')).json();
+    return homeView.messages.some(message => message.sourcePageId === originalId
+      && message.content?.includes('The first screen is a twelve-field intake form.'));
+  }, 'late native return persists with source in Home');
+  await page.waitForTimeout(200);
+  assert.equal(new URL(page.url()).pathname, '/', 'late Home return must not hijack a newer route');
+  assert.equal(await page.locator('.composer textarea').inputValue(), pendingHomeDraft,
+    'The Home draft survives the completed return');
+  await page.unroute(delayedReturnUrl);
+  await page.goto(base + '/page/' + originalId);
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
+  checks.push('late native Home return keeps its source without stealing the active route or drafts');
+
   await selectedSource.getByRole('button', { name: 'Use in another Work', exact: true }).click();
   const transferDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
   await transferDialog.waitFor();
