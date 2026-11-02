@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useLanguage } from '../i18n';
 import type { AdaptiveWorkChoices, CollaboratorOutcome } from '../types';
 import { SessionLink, type Navigate } from './SessionLink';
+import { CollaboratorFeedbackEditor } from './CollaboratorFeedbackEditor';
 
 /** A read of an executed collaborator choice, not a live suggestion or reward. */
 export function CollaboratorChoices({ pageId, navigate }: { pageId: string; navigate: Navigate }) {
@@ -93,6 +94,8 @@ export function CollaboratorChoices({ pageId, navigate }: { pageId: string; navi
               </div>}
             {submitting === choice.recordId ? <p role="status">{t('collaboration.saving')}</p> : null}
           </div> : null}
+          {choice.resultMessageId ? <CollaboratorFeedbackEditor key={`${pageId}/${choice.recordId}`}
+            pageId={pageId} recordId={choice.recordId} /> : null}
           {choice.evidence.length ? <details>
             <summary>{t('collaboration.evidence', { count: choice.evidence.length })}</summary>
             <ul>{choice.evidence.map((item, index) => <li key={item.recordId}>
