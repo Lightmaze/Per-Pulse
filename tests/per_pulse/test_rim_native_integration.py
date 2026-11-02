@@ -332,6 +332,80 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert not neutral["changed"]
         assert neutral["evidence"] == []
         assert neutral["probabilities"] == neutral["prior"]
+
+        # Actual native feedback is a separate, operator-controlled consent:
+        # Work-only notes do not transfer even when the original outcome is rated.
+        details = {"expected_revision": 0, "content": "Use the proven startup evidence.",
+                   "scope": "work", "withdrawn": False}
+        work_only = reopened._native_team.feedback.put(front.id, records[1], details)
+        assert work_only["revision"] == 1
+        still_private = choose(reopened._native_team, other_scope, other, {
+            "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
+            "instruction": INSTRUCTION,
+        })
+        assert still_private["evidence"] == []
+        assert still_private["probabilities"] == still_private["prior"]
+
+        # Only explicit collaborator-scope sharing lets the same subject use
+        # that verified outcome in another Work's native decision.
+        shared = reopened._native_team.feedback.put(front.id, records[1], {
+            **details, "expected_revision": 1, "scope": "collaborator",
+        })
+        assert shared["revision"] == 2
+        transferred = choose(reopened._native_team, other_scope, other, {
+            "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
+            "instruction": INSTRUCTION,
+        })
+        assert transferred["changed"]
+        assert transferred["probabilities"][state["good"]] > 0.4
+        assert transferred["kl"] <= 0.15 + 1e-12
+        assert {item["id"] for item in transferred["evidence"]} == {records[1]}
+        assert transferred["evidence"][0]["source_work_id"] == front.id
+
+        # A new Work actually executes the existing team tool and native
+        # TUNNEL with that operator-shared history; no direct synthetic
+        # selection is substituted for this delivered request.
+        state.pop("reference_record_id", None)
+        state.pop("reference_excerpt", None)
+        reopened.send_task_front_message(other.id, START)
+
+        def _shared_choice_delivered():
+            requests = [row for row in reopened.storage.native_team_requests(limit=64)
+                        if row["work_id"] == other.id and row["status"] == "delivered"]
+            if len(requests) != 1:
+                return False
+            selected = reopened.storage.get_delegation(requests[0]["record_id"])
+            return (selected is not None and selected["result_summary"] is not None
+                    and reopened.causal_ledger.find_delegation_result_by_record_id(
+                        reopened.world_id, selected["id"]) is not None)
+
+        _tick(reopened, _shared_choice_delivered)
+        new_choice = next(row for row in reopened.storage.native_team_requests(limit=64)
+                          if row["work_id"] == other.id)
+        assert new_choice["preference"]["changed"]
+        assert {item["id"] for item in new_choice["preference"]["evidence"]} == {records[1]}
+        assert new_choice["preference"]["evidence"][0]["source_work_id"] == front.id
+        other_visible = page_projection.adaptive_choices(other.id)
+        assert len(other_visible["choices"]) == 1
+        source = other_visible["choices"][0]["evidence"][0]
+        assert source["sourceWorkId"] == front.id
+        assert source["sourceMessageId"] == transferred["evidence"][0]["sources"][1]
+        assert other_visible["choices"][0]["resultMessageId"]
+
+        # Withdrawal changes only the next computation, not an already
+        # delivered and source-audited historical selection.
+        revoked = reopened._native_team.feedback.put(front.id, records[1], {
+            **details, "expected_revision": 2,
+            "scope": "collaborator", "withdrawn": True,
+        })
+        assert revoked["revision"] == 3
+        after_withdrawal = choose(reopened._native_team, other_scope, other, {
+            "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
+            "instruction": INSTRUCTION,
+        })
+        assert after_withdrawal["evidence"] == []
+        assert after_withdrawal["probabilities"] == after_withdrawal["prior"]
+        assert page_projection.adaptive_choices(other.id)["choices"][0]["evidence"][0]["sourceWorkId"] == front.id
         assert len(reopened.storage.list_engrams()) == 3
     finally:
         reopened.close()

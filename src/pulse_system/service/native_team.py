@@ -337,6 +337,7 @@ class NativeTeam:
                         continue
                     sources.append({
                         'recordId': item['id'],
+                        'sourceWorkId': item.get('source_work_id') or work_id,
                         'sourceMessageId': item['sources'][1],
                         'outcomeProxy': item.get('value'),
                     })

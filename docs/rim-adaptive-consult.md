@@ -29,8 +29,14 @@ result and scope before first TUNNEL dispatch. Only the sampled collaborator
 receives the selected historical excerpts, not source transcripts, other
 contributors' histories, or private feedback. The delivered contribution
 retains this exact source selection and remains inspectable after restart.
-The quotes **do not** themselves change RIM candidate probabilities; only
-settled, operator-rated outcomes from the calling Work may do that. An
+The quotes **do not** themselves change RIM candidate probabilities.
+Settled, operator-rated outcomes from this Work can influence selection.
+A rated outcome from another Work may do so only if its original owner has
+separately saved an active **collaborator-scope** feedback annotation on that
+exact completed contribution. Work-only notes and withdrawn annotations
+never authorize a new cross-Work selection. This uses the existing operator
+feedback revision/withdrawal interface and the original native World/Kernel,
+not a global reward store or automatic lesson promotion. An
 explicit single-recipient `consult` still avoids probabilistic sharing.
 
 Candidate weights are the model's relative starting preferences, **not**
@@ -38,8 +44,11 @@ provider-token probabilities or a learned optimal policy. The host reads at
 most 128 existing caller delegations, accepts only completed contributions
 with explicitly recorded `adopted`, `revised` or `discarded` outcomes,
 and verifies each outcome's settled native causal event, matching result
-parent, same owner and **same original Work**, target and task. It ignores
-invalid sources. Repeated identical candidate/task/contract combinations
+parent, same owner and original Work identity, target and task. For a different
+receiving Work it also revalidates active explicit collaborator-scope sharing
+at selection time, failing closed on a missing or withdrawn annotation. It
+ignores invalid sources. The model still has to choose `consult_adaptive` in
+its own Work; this feature does not autonomously invoke the tool. Repeated identical candidate/task/contract combinations
 contribute at most one outcome.
 
 The current instruction and historical task use the host's existing
@@ -66,9 +75,11 @@ authenticated-local-browser, **read-only** projection through the original
 `NativeTeam` and the existing SQLite/Kernel/TUNNEL records, not another
 decision engine. It shows the originally selected collaborator, reference
 weight versus persisted selection weight, eligible rated source results,
-and the original completed result. Links are offered only for native events
-that pass this **same Work**'s original message/source check. Missing or
-foreign source links remain unavailable, never guessed. The endpoint returns
+and the original completed result. Links are offered only for native events checked against their **original**
+displayable Work: same-Work results return within the current Work, while
+explicitly consented cross-Work evidence opens its exact originating Work
+message and returns to the receiving Work. Missing or invalid source links
+remain unavailable, never guessed. The endpoint returns
 an empty list for Home or an unrelated Work and rejects unknown pages.
 
 The projection rechecks delegation ownership, Work, matched request, delivery,
@@ -84,10 +95,13 @@ that collaborator improved a delivered work artifact.
 
 The feature does not silently form habits when the model does not select
 `consult_adaptive`, and it does not teach the provider's weights. A completed
-contribution without explicit operator outcome is not a reward. Outcomes are
-currently immutable and the current Work is the evidence scope; shared,
-cross-Work preferences, withdrawal and broader cognitive action choices
-require a separate authorized interface design.
+contribution without explicit operator outcome is not a reward. Outcomes remain immutable and the default evidence scope is the current
+Work. Explicit collaborator-scope annotations already have a native operator
+interface, so this slice reuses that consent to influence **future** choices.
+Withdrawing consent prevents later cross-Work selection but does not erase
+choices already persisted or text already sent. It does not infer rewards from
+feedback prose, improve the underlying provider weights or generalize to
+arbitrary cognitive strategies.
 
 First verify the exact head: configuration/schema/validation, candidate
 choice bounds, same-Work source privacy, native prepared-request persistence,

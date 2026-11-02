@@ -98,7 +98,7 @@ export type AdaptiveWorkChoices = {
     resultMessageId: string | null; changedFromReference: boolean; historyIncomplete: boolean;
     kind: 'operator_rated_outcome_proxy_not_quality_proof';
     candidates: { expertId: string; name: string; referenceWeight: number; choiceWeight: number }[];
-    evidence: { recordId: string; sourceMessageId: string | null; outcomeProxy: number }[];
+    evidence: { recordId: string; sourceWorkId?: string; sourceMessageId: string | null; outcomeProxy: number }[];
   }[];
 };
 

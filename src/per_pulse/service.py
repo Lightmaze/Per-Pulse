@@ -427,8 +427,8 @@ class PageService:
             projection = self.runtime._native_team.adaptive_choices_for_work(
                 front.focal_engram_id, front.id)
             # Do not expose a navigable causal link merely because a persisted
-            # preference contains an event identifier. Only this same Work's
-            # original displayable messages can become source links.
+            # preference contains an event identifier. Check each saved choice
+            # and its source against the original Work's displayable messages.
             for choice in projection["choices"]:
                 result_id = choice["resultMessageId"]
                 try:
@@ -441,7 +441,11 @@ class PageService:
                         evidence["sourceMessageId"] = None
                         continue
                     try:
-                        self._check_message(page_id, source_id)
+                        source_work = evidence.get("sourceWorkId") or page_id
+                        if not isinstance(source_work, str) or source_work == "home":
+                            raise PageError("message_not_found", "Invalid source Work.", 404)
+                        self._front(source_work)
+                        self._check_message(source_work, source_id)
                     except PageError:
                         evidence["sourceMessageId"] = None
             return projection
