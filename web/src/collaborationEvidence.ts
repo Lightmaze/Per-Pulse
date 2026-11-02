@@ -9,3 +9,12 @@ export function historicSourceRating(value: unknown): CollaboratorOutcome | null
   if (value === -1) return 'discarded';
   return null;
 }
+
+/** Only link an exact Work in the currently visible native page directory. */
+export function visibleRatedSourceWork(
+  pages: import('./types').PageSummary[], sourceWorkId: unknown, sourceMessageId: unknown,
+): import('./types').PageSummary | null {
+  if (typeof sourceWorkId !== 'string' || !sourceWorkId ||
+      typeof sourceMessageId !== 'string' || !sourceMessageId) return null;
+  return pages.find(page => page.kind === 'work' && page.id === sourceWorkId) ?? null;
+}
