@@ -522,3 +522,9 @@ button, a, input, textarea { outline-offset: 4px; }
 .transfer-presentation-source { border-left: 3px solid var(--border); padding: 6px 0 6px 13px; min-width: 0; }
 .transfer-presentation-request { min-width: 0; }
 .transfer-presentation-label { color: var(--muted); font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+
+/* The outcome belongs to the original Work and requires explicit confirmation. */
+.collaborator-rating { border-left: 2px solid var(--border); padding-left: 12px; margin: 12px 0; }
+.collaborator-rating-actions { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0; }
+.collaborator-rating-actions .text-button { min-height: 34px; padding: 5px 8px; border-radius: 5px; border: 1px solid var(--border); }
+.collaborator-rating-actions .text-button:hover:not(:disabled) { background: var(--active); }

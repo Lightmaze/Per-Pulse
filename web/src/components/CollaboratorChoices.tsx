@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage } from '../i18n';
-import type { AdaptiveWorkChoices } from '../types';
+import type { AdaptiveWorkChoices, CollaboratorOutcome } from '../types';
 import { SessionLink, type Navigate } from './SessionLink';
 
 /** A read of an executed collaborator choice, not a live suggestion or reward. */
@@ -11,6 +11,8 @@ export function CollaboratorChoices({ pageId, navigate }: { pageId: string; navi
   const [reading, setReading] = useState(false);
   const [choices, setChoices] = useState<AdaptiveWorkChoices | null>(null);
   const [problem, setProblem] = useState<unknown>(null);
+  const [proposal, setProposal] = useState<{ recordId: string; outcome: CollaboratorOutcome } | null>(null);
+  const [submitting, setSubmitting] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -27,6 +29,20 @@ export function CollaboratorChoices({ pageId, navigate }: { pageId: string; navi
       if (!pending.signal.aborted) setProblem(error);
     } finally {
       if (!pending.signal.aborted) setReading(false);
+    }
+  };
+
+  const submit = async (recordId: string, outcome: CollaboratorOutcome) => {
+    setSubmitting(recordId);
+    setProblem(null);
+    try {
+      await api.rateAdaptiveChoice(pageId, recordId, outcome);
+      setProposal(null);
+      await load();
+    } catch (error) {
+      setProblem(error);
+    } finally {
+      setSubmitting(null);
     }
   };
 
@@ -51,6 +67,32 @@ export function CollaboratorChoices({ pageId, navigate }: { pageId: string; navi
           <p className="artifact-intro">{t(choice.changedFromReference ? 'collaboration.adjusted' : 'collaboration.unchanged')}</p>
           {choice.resultMessageId ? <SessionLink pageId={pageId} label={t('collaboration.result')}
             origin={{ pageId }} navigate={navigate} targetMessageId={choice.resultMessageId} /> : null}
+          {choice.outcome ? <p className="artifact-intro" role="status">{
+            t(choice.outcome === 'adopted' ? 'collaboration.ratedAdopted'
+              : choice.outcome === 'revised' ? 'collaboration.ratedRevised' : 'collaboration.ratedDiscarded')
+          }</p> : choice.resultMessageId ? <div className="collaborator-rating">
+            <p className="artifact-intro">{t('collaboration.ratingQuestion')}</p>
+            {proposal?.recordId === choice.recordId
+              ? <div>
+                <p className="artifact-intro">{t('collaboration.confirmImmutable')}</p>
+                <div className="collaborator-rating-actions">
+                  <button type="button" className="text-button" disabled={submitting !== null}
+                    onClick={() => void submit(choice.recordId, proposal.outcome)}>{t('collaboration.confirm')}</button>
+                  <button type="button" className="text-button" disabled={submitting !== null}
+                    onClick={() => setProposal(null)}>{t('collaboration.cancel')}</button>
+                </div>
+              </div>
+              : <div className="collaborator-rating-actions" role="group"
+                  aria-label={t('collaboration.ratingQuestion')}>
+                {(['adopted', 'revised', 'discarded'] as const).map(outcome =>
+                  <button type="button" className="text-button" key={outcome} disabled={submitting !== null}
+                    onClick={() => setProposal({ recordId: choice.recordId, outcome })}>
+                    {t(outcome === 'adopted' ? 'collaboration.rateAdopted'
+                      : outcome === 'revised' ? 'collaboration.rateRevised' : 'collaboration.rateDiscarded')}
+                  </button>)}
+              </div>}
+            {submitting === choice.recordId ? <p role="status">{t('collaboration.saving')}</p> : null}
+          </div> : null}
           {choice.evidence.length ? <details>
             <summary>{t('collaboration.evidence', { count: choice.evidence.length })}</summary>
             <ul>{choice.evidence.map((item, index) => <li key={item.recordId}>

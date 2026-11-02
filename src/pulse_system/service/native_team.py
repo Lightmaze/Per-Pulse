@@ -346,6 +346,7 @@ class NativeTeam:
                     'selectedExpertId': record['target_id'],
                     'selectedName': recipient.name or recipient.id,
                     'resultMessageId': original_result.id if original_result else None,
+                    'outcome': record.get('outcome'),
                     'candidates': candidates, 'evidence': sources,
                     'changedFromReference': bool(preference.get('changed')),
                     'historyIncomplete': bool(preference.get('history_may_be_incomplete')),

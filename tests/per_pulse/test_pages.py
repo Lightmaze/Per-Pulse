@@ -50,6 +50,25 @@ def wait_for(client, page_id, predicate, timeout=8):
     pytest.fail(f"Page did not settle: {view}")
 
 
+def test_collaborator_outcome_route_requires_original_completed_work(tmp_path):
+    """Offline API rejects manufactured rewards without creating a delegation."""
+    with client_for(tmp_path, model_factory=None) as client:
+        work = new_page(client)["page"]["id"]
+        uri = f"/api/pages/{work}/team/choices/not-a-record/outcome"
+        invalid = client.post(uri, json={"outcome": "success"})
+        assert invalid.status_code == 422
+        unowned = client.post(uri, json={"outcome": "adopted"})
+        assert unowned.status_code == 404
+        assert unowned.json()["error"]["code"] == "collaboration_outcome_unavailable"
+        home = client.post(
+            "/api/pages/home/team/choices/not-a-record/outcome",
+            json={"outcome": "adopted"},
+        )
+        assert home.status_code == 404
+        assert client.get(f"/api/pages/{work}/team/choices").json()["choices"] == []
+        assert client.app.state.pages.runtime.storage.list_delegations() == []
+
+
 def test_offline_pages_links_and_selected_return_survive_restart(tmp_path):
     with client_for(tmp_path, model_factory=None) as client:
         initial = client.get("/api/bootstrap").json()
