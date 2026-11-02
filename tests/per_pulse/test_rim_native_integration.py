@@ -19,7 +19,7 @@ import pytest
 from per_pulse.service import PageService, PageError
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 from pulse_system.service.kernel_runtime import KernelHarnessFactory
-from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
+from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig, ServiceError
 from pulse_system.service.execution_preference import choose
 from pulse_system.service.shared_contributions import retained as retained_shared, selected_for_inspection
 from pulse_harness.core.errors import ScopeConflict
@@ -292,9 +292,9 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         # legitimate original-Work source for revisable consent, independent
         # of its immutable outcome assessment.
         assert page_projection.collaborator_feedback(front.id, new_record["id"])["revision"] == 0
-        with pytest.raises(Exception) as foreign_guidance:
+        with pytest.raises(ServiceError) as foreign_guidance:
             page_projection.collaborator_feedback(reference_work.id, new_record["id"])
-        assert "contribution" in str(foreign_guidance.value).lower() or "source" in str(foreign_guidance.value).lower()
+        assert foreign_guidance.value.error == "feedback_source_unavailable"
         with pytest.raises(PageError) as wrong_work:
             page_projection.rate_adaptive_choice(reference_work.id, new_record["id"], "adopted")
         assert wrong_work.value.code == "collaboration_outcome_unavailable"
