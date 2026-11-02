@@ -37,6 +37,7 @@ export const materialsEnglish = {
   'library.artifactToHomeBusy': 'Adding file…',
   'library.artifactToHomeSource': 'Verified file from {title}: {path}',
   'library.artifactToHomeAdded': 'The verified file is ready in your Home draft.',
+  'materials.openOriginal': 'Open original material in its source Work',
 };
 
 export const materialsChinese: Record<keyof typeof materialsEnglish, string> = {
@@ -78,4 +79,5 @@ export const materialsChinese: Record<keyof typeof materialsEnglish, string> = {
   'library.artifactToHomeBusy': '正在附加文件…',
   'library.artifactToHomeSource': '来自「{title}」的已验证文件：{path}',
   'library.artifactToHomeAdded': '文件已加入主页草稿，尚未发送。',
+  'materials.openOriginal': '打开来源工作中的原始材料',
 };
