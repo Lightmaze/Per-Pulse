@@ -251,6 +251,17 @@ jobs:
           # exercises the full OS-deps installer separately.
           node "$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright/cli.js" install chromium
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_JOURNEY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-journey-screenshots" node tests/browser/learning_artifact_flow.mjs
+      - name: Verify original-Work collaborator consent, transfer and withdrawal in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_RIM_SCREENSHOTS="$RUNNER_TEMP/per-pulse-rim-screenshots" node tests/browser/rim_feedback_flow.mjs
+      - name: Keep RIM browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rim-operator-consent-browser-screenshots
+          path: ${{ runner.temp }}/per-pulse-rim-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Keep one-story browser evidence
         if: always()
         uses: actions/upload-artifact@v4
