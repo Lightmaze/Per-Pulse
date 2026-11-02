@@ -256,6 +256,11 @@ export type PulseState = {
     hardProviderSpendingCap: false;
   } | null;
   queue: { queued: number; running: number; oldestQueuedAt: string | null };
+  /** Read-only original Kernel/Pulse ownership; no implied consent or priority. */
+  workerCapacity?: {
+    computeLimit: number; computeRunning: number; approvalHeld: number;
+    attached: number; approvalParkedLimit: number; available: number;
+  };
   // Derived from the same complete native queue, not the recent-events sample.
   queueByContext?: { center_id: string | null; pageId: string | null;
     queued: number; running: number; oldestQueuedAt: string | null;

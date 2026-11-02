@@ -301,6 +301,18 @@ class PageService:
                 else:
                     activation["sourceCenterId"] = None
                     activation["sourcePageId"] = None
+            # Physical approval parking preserves original Kernel ownership,
+            # but a finite attached-turn fleet can still fill. Report only
+            # native read-only capacity facts, never infer approval of a turn.
+            capacity = self.runtime.scheduling_snapshot()["capacity"]
+            state["workerCapacity"] = {
+                "computeLimit": capacity["worker_limit"],
+                "computeRunning": capacity["worker_running"],
+                "approvalHeld": capacity["worker_parked"],
+                "attached": capacity["worker_attached"],
+                "approvalParkedLimit": capacity["approval_parked_limit"],
+                "available": capacity["worker_available"],
+            }
             state["running"] = self.runtime.running and state["enabled"] and not state["paused"]
             state["providerConfigured"] = self.configured
             return state

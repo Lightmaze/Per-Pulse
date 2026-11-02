@@ -50,3 +50,22 @@ test('the English and Chinese notices preserve foreground and queued-work distin
   assert.match(continuityChinese['pulse.admissionCountHeld'], /已排队的工作仍可能继续/);
   assert.match(continuityChinese['pulse.admissionTokensHeld'], /前台输入不受影响/);
 });
+
+test('physical approval saturation is visible only for genuinely queued local work', async () => {
+  const { pulseWorkerPressure } = await import('../src/pulseAdmission.ts');
+  const capacity = {
+    computeLimit: 1, computeRunning: 0, approvalHeld: 3,
+    attached: 3, approvalParkedLimit: 2, available: 0,
+  };
+  const saturated = state({ workerCapacity: capacity });
+  assert.equal(pulseWorkerPressure(saturated, 1), true);
+  assert.equal(pulseWorkerPressure(saturated, 0), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, attached: 2, available: 0 } }), 1), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, approvalHeld: 0 } }), 1), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: { ...capacity, available: 1 } }), 1), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, providerConfigured: false }), 1), false);
+  assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, running: false }), 1), false);
+  assert.equal(pulseWorkerPressure(state(), 1), false);
+  assert.match(continuityEnglish['pulse.slotPressure'], /Nothing is approved automatically/);
+  assert.match(continuityChinese['pulse.slotPressure'], /不会自动批准/);
+});

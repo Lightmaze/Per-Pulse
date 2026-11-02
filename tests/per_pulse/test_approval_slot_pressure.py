@@ -17,7 +17,7 @@ import per_pulse.service as page_service_module
 from per_pulse.execution import PageExecution
 from per_pulse.service import PulseSettings
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
-from test_execution import _new_page, _wait
+from test_execution import _factory, _new_page, _wait
 from test_pulse_integration import client_for
 
 
@@ -294,3 +294,84 @@ def test_one_live_model_limit_is_preserved_when_old_approvals_are_parked(
             assert not list((tmp_path / "workspace").glob("approval-gated-*.txt"))
         finally:
             release.set()
+
+
+def test_exhausted_physical_approval_slots_are_visible_and_recoverable(
+    tmp_path, monkeypatch,
+):
+    """Three human-held original turns fill the 1+2 physical slot fleet.
+
+    A fourth foreground Work must remain genuinely queued, not fabricated as
+    an approval. The user can resolve one original action to admit the fourth.
+    The activity observation is read-only and cannot approve an action.
+    """
+    requests = []
+    factory = _factory(monkeypatch, requests)
+    base_config = page_service_module.RuntimeServiceConfig
+    monkeypatch.setattr(
+        page_service_module, "RuntimeServiceConfig",
+        lambda **kwargs: base_config(**kwargs, pulse_worker_capacity=1),
+    )
+    settings = PulseSettings(enabled=True, spontaneous_rate=0, check_interval_seconds=0.02)
+    with client_for(tmp_path, pulse=settings, model_factory=factory,
+                    allow_workspace_actions=True) as client:
+        execution = PageExecution(client.app.state.pages.runtime)
+        originals = []
+        for index in range(3):
+            work = _new_page(client, f"WRITE_ONE_ORIGINAL_{index}")
+            pending = _wait(
+                execution, work,
+                lambda state: state["status"] == "needs_attention"
+                and len(state["pendingActions"]) == 1
+                and state["pendingActions"][0]["canResolve"],
+                timeout=12,
+            )
+            originals.append((work, pending["turnId"], pending["pendingActions"][0]["actionId"]))
+        runtime = client.app.state.pages.runtime
+        deadline = time.monotonic() + 5
+        while runtime.scheduling_snapshot()["capacity"]["worker_parked"] < 3:
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        newcomer = _new_page(client, "WRITE_ONE_FOURTH_FOREGROUND")
+        deadline = time.monotonic() + 5
+        while True:
+            observation = client.get("/api/pulse/observation").json()
+            queue = [
+                entry for entry in observation["pulse"]["queueByContext"]
+                if entry["pageId"] == newcomer and entry["queued"] > 0
+            ]
+            if queue:
+                break
+            assert time.monotonic() < deadline, observation["pulse"]["queue"]
+            time.sleep(0.02)
+        capacity = observation["pulse"]["workerCapacity"]
+        assert capacity == {
+            "computeLimit": 1, "computeRunning": 0, "approvalHeld": 3,
+            "attached": 3, "approvalParkedLimit": 2, "available": 0,
+        }
+        assert observation["workspaceId"] == runtime.world_id
+        assert observation["pulse"]["providerConfigured"] is True
+        assert execution.snapshot(newcomer)["turnId"] is None
+        assert len(requests) == 3
+        assert not (tmp_path / "workspace" / "one.txt").exists()
+
+        # No status read or foreground admission has approved the prior turns.
+        for work, turn, action in originals:
+            current = execution.snapshot(work)
+            assert current["turnId"] == turn
+            assert current["pendingActions"][0]["actionId"] == action
+        original_work, _, original_action = originals[0]
+        receipt = execution.resolve_approval(original_work, original_action, "deny")
+        assert receipt["accepted"]
+        admitted = _wait(
+            execution, newcomer,
+            lambda state: state["status"] == "needs_attention"
+            and len(state["pendingActions"]) == 1,
+            timeout=12,
+        )
+        assert admitted["turnId"] is not None
+        assert not (tmp_path / "workspace" / "one.txt").exists()
+        for work, turn, action in originals[1:]:
+            current = execution.snapshot(work)
+            assert current["turnId"] == turn
+            assert current["pendingActions"][0]["actionId"] == action

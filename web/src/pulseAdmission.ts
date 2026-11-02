@@ -17,3 +17,19 @@ export function pulseAdmissionHold(pulse: PulseState): PulseAdmissionHold {
   }
   return null;
 }
+
+/**
+ * Physical attachment exhaustion is distinct from model concurrency and
+ * admission-token limits. Reveal it only for actual queued local work, with a
+ * verified native parked population; this is not a scheduler diagnosis or a
+ * claim that an attention-needing Work is necessarily an approval.
+ */
+export function pulseWorkerPressure(pulse: PulseState, localQueued: number): boolean {
+  const capacity = pulse.workerCapacity;
+  return Boolean(
+    capacity && pulse.enabled && pulse.running && !pulse.paused
+    && pulse.providerConfigured && localQueued > 0
+    && capacity.approvalHeld > 0 && capacity.available === 0
+    && capacity.attached >= capacity.computeLimit + capacity.approvalParkedLimit
+  );
+}
