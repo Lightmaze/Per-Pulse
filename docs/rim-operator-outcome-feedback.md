@@ -50,3 +50,17 @@ Review the exact-head verify, Chromium, and real Docker recovery on one
 combined tree, then require independent main CI after merging. Success means
 a human can finish a collaborator task and record an outcome that affects
 a later choice—not merely inspect another statistics panel.
+
+## Explicit original-Work sharing and withdrawal
+
+A completed adaptive collaboration result can receive an **operator-authored, revisable annotation** distinct from the immutable used/reworked/not-used outcome. Open the original Work's saved decision and its finished result; expand **Guidance from this result**. It is Work-local unless the person explicitly selects **This collaborator across my Works**, reviews a second confirmation and saves. Changing the scope or note creates a versioned revision. **Withdraw guidance** prevents new usage in future choices; it never rewrites older decisions or erases already-seen model messages.
+
+The product uses the existing native World/Kernel/SQLite `CollaboratorFeedback` journal, no new reward engine or session identity. The local single-user API is:
+
+- `GET /api/pages/{workId}/team/choices/{recordId}/feedback` returns the source-scoped native revision, current annotation and retained history, or 404 when the original completed contribution is not in that Work.
+- `PUT /api/pages/{workId}/team/choices/{recordId}/feedback` accepts the strict JSON object `{"expectedRevision":0,"content":"...","scope":"work","withdrawn":false}`. `scope` can be `work` or `collaborator`; an active note needs nonblank content (up to 2048 characters). Withdrawal reuses the exact saved content/scope and sets `withdrawn:true`. Native atomic CAS/lease/source checks own authority. A conflicting or uncertain receipt requires re-reading server state, not blind resubmission.
+- Home, foreign Work, missing, incomplete, or mismatched original results cannot create authorization. Saved results are source-bound to the actual original collaborator and owner; the other Work does not receive the original conversation transcript.
+
+This **does not make an assessment itself a cross-Work grant**. Native RIM's cross-Work selector requires both a verified previously rated outcome and a separate active `collaborator`-scope annotation for that exact contribution. Model-produced `propose_feedback` is still merely a proposal. No provider calls, real model quality improvement, monetary budget or new approval is implied by this interface.
+
+The real-World regression `tests/per_pulse/test_rim_native_integration.py` exercises local-only vs explicit cross-Work scope, next-choice effect, revision and withdrawal over synthetic HTTP transport. The HTTP contract is separately checked by `tests/per_pulse/test_collaborator_feedback_api.py`. The UI includes English and Simplified Chinese. Current Work draft navigation, source message anchors and future candidate sampling remain controlled by existing contracts.

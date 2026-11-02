@@ -108,6 +108,13 @@ class AssessCollaborator(Input):
     outcome: Literal["adopted", "revised", "discarded"]
 
 
+class CollaboratorFeedbackInput(Input):
+    expectedRevision: int = Field(ge=0, le=32, strict=True)
+    content: Annotated[str, StringConstraints(max_length=2048)]
+    scope: Literal["work", "collaborator"]
+    withdrawn: bool = Field(strict=True)
+
+
 class SettingsInput(Input):
     responseLanguage: ResponseLanguage
 
@@ -478,6 +485,18 @@ def create_app(
     @app.post("/api/pages/{page_id}/team/choices/{record_id}/outcome")
     def rate_adaptive_choice(page_id: str, record_id: str, body: AssessCollaborator, request: Request):
         return pages(request).rate_adaptive_choice(page_id, record_id, body.outcome)
+
+    @app.get("/api/pages/{page_id}/team/choices/{record_id}/feedback")
+    def collaborator_feedback(page_id: str, record_id: str, request: Request):
+        return pages(request).collaborator_feedback(page_id, record_id)
+
+    @app.put("/api/pages/{page_id}/team/choices/{record_id}/feedback")
+    def update_collaborator_feedback(page_id: str, record_id: str,
+                                     body: CollaboratorFeedbackInput, request: Request):
+        return pages(request).update_collaborator_feedback(page_id, record_id, {
+            "expected_revision": body.expectedRevision, "content": body.content,
+            "scope": body.scope, "withdrawn": body.withdrawn,
+        })
 
     @app.get("/api/pages/{page_id}/posture")
     def learning(page_id: str, request: Request):

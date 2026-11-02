@@ -95,6 +95,19 @@ export type MaterialRead = { material: Material; content: string; redacted: bool
 
 export type CollaboratorOutcome = 'adopted' | 'revised' | 'discarded';
 
+export type CollaboratorFeedbackScope = 'work' | 'collaborator';
+export type CollaboratorFeedbackCurrent = {
+  content: string; scope: CollaboratorFeedbackScope; withdrawn: boolean;
+  revision: number; recorded_at: string; recorded_by: 'operator';
+};
+export type CollaboratorFeedbackView = {
+  source: { work_id: string; record_id: string; result_event_id: string };
+  revision: number;
+  current: CollaboratorFeedbackCurrent | null;
+  max_revisions: number;
+};
+
+
 export type AdaptiveWorkChoices = {
   workId: string; historyMayBeIncomplete: boolean;
   choices: {
