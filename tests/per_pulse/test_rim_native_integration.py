@@ -354,8 +354,13 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         # Work-only notes do not transfer even when the original outcome is rated.
         details = {"expected_revision": 0, "content": "Use the proven startup evidence.",
                    "scope": "work", "withdrawn": False}
-        work_only = reopened._native_team.feedback.put(front.id, records[1], details)
+        assert page_projection.collaborator_feedback(front.id, records[1])["revision"] == 0
+        with pytest.raises(PageError) as wrong_feedback_home:
+            page_projection.collaborator_feedback("home", records[1])
+        assert wrong_feedback_home.value.code == "collaboration_feedback_unavailable"
+        work_only = page_projection.update_collaborator_feedback(front.id, records[1], details)
         assert work_only["revision"] == 1
+        assert page_projection.collaborator_feedback(front.id, records[1])["current"]["scope"] == "work"
         still_private = choose(reopened._native_team, other_scope, other, {
             "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
             "instruction": INSTRUCTION,
@@ -365,7 +370,7 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
 
         # Only explicit collaborator-scope sharing lets the same subject use
         # that verified outcome in another Work's native decision.
-        shared = reopened._native_team.feedback.put(front.id, records[1], {
+        shared = page_projection.update_collaborator_feedback(front.id, records[1], {
             **details, "expected_revision": 1, "scope": "collaborator",
         })
         assert shared["revision"] == 2
@@ -425,7 +430,7 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
 
         # Withdrawal changes only the next computation, not an already
         # delivered and source-audited historical selection.
-        revoked = reopened._native_team.feedback.put(front.id, records[1], {
+        revoked = page_projection.update_collaborator_feedback(front.id, records[1], {
             **details, "expected_revision": 2,
             "scope": "collaborator", "withdrawn": True,
         })
