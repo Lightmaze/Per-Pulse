@@ -39,20 +39,33 @@ def _vector(value):
 
 
 def _verified_outcome(team, owner, front, record):
-    """Consume only a native owned Work's settled, operator-rated causal outcome."""
+    """Verify a native outcome; a different Work also requires explicit live sharing."""
     runtime = team.runtime
     actual, request, origin = team._record(owner, record["id"])
-    if (origin.id != front.id or actual.get("outcome") not in OUTCOMES
+    if (actual.get("outcome") not in OUTCOMES
             or actual.get("completed_at") is None
             or actual.get("result_summary") is None):
-        raise ValueError("not a completed, rated outcome of this Work")
+        raise ValueError("not a completed, rated outcome")
+    if origin.id != front.id:
+        # Sharing an annotation is explicit operator authority to reuse the
+        # already-rated outcome, not permission to infer a reward from its text.
+        # Re-read current scope on every new selection so withdrawal fails closed.
+        from .runtime import ServiceError
+        try:
+            annotation = team.feedback.get(origin.id, actual["id"])["current"]
+        except ServiceError as exc:
+            raise ValueError("shared outcome source is no longer available") from exc
+        if (not isinstance(annotation, dict)
+                or annotation.get("scope") != "collaborator"
+                or annotation.get("withdrawn") is not False):
+            raise ValueError("cross-Work outcome has no active collaborator-scope consent")
     outcome_id = runtime.storage.find_delegation_outcome_event_id(actual["id"])
     event = runtime.causal_ledger.get_event(outcome_id) if outcome_id else None
     if event is None:
         raise ValueError("missing native outcome")
     meta = event.metadata
     if not (
-        event.world_id == runtime.world_id and event.center_id == front.center_id
+        event.world_id == runtime.world_id and event.center_id == origin.center_id
         and event.engram_id == owner and event.kind.value == "system"
         and event.source.value == "delegation" and event.status.value == "settled"
         and event.flow.value == "tunnel" and meta.get("record_id") == actual["id"]
@@ -63,7 +76,7 @@ def _verified_outcome(team, owner, front, record):
         raise ValueError("outcome is not native source-bound evidence")
     parent = runtime.causal_ledger.get_event(event.parent_event_id)
     if parent is None or not (
-        parent.world_id == runtime.world_id and parent.center_id == front.center_id
+        parent.world_id == runtime.world_id and parent.center_id == origin.center_id
         and parent.engram_id == owner and parent.kind.value == "delegation_result"
         and parent.source.value == "delegation" and parent.status.value == "settled"
         and parent.flow.value == "tunnel" and parent.causal_id == event.causal_id
@@ -72,7 +85,7 @@ def _verified_outcome(team, owner, front, record):
         raise ValueError("missing settled original contribution")
     representation = _vector(json.loads(actual["task_embedding"]))
     observed = (event.settled_at or event.updated_at).timestamp()
-    return actual, representation, observed, (event.id, parent.id)
+    return actual, representation, observed, (event.id, parent.id), origin.id
 
 
 def _kl(values, prior):
@@ -106,7 +119,8 @@ def _distribution(candidates, query, evidence):
         mass[k] += weight
         value_sum[k] += weight * item["value"]
         admitted.append({"id": item["id"], "sources": item["sources"], "action": k,
-                         "value": item["value"], "mass": weight})
+                         "value": item["value"], "mass": weight,
+                         "source_work_id": item.get("source_work_id")})
     values = {k: value_sum[k] / (2.0 + mass[k]) for k in prior}
     mean = math.fsum(prior[k] * values[k] for k in prior)
     relative_values = {k: values[k] - mean for k in prior}
@@ -166,7 +180,7 @@ def choose(team, scope, front, arguments):
         if row["target_id"] not in candidates or row.get("outcome") not in OUTCOMES:
             continue
         try:
-            actual, features, observed, sources = _verified_outcome(
+            actual, features, observed, sources, source_work_id = _verified_outcome(
                 team, scope.engram_id, front, row)
         except (ValueError, KeyError, TypeError, ScopeConflict):
             skipped += 1
@@ -180,7 +194,8 @@ def choose(team, scope, front, arguments):
             continue
         evidence.append({"id": actual["id"], "action": actual["target_id"],
                          "features": features, "value": OUTCOMES[actual["outcome"]],
-                         "age_seconds": now - observed, "sources": list(sources)})
+                         "age_seconds": now - observed, "sources": list(sources),
+                         "source_work_id": source_work_id})
     result = _distribution(candidates, query, evidence)
     draw = random.SystemRandom().random()
     return {**result, "selected_expert_id": _sample(result["probabilities"], draw),

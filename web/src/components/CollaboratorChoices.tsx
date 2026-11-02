@@ -54,7 +54,7 @@ export function CollaboratorChoices({ pageId, navigate }: { pageId: string; navi
           {choice.evidence.length ? <details>
             <summary>{t('collaboration.evidence', { count: choice.evidence.length })}</summary>
             <ul>{choice.evidence.map((item, index) => <li key={item.recordId}>
-              {item.sourceMessageId ? <SessionLink pageId={pageId}
+              {item.sourceMessageId ? <SessionLink pageId={item.sourceWorkId || pageId}
                 label={t('collaboration.source', { number: index + 1 })}
                 origin={{ pageId }} navigate={navigate} targetMessageId={item.sourceMessageId} />
                 : t('collaboration.sourceUnavailable')}
