@@ -352,6 +352,18 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             **details, "expected_revision": 1, "scope": "collaborator",
         })
         assert shared["revision"] == 2
+        # A long-lived subject may have many more recent, unrated tasks than
+        # the fixed scan window. They must not evict a still-valid, explicitly
+        # shared outcome from the *actual* native selection and later TUNNEL.
+        for index in range(140):
+            reopened.storage.create_delegation(
+                owner, state["bad"], f"Later unrated work {index}", "durable_pi",
+            )
+        assert records[1] not in {
+            row["id"] for row in reopened.storage.list_delegations(
+                caller_id=owner, limit=128,
+            )
+        }
         transferred = choose(reopened._native_team, other_scope, other, {
             "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
             "instruction": INSTRUCTION,
@@ -361,6 +373,8 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert transferred["kl"] <= 0.15 + 1e-12
         assert {item["id"] for item in transferred["evidence"]} == {records[1]}
         assert transferred["evidence"][0]["source_work_id"] == front.id
+        assert 2 <= transferred["records_scanned"] < 128
+        assert not transferred["history_may_be_incomplete"]
 
         # A new Work actually executes the existing team tool and native
         # TUNNEL with that operator-shared history; no direct synthetic
