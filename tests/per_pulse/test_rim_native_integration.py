@@ -288,6 +288,13 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert all(item["sourceMessageId"] for item in user_read["choices"][0]["evidence"])
         assert page_projection.adaptive_choices(reference_work.id)["choices"] == []
         assert user_read["choices"][0]["outcome"] is None
+        # The exact finished adaptive result exposed to the user is also a
+        # legitimate original-Work source for revisable consent, independent
+        # of its immutable outcome assessment.
+        assert page_projection.collaborator_feedback(front.id, new_record["id"])["revision"] == 0
+        with pytest.raises(Exception) as foreign_guidance:
+            page_projection.collaborator_feedback(reference_work.id, new_record["id"])
+        assert "contribution" in str(foreign_guidance.value).lower() or "source" in str(foreign_guidance.value).lower()
         with pytest.raises(PageError) as wrong_work:
             page_projection.rate_adaptive_choice(reference_work.id, new_record["id"], "adopted")
         assert wrong_work.value.code == "collaboration_outcome_unavailable"
