@@ -174,7 +174,7 @@ def choose(team, scope, front, arguments):
     runtime = team.runtime
     now = time.time()
     query = _vector(stable_text_embedding(arguments["instruction"]).tolist())
-    rows = runtime.storage.list_delegations(caller_id=scope.engram_id, limit=128)
+    # Filter before LIMIT: numerous unrated/unrelated Works must not evict an\n    # older, source-verified collaborator outcome from this continuing body.\n    rows = runtime.storage.list_delegations(\n        caller_id=scope.engram_id, target_ids=tuple(candidates),\n        rated_only=True, limit=128,\n    )
     evidence, groups, skipped = [], set(), 0
     for row in rows:
         if row["target_id"] not in candidates or row.get("outcome") not in OUTCOMES:
