@@ -515,3 +515,10 @@ button, a, input, textarea { outline-offset: 4px; }
 .return-materials { margin: 16px 0; }
 .return-materials label { display: flex; align-items: center; gap: 9px; font-size: 13px; }
 .return-materials input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+
+
+/* Display a selected cross-Work result as evidence, never as a second request. */
+.transfer-presentation { display: grid; gap: 17px; min-width: 0; }
+.transfer-presentation-source { border-left: 3px solid var(--border); padding: 6px 0 6px 13px; min-width: 0; }
+.transfer-presentation-request { min-width: 0; }
+.transfer-presentation-label { color: var(--muted); font-size: 12px; font-weight: 600; margin-bottom: 6px; }

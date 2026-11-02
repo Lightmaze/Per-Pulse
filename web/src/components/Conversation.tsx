@@ -8,6 +8,7 @@ import { CopyButton } from './CopyButton';
 import { ReplayOrigin } from './ReplayOrigin';
 import { messageBody } from '../messageBody';
 import { initialWorkHandoffExcerpt } from '../workHandoffExcerpt';
+import { readTransferPresentation } from '../transferPresentation';
 
 export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
   view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
@@ -23,11 +24,23 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
       {view.historyBeforeMessageId ? <button className="text-button" onClick={() => onHistory(view.historyBeforeMessageId!)}>{t('history.title')}</button> : null}
       <button className="text-button" onClick={onFind}><Icon name="search" size={14} />{t('find.title')}</button>
     </div> : null}
-    {view.messages.map(message => { const activity = getMessageActivity(message.status, view.provider.configured, stale); return <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id} key={message.id} tabIndex={-1} aria-label={t(message.role === 'user' ? 'conversation.yourMessage' : message.role === 'assistant' ? 'conversation.assistantMessage' : 'conversation.workspaceMessage')}>
+    {view.messages.map(message => { const activity = getMessageActivity(message.status, view.provider.configured, stale);
+      const transferPresentation = readTransferPresentation(message);
+      const referenceKey = JSON.stringify(message.references.map(({ id, targetPageId, label }) => ({ id, targetPageId, label })));
+      return <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id} key={message.id} tabIndex={-1} aria-label={t(message.role === 'user' ? 'conversation.yourMessage' : message.role === 'assistant' ? 'conversation.assistantMessage' : 'conversation.workspaceMessage')}>
       <div className="message-label">{message.role === 'user' ? t('conversation.you') : message.role === 'assistant' ? 'Per Pulse' : t('conversation.workspace')}</div>
       {message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">{t("conversation.from")} <SessionLink pageId={message.sourcePageId} label={pageMap.get(message.sourcePageId) ? pageTitle(pageMap.get(message.sourcePageId)!) : t('conversation.sourcePage')} targetMessageId={message.sourceMessageId ?? undefined} origin={{ pageId: view.page.id, messageId: message.id }} navigate={navigate} /></div> : null}
       <ReplayOrigin message={message} pageId={view.page.id} navigate={navigate} />
-      <MessageContent content={messageBody(message)} referenceKey={JSON.stringify(message.references.map(({ id, targetPageId, label }) => ({ id, targetPageId, label })))} pageId={view.page.id} messageId={message.id} navigate={navigate} />
+      {transferPresentation ? <div className="transfer-presentation">
+        <section className="transfer-presentation-source" aria-label={t('conversation.transferSource')}>
+          <div className="transfer-presentation-label">{t('conversation.transferSource')}</div>
+          <MessageContent content={transferPresentation.excerpt} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />
+        </section>
+        <section className="transfer-presentation-request" aria-label={t('conversation.transferRequest')}>
+          <div className="transfer-presentation-label">{t('conversation.transferRequest')}</div>
+          <MessageContent content={transferPresentation.instruction} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />
+        </section>
+      </div> : <MessageContent content={messageBody(message)} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />}
       {message.materials?.length ? <ul className="message-materials" aria-label={t('materials.attached')}>{message.materials.map(material => <li key={material.id}><button className="material-chip" onClick={() => onMaterial?.(material.id, material.pageId)}><Icon name="page" size={16} /><span>{material.name}</span></button></li>)}</ul> : null}
       <div className="message-footer">
         {activity ? <span className={`message-status tone-${activity.tone}`} title={activity.detail}>{activity.label}</span> : null}
