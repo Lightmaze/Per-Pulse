@@ -80,6 +80,19 @@ def _model_factory(state, seen):
                     "index": 0, "id": "rim-choice", "type": "function",
                     "function": {"name": "team", "arguments": json.dumps(arguments)},
                 }]}, finish="tool_calls")
+            if last.get("content") == "BUILD_RIM_APPROVED_ARTIFACT":
+                # A separate, explicitly scripted model request after the
+                # adaptive choice: the user must approve the *real* file
+                # operation in the same receiving Work. This is not proof
+                # that a provider learned the source material.
+                return _stream({"tool_calls": [{
+                    "index": 0, "id": "rim-approved-file", "type": "function",
+                    "function": {"name": "mutate_file", "arguments": json.dumps({
+                        "path": "rim-choice-followup.txt",
+                        "expected_digest": None,
+                        "content": "A real approval-gated Work artifact from a scripted model fixture.\\n",
+                    })},
+                }]}, finish="tool_calls")
             if (last.get("content") or "").startswith(INSTRUCTION):
                 return _answer("A real native TUNNEL contribution about cache warmup.")
             return _answer("The original Work received and used the collaboration.")
