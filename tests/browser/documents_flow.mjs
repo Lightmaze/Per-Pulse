@@ -226,7 +226,7 @@ try {
       }],
     }),
   }));
-  await page.getByRole('button', { name: 'How this Work chose collaborators', exact: true }).click();
+  await page.getByRole('button', { name: 'How this page chose collaborators', exact: true }).click();
   await page.getByText('Selected Fixture collaborator', { exact: false }).waitFor();
   assert.match(await page.locator('.collaborator-choices').innerText(), /Selection weight 70.0%/);
   const originalResultLink = page.getByRole('link', { name: 'Open the original collaborator result', exact: true });

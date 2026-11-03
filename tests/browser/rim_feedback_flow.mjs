@@ -81,7 +81,7 @@ try {
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
   const openDecisions = async () => {
-    await page.getByRole('button', { name: 'How this Work chose collaborators', exact: true }).click();
+    await page.getByRole('button', { name: 'How this page chose collaborators', exact: true }).click();
     await page.locator('.collaborator-choice').first().waitFor();
   };
   const openFeedback = async () => {
@@ -110,7 +110,7 @@ try {
   await editor().getByText('No guidance saved.').waitFor();
   await editor().locator('textarea').fill('Check recorded cache timing before proposing a fix.');
   await submit();
-  await editor().getByText('Saved for this Work only.').waitFor();
+  await editor().getByText('Saved for this page only.').waitFor();
   assert.equal((await feedback(works.source, works.record)).current.scope, 'work');
   checks.push('actual browser saves Work-only guidance that keeps this rated result local');
 
@@ -121,14 +121,14 @@ try {
   await page.goto(base + '/page/' + works.source);
   await openDecisions();
   await openFeedback();
-  await editor().getByText('Saved for this Work only.').waitFor();
+  await editor().getByText('Saved for this page only.').waitFor();
   await editor().locator('select').selectOption('collaborator');
   await editor().getByRole('button', { name: 'Review and save guidance', exact: true }).click();
-  await editor().getByText('Share this note with the same collaborator in other Works?', { exact: false }).waitFor();
+  await editor().getByText('Share this note with the same collaborator in other pages?', { exact: false }).waitFor();
   assert.equal((await feedback(works.source, works.record)).revision, 1,
     'review step must not mutate native consent');
   await editor().getByRole('button', { name: 'Confirm', exact: true }).click();
-  await editor().getByText('Saved for this collaborator across Works.').waitFor();
+  await editor().getByText('Saved for this collaborator across pages.').waitFor();
   const sharedNote = await feedback(works.source, works.record);
   assert.equal(sharedNote.revision, 2);
   assert.equal(sharedNote.current.scope, 'collaborator');
@@ -162,7 +162,7 @@ try {
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('#interface-language').selectOption('en');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
-  await editor().getByText('Saved for this collaborator across Works.').waitFor();
+  await editor().getByText('Saved for this collaborator across pages.').waitFor();
   checks.push('same source-bound guidance survives Chinese and English user navigation');
 
   // The receiving Work must finish an actual approved file operation, not

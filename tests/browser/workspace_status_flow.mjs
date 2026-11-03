@@ -105,9 +105,9 @@ try {
       pending.push({ id, title });
     }
     const reviewSection = page.locator('section.home-continuations').filter({
-      has: page.getByRole('heading', { name: 'Work needing attention', exact: true }),
+      has: page.getByRole('heading', { name: 'Pages needing attention', exact: true }),
     });
-    const reveal = reviewSection.getByRole('button', { name: 'Show all 6 Works needing attention' });
+    const reveal = reviewSection.getByRole('button', { name: 'Show all 6 pages needing attention' });
     await reveal.waitFor({ timeout: 35000 });
     assert.equal(await reviewSection.getByRole('button', { name: /^Open Pending review / }).count(), 3);
     await reveal.click();

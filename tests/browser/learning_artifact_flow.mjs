@@ -273,14 +273,14 @@ try {
     selection.removeAllRanges();
     selection.addRange(range);
     const button = [...article.querySelectorAll('button')]
-      .find(node => node.textContent?.trim() === 'Use in another Work');
+      .find(node => node.textContent?.trim() === 'Use in another page');
     if (!button) throw new Error('Result handoff action was not found');
     button.click();
   });
-  const mismatchDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
+  const mismatchDialog = page.getByRole('dialog', { name: 'Carry this result into another page', exact: true });
   await mismatchDialog.waitFor();
   const editedNote = mismatchDialog.getByText('Edited from the original. The link to its source stays.', { exact: true });
-  const sendButton = mismatchDialog.getByRole('button', { name: 'Send to Work', exact: true });
+  const sendButton = mismatchDialog.getByRole('button', { name: 'Send to page', exact: true });
   assert.match(await mismatchDialog.locator('#transfer-work-excerpt').inputValue(), /twelve-field intake form/);
   await editedNote.waitFor();
   await mismatchDialog.locator('#transfer-work-instruction').fill('Use this note.');
@@ -315,11 +315,11 @@ try {
     await transferGate;
     await route.continue();
   });
-  await selectedSource.getByRole('button', { name: 'Use in another Work', exact: true }).click();
-  const pendingDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
+  await selectedSource.getByRole('button', { name: 'Use in another page', exact: true }).click();
+  const pendingDialog = page.getByRole('dialog', { name: 'Carry this result into another page', exact: true });
   await pendingDialog.locator('#transfer-work-target').selectOption(beforeId);
   await pendingDialog.locator('#transfer-work-instruction').fill('Carry this finding without moving my current page.');
-  await pendingDialog.getByRole('button', { name: 'Send to Work', exact: true }).click();
+  await pendingDialog.getByRole('button', { name: 'Send to page', exact: true }).click();
   await interceptedTransfer;
   await page.goBack();
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
@@ -386,13 +386,13 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
   checks.push('late native Home return keeps its source without stealing the active route or drafts');
 
-  await selectedSource.getByRole('button', { name: 'Use in another Work', exact: true }).click();
-  const transferDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
+  await selectedSource.getByRole('button', { name: 'Use in another page', exact: true }).click();
+  const transferDialog = page.getByRole('dialog', { name: 'Carry this result into another page', exact: true });
   await transferDialog.waitFor();
   await transferDialog.locator('#transfer-work-target').selectOption(beforeId);
   assert.match(await transferDialog.locator('#transfer-work-excerpt').inputValue(), /twelve-field intake form/);
   await transferDialog.locator('#transfer-work-instruction').fill('Use this precise finding to improve the next draft.');
-  await transferDialog.getByRole('button', { name: 'Send to Work', exact: true }).click();
+  await transferDialog.getByRole('button', { name: 'Send to page', exact: true }).click();
   await page.getByRole('heading', { name: 'Uninformed delivery', exact: true }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Receiver draft stays here.');
   const imported = page.locator('.message-user').filter({
@@ -404,7 +404,7 @@ try {
   const requestSection = imported.locator('.transfer-presentation-request');
   assert.match(await sourceSection.innerText(), /Selected source excerpt/);
   assert.match(await sourceSection.innerText(), /twelve-field intake form/);
-  assert.match(await requestSection.innerText(), /Your request for this Work/);
+  assert.match(await requestSection.innerText(), /Your request for this page/);
   assert.match(await requestSection.innerText(), /Use this precise finding to improve the next draft/);
   assert.ok(!(await imported.innerText()).includes('SOURCE_EXCERPT_JSON'),
     'Rendered transfer must not expose raw transport JSON to the reader');
