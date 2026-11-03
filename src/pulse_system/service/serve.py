@@ -360,6 +360,7 @@ def main(argv: list[str] | None = None) -> int:
             harness_pipe_lifecycle_gate=args.harness_pipe_lifecycle_gate,
             harness_pipe_session_capacity=args.harness_pipe_capacity,
             harness_turn_timeout_sec=args.turn_timeout,
+            harness_background_turn_timeout_sec=args.turn_timeout,
             pulse_worker_capacity=args.pulse_workers,
             pi_resident_session_limit=args.pi_resident_sessions,
             tick_interval=args.tick,

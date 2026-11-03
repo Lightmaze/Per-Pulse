@@ -517,6 +517,8 @@ class RuntimeServiceConfig:
     harness_task_worker_default_timeout_sec: float = 300.0
     harness_task_worker_max_timeout_sec: float = 900.0
     harness_turn_timeout_sec: float | None = 600.0
+    # Unattended (spontaneous, propagated, requested-continuation) turns.
+    harness_background_turn_timeout_sec: float | None = 600.0
     harness_handshake_timeout_sec: float = 30.0
     harness_sideband_timeout_sec: float = 30.0
     harness_abort_timeout_sec: float = 5.0
@@ -6021,6 +6023,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 else None
             ),
             harness_turn_timeout_sec=c.harness_turn_timeout_sec,
+            harness_background_turn_timeout_sec=c.harness_background_turn_timeout_sec,
             causal_ledger=self._causal_ledger,
             causal_context_for_center=(
                 self._native_kernel_context_for_center

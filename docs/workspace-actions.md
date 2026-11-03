@@ -14,6 +14,8 @@ Commands (available when `P_PULSE_COMMAND_IMAGE` names a container image) always
 ask first. A pending approval and exact-turn Stop stay in their original page.
 An approval waits for you for up to a week, and a turn you start has no time
 limit: it ends when it finishes, when you press Stop, or after 256 tool steps.
+Turns that run unattended (background Pulse, connections, `/tick` steps) stop
+after ten minutes, so one cannot hold an execution slot indefinitely.
 Example mode never calls a model or changes files. See
 [Core Harness](harness-foundation.md) for authority, recovery and limits.
 
