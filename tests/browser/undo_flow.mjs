@@ -51,6 +51,8 @@ try {
   };
   await page.goto(base);
 
+  await create('Review draft', 'REVIEW_DRAFT');
+  await page.locator('.composer textarea').fill('Keep this review draft.');
   await create('Launch plan', 'REVISE_PLAN');
   const files = page.getByRole('region', { name: 'Files from this page', exact: true });
   await files.getByRole('button', { name: /^plan\.md/ }).waitFor();
@@ -59,6 +61,28 @@ try {
   checks.push('a file change inside the workspace applies without an approval prompt');
 
   if (screenshots) await page.screenshot({ path: join(screenshots, 'undo-before.png') });
+  const receiverId = (await json('/api/bootstrap')).pages.find(item => item.title === 'Review draft')?.id;
+  assert.ok(receiverId, 'real receiving Work exists');
+  const beforeReceiver = (await json('/api/pages/' + receiverId)).messages.map(message => message.id);
+  await files.getByRole('button', { name: /^plan\\.md/ }).click();
+  await files.getByRole('button', { name: 'Add full file to another Work draft', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Add full file to another Work draft' })
+    .getByRole('option', { name: 'Review draft' }).click();
+  await page.getByRole('heading', { name: 'Review draft', exact: true }).waitFor();
+  const receivingDraft = await page.locator('.composer textarea').inputValue();
+  assert.match(receivingDraft, /Keep this review draft\\./);
+  assert.match(receivingDraft, /Verified file from Launch plan: plan\\.md/);
+  await page.locator('.composer-materials').getByText('plan.md', { exact: true }).waitFor();
+  assert.deepEqual((await json('/api/pages/' + receiverId)).messages.map(message => message.id), beforeReceiver,
+    'attaching a verified file must not silently run the receiving Work');
+  checks.push('a completed file enters another Work as a sourced, unsent draft without replacing its existing text');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => (await json('/api/pages/' + receiverId)).messages.some(message =>
+    message.role === 'user' && message.content.includes('Verified file from Launch plan: plan.md')
+      && message.materials?.some(material => material.name === 'plan.md')), 'receiving Work gets native file material');
+  checks.push('the receiving Work explicitly sends the complete file with its original source');
+  await page.locator('nav.page-nav').getByRole('link', { name: 'Launch plan', exact: true }).click();
+  await page.getByRole('heading', { name: 'Launch plan', exact: true }).waitFor();
   await files.getByRole('button', { name: 'Undo', exact: true }).click();
   await files.getByRole('button', { name: /^plan\.md Undone/ }).waitFor();
   assert.equal(await files.getByRole('button', { name: 'Undo', exact: true }).count(), 0);
