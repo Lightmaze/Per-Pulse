@@ -40,7 +40,10 @@ export function homeContinuations(
   maximum = 3,
   visitedEventIds: ReadonlySet<string> = new Set<string>(),
 ): HomeContinuation[] {
-  if (!pulse?.enabled || !Number.isInteger(maximum) || maximum <= 0) return [];
+  // Disabling or pausing future autonomous activity cannot erase completed,
+  // source-verified results. The native recent window remains read-only; this
+  // projection never admits another Pulse turn.
+  if (!pulse || !Number.isInteger(maximum) || maximum <= 0) return [];
   const known = new Map(pages.filter(page => page.kind === 'work').map(page => [page.id, page]));
   const validIds = new Set(['home', ...pages.map(page => page.id)]);
   const displayed = new Set<string>();
