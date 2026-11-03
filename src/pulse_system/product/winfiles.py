@@ -197,13 +197,14 @@ def directory(root: str, parts: list[str]) -> Iterator[int]:
 
 
 def open_file_read(parent: int, name: str) -> int:
-    """Return a read-only file descriptor for a plain single-link file in ``parent``."""
+    """Return a read-only file descriptor for a plain (non-reparse) file in ``parent``.
+
+    The caller checks the link count with ``os.fstat``, as on POSIX.
+    """
     handle = _open_relative(parent, name, _GENERIC_READ | _FILE_READ_ATTRIBUTES, _FILE_OPEN,
                             _FILE_NON_DIRECTORY_FILE)
     try:
-        info = _plain(handle, directory=False)
-        if info.links != 1:
-            raise OSError(5, "a file with several links is refused")
+        _plain(handle, directory=False)
         return msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
     except BaseException:
         close(handle)
@@ -244,9 +245,11 @@ def _rename_into(file_handle: int, directory_handle: int, name: str) -> None:
 
     class _RenameInfo(ctypes.Structure):
         _fields_ = [("ReplaceIfExists", wintypes.BOOLEAN), ("RootDirectory", wintypes.HANDLE),
-                    ("FileNameLength", wintypes.ULONG), ("FileName", ctypes.c_char * len(encoded))]
+                    ("FileNameLength", wintypes.ULONG), ("FileName", ctypes.c_ubyte * len(encoded))]
 
-    info = _RenameInfo(False, directory_handle, len(encoded), encoded)
+    info = _RenameInfo(False, directory_handle, len(encoded))
+    # Copy the UTF-16 bytes directly: a c_char field would stop at the first NUL byte.
+    ctypes.memmove(ctypes.addressof(info) + _RenameInfo.FileName.offset, encoded, len(encoded))
     io = _IoStatusBlock()
     _check(_NtSetInformationFile(file_handle, ctypes.byref(io), ctypes.byref(info), ctypes.sizeof(info),
                                  _FILE_RENAME_INFORMATION), "rename")
