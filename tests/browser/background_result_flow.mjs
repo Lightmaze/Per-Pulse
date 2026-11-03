@@ -126,7 +126,7 @@ try {
     let resultMessageId;
     await wait(async () => {
       const messages = (await get('/api/pages/' + pageId)).messages;
-      resultMessageId = messages.find(message => message.role === 'assistant' && message.status === 'completed')?.id;
+      resultMessageId = messages.find(message => message.role === 'assistant' && message.content.includes('Synthetic fixture response.'))?.id;
       return Boolean(resultMessageId);
     }, 'native result for Work ' + index);
     otherResults.push({
