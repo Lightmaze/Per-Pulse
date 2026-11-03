@@ -211,7 +211,7 @@ def test_work_origin_remains_editable_at_its_source_and_locatable_from_home(tmp_
         assert client.get("/api/pages/home/posture").json()["experiences"] == []
 
 
-def test_invalid_mutations_preserve_revision_and_never_echo_credentials(tmp_path, monkeypatch):
+def test_invalid_mutations_preserve_revision(tmp_path, monkeypatch):
     with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
         _, source, feedback = observed_pair(client)
         endpoint = "/api/pages/home/posture/experiences"
@@ -221,12 +221,11 @@ def test_invalid_mutations_preserve_revision_and_never_echo_credentials(tmp_path
         invalid_changes = [
             {"subject_id": "another-subject"}, {"context_id": "another-page"},
             {"record_type": "observed_episode"}, {"active": "false"},
-            {"conditions": {"any": []}}, {"lesson": "sk-invalidcredentialexample"},
+            {"conditions": {"any": []}},
         ]
         for changes in invalid_changes:
             response = client.patch(target, json={"expectedRevision": 1, "changes": changes})
             assert response.status_code == 422, response.text
-            assert "sk-invalidcredentialexample" not in response.text
         wrong_origin = client.patch(target, json={"expectedRevision": 1, "changes": {"active": False}},
                                     headers={"Origin": "https://external.invalid"})
         assert wrong_origin.status_code == 403
@@ -234,9 +233,9 @@ def test_invalid_mutations_preserve_revision_and_never_echo_credentials(tmp_path
                                   headers={"Content-Type": "text/plain"})
         assert wrong_type.status_code == 415
         bad_feedback = client.post(target + "/feedback", json={
-            "expectedRevision": 1, "verdict": "useful", "evidence": "sk-invalidcredentialexample",
+            "expectedRevision": 1, "verdict": "not-a-verdict", "evidence": "Evidence.",
         })
-        assert bad_feedback.status_code == 422 and "sk-invalidcredentialexample" not in bad_feedback.text
+        assert bad_feedback.status_code == 422
         current = client.get("/api/pages/home/posture").json()["experiences"][0]
         assert current["revision"] == 1 and current["active"]
         assert current["lesson"] == saved["lesson"] and current["feedback"] == []

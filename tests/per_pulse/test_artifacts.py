@@ -229,7 +229,7 @@ def test_original_work_effect_evidence_survives_native_succession_without_replay
         assert state["historicalUncertainty"] and state["uncertainActionsTruncated"]
         assert [record["actionId"] for record in state["uncertainActions"]] == ["older-uncertain-2", "older-uncertain-1"]
         assert not state["canCancel"] and not state["pendingActions"] and not state["recoveryRequired"]
-        assert "SYNTHETIC_SECRET_VALUE" not in json.dumps(state)
+        assert all(record["arguments"]["api_key"] == "SYNTHETIC_SECRET_VALUE" for record in state["uncertainActions"])
         assert store.sessions_for_world(runtime.world_id) == before_sessions
         assert set(runtime.kernel_service._runtimes) == before_runners
         assert len(requests) == before_requests

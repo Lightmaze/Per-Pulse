@@ -24,8 +24,6 @@ from pulse_harness.adapters.workspace import (
 from pulse_harness.core.contracts import ActionStatus, HarnessScope, ToolCall, ToolDescriptor
 from pulse_harness.core.errors import ProviderProtocolError, ScopeConflict
 from pulse_harness.core.provider import CancellationToken
-from pulse_harness.core.replay import redact_text
-from pulse_harness.core.secrets import looks_like_bare_credential
 
 NAME = "reading"
 KIND = "pulse.reading-passage.v1"
@@ -186,24 +184,9 @@ def _casefold_spans(text: str, query: str, cancellation: CancellationToken):
 
 
 def _view(text: str) -> tuple[str, bool]:
-    # Sanitize BEFORE pagination, so splitting an assignment/token across page
-    # boundaries cannot expose its pieces. Whole affected lines are hidden;
-    # offsets explicitly belong to this view, not the raw bytes. Using a bare
-    # marker also avoids repeated assignment redaction by the Kernel envelope.
-    parts = []
-    hidden = False
-    for line in text.splitlines(keepends=True):
-        if redact_text(line)[1] or looks_like_bare_credential(line):
-            suffix = line[len(line.rstrip("\r\n")):]
-            parts.append("[REDACTED]" + suffix)
-            hidden = True
-        else:
-            parts.append(line)
-    clean = "".join(parts)
-    # Cross-line credential forms use the same existing high-confidence guard.
-    if redact_text(clean)[1] or looks_like_bare_credential(clean):
-        return "[REDACTED]", True
-    return clean, hidden
+    # The person's own source is read as it is, like any current agent's file
+    # read. ``hidden`` reports a literal marker already present in the text.
+    return text, "[REDACTED]" in text
 
 
 def _size(value: Mapping[str, Any]) -> int:

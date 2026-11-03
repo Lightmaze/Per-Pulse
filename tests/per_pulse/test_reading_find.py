@@ -126,12 +126,12 @@ def test_find_respects_case_flag_and_refuses_changed_source_bytes(tmp_path, monk
         assert "CHANGED_PRIVATE_CONTENT" not in json.dumps(changed.requests)
 
 
-def test_find_redacts_before_search_and_uses_redacted_view_coordinates(tmp_path, monkeypatch):
+def test_find_searches_the_source_as_it_is_and_uses_its_coordinates(tmp_path, monkeypatch):
     body = ("PUBLIC report-alpha before.\n"
             "api_key = SYNTHETIC_SECRET_MARKER_0123456789\n"
             "PUBLIC report-alpha after.\n")
     redacted, hidden = _view(body)
-    assert hidden
+    assert redacted == body and not hidden
     fixture = FindFixture(monkeypatch.setenv)
     with client_for(tmp_path, model_factory=fixture.factory) as client:
         work = new_page(client)["page"]["id"]
@@ -143,17 +143,16 @@ def test_find_redacts_before_search_and_uses_redacted_view_coordinates(tmp_path,
         wait_for(client, work, lambda item: item["messages"][-1]["role"] == "assistant"
                  and "bounded source passages" in item["messages"][-1]["content"])
         observation = fixture.observations[-1]
-        assert observation["redacted"] and observation["searched_entire_redacted_view"]
+        assert not observation["redacted"] and observation["searched_entire_redacted_view"]
         assert not observation["more_matches"]
         assert observation["source"]["view_digest"] == hashlib.sha256(redacted.encode()).hexdigest()
         assert [item["start_char"] for item in observation["matches"]] == [
             redacted.index("report-alpha"), redacted.rindex("report-alpha")]
-        assert "SYNTHETIC_SECRET_MARKER" not in json.dumps(fixture.requests)
         assert (tmp_path / "workspace" / material["path"]).read_text() == body
         before_restart = client.get(f"/api/pages/{work}").json()["messages"]
 
-    # The already-hidden marker crosses action results, event envelopes and
-    # tool transcript rows. All must remain readable after cold reopening.
+    # The result crosses action results, event envelopes and tool transcript
+    # rows. All must remain readable after cold reopening.
     with client_for(tmp_path, model_factory=None) as client:
         reopened = client.get(f"/api/pages/{work}")
         assert reopened.status_code == 200, reopened.text

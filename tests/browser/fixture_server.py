@@ -70,6 +70,9 @@ def handler(request):
     if 'FAIL_FOR_REVIEW' in text:
         return httpx.Response(400, headers={'content-type': 'application/json'},
                               json={'error': {'message': 'Explicit synthetic provider rejection'}})
+    if 'FAIL_AFTER_TOOL' in text and has_tool:
+        return httpx.Response(500, headers={'content-type': 'application/json'},
+                              json={'error': {'message': 'Explicit synthetic provider failure after the tool'}})
     if 'SLOW_AFTER_APPROVAL' in text and has_tool:
         entered.set()
         release.wait(30)

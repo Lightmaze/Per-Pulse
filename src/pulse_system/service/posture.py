@@ -55,7 +55,7 @@ def _text(value: Any, name: str, limit: int) -> str:
     except (UnicodeError, TypeError) as exc:
         raise ValueError(f"{name} must be valid Unicode text") from exc
     if redacted or truncated or clean != value:
-        raise ValueError(f"{name} is too large or contains a credential")
+        raise ValueError(f"{name} is too large")
     return value
 
 

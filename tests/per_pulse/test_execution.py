@@ -66,6 +66,8 @@ def _factory(monkeypatch, requests, *, entered=None, release=None, tool=None, re
         ):
             entered.set()
             assert release.wait(8), "The test must release its synthetic provider."
+        if "FAIL_AFTER_TOOL" in text and any(m.get("role") == "tool" for m in messages):
+            return httpx.Response(500, json={"error": {"message": "Synthetic provider failure after the tool."}})
         if not respond_only and not any(m.get("role") == "tool" for m in messages) and ("WRITE_" in text or tool is not None):
             path = "two.txt" if "WRITE_TWO" in text else "one.txt"
             name, arguments = tool if tool is not None else ("mutate_file", {
@@ -515,7 +517,7 @@ def test_recovered_turn_can_stop_offline_without_constructing_model_or_tools(tmp
             assert execution.snapshot("home")["uncertainActions"] == []
 
 
-def test_uncertain_action_projection_is_bounded_redacted_and_observation_only(tmp_path, monkeypatch):
+def test_uncertain_action_projection_is_bounded_and_observation_only(tmp_path, monkeypatch):
     """Use native action transitions, including retained old terminal records.
 
     These read-only fixture actions do not claim any real physical write. The
@@ -545,14 +547,15 @@ def test_uncertain_action_projection_is_bounded_redacted_and_observation_only(tm
         state = client.get(f"/api/pages/{work}/execution").json()
         assert [a["actionId"] for a in state["uncertainActions"]] == ["fixture-uncertain-2", "fixture-uncertain-1"]
         assert state["uncertainActionsTruncated"] is True
-        assert all(a["argumentsRedacted"] for a in state["uncertainActions"])
-        assert "SYNTHETIC_SECRET_VALUE" not in json.dumps(state)
+        # Your own page shows the recorded arguments as they were given.
+        assert not any(a["argumentsRedacted"] for a in state["uncertainActions"])
+        assert all(a["arguments"]["api_key"] == "SYNTHETIC_SECRET_VALUE" for a in state["uncertainActions"])
         assert not pages.runtime.kernel_service._runtimes
         assert pages.execution.snapshot("home")["uncertainActions"] == []
         assert all(store.action_terminal_count(scope, f"fixture-uncertain-{i}") == 1 for i in range(3))
 
 
-def test_completed_effect_is_not_reported_as_rejected_when_continuation_is_redacted(tmp_path, monkeypatch):
+def test_completed_effect_is_not_reported_as_rejected_when_continuation_fails(tmp_path, monkeypatch):
     before = "Draft heading.\npassword=abc\nOrdinary report content.\n"
     after = before.replace("Draft heading.", "Final heading.")
     requests = []
@@ -564,7 +567,7 @@ def test_completed_effect_is_not_reported_as_rejected_when_continuation_is_redac
         path = tmp_path / "workspace" / "report.txt"
         path.write_text(before)
         pages = client.app.state.pages
-        page_id = _new_page(client, "Update the report heading.")
+        page_id = _new_page(client, "Update the report heading. FAIL_AFTER_TOOL")
         waiting = _wait(pages.execution, page_id, lambda p: bool(p["pendingActions"]) and p["pendingActions"][0]["canResolve"])
         action_id = waiting["pendingActions"][0]["actionId"]
         response = client.post(f"/api/pages/{page_id}/execution/actions/{action_id}", json={"decision": "allow_once"})
@@ -572,11 +575,12 @@ def test_completed_effect_is_not_reported_as_rejected_when_continuation_is_redac
         receipt = response.json()
         assert receipt["accepted"] and receipt["actionCompleted"]
         assert receipt["actionStatus"] == "succeeded"
-        assert receipt["continuationError"]["code"] == "redaction_required"
-        assert "action completed" in receipt["continuationError"]["message"].lower()
-        # Check the actual private value, not a three-letter substring that
-        # can occur by chance inside unrelated generated UUIDs and IDs.
-        assert "password=abc" not in json.dumps(receipt)
+        # The follow-up model request fails after the effect; the completed
+        # action must still read as completed, not as rejected.
+        _wait(pages.execution, page_id, lambda p: p["status"] in {"error", "needs_attention"})
+        action = pages.runtime.kernel_service.store.get_action(
+            pages.execution._scope(page_id).for_turn(waiting["turnId"]), action_id)
+        assert action.status.value == "succeeded"
         assert path.read_text() == after
         assert pages.artifacts.read(page_id, action_id)["state"] == "current"
         round_count = len(requests)

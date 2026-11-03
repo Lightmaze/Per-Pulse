@@ -73,11 +73,11 @@ flowchart TD
 
 `PageExecution.snapshot` only observes existing records. It does not create a runner or wake a model. A page maps through its native center to `work:<center>`; Home uses the existing Home scope. Exact action/turn IDs are validated inside that scope. Per-action and per-turn control locks leave unrelated controls independent. A slow model continuation after approval cannot hold the Stop button hostage.
 
-`PageArtifacts` projects confirmed successful `mutate_file` receipts. A click verifies a regular UTF-8 file within the original workspace, with no-follow/identity checks, a 1 MiB file bound and 64 KiB preview bound. The recorded digest must match. A changed file produces a changed-state explanation, never the replacement content presented as the original version. Sensitive values are redacted. The list performs no file-content I/O. There is no second artifact database or implicit immutable blob store.
+`PageArtifacts` projects confirmed successful `mutate_file` receipts. A click verifies a regular UTF-8 file within the original workspace, with no-follow/identity checks, a 1 MiB file bound and 64 KiB preview bound. The recorded digest must match. A changed file produces a changed-state explanation, never the replacement content presented as the original version. The file is shown as it is. The list performs no file-content I/O. There is no second artifact database or implicit immutable blob store.
 
 `GET /api/pages/{pageId}/artifacts/{actionId}/download` resolves the same native
 receipt and reads the complete file again through `WorkspaceFiles`. It returns
-only bytes matching that recorded digest and needing no redaction. Responses
+only bytes matching that recorded digest. Responses
 use `application/octet-stream`, attachment disposition with an encoded UTF-8
 basename and ASCII fallback, the SHA-256 as ETag, and the existing no-store and
 nosniff headers. HTTP sends the checked in-memory bytes rather than reopening
@@ -110,7 +110,7 @@ The shared resource registry coordinates a workspace's participating file writes
 | Allow once | Decide one original eligible action. Repeating the same decision returns observation, without resuming or repeating its effect. |
 | Decline | Reject that action; normal native continuation may explain or proceed with different work. |
 | Open a file result | Check the recorded version when opened. This is not live content polling or old-version restoration. |
-| Download a file result | Recheck and deliver exact current bytes matching the original receipt; refuse changed, unavailable or redacted content. |
+| Download a file result | Recheck and deliver exact current bytes matching the original receipt; refuse changed or unavailable content. |
 | Pause work / cancel a schedule / revoke access | Distinct future product controls; not aliases for Stop this turn. |
 
 If an approved write succeeds and the following model response fails, the receipt reports `actionCompleted: true` and a separate continuation error. Users must not be invited to repeat a completed external effect to repair a conversational failure.

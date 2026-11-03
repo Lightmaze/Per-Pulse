@@ -191,9 +191,11 @@ try {
   await wait(async()=>await page.locator('.message-assistant').count()>repliesBeforeCancellation,
              'foreground Home response after sibling cancellation');
   check('Home remains usable after sibling cancellation',true);
-  await create('Completed effect with response failure','WRITE_REDACTED');
+  await create('Completed effect with response failure','WRITE_REDACTED FAIL_AFTER_TOOL');
   await page.getByRole('button',{name:'Allow once',exact:true}).click();
-  await page.getByText('The action completed, but the follow-up response could not finish. Do not repeat the action.',{exact:true}).waitFor();
+  // The model service fails after the file change; the change stays, and the
+  // page shows the interruption instead of claiming the action was declined.
+  await page.locator('.page-activity').filter({hasText:/Turn interrupted|Needs attention/}).waitFor({timeout:15000});
   await page.getByRole('button',{name:/redacted.txt/}).click();
   await page.getByText(/Final heading\./).first().waitFor();
   check('completed effect survives continuation failure with truthful UI and its file preview',(await page.textContent('body')).includes('Final heading.'));

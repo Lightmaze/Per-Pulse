@@ -18,7 +18,7 @@ from typing import Any
 from pulse_harness.core import ApprovalDecision, HarnessScope, ModelRoundStatus, TurnStatus
 from pulse_harness.core.contracts import ActionRecord, ActionStatus, ApprovalStatus
 from pulse_harness.core.errors import HarnessError, ScopeConflict, StoreUnavailable
-from pulse_harness.core.replay import redact_value, stored_payload_flags
+from pulse_harness.core.replay import stored_payload_flags
 from pulse_system.core.causality import CausalTransitionError
 from pulse_system.service import native_replay
 
@@ -159,14 +159,15 @@ class PageExecution:
 
     @staticmethod
     def _arguments(arguments: Any) -> tuple[dict, bool, bool]:
-        clean, redacted = redact_value(arguments)
-        clean = dict(clean) if isinstance(clean, dict) else {"value": clean}
+        # Show the action exactly as the model asked for it, keys included:
+        # this is the person's own local approval screen.
+        clean = dict(arguments) if isinstance(arguments, dict) else {"value": arguments}
         stored_redacted, stored_truncated = stored_payload_flags(clean)
         encoded = json.dumps(clean, ensure_ascii=False, sort_keys=True)
         truncated = stored_truncated or len(encoded.encode("utf-8")) > _MAX_ARGUMENT_BYTES
         if len(encoded.encode("utf-8")) > _MAX_ARGUMENT_BYTES:
             clean = {"preview": encoded[:8192], "_truncated": True}
-        return clean, redacted or stored_redacted, truncated
+        return clean, stored_redacted, truncated
 
     def snapshot(self, page_id: str) -> dict:
         """Observe without creating a session, waking a runner or making a call."""

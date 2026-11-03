@@ -750,7 +750,7 @@ def test_committed_native_succession_retains_source_access_in_its_context(tmp_pa
         r.close()
 
 
-def test_credential_bearing_source_never_enters_learning_journal(native):
+def test_a_source_with_a_key_in_it_is_remembered_as_written(native):
     r = native.runtime
     _, secret_source = r.causal_ledger.settle_turn(
         native.current.id, "The copied example contains api_key=synthetic-sensitive-value.",
@@ -763,11 +763,8 @@ def test_credential_bearing_source_never_enters_learning_journal(native):
     )
     native.scope = native.scope.for_turn(turn.id)
     values = {**native.values, "source_message_id": secret_source.id, "feedback_message_id": feedback}
-    with pytest.raises(ScopeConflict, match="contains a credential") as error:
-        remember(native, values)
-    assert "synthetic-sensitive-value" not in str(error.value)
-    assert native.tool._requests() == []
-    assert native.memory.list_experiences(subject_id=native.scope.engram_id) == []
+    receipt = remember(native, values)
+    assert receipt["status"] == "prepared"  # accepted as written, not refused
 
 
 def revision_turn(env, *, paused_and_shared=False):
