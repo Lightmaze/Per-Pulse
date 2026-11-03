@@ -10,7 +10,8 @@ async function loadSource(name) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 }
 const storage = await loadSource('storage');
-const { getPageActivity, getMessageActivity } = await loadSource('status');
+const statusModule = await loadSource('status');
+const { getPageActivity, getMessageActivity } = statusModule;
 
 test('source URLs retain page and message identity across a direct load', () => {
   for (const [page, message] of [['home', 'event 1'], ['research / notes', 'event/#2']]) {
@@ -80,4 +81,19 @@ test('drafts remain scoped and restricted storage does not break editing', () =>
     if (original) Object.defineProperty(globalThis, 'localStorage', original);
     else delete globalThis.localStorage;
   }
+});
+
+test('a failed turn explains its cause from the Kernel error code', () => {
+  const { failureReason } = statusModule;
+  assert.equal(failureReason(null), null);
+  assert.equal(failureReason('provider_http_401').key, 'status.failureAuth');
+  assert.equal(failureReason('provider_http_429').key, 'status.failureRateLimited');
+  assert.equal(failureReason('provider_http_503').key, 'status.failureService');
+  assert.equal(failureReason('provider_http_400').key, 'status.failureRejected');
+  assert.equal(failureReason('provider_timeout').key, 'status.failureUnreachable');
+  assert.deepEqual(failureReason('something_new').params, { code: 'something_new' });
+  const page = getPageActivity('error', true, false, 'provider_http_401');
+  assert.equal(page.labelKey, 'status.interrupted');
+  assert.equal(page.detailKey, 'status.failureAuth');
+  assert.equal(getPageActivity('error', true).detailKey, 'status.interruptedDetail');
 });

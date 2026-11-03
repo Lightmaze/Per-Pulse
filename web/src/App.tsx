@@ -410,7 +410,27 @@ export default function App() {
   const pages = bootstrap?.pages ?? [];
   const sourcePage = view?.page.sourcePageId ? pages.find(page => page.id === view.page.sourcePageId) : undefined;
   const breadcrumbs = view?.breadcrumbs.length ? view.breadcrumbs : [{ id: 'home', title: 'Home' }];
-  const activity = view ? getPageActivity(view.page.status, view.provider.configured, Boolean(syncError)) : null;
+  const activity = view ? getPageActivity(view.page.status, view.provider.configured, Boolean(syncError), view.execution?.failureCode) : null;
+  const failedMessage = view?.page.status === 'error'
+    ? [...view.messages].reverse().find(message => message.role !== 'assistant') ?? null : null;
+  const lastMessage = view?.messages[view.messages.length - 1];
+  const canSendAgain = Boolean(failedMessage && lastMessage?.id === failedMessage.id && failedMessage.role === 'user'
+    && !sendingPages[draftKey]);
+  const sendAgain = async () => {
+    if (!failedMessage || !view || pendingSends.current.has(draftKey)) return;
+    const id = view.page.id;
+    pendingSends.current.add(draftKey);
+    setSendingPages(previous => ({ ...previous, [draftKey]: true }));
+    try {
+      const response = await api.send(id, failedMessage.content, [], failedMessage.materials?.map(item => item.id));
+      applyView(response.view);
+    } catch (problem) {
+      setSendErrors(previous => ({ ...previous, [draftKey]: errorText(problem) }));
+    } finally {
+      pendingSends.current.delete(draftKey);
+      setSendingPages(previous => ({ ...previous, [draftKey]: false }));
+    }
+  };
 
   return <div className={`app-shell ${sidebarHidden ? 'is-sidebar-collapsed' : ''}`}>
     <Sidebar stale={Boolean(syncError)} bootstrap={bootstrap} sendingPages={sendingPages} sendErrors={sendErrors} activePageId={route.id} open={sidebarOpen} close={() => setSidebarOpen(false)} navigate={navigate} onSearch={() => openModal({ kind: 'picker', mode: 'search' })} onCreate={() => openModal({ kind: 'create' })} onSettings={() => openModal({ kind: 'settings' })} />
@@ -441,7 +461,7 @@ export default function App() {
               {sourcePage ? <p className="page-subtitle page-origin">{t('app.origin')} <SessionLink pageId={sourcePage.id} label={pageTitle(sourcePage)} navigate={navigate} targetMessageId={view?.page.sourceMessageId ?? undefined} /></p> : <p className="page-subtitle">{t('app.pageSubtitle')}</p>}
             </>}
             {bootstrap?.example ? <p className="mobile-workspace-status">{t('settings.exampleWorkspace')}</p> : null}
-            {activity ? <div className="page-activity" role="status" aria-atomic="true"><span className={`activity-indicator tone-${activity.tone}`}><span className="activity-dot" aria-hidden="true" />{activity.label}</span>{['attention', 'error'].includes(activity.tone) ? <p className="page-activity-detail">{activity.detail}</p> : null}</div> : null}
+            {activity ? <div className="page-activity" role="status" aria-atomic="true"><span className={`activity-indicator tone-${activity.tone}`}><span className="activity-dot" aria-hidden="true" />{t(activity.labelKey)}</span>{['attention', 'error'].includes(activity.tone) ? <p className="page-activity-detail">{t(activity.detailKey, activity.detailParams)}</p> : null}{canSendAgain ? <button type="button" className="secondary-button send-again" onClick={() => void sendAgain()}>{t('status.sendAgain')}</button> : null}</div> : null}
             {sourceNotice ? <p className="conversation-note source-notice" role="status">{sourceNotice}</p> : null}
           </section>
           {route.id === 'home' && bootstrap ? <HomeContinuations pages={pages} workspaceId={bootstrap.workspaceId} navigate={navigate} /> : null}

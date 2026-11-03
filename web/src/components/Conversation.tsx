@@ -43,7 +43,7 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
       </div> : <MessageContent content={messageBody(message)} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />}
       {message.materials?.length ? <ul className="message-materials" aria-label={t('materials.attached')}>{message.materials.map(material => <li key={material.id}><button className="material-chip" onClick={() => onMaterial?.(material.id, material.pageId)}><Icon name="page" size={16} /><span>{material.name}</span></button></li>)}</ul> : null}
       <div className="message-footer">
-        {activity ? <span className={`message-status tone-${activity.tone}`} title={activity.detail}>{activity.label}</span> : null}
+        {activity ? <span className={`message-status tone-${activity.tone}`} title={t(activity.detailKey, activity.detailParams)}>{t(activity.labelKey)}</span> : null}
         <div className="message-actions">
           <CopyButton text={message.content} label={t('conversation.copyMessage')} />
           <button onClick={() => onCreate(message)} title={t("conversation.newPageTitle")}><Icon name="plus" size={14} />{t("conversation.newPage")}</button>

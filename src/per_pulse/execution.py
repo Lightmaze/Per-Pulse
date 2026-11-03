@@ -169,6 +169,24 @@ class PageExecution:
             clean = {"preview": encoded[:8192], "_truncated": True}
         return clean, stored_redacted, truncated
 
+    def _can_supersede(self, turn) -> bool:
+        if turn.status is not TurnStatus.BLOCKED:
+            return False
+        check = getattr(self.runtime.harness, "can_supersede", None)
+        return bool(callable(check) and check(turn))
+
+    def _turn_error_code(self, scope: HarnessScope) -> str | None:
+        """The Kernel's own error code for a failed or blocked turn, if still retained."""
+        store = self._kernel.store
+        session_scope = scope.session_scope()
+        cursor = store.get_session(session_scope).cursor
+        page = store.replay(session_scope, after_seq=max(0, cursor - 64), limit=64)
+        for event in reversed(page.events):
+            if event.event_type == "turn.error" and event.scope.turn_id == scope.turn_id:
+                code = event.payload.get("error_code")
+                return code if isinstance(code, str) and len(code) <= 128 else None
+        return None
+
     def snapshot(self, page_id: str) -> dict:
         """Observe without creating a session, waking a runner or making a call."""
         scope = self._scope(page_id)
@@ -183,7 +201,7 @@ class PageExecution:
                         "pageId": page_id, "sessionId": None, "turnId": None,
                         "status": "idle", "canCancel": False, "pendingActions": [],
                         "pendingActionsTruncated": False, "recoveryRequired": False,
-                        "replay": None,
+                        "failureCode": None, "replay": None,
                         **history,
                         "updatedAt": None,
                     }
@@ -226,9 +244,12 @@ class PageExecution:
                     "expiresAt": expires_at, "canResolve": resolvable,
                     "blockedReason": reason,
                 })
+            # A turn blocked only by a model error, with no action in doubt,
+            # has ended for the person: their next message replaces it.
+            superseded = bool(turn and self._can_supersede(turn))
             status = "idle"
             if turn is not None:
-                status = {
+                status = "error" if superseded else {
                     TurnStatus.SUCCEEDED: "idle", TurnStatus.CANCELLED: "stopped",
                     TurnStatus.FAILED: "error", TurnStatus.BLOCKED: "needs_attention",
                     TurnStatus.WAITING_APPROVAL: "needs_attention",
@@ -237,16 +258,18 @@ class PageExecution:
             # later successful work. Only the current unresolved turn can need
             # an actionable recovery decision in this page's controls.
             recovery = bool(
-                turn and turn.status not in _TERMINAL
+                turn and turn.status not in _TERMINAL and not superseded
                 and (turn.status is TurnStatus.BLOCKED or not self._attached(turn.scope))
             )
             entry = native_replay.mode(kernel.store, turn.scope) if turn and turn.status not in _TERMINAL else None
             return {
                 "pageId": page_id, "sessionId": session.scope.session_id,
                 "turnId": turn.scope.turn_id if turn else None, "status": status,
-                "canCancel": bool(turn and turn.status not in _TERMINAL),
+                "canCancel": bool(turn and turn.status not in _TERMINAL and not superseded),
                 "pendingActions": actions, "pendingActionsTruncated": pending_truncated,
                 "recoveryRequired": recovery,
+                "failureCode": (self._turn_error_code(turn.scope)
+                                if turn and turn.status in {TurnStatus.FAILED, TurnStatus.BLOCKED} else None),
                 "replay": {"sourceCount": len(entry["message_ids"]),
                            **({"focus": entry["focus"]} if "focus" in entry else {})} if entry else None,
                 **history,

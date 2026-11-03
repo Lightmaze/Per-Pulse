@@ -68,6 +68,7 @@ export type PageExecution = {
   status: 'idle' | 'working' | 'needs_attention' | 'error' | 'stopped';
   canCancel: boolean; pendingActions: PendingAction[]; pendingActionsTruncated: boolean;
   recoveryRequired: boolean; historicalUncertainty: boolean; updatedAt: string | null;
+  failureCode?: string | null;
   uncertainActions: UncertainAction[];
   uncertainActionsTruncated: boolean;
   replay?: { sourceCount: number; focus?: string } | null;
