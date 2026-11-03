@@ -156,3 +156,25 @@ test('Home can reveal every live approval and failed Work beyond the quiet first
     page.id === 'waiting-6' ? { ...page, status: 'idle' } : page
   )), live.length).map(page => page.id), expanded.map(page => page.id).filter(id => id !== 'waiting-6'));
 });
+
+
+test('Home can expand the live recent result window beyond three distinct Works', () => {
+  const morePages = [...pages, ...Array.from({ length: 5 }, (_, index) => work('work-' + index))];
+  const pulse = state(
+    ...Array.from({ length: 5 }, (_, index) => event('result-' + index, 'work-' + index)),
+    event('older-result-0', 'work-0'),
+  );
+  const preview = homeContinuations(pulse, morePages);
+  const expanded = homeContinuations(pulse, morePages, morePages.length);
+  assert.deepEqual(preview.map(row => row.event.eventId), ['result-0', 'result-1', 'result-2']);
+  assert.deepEqual(expanded.map(row => row.event.eventId),
+    ['result-0', 'result-1', 'result-2', 'result-3', 'result-4']);
+  assert.deepEqual(expanded.slice(0, 3), preview);
+
+  // A read receipt removes only the opened result, without resurrecting an
+  // earlier event from its Work or hiding the other four original results.
+  const afterOpening = homeContinuations(pulse, morePages, morePages.length, new Set(['result-0']));
+  assert.deepEqual(afterOpening.map(row => row.event.eventId),
+    ['result-1', 'result-2', 'result-3', 'result-4']);
+  assert.deepEqual(homeContinuations({ ...pulse, enabled: false }, morePages, morePages.length), []);
+});
