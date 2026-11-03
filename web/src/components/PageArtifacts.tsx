@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import { useLanguage, type Translate } from '../i18n';
 import type { Artifact, ArtifactRead, PageView } from '../types';
 import { TextDocument } from './TextDocument';
@@ -12,7 +12,7 @@ function unavailableReason(reason: string | null, t: Translate): string {
   return t('artifacts.missing');
 }
 
-export function PageArtifacts({ view, onUseInHome }: { view: PageView; onUseInHome?: (artifact: Artifact) => Promise<void> }) {
+export function PageArtifacts({ view, onUseInHome, onChanged }: { view: PageView; onUseInHome?: (artifact: Artifact) => Promise<void>; onChanged?: () => Promise<unknown> }) {
   const { t, errorText } = useLanguage();
   const [opened, setOpened] = useState<string | null>(null);
   const [result, setResult] = useState<ArtifactRead | null>(null);
@@ -21,6 +21,9 @@ export function PageArtifacts({ view, onUseInHome }: { view: PageView; onUseInHo
   const [downloadState, setDownloadState] = useState<'ready' | 'loading' | 'started'>('ready');
   const [carrying, setCarrying] = useState(false);
   const carryingRequest = useRef(false);
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [undoError, setUndoError] = useState<{ id: string; problem: unknown } | null>(null);
+  const undoRequest = useRef(false);
   const downloadRequest = useRef<AbortController | null>(null);
   const requestId = useRef(0);
   useEffect(() => () => { requestId.current++; downloadRequest.current?.abort(); }, []);
@@ -72,13 +75,36 @@ export function PageArtifacts({ view, onUseInHome }: { view: PageView; onUseInHo
     }
   };
 
+  const undo = async (artifact: Artifact) => {
+    if (undoRequest.current) return;
+    undoRequest.current = true; setUndoing(artifact.id); setUndoError(null);
+    try {
+      await api.undoArtifact(view.page.id, artifact.id);
+      if (opened === artifact.id) { requestId.current++; setOpened(null); setResult(null); }
+      await onChanged?.();
+    } catch (problem) {
+      setUndoError({ id: artifact.id, problem });
+    } finally {
+      undoRequest.current = false; setUndoing(null);
+    }
+  };
+  const undoErrorText = (problem: unknown) =>
+    problem instanceof ApiError && problem.code === 'artifact_version_changed' ? t('artifacts.undoChanged') : errorText(problem);
+  const canUndo = Boolean(view.provider?.workspaceActions);
+
   return <section className="page-artifacts" aria-label={t('artifacts.title')}>
     <h2>{t('artifacts.title')}</h2>
     <p className="artifact-intro">{t('artifacts.intro')}</p>
     <ul>{view.artifacts.map(artifact => <li key={artifact.id}>
-      <button className="artifact-open" aria-expanded={opened === artifact.id} onClick={() => read(artifact)}>
-        <span>{artifact.path}</span><small>{t('artifacts.version', { digest: artifact.sha256.slice(0, 8) })}</small>
-      </button>
+      <div className="artifact-row">
+        <button className="artifact-open" aria-expanded={opened === artifact.id} onClick={() => read(artifact)}>
+          <span id={`artifact-path-${artifact.id}`}>{artifact.path}</span><small>{artifact.undone ? t('artifacts.undone') : t('artifacts.version', { digest: artifact.sha256.slice(0, 8) })}</small>
+        </button>
+        {!artifact.undone && canUndo ? <button type="button" className="text-button artifact-undo"
+          aria-describedby={`artifact-path-${artifact.id}`} disabled={undoing !== null}
+          onClick={() => void undo(artifact)}>{t(undoing === artifact.id ? 'artifacts.undoing' : 'artifacts.undo')}</button> : null}
+      </div>
+      {undoError?.id === artifact.id ? <p className="artifact-undo-error" role="alert">{undoErrorText(undoError.problem)}</p> : null}
       {opened === artifact.id ? <div className="artifact-preview">
         {loading ? <p role="status">{t('artifacts.reading')}</p> : null}
         {error ? <p role="alert">{errorText(error)}</p> : null}

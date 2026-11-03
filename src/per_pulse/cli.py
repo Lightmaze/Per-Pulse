@@ -72,9 +72,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--example", action="store_true", help="Open a separate, clearly marked example workspace without a model.")
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--allow-workspace-actions", dest="workspace_actions", action="store_true", default=True,
-                         help="Let the model propose file changes, each needing your approval (default).")
+                         help="Let the model change files in the workspace; you can undo each change (default).")
     actions.add_argument("--no-workspace-actions", dest="workspace_actions", action="store_false",
-                         help="Do not let the model propose file changes.")
+                         help="Do not let the model change files.")
+    parser.add_argument("--ask-before-edits", action="store_true",
+                        help="Ask before each file change instead of applying it.")
     pulse_mode = parser.add_mutually_exclusive_group()
     pulse_mode.add_argument("--pulse", dest="pulse", action="store_true", default=True,
                             help="Let pages continue in the background within the hourly budget (default when a model is connected).")
@@ -110,6 +112,8 @@ def main(argv: list[str] | None = None) -> None:
             "--pulse-hourly-tokens must be 0 (to hold background admission) "
             "or at least --pulse-token-reservation; otherwise no local activation can be admitted."
         )
+    if args.ask_before_edits and not args.workspace_actions:
+        parser.error("--ask-before-edits cannot be combined with --no-workspace-actions.")
     if not 1 <= args.pulse_main_rounds <= 16:
         parser.error("--pulse-main-rounds must be between 1 and 16.")
     if args.pulse_main_rounds != 4 and not args.pulse:
@@ -134,6 +138,7 @@ def main(argv: list[str] | None = None) -> None:
                   f"{args.pulse_token_reservation} reserved per turn.")
     uvicorn.run(create_app(data_dir, example=args.example, posture=args.posture,
                            allow_workspace_actions=args.workspace_actions,
+                           auto_apply_edits=not args.ask_before_edits,
                           pulse=PulseSettings(enabled=args.pulse,
                                               max_background_pulses_per_hour=args.pulse_budget,
                                               max_background_provider_tokens_per_hour=args.pulse_hourly_tokens,

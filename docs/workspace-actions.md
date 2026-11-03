@@ -1,6 +1,22 @@
 # Workspace actions and file results
 
-`per-pulse` lets the model propose workspace changes by default; turn this off with `--no-workspace-actions`. Each proposal needs action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. Example mode keeps model requests and model file changes disabled. See [Core Harness](harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
+`per-pulse` lets the model change text files in its workspace by default, the
+way current coding agents do: a change inside the workspace applies at once,
+with no approval prompt. Each change appears under **Files from this page**,
+where **Undo** puts the file back as it was before that change (a file the change
+created is removed). Undo only applies while the file still has that change's
+content; if the file changed again afterwards, undo the later change first.
+Undo uses the checkpoint the Kernel records before every change.
+
+Start with `--ask-before-edits` to approve each file change instead, or
+`--no-workspace-actions` to let the model read files without changing them.
+Commands (available when `P_PULSE_COMMAND_IMAGE` names a container image) always
+ask first. A pending approval and exact-turn Stop stay in their original page.
+Example mode never calls a model or changes files. See
+[Core Harness](harness-foundation.md) for authority, recovery and limits.
+
+Completed text-file changes can be opened from **Files from this page**, with
+original-action provenance and digest checks.
 
 **Download file** takes the complete verified text result out of the workspace.
 It checks the file again when requested and verifies the received bytes before

@@ -126,6 +126,7 @@ class TurnRunner:
         max_model_stream_bytes: int | None = None,
         response_reviewer: ResponseReviewer | None = None,
         turn_advisor: TurnAdvisor | None = None,
+        auto_apply_capabilities: frozenset[str] | set[str] | tuple[str, ...] = (),
     ) -> None:
         if max_model_rounds < 1:
             raise ValueError("max_model_rounds must be positive")
@@ -139,6 +140,10 @@ class TurnRunner:
         self.hooks = hooks or HookSet()
         self.response_reviewer = response_reviewer
         self.turn_advisor = turn_advisor
+        # Mutable tools whose capability is listed here run without a
+        # per-action approval. They still carry durable authority and their
+        # own guards (checkpoints, expected digests, recovery).
+        self.auto_apply_capabilities = frozenset(auto_apply_capabilities)
         self.max_model_rounds = max_model_rounds
         self.max_model_deltas = max_model_deltas
         self.max_model_stream_bytes = (
@@ -652,8 +657,9 @@ class TurnRunner:
                 return descriptor
         raise ProviderProtocolError(f"model requested an unregistered tool: {name}")
 
-    @staticmethod
-    def _requires_approval(descriptor: ToolDescriptor) -> bool:
+    def _requires_approval(self, descriptor: ToolDescriptor) -> bool:
+        if descriptor.capability in self.auto_apply_capabilities:
+            return False
         return descriptor.requires_approval or descriptor.mutable
 
     def _drive_model(

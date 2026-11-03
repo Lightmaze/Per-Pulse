@@ -12,6 +12,9 @@ Only the existing ``mutate_file`` receipt contract is supported. Command output,
 assistant claims, arbitrary workspace paths, and unconfirmed effects are not
 artifacts. Preview is bounded and redacted. Downloads separately verify the
 complete current text and refuse any content that would require redaction.
+
+Undo restores the change's own checkpoint through the Kernel workspace
+provider. It applies only while the file still has that change's content.
 """
 from __future__ import annotations
 
@@ -19,6 +22,9 @@ from collections.abc import Mapping
 import re
 from typing import Any
 
+from pulse_harness.adapters.workspace import (
+    WorkspaceAuthorityError, WorkspaceDigestConflict, WorkspaceEffectUncertain,
+)
 from pulse_harness.core.contracts import ActionRecord, ActionStatus
 from pulse_harness.core.errors import HarnessError, ScopeConflict
 from pulse_harness.core.replay import bound_text, redact_text, stored_payload_flags, stored_text_flags
@@ -102,7 +108,14 @@ class PageArtifacts:
             "operationId": action.operation_id,
             "createdAt": action.terminal_at or action.updated_at,
             "state": "unchecked",
+            "undone": False,
         }
+
+    def _undone(self, action: ActionRecord) -> bool:
+        return self.execution._kernel.store.has_event(
+            action.scope.session_scope(), "checkpoint.restored",
+            action_request_id=action.action_request_id,
+        )
 
     @staticmethod
     def _limits() -> dict:
@@ -125,6 +138,8 @@ class PageArtifacts:
             for action in actions[:MAX_ACTION_SCAN]:
                 item = self._item(page_id, action)
                 if item is not None:
+                    if len(items) < MAX_ARTIFACTS:
+                        item["undone"] = self._undone(action)
                     items.append(item)
                 elif action.tool_name == "mutate_file" and stored_payload_flags(action.result)[1]:
                     # The native result bound can omit a large receipt's
@@ -140,6 +155,9 @@ class PageArtifacts:
 
     def _resolve(self, page_id: str, artifact_id: str) -> dict:
         """Resolve a confirmed receipt in this page's committed history."""
+        return self._resolve_action(page_id, artifact_id)[0]
+
+    def _resolve_action(self, page_id: str, artifact_id: str) -> tuple[dict, ActionRecord]:
         scope = self.execution._scope(page_id)
         kernel = self.execution._kernel
         missing = ArtifactError("artifact_not_found", "This file result does not belong to this page.", 404)
@@ -160,7 +178,43 @@ class PageArtifacts:
         item = self._item(page_id, action)
         if item is None:
             raise missing
-        return item
+        try:
+            item["undone"] = self._undone(action)
+        except HarnessError as error:
+            raise self.execution._translate(error) from error
+        return item, action
+
+    def undo(self, page_id: str, artifact_id: str) -> dict:
+        """Put the file back as it was before this change.
+
+        A file that changed again afterwards is left alone; undo the later
+        change first. A new file that this change created is removed.
+        """
+        item, action = self._resolve_action(page_id, artifact_id)
+        if item["undone"]:
+            raise ArtifactError("artifact_already_undone", "This change has already been undone.", 409)
+        try:
+            self.execution._kernel.restore_checkpoint(action.scope, item["checkpointId"])
+        except WorkspaceDigestConflict as error:
+            raise ArtifactError(
+                "artifact_version_changed",
+                "This file has changed since this change. Undo the later change first.", 409,
+            ) from error
+        except WorkspaceAuthorityError as error:
+            raise ArtifactError(
+                "artifact_undo_unavailable",
+                "This change was made in another workspace and cannot be undone here.", 409,
+            ) from error
+        except WorkspaceEffectUncertain as error:
+            raise ArtifactError(
+                "artifact_undo_uncertain",
+                "Undo may not have finished. Check the file before trying again.", 500,
+            ) from error
+        except HarnessError as error:
+            raise ArtifactError(
+                "artifact_undo_unavailable", "This change can no longer be undone.", 409,
+            ) from error
+        return {"pageId": page_id, "artifact": {**item, "undone": True, "state": "unchecked"}}
 
     def read(self, page_id: str, artifact_id: str) -> dict:
         """Preview an exact page-owned action's current, digest-matching file.

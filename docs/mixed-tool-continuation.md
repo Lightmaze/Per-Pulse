@@ -10,7 +10,8 @@ approval. The original file was preserved; it was not replayed.
 `TurnRunner.resume` now admits fresh `INTENT` actions through the existing
 before-tool hook and guarded start path. A resumed `STARTING` action also runs
 that hook. A `RUNNING` action still requires recovery, completed actions are
-only observed, and every later mutable action keeps its own explicit approval.
+only observed, and every later action that needs approval keeps its own
+explicit approval (commands always; file changes with `--ask-before-edits`).
 No new scheduler, action authority, replay permission or store is introduced.
 
 The native regression requests file write, source reading, attention hold,

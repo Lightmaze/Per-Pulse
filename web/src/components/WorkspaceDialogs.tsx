@@ -216,7 +216,7 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
       {saving ? <p role="status">{t('settings.saving')}</p> : null}
       {languageError ? <p className="form-error" role="alert">{languageError}</p> : null}
     </div>
-    <div className="settings-section"><h3>{t('settings.actions')}</h3><p>{bootstrap?.provider.workspaceActions ? t('settings.actionsOn') : t('settings.actionsOff')}</p></div>
+    <div className="settings-section"><h3>{t('settings.actions')}</h3><p>{bootstrap?.provider.workspaceActions ? t(bootstrap.provider.autoApplyEdits ? 'settings.actionsOn' : 'settings.actionsAsk') : t('settings.actionsOff')}</p></div>
     <div className="settings-section"><h3>{t('settings.learning')}</h3><p>{bootstrap?.postureEnabled ? t('settings.learningOn') : t('settings.learningOff')}</p><button className="secondary-button" onClick={learning}>{t('settings.lessons')}</button></div>
     <div className="settings-section"><h3>{bootstrap?.example ? t('settings.exampleWorkspace') : t('settings.yourConversations')}</h3><p>{bootstrap?.example ? t('settings.exampleDescription') : t('settings.conversationDescription')}</p><p>{t('settings.savedDraft')}</p></div>
   </Dialog>;

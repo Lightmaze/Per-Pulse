@@ -52,6 +52,7 @@ export type ProviderState = {
   label: 'AI connected' | 'AI disconnected';
   detail: string;
   workspaceActions: boolean;
+  autoApplyEdits?: boolean;
 };
 
 export type ActionDetails = {
@@ -76,6 +77,7 @@ export type Artifact = {
   version: string; beforeSha256: string | null; sessionId: string;
   turnId: string; actionId: string; changeId: string; checkpointId: string;
   operationId: string; createdAt: string; state: 'unchecked' | 'current' | 'changed' | 'unavailable';
+  undone?: boolean;
 };
 export type ArtifactRead = {
   pageId: string; artifact: Artifact; state: 'current' | 'changed' | 'unavailable';

@@ -78,6 +78,7 @@ class PageService:
         *,
         example: bool = False,
         allow_workspace_actions: bool = False,
+        auto_apply_edits: bool = False,
         pulse: PulseSettings | None = None,
         posture: bool | None = None,
         model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None | object = _ENV_PROVIDER,
@@ -103,6 +104,9 @@ class PageService:
         # An ephemeral process identity is distinct from the persistent World.
         self.service_instance_id = uuid4().hex
         self.allow_workspace_actions = bool(allow_workspace_actions and not example)
+        # File changes inside the workspace apply at once and can be undone;
+        # commands keep asking. Library callers keep per-change approval.
+        self.auto_apply_edits = bool(self.allow_workspace_actions and auto_apply_edits)
         # Explicit example data must remain usable with no credentials and
         # must never consume a user's model budget, even if the shell has keys.
         factory = None if example else (
@@ -134,7 +138,7 @@ class PageService:
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
             model_factory=factory, allow_unconfigured=True, allow_mutations=self.allow_workspace_actions,
-            enable_posture=False if example else posture,
+            enable_posture=False if example else posture, auto_apply_edits=self.auto_apply_edits,
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
         self.execution = PageExecution(self.runtime)
@@ -194,6 +198,7 @@ class PageService:
             "configured": self.configured,
             "model": self.model,
             "workspaceActions": self.allow_workspace_actions,
+            "autoApplyEdits": self.auto_apply_edits,
             "label": "AI connected" if self.configured else "AI disconnected",
             "detail": (
                 "Your configured model handles messages in each page's own context."

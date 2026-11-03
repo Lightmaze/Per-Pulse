@@ -713,7 +713,7 @@ class StructuredWorkspaceToolProvider:
             ),
             ToolDescriptor(
                 name="mutate_file",
-                description="Apply one expected-digest guarded UTF-8 file mutation after approval. "
+                description="Apply one expected-digest guarded UTF-8 file mutation. "
                             "Supply either complete content or patch={edits:[{old,new},...]}, never both. "
                             "Patch revises exact, uniquely matching text in the same file, in order; "
                             "unmentioned text is retained. Read the current source/digest before editing. "
