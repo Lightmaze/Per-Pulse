@@ -142,22 +142,20 @@ def test_native_modes_remain_distinct_and_casefold_match_budget_is_honest(tmp_pa
         assert partial["matches"] == [] and partial["searched_entire_redacted_view"]
 
 
-def test_casefold_search_hides_credentials_and_follow_rechecks_hidden_bytes(tmp_path, monkeypatch):
+def test_casefold_search_reads_the_source_as_it_is_and_follow_rechecks_bytes(tmp_path, monkeypatch):
     fixture = ReadingFixture(monkeypatch.setenv)
     original = "password=Straße-secret-example\r\nß 🌍 Straße source.\r\n"
     visible, hidden = _view(original)
-    assert hidden
+    assert visible == original and not hidden
     with client_for(tmp_path, model_factory=fixture.factory) as client:
         page = work(client)
-        path = tmp_path / "workspace" / "hidden.txt"
+        path = tmp_path / "workspace" / "source.txt"
         path.write_bytes(original.encode())
         found = read(client, page, fixture, op="find", path=path.name, query="STRASSE", casefold=True)["output"]
-        assert found["redacted"] and len(found["matches"]) == 1
-        assert found["matches"][0]["start_char"] == visible.index("Straße")
+        assert not found["redacted"] and len(found["matches"]) == 2
+        assert found["matches"][0]["start_char"] == original.index("Straße")
         assert found["source"]["view_digest"] == hashlib.sha256(visible.encode()).hexdigest()
-        assert "Straße-secret-example" not in json.dumps(fixture.requests, ensure_ascii=False)
         changed = original.replace("secret-example", "different-example")
-        assert _view(changed) == _view(original)
         path.write_bytes(changed.encode())
         refused = read(client, page, fixture, op="follow", receipt_id=found["receipt_id"], match_index=0)
         assert refused["status"] == "failed" and refused["error_code"] == "reading_source_changed"

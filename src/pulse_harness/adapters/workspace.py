@@ -65,8 +65,7 @@ from ..core.errors import (
 )
 from ..core.events import EventDraft
 from ..core.provider import CancellationToken, CancellationRequested
-from ..core.replay import bound_text, digest_json, redact_text
-from ..core.secrets import looks_like_bare_credential
+from ..core.replay import bound_text, digest_json
 from ..core.session_store import HarnessStore
 
 
@@ -594,17 +593,10 @@ def _normalize_relative_path(value: Any, *, allow_pulse: bool = False) -> str:
 
 
 def _safe_observer_text(value: str, max_bytes: int) -> tuple[str, bool, bool]:
-    """Redact a read/diff view without ever persisting raw high-confidence secrets."""
+    """Bound a read/diff view. The person's own file text is kept as it is."""
 
-    clean, redacted = redact_text(value)
-    if looks_like_bare_credential(clean):
-        clean = "[REDACTED]"
-        redacted = True
-    try:
-        bounded, bound_redacted, truncated = bound_text(clean, max_bytes)
-    except RedactionRequired:
-        bounded, bound_redacted, truncated = "[REDACTED]", True, False
-    return bounded, bool(redacted or bound_redacted), truncated
+    bounded, bound_redacted, truncated = bound_text(value, max_bytes)
+    return bounded, bool(bound_redacted), truncated
 
 
 def _unified_diff(path: str, before: str, after: str) -> str:
@@ -1727,8 +1719,6 @@ class StructuredWorkspaceToolProvider:
         if before.digest != expected_digest:
             raise WorkspaceDigestConflict("workspace digest does not match expected_digest")
         before_text = before.text
-        if before.exists and looks_like_bare_credential(before_text):
-            raise RedactionRequired("workspace pre-image contains a raw credential")
         if has_content:
             content = arguments["content"]
             if not isinstance(content, str):
@@ -1736,8 +1726,6 @@ class StructuredWorkspaceToolProvider:
             after_text = content
         else:
             after_text = self._apply_patch(before_text, arguments["patch"])
-        if looks_like_bare_credential(after_text):
-            raise RedactionRequired("workspace content contains a raw credential")
         after_data = after_text.encode("utf-8")
         if len(after_data) > self.store.max_payload_bytes:
             raise ProviderProtocolError("workspace content exceeds the durable bound", code="payload_too_large")

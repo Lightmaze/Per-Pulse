@@ -98,7 +98,7 @@ def test_explicit_resume_after_cold_image_keeps_offset_and_old_provenance(tmp_pa
     assert (original / "workspace" / material["path"]).read_bytes() == text.encode()
 
 
-@pytest.mark.parametrize("changed_part", ["visible_bytes", "hidden_bytes", "view_format"])
+@pytest.mark.parametrize("changed_part", ["read_bytes", "unread_bytes", "view_format"])
 def test_resume_refuses_a_changed_file_or_view_even_when_some_text_matches(tmp_path, monkeypatch, changed_part):
     fixture = ReadingFixture(monkeypatch.setenv)
     text = "Visible introduction.\npassword=synthetic-first-value\nMore source content.\n"
@@ -107,14 +107,13 @@ def test_resume_refuses_a_changed_file_or_view_even_when_some_text_matches(tmp_p
         source = tmp_path / "workspace" / "private-source.txt"
         source.write_text(text)
         first = read(client, page_id, fixture, op="open", path=source.name, max_chars=12)["output"]
-        assert first["redacted"]
+        assert not first["redacted"]  # the source is read as it is
         if changed_part == "view_format":
             monkeypatch.setattr(workspace_reading, "VIEW", "explicit-test-view.v2")
         else:
-            changed = text.replace("Visible", "Revised") if changed_part == "visible_bytes" else text.replace("first", "other")
+            # A change before or after the position already read.
+            changed = text.replace("Visible", "Revised") if changed_part == "read_bytes" else text.replace("first", "other")
             source.write_text(changed)
-            if changed_part == "hidden_bytes":
-                assert workspace_reading._view(text) == workspace_reading._view(changed)
         result = read(client, page_id, fixture, op="resume", receipt_id=first["receipt_id"], max_chars=30)
         assert result["status"] == "failed" and result["error_code"] == "reading_source_changed"
         assert "content" not in result.get("output", {})

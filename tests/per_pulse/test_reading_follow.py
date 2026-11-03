@@ -60,36 +60,32 @@ def test_follow_distant_unicode_match_then_continue_and_reopen(tmp_path, monkeyp
     assert (tmp_path / "workspace" / material["path"]).read_bytes() == text.encode()
 
 
-@pytest.mark.parametrize("changed_part", ["visible", "redacted", "view_format"])
+@pytest.mark.parametrize("changed_part", ["near_match", "elsewhere", "view_format"])
 def test_follow_rechecks_the_complete_source_before_exposing_text(tmp_path, monkeypatch, changed_part):
     fixture = ReadingFixture(monkeypatch.setenv)
     text = "password=synthetic-first-value\nA visible NEEDLE followed by original context.\n"
     with client_for(tmp_path, model_factory=fixture.factory) as client:
         page = work(client)
-        # Pre-existing workspace files may need line redaction. The user upload
-        # API separately refuses credential-shaped documents; do not weaken it.
         path = tmp_path / "workspace" / "source.txt"
         path.write_text(text)
         material = {"path": path.name}
         found = read(client, page, fixture, op="find", path=material["path"], query="NEEDLE")["output"]
-        assert found["redacted"]
+        assert not found["redacted"]  # the source is read as it is
         if changed_part == "view_format":
             monkeypatch.setattr(workspace_reading, "VIEW", "explicit-follow-test.v2")
         else:
-            changed = text.replace("original", "REPLACEMENT_PRIVATE") if changed_part == "visible" else text.replace("first", "other")
+            changed = text.replace("original", "REPLACEMENT_PRIVATE") if changed_part == "near_match" else text.replace("first", "other")
             (tmp_path / "workspace" / material["path"]).write_text(changed)
-            if changed_part == "redacted":
-                assert workspace_reading._view(changed) == workspace_reading._view(text)
         result = read(client, page, fixture, op="follow", receipt_id=found["receipt_id"], match_index=0)
         assert result["status"] == "failed" and result["error_code"] == "reading_source_changed"
         assert "content" not in result.get("output", {})
         assert "REPLACEMENT_PRIVATE" not in json.dumps(fixture.requests)
 
 
-def test_follow_uses_redacted_view_coordinates_and_rejects_unexposed_match(tmp_path, monkeypatch):
+def test_follow_uses_source_coordinates_and_rejects_unexposed_match(tmp_path, monkeypatch):
     fixture = ReadingFixture(monkeypatch.setenv)
     original = "password=synthetic-hidden-value\r\n🌍 Heading.\r\nNEEDLE first.\r\nNEEDLE second.\r\n"
-    visible = "[REDACTED]\r\n🌍 Heading.\r\nNEEDLE first.\r\nNEEDLE second.\r\n"
+    visible = original
     with client_for(tmp_path, model_factory=fixture.factory) as client:
         page = work(client)
         path = tmp_path / "workspace" / "redacted.txt"
@@ -104,7 +100,6 @@ def test_follow_uses_redacted_view_coordinates_and_rejects_unexposed_match(tmp_p
         followed = read(client, page, fixture, op="follow", receipt_id=found["receipt_id"], match_index=0)["output"]
         assert followed["content"] == "NEEDLE first.\r\nNEEDLE second.\r\n"
         assert followed["position"]["start_char"] == visible.index("NEEDLE")
-        assert "synthetic-hidden-value" not in json.dumps(fixture.requests)
 
 
 def test_follow_cannot_borrow_another_works_receipt_or_a_passage(tmp_path, monkeypatch):

@@ -2450,22 +2450,18 @@ class HarnessStore:
         if assistant_content is not None:
             if not assistant_item_id.strip():
                 raise ValueError("assistant content requires an authority item id")
-            clean_content, redacted, truncated = bound_text(
+            clean_content, _redacted, truncated = bound_text(
                 assistant_content, self.max_payload_bytes
             )
-            if redacted:
-                raise RedactionRequired("assistant response contains a raw credential")
             if truncated or clean_content != assistant_content:
                 raise ValueError("assistant response exceeds the durable payload bound")
         elif assistant_item_id:
             raise ValueError("empty assistant response cannot have an authority item")
         review = None
         if review_context is not None:
-            clean_review, review_redacted, review_truncated = bound_text(
+            clean_review, _review_redacted, review_truncated = bound_text(
                 review_context, self.max_payload_bytes
             )
-            if review_redacted:
-                raise RedactionRequired("response review contains a raw credential")
             if review_truncated or clean_review != review_context:
                 raise ValueError("response review exceeds the durable payload bound")
             review = decode_review_envelope(review_context)

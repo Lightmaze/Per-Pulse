@@ -12,7 +12,6 @@ from .errors import StoreUnavailable
 from .secrets import (
     is_secret_ref,
     normalize_secret_refs,
-    reject_bare_credentials,
 )
 
 
@@ -116,14 +115,32 @@ def redact_value(value: Any) -> tuple[Any, bool]:
     return str(value), False
 
 
+def _json_safe(value: Any) -> Any:
+    """The JSON-safe shape redact_value produced, without hiding anything."""
+
+    if is_secret_ref(value):
+        return dict(value)
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
 def stored_text_flags(value: str) -> tuple[bool, bool]:
-    """Recover visibility flags from a canonical persisted text value."""
+    """Recover visibility flags from a canonical persisted text value.
+
+    Text is stored as given. ``redacted`` means it carries a literal
+    ``[REDACTED]`` marker, from an older write or from content that already
+    held one.
+    """
 
     match = _TRUNCATED_TEXT.match(value)
     if match is not None:
         return bool(int(match.group("redacted"))), True
-    clean, redacted = redact_text(value)
-    return redacted or "[REDACTED]" in clean, False
+    return "[REDACTED]" in value, False
 
 
 def _contains_redaction_marker(value: Any) -> bool:
@@ -154,25 +171,25 @@ def stored_payload_flags(value: Mapping[str, Any]) -> tuple[bool, bool]:
         return bool(value["_redacted"]) or _contains_redaction_marker(
             value["preview"]
         ), True
-    _, redacted = redact_value(value)
     truncated = isinstance(value, Mapping) and value.get("_truncated") is True
-    return redacted or _contains_redaction_marker(value), truncated
+    return _contains_redaction_marker(value), truncated
 
 
 def bound_payload(value: Mapping[str, Any], max_bytes: int) -> tuple[dict[str, Any], bool, bool]:
-    """Redact and bound payload bytes without silently dropping evidence."""
+    """Bound payload bytes without silently dropping evidence.
+
+    Content is kept as given, including keys and passwords, as current agent
+    tools do: this is the person's own local history. Only the size is bounded.
+    """
 
     if max_bytes < 256:
         raise ValueError("max_bytes must be at least 256")
     if _is_bounded_payload(value):
         return dict(value), bool(value["_redacted"]) or _contains_redaction_marker(value["preview"]), True
-    normalized = normalize_secret_refs(value)
-    reject_bare_credentials(normalized)
-    clean_value, redacted = redact_value(normalized)
-    # Native tools may already have hidden sensitive lines. Their markers must
-    # retain the same visibility flag through action rows and event envelopes;
-    # replay validation recovers that flag from the persisted content.
-    redacted = redacted or _contains_redaction_marker(clean_value)
+    clean_value = _json_safe(normalize_secret_refs(value))
+    # Older writes and some native views carry literal markers. Their flag is
+    # recovered from the persisted content by replay validation.
+    redacted = _contains_redaction_marker(clean_value)
     clean = dict(clean_value) if isinstance(clean_value, Mapping) else {"value": clean_value}
     encoded = json.dumps(
         clean, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
@@ -212,12 +229,10 @@ def bound_text(value: str, max_bytes: int) -> tuple[str, bool, bool]:
 
     if max_bytes < 128:
         raise ValueError("max_bytes must be at least 128")
-    reject_bare_credentials(value)
-    clean, redacted = redact_text(value)
+    clean = value
     # Preserve a canonical old truncation marker's declared flag. Rescanning
     # its preview could change metadata for an otherwise valid saved row.
-    prior_redacted, prior_truncated = stored_text_flags(clean)
-    redacted = redacted or prior_redacted
+    redacted, prior_truncated = stored_text_flags(clean)
     encoded = clean.encode("utf-8")
     if len(encoded) <= max_bytes:
         return clean, redacted, prior_truncated

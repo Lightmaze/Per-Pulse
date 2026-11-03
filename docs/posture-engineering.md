@@ -166,8 +166,7 @@ Provider evidence stays attached to the source. A `TEST_DOUBLE` or
 `EXPLICIT_MOCK` result produces a `constructed_fixture`, even though its local
 runtime events are real. Missing provider evidence remains explicitly unknown.
 A stored user stimulus establishes attribution, not independent verification
-of the reported outcome. Source text passes the existing credential guards;
-recognized credential values are rejected or redacted before journal admission.
+of the reported outcome. Source text is kept as written.
 
 ## Capacity and continued use
 

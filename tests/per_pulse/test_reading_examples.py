@@ -192,7 +192,7 @@ def test_failed_selecting_turn_does_not_admit_prepared_reading_memory(tmp_path, 
         assert client.get(f"/api/pages/{page_id}/posture").json()["experiences"] == []
 
 
-def test_redacted_receipt_coordinates_are_not_claimed_as_original_file_offsets(tmp_path, monkeypatch):
+def test_receipt_coordinates_are_offsets_in_the_exposed_content(tmp_path, monkeypatch):
     fixture = ReadingExampleFixture(monkeypatch.setenv)
     text = "password=synthetic-private-credential\nKeep  two spaces.\r\n"
     with client_for(tmp_path, posture=True, model_factory=fixture.factory) as client:
@@ -205,8 +205,8 @@ def test_redacted_receipt_coordinates_are_not_claimed_as_original_file_offsets(t
         selection = saved["source"]["selected_excerpt"]
         assert selection["offset_unit"] == "unicode_code_points_in_exposed_receipt_content"
         assert results[0]["output"]["content"][selection["start"]:selection["end"]] == saved["excerpt"]
-        assert selection["start"] != text.index(saved["excerpt"])
-        assert "synthetic-private-credential" not in json.dumps(saved)
+        # The source is read as it is, so these are also its text offsets.
+        assert selection["start"] == text.index(saved["excerpt"])
 
 
 def test_committed_generation_and_cold_copy_keep_a_reading_example(tmp_path, monkeypatch):

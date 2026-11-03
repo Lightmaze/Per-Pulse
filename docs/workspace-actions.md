@@ -56,17 +56,17 @@ Files are shared native workspace material, not isolated
 per-page filesystem permissions.
 
 To locate a specific phrase in a long source, the native `reading.find` operation
-searches literal text in the redacted view and returns up to eight short excerpts
+searches literal text in the source and returns up to eight short excerpts
 with exact source coordinates and digests. It checks an optional expected file
 version, identifies when more matches remain, and reports when its search stopped
 early. Finding a passage is distinct from reading or understanding the whole file.
 To read more at a selected hit, use `reading.follow(receipt_id, match_index)`
 with the find result's receipt and zero-based match index. It starts a bounded
 passage at that original match and supplies a normal continuation receipt.
-Follow rechecks the complete source bytes, redacted view and workspace root;
+Follow rechecks the complete source bytes and workspace root;
 it accepts neither an invented offset nor another Work's private receipt.
 After relocating a workspace, run find again before following a hit. The
-coordinate unit is Python Unicode characters in the redacted view, not raw
+coordinate unit is Python Unicode characters in the source text, not raw
 UTF-8 bytes or JavaScript UTF-16 indices.
 
 For expansion-aware Unicode matching, explicitly pass `casefold=true` to
