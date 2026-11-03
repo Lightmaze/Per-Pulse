@@ -15,6 +15,16 @@ import stat
 from typing import Iterator
 from uuid import uuid4
 
+# POSIX opens each path component relative to an open directory descriptor.
+# Windows has no dir_fd; it opens each component relative to an open
+# directory handle instead (see winfiles). Elsewhere workspace files are
+# unavailable rather than accessed by unanchored paths.
+_WINDOWS = os.name == "nt"
+_DIR_FD = (hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW")
+           and os.open in os.supports_dir_fd)
+if _WINDOWS:
+    from . import winfiles
+
 MAX_FILE_BYTES = 1024 * 1024
 MAX_LIST_ENTRIES = 200
 MAX_SCAN_ENTRIES = 4000
@@ -57,6 +67,15 @@ class WorkspaceFiles:
     @contextmanager
     def directory(self, path: str = "") -> Iterator[int]:
         parts = _parts(path, root_ok=True)
+        if _WINDOWS:
+            try:
+                with winfiles.directory(str(self.root), parts) as handle:
+                    yield handle
+            except OSError:
+                raise FileAccessError("path_unavailable", 404) from None
+            return
+        if not _DIR_FD:
+            raise FileAccessError("workspace_files_unsupported", 501)
         fd = -1
         try:
             # Open each component by a directory descriptor; replacing a path
@@ -76,6 +95,8 @@ class WorkspaceFiles:
     def list(self, path: str = "") -> dict:
         rows = []
         truncated = False
+        if _WINDOWS:
+            return self._list_windows(path)
         with self.directory(path) as directory:
             with os.scandir(directory) as entries:
                 for scanned, entry in enumerate(entries):
@@ -97,11 +118,36 @@ class WorkspaceFiles:
         return {"path": path, "entries": rows, "truncated": truncated,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
+    def _list_windows(self, path: str) -> dict:
+        rows = []
+        truncated = False
+        with self.directory(path) as directory:
+            for scanned, (name, is_directory, size, reparse) in enumerate(winfiles.list_directory(directory)):
+                if scanned >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
+                    truncated = True
+                    break
+                relative = f"{path}/{name}" if path else name
+                if reparse:
+                    continue  # symlinks and junctions are not workspace entries
+                try:
+                    _parts(relative)
+                except FileAccessError:
+                    continue
+                rows.append({"name": name, "path": relative,
+                             "kind": "directory" if is_directory else "file",
+                             "bytes": None if is_directory else size})
+        rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold()))
+        return {"path": path, "entries": rows, "truncated": truncated,
+                "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
+
     def read(self, path: str) -> dict:
         parts = _parts(path)
         with self.directory("/".join(parts[:-1])) as parent:
             try:
-                fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+                if _WINDOWS:
+                    fd = winfiles.open_file_read(parent, parts[-1])
+                else:
+                    fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
                 with os.fdopen(fd, "rb") as stream:
                     info = os.fstat(stream.fileno())
                     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
@@ -134,6 +180,8 @@ class WorkspaceFiles:
         stem = safe_name[:-len(suffix)] if suffix else safe_name
         safe_name = stem.encode("utf-8")[:160 - len(suffix.encode("utf-8"))].decode("utf-8", errors="ignore") + suffix
         target = f"{uuid4().hex[:12]}-{safe_name}"
+        if _WINDOWS:
+            return self._upload_windows(name, data, target)
         with self.directory() as root:
             try:
                 os.mkdir("uploads", mode=0o700, dir_fd=root)
@@ -160,5 +208,21 @@ class WorkspaceFiles:
                     os.unlink(temp, dir_fd=parent)
                 except FileNotFoundError:
                     pass
+        return {"path": "uploads/" + target, "name": name, "bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(), "source": "user_upload"}
+
+    def _upload_windows(self, name: str, data: bytes, target: str) -> dict:
+        """Create and publish the upload relative to the open uploads directory handle."""
+        with self.directory() as root:
+            try:
+                uploads = winfiles.open_directory(root, "uploads", create=True)
+            except OSError:
+                raise FileAccessError("path_unavailable", 404) from None
+            try:
+                winfiles.publish(uploads, ".upload-" + uuid4().hex, target, data)
+            except OSError:
+                raise FileAccessError("upload_failed_or_unconfirmed", 503) from None
+            finally:
+                winfiles.close(uploads)
         return {"path": "uploads/" + target, "name": name, "bytes": len(data),
                 "sha256": hashlib.sha256(data).hexdigest(), "source": "user_upload"}

@@ -235,6 +235,28 @@ jobs:
           PER_PULSE_PYTHON="$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" \
           node tests/browser/materials_flow.mjs
 
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build the client
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+      - name: Install the local service
+        run: python -m pip install -e ".[dev]"
+      - name: Start, browse, upload, change and undo files on Windows, and keep them inside the workspace
+        run: python -m pytest -q tests/per_pulse/test_workspace_files_api.py tests/per_pulse/test_auto_apply_edits.py tests/per_pulse/test_artifacts.py tests/per_pulse/test_pages.py tests/per_pulse/test_keys_in_content.py tests/per_pulse/test_windows_file_boundary.py
+
   browser-journey:
     runs-on: ubuntu-latest
     timeout-minutes: 12

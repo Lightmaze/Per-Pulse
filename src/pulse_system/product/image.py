@@ -367,7 +367,7 @@ def restore(archive: Path, home: Path) -> dict:
         _check(all(current.get(k)==v for k,v in manifest['implementation'].items()),
                'restore requires the same implementation; use the original release or an explicit migration')
         home.mkdir(parents=True,mode=0o700,exist_ok=False)
-        marker = home/INCOMPLETE; marker.write_text('incomplete cold-image restore; do not start\n'); marker.chmod(0o600)
+        marker = home/INCOMPLETE; marker.write_text('incomplete cold-image restore; do not start\n', encoding='utf-8'); marker.chmod(0o600)
         for name in sorted(manifest['directories'],key=lambda x:(x.count('/'),x)):
             (home/name).mkdir(mode=0o700)
         _verify(z,manifest,home)
@@ -383,7 +383,7 @@ def restore(archive: Path, home: Path) -> dict:
                    'restored_at':datetime.now(timezone.utc).isoformat(), 'semantics':manifest['semantics'],
                    'rebind':manifest['rebind'], 'world_id':manifest['world_id'], 'model_calls':0,
                    'retained_uncertain_turns':recovered}
-        p = home/'image-origin.json'; p.write_text(json.dumps(receipt,indent=2)); p.chmod(0o600)
+        p = home/'image-origin.json'; p.write_text(json.dumps(receipt,indent=2), encoding='utf-8'); p.chmod(0o600)
         marker.unlink()
     return {'restored':str(home), 'files':len(manifest['files']), **receipt,
             'next':'run explicit model setup in this new home, then start with chosen resources'}
