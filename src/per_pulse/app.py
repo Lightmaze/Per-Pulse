@@ -293,7 +293,6 @@ def create_app(
         messages = {
             "file_too_large": "Choose a text file no larger than 1 MiB.",
             "text_files_only": "Choose a UTF-8 text file, such as Markdown, plain text or CSV.",
-            "credential_content_blocked": "This file appears to contain a credential. Remove it before sharing the file.",
             "protected_or_invalid_path": "This file name or location cannot be opened here.",
             "invalid_path": "This file location is invalid.",
             "filename_only": "Choose a file name without folders.",

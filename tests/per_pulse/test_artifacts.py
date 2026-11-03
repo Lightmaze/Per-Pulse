@@ -376,7 +376,6 @@ def test_preview_uses_existing_path_file_type_and_size_guards(tmp_path, monkeypa
         for data, reason in (
             (b"\xff\x00", "text_files_only"),
             (b"x" * (1024 * 1024 + 1), "file_too_large"),
-            (b"password=synthetic-sensitive-value", "credential_content_blocked"),
         ):
             target.write_bytes(data)
             preview = artifacts.read(page_id, action_id)
@@ -385,6 +384,11 @@ def test_preview_uses_existing_path_file_type_and_size_guards(tmp_path, monkeypa
             denied = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
             assert denied.status_code in {403, 413, 415}
             assert denied.json()["error"]["code"] == reason
+        # The user's own file is never withheld for looking like it holds a
+        # credential; a different version is reported as changed.
+        target.write_bytes(b"password=synthetic-sensitive-value")
+        changed = artifacts.read(page_id, action_id)
+        assert changed["state"] == "changed" and changed["reason"] == "artifact_version_changed"
         workspace = tmp_path / "workspace"
         original_workspace = tmp_path / "original-workspace"
         replacement = tmp_path / "replacement"
@@ -408,7 +412,7 @@ def test_preview_uses_existing_path_file_type_and_size_guards(tmp_path, monkeypa
             original_workspace.rename(workspace)
 
 
-def test_preview_redacts_and_bounds_text_after_verifying_original_bytes(tmp_path, monkeypatch):
+def test_preview_shows_the_users_own_text_bounded_after_verifying_original_bytes(tmp_path, monkeypatch):
     import per_pulse.artifacts as module
 
     monkeypatch.setattr(module, "MAX_PREVIEW_BYTES", 256)
@@ -436,14 +440,14 @@ def test_preview_redacts_and_bounds_text_after_verifying_original_bytes(tmp_path
         preview = artifacts.read(page_id, action_id)
         assert preview["state"] == "current"
         assert preview["observedSha256"] == _sha(after)
-        assert preview["redacted"] and preview["truncated"]
-        assert "password=abc" not in preview["content"]
-        assert len(preview["content"].encode("utf-8")) <= 256
+        assert preview["truncated"] and not preview["redacted"]
+        assert preview["content"] == after.encode("utf-8")[:256].decode("utf-8")
+        assert "password=abc" in preview["content"]
         assert preview["bytes"] == len(after.encode("utf-8"))
-        denied = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
-        assert denied.status_code == 422
-        assert denied.json()["error"]["code"] == "artifact_download_redacted"
-        assert "password=abc" not in denied.text
+        assert preview["downloadable"] is True
+        download = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert download.status_code == 200
+        assert download.content == after.encode("utf-8")
 
 def test_preview_rejects_hidden_marker_beyond_bounded_prefix(tmp_path, monkeypatch):
     """A safe-looking preview cannot authorize carrying an unsafe complete file."""
