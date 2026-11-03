@@ -451,7 +451,12 @@ try {
   await incomingEnglish.scrollIntoViewIfNeeded();
   if (screenshots) await page.screenshot({ path: join(screenshots, 'incoming-connections-desktop-en.png') });
   await incomingEnglish.getByRole('button', { name: 'Remove connection from Independent design work', exact: true }).click();
-  await incomingEnglish.getByText('No incoming computation connections.', { exact: true }).waitFor();
+  await wait(async () => await incomingEnglish.getByRole('button', { name: 'Independent design work', exact: true }).count() === 0,
+    'selected incoming source removed');
+  const remainingIncoming = (await (await fetch(base + '/api/pulse')).json()).connections;
+  assert.equal(remainingIncoming.some(edge => edge.targetPageId === localReceiver
+    && [localSource, workId].includes(edge.sourcePageId)), false);
+  // Other activity-learned sources are independent of these two removals.
   checks.push('receiving Work inspects incoming sources, removes one edge and its unstarted input, preserves unrelated edges/history/drafts, and retains the change after restart');
 
   // Continue the existing quota test: cancellation does not refund an

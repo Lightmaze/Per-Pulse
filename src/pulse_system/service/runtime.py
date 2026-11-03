@@ -6587,6 +6587,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 self._storage, self._causal_ledger, self._world,
                 world_id=self._world_id, subject=lambda: self._front_id,
                 fence=lambda: self._current_runtime_fence(), config=c.context_pulse,
+                learning_policy=c.online_learning_policy,
+                learning_audit=self._online_learning_audit,
                 attention_outcome=(self._native_attention.outcome
                     if self._harness_kind == "kernel" and c.context_pulse.enabled else None),
             ) if c.context_pulse is not None else None
@@ -6619,6 +6621,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             spontaneous_emitter=self._spontaneous_dispatch_for_engram,
             scheduler=self._scheduler,
             admission_filter=(self._context_pulse.admits if self._context_pulse else None),
+            context_wait_modifier=(self._context_pulse.wait_modifier if self._context_pulse else None),
             approval_parked=native_approval_parked,
             unsettled_provider_usage=native_unsettled_provider_usage,
             runtime_fence=self._current_runtime_fence(),

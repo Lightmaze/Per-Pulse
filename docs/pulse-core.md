@@ -17,7 +17,7 @@ Three events form the basic path:
 
 The world tick is a coordination clock. It does not manufacture a new task at
 every interval. Eligibility depends on retained local activity, the explicit
-connection graph, inhibition, refractory time and the shared background quota.
+connection graph (configured and learned), inhibition, refractory time and the shared background quota.
 
 ## Separate histories, explicit influence
 
@@ -55,6 +55,10 @@ user input remains available when a background quota is exhausted.
 `per-pulse` enables background computation when a model is connected, with at
 most twelve background admissions in a rolling hour. Change the ceiling with
 `--pulse-budget N`, or turn background computation off with `--no-pulse`.
+Connection learning and Work-level spectrum modulation run with background
+computation. `--no-adaptive-pulse` retains current connections and their
+current weights while freezing connection learning and using neutral Work
+modulation factors. It does not erase learned state.
 Library callers of `create_app` keep it off unless they pass `PulseSettings`.
 
 Python callers can configure the local rhythm directly:
@@ -109,6 +113,85 @@ creates a new edge identity that applies to subsequently settled results.
 Removing or changing an edge cancels its queued, unstarted deliveries; a model
 turn already running may finish normally. Recreating an edge does not revive
 cancelled deliveries or retroactively relay old results.
+
+## Work-level connection learning and spectrum
+
+Home and each Work are distinct learning nodes even though they share the
+continuity Engram. Accepted, ordinary completed turns supply their actual
+result IDs and completion times. Replay, failed/uncertain turns, TUNNEL
+results and another participant's history do not train this graph. Locally
+held, paused and inactive contexts do not form new associations.
+
+The connection learner reuses Pulse's timing rule: A completing before B in a
+30-second eligibility window strengthens A-to-B and weakens an existing
+excitatory B-to-A edge. The default deltas are `0.08` and `0.04`, multiplied
+by `exp(-gap / 10 seconds)`, with weights in `[0, 1]`. It can create an
+excitatory connection; timing never creates an inhibitory relation or changes
+the sign of a configured edge. This rule measures temporal association.
+
+Connections retain `origin`, `factory_weight`, `learned_weight` and the two
+original learning result IDs. A newly learned edge applies only to later
+results. Weak associations remain below the ordinary delivery threshold
+until further activity strengthens them. Activity labels those connections
+as **Below delivery threshold**, and stronger learned connections as **Learned from activity**.
+Removing a connection records a persistent exclusion: later activity and
+restart cannot recreate it. Explicitly reconnecting the pages releases that
+exclusion and establishes a new edge revision.
+
+Learned weights decay by `exp(-0.003 * elapsed_minutes)`. Learned-origin edges
+below `0.01` are pruned. Explicit edges retain their factory provenance and
+are never removed by pruning, although their learned effective weight can
+change. An edge with an already queued/running input, including a fused input,
+remains until that input is consumed. Numerical decay never discards completed
+influence retained during a local pause. Weight changes preserve the edge identity and never rewrite the
+priority, text or source of an already admitted delivery. Graph deltas and
+their learning cursor are saved together; checkpoint retries cannot learn
+the same result twice.
+
+Learning starts at a durable first-attachment sequence. Importing an existing
+history does not retrospectively associate its old turns. New results that
+arrive after attachment remain eligible across a crash before observation.
+Each bounded observation batch commits its graph updates once, using context
+and edge indexes instead of rereading the graph for every result pair.
+
+The existing Claustrum MLP now also has a separate, World-scoped context
+adapter. Its stable slots identify Home/Work contexts, with no extra Engram
+rows. It reads five numeric features per context: recent activity, connection
+count, queued/running input count, time since completion and neighboring
+context activity. It modulates three actual execution surfaces:
+
+- local spontaneous-activation probability;
+- the source's content-propagation threshold;
+- the receiving context's Dendrite silence and maximum-wait durations.
+
+Each factor lies in `[0.5, 2]`. The adapter uses the original mind-tide band
+reward (`0.15–0.45`), computed over eligible Work contexts active within the
+last sixty seconds. It retains bounded exploration and the existing masked
+online update. This is a rhythm objective; it does not rate the usefulness
+of a model's answer. The normal online-learning policy controls both this
+learner and Work connection updates.
+
+Rhythm samples are at least one second apart; a fast queue poll does not
+manufacture another independent reward. Idle coordination checks SQLite
+changes before scanning the graph. New results, graph edits and commits from
+another connection invalidate that shortcut; source-adjacency and inhibition
+reads project only the relevant numeric state during admission.
+
+The field weights, slot mapping, held factors, pending credit, recent learning
+buffer, random state and observation clock persist in the same World SQLite
+store. Context IDs survive committed Engram succession. Inactive slots are
+reset before reuse; contexts beyond the 256-slot capacity receive neutral
+factors. Modulation does not create text or bypass pause, inhibitory gates,
+refractory time, propagation depth or background admission budgets. Existing
+Dendrite windows keep their original frozen timing; new context factors apply
+when a new window opens. Foreground messages, explicit `/tick` and TUNNEL
+retain their ordinary timing.
+
+`GET /api/pulse` includes `adaptiveConnections`, `connectionLearning` and
+`spectrum`. Its connection entries expose `effectiveThreshold` and
+`aboveThreshold`; spectrum includes its local tide, original context-keyed
+factors, observation count, slot capacity and learning audit. Reading these
+fields does not advance learning or create activity.
 
 ## Explicit time steps: `/tick`
 
@@ -224,7 +307,7 @@ that center back to its original Home/Work page when possible.
 
 Retained drive may increase a local context's chance of a *native* reentry
 when that context has an eligible settled result. It cannot bypass the
-existing `spontaneous_rate` ceiling, hourly admission quota, inhibition,
+configured base `spontaneous_rate` and bounded spectrum factors, hourly admission quota, inhibition,
 refractory period, depth limit, global/local pause, worker capacity or
 foreground priority. Operator pause does not erase already stored thoughts
 or in-flight turns. The feature is not the alternative second ContextBody,

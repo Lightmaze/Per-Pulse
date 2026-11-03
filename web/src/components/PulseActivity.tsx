@@ -252,6 +252,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
               ? <button className="pulse-activity-link" type="button" onClick={() => jump(edge.sourcePageId)}>{nameFor(edge.sourcePageId)}</button>
               : <span>{nameFor(edge.sourcePageId, edge.source_center_id)}</span>}
             <span> → {edge.kind === 'inhibitory' ? t('pulse.settles') : t('pulse.excites')}</span>
+            {edge.origin === 'learned' ? <span className="pulse-activity-detail">{t(edge.aboveThreshold === false ? 'pulse.formingConnection' : 'pulse.learnedConnection')}</span> : null}
             {edge.sourcePageId && validIds.has(edge.sourcePageId) ? <button className="text-button" type="button" disabled={busy}
               aria-label={t('pulse.removeIncoming', { page: nameFor(edge.sourcePageId) })}
               onClick={() => void act(() => api.disconnectPulse(edge.sourcePageId!, pageId, identity))}>{t('pulse.remove')}</button> : null}
@@ -261,12 +262,14 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
       <section className="pulse-activity-section" aria-label={t('pulse.connections')}>
         <h3>{t('pulse.connections')}</h3>
         <p className="pulse-activity-detail">{t('pulse.connectionsInfo')}</p>
+        {pulse?.adaptiveConnections ? <p className="pulse-activity-detail">{t('pulse.learningInfo')}</p> : null}
         {!edges.length ? <p className="pulse-activity-empty">{t('pulse.noEdges')}</p> : <ul className="pulse-activity-list">
           {edges.map(edge => <li key={edge.id}>
             <span>{edge.kind === 'inhibitory' ? t('pulse.settles') : t('pulse.excites')} → </span>
             {edge.targetPageId && validIds.has(edge.targetPageId)
               ? <button className="pulse-activity-link" onClick={() => jump(edge.targetPageId)}>{nameFor(edge.targetPageId)}</button>
               : <span>{nameFor(edge.targetPageId, edge.target_center_id)}</span>}
+            {edge.origin === 'learned' ? <span className="pulse-activity-detail">{t(edge.aboveThreshold === false ? 'pulse.formingConnection' : 'pulse.learnedConnection')}</span> : null}
             {edge.targetPageId && validIds.has(edge.targetPageId) ?
               <button className="text-button" type="button" disabled={busy} onClick={() => void act(() => api.disconnectPulse(pageId, edge.targetPageId!, identity))}>{t('pulse.remove')}</button> : null}
           </li>)}

@@ -102,3 +102,10 @@ def test_ask_before_edits_restores_per_change_approval(monkeypatch, capsys):
         main(["--ask-before-edits", "--no-workspace-actions"])
     assert stopped.value.code == 2
     assert "--ask-before-edits" in capsys.readouterr().err
+
+
+def test_adaptive_pulses_are_default_and_can_be_frozen(monkeypatch):
+    enabled = _captured_settings([], monkeypatch)
+    assert enabled.adaptive_connections and enabled.spectrum_enabled
+    explicit = _captured_settings(["--no-adaptive-pulse"], monkeypatch)
+    assert explicit.enabled and not explicit.adaptive_connections and not explicit.spectrum_enabled

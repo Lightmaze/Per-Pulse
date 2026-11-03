@@ -227,6 +227,12 @@ export type PulseConnection = {
   targetPageId: string | null;
   weight: number;
   kind: 'excitatory' | 'inhibitory';
+  origin?: 'configured' | 'learned';
+  factory_weight?: number | null;
+  learned_weight?: number | null;
+  learning_source_ids?: string[] | null;
+  effectiveThreshold?: number;
+  aboveThreshold?: boolean;
 };
 
 export type PulseActivation = {
@@ -264,6 +270,7 @@ export type PulseRetainedAttention = {
 
 export type PulseState = {
   enabled: boolean;
+  adaptiveConnections?: boolean;
   paused: boolean;
   heldContexts: { center_id: string | null; pageId: string | null }[];
   retainedAttention: PulseRetainedAttention[];

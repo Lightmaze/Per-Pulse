@@ -83,6 +83,8 @@ def main(argv: list[str] | None = None) -> None:
     pulse_mode.add_argument("--no-pulse", dest="pulse", action="store_false",
                             help="Turn off background continuation. Pages still answer your messages and /tick.")
     parser.add_argument("--pulse-budget", type=int, default=12, help="Maximum background turns per rolling hour (default: 12).")
+    parser.add_argument("--no-adaptive-pulse", action="store_true",
+                        help="Keep current page connections fixed and use an unmodulated rhythm.")
     parser.add_argument("--pulse-hourly-tokens", type=int, default=None,
                         help="Optional estimated background token budget per rolling hour.")
     parser.add_argument("--pulse-token-reservation", type=int, default=8192,
@@ -140,6 +142,8 @@ def main(argv: list[str] | None = None) -> None:
                            allow_workspace_actions=args.workspace_actions,
                            auto_apply_edits=not args.ask_before_edits,
                           pulse=PulseSettings(enabled=args.pulse,
+                                              adaptive_connections=not args.no_adaptive_pulse,
+                                              spectrum_enabled=not args.no_adaptive_pulse,
                                               max_background_pulses_per_hour=args.pulse_budget,
                                               max_background_provider_tokens_per_hour=args.pulse_hourly_tokens,
                                               background_provider_token_reservation=args.pulse_token_reservation,

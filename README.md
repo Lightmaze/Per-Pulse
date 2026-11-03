@@ -93,6 +93,10 @@ page ends the run. Steps you ask for do not use the background budget. Pages can
 also pass finished results to each other through connections; see
 [Local pulses](docs/pulse-core.md).
 
+Pages can learn connections from their activity, and their local rhythm adapts
+across the workspace. Activity shows learned connections and lets you remove
+them. Use `--no-adaptive-pulse` to freeze connection learning and keep a fixed rhythm.
+
 ## Explore the example
 
 ```sh
