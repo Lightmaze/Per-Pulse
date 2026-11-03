@@ -124,11 +124,11 @@ try {
   await editor().getByText('Saved for this page only.').waitFor();
   await editor().locator('select').selectOption('collaborator');
   await editor().getByRole('button', { name: 'Review and save guidance', exact: true }).click();
-  await editor().getByText('Share this note with the same collaborator in other Works?', { exact: false }).waitFor();
+  await editor().getByText('Share this note with the same collaborator in other pages?', { exact: false }).waitFor();
   assert.equal((await feedback(works.source, works.record)).revision, 1,
     'review step must not mutate native consent');
   await editor().getByRole('button', { name: 'Confirm', exact: true }).click();
-  await editor().getByText('Saved for this collaborator across Works.').waitFor();
+  await editor().getByText('Saved for this collaborator across pages.').waitFor();
   const sharedNote = await feedback(works.source, works.record);
   assert.equal(sharedNote.revision, 2);
   assert.equal(sharedNote.current.scope, 'collaborator');
@@ -162,7 +162,7 @@ try {
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('#interface-language').selectOption('en');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
-  await editor().getByText('Saved for this collaborator across Works.').waitFor();
+  await editor().getByText('Saved for this collaborator across pages.').waitFor();
   checks.push('same source-bound guidance survives Chinese and English user navigation');
 
   // The receiving Work must finish an actual approved file operation, not
