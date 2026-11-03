@@ -63,12 +63,14 @@ export type UncertainAction = ActionDetails & { status: 'uncertain' };
 export type PendingAction = ActionDetails & {
   approvalId: string | null; expiresAt: string | null; canResolve: boolean; blockedReason: string | null;
 };
+export type ExecutionStep = { actionId: string; toolName: string; status: string; target: string | null };
 export type PageExecution = {
   pageId: string; sessionId: string | null; turnId: string | null;
   status: 'idle' | 'working' | 'needs_attention' | 'error' | 'stopped';
   canCancel: boolean; pendingActions: PendingAction[]; pendingActionsTruncated: boolean;
   recoveryRequired: boolean; historicalUncertainty: boolean; updatedAt: string | null;
   failureCode?: string | null;
+  steps?: ExecutionStep[];
   uncertainActions: UncertainAction[];
   uncertainActionsTruncated: boolean;
   replay?: { sourceCount: number; focus?: string } | null;

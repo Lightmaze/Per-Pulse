@@ -2,13 +2,31 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useLanguage, type Translate } from '../i18n';
 import { ExecutionResponseGate } from '../executionResponseGate';
-import type { ActionDetails, PageView } from '../types';
+import type { ActionDetails, ExecutionStep, PageView } from '../types';
 
 function actionTitle(action: ActionDetails, t: Translate): string {
   if (['mutate_file', 'apply_patch'].includes(action.toolName)) return t('execution.reviewFile');
   if (action.toolName === 'run_command') return t('execution.reviewCommand');
   if (action.toolName === 'work') return t('execution.reviewWork');
   return t('execution.reviewOther', { tool: action.toolName.replaceAll('_', ' ') });
+}
+
+function stepLabel(step: ExecutionStep, t: Translate): string {
+  const target = step.target ?? '';
+  if (['read_file', 'reading'].includes(step.toolName)) return target ? t('execution.stepRead', { target }) : t('execution.stepReadAny');
+  if (['mutate_file', 'apply_patch'].includes(step.toolName)) return target ? t('execution.stepChange', { target }) : t('execution.stepChangeAny');
+  if (step.toolName === 'run_command') return t('execution.stepCommand');
+  if (step.toolName === 'search_history') return target ? t('execution.stepSearch', { target }) : t('execution.stepHistory');
+  if (step.toolName === 'read_history') return t('execution.stepHistory');
+  if (step.toolName === 'work') return t('execution.stepWork');
+  if (step.toolName === 'posture') return t('execution.stepLesson');
+  return t('execution.stepOther', { tool: step.toolName.replaceAll('_', ' ') });
+}
+
+function stepState(status: string): 'running' | 'done' | 'failed' {
+  if (status === 'succeeded') return 'done';
+  if (['failed', 'uncertain', 'cancelled'].includes(status)) return 'failed';
+  return 'running';
 }
 
 export function ExecutionStatus({ view, applyView }: { view: PageView; applyView: (view: PageView) => void }) {
@@ -68,6 +86,11 @@ export function ExecutionStatus({ view, applyView }: { view: PageView; applyView
       </div>
       {execution.canCancel && execution.turnId ? <button className="execution-stop" disabled={stopping} onClick={() => act(() => api.stop(pageId, execution.turnId!), true)}>{stopping ? t('execution.stopping') : t('execution.stop')}</button> : null}
     </div> : null}
+    {execution.canCancel && execution.steps?.length ? <ol className="execution-steps" aria-label={t('execution.steps')}>
+      {execution.steps.map(step => { const state = stepState(step.status); return <li key={step.actionId} className={`execution-step step-${state}`}>
+        <span>{stepLabel(step, t)}</span>{state === 'running' ? <span className="step-note">{t('execution.stepRunning')}</span> : state === 'failed' ? <span className="step-note">{t('execution.stepFailed')}</span> : null}
+      </li>; })}
+    </ol> : null}
     {execution.pendingActions.map(action => <div className="execution-action" key={action.actionId}>
       <h3>{actionTitle(action, t)}</h3>
       <details open>

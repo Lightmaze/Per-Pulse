@@ -24,6 +24,7 @@ from pulse_system.service import native_replay
 
 
 _TERMINAL = {TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED}
+_MAX_STEPS = 8
 _MAX_ACTIONS = 32
 _MAX_ARGUMENT_BYTES = 32 * 1024
 
@@ -186,6 +187,24 @@ class PageExecution:
                 code = event.payload.get("error_code")
                 return code if isinstance(code, str) and len(code) <= 128 else None
         return None
+    def _steps(self, scope: HarnessScope) -> list[dict]:
+        """The current turn's latest tool steps, oldest first, for live progress."""
+        recent = self._kernel.store.actions_for_session(scope.session_scope(), limit=_MAX_STEPS * 2)
+        steps = []
+        for action in sorted(recent, key=lambda item: (item.created_at, item.action_request_id), reverse=True):
+            if action.scope.turn_id != scope.turn_id:
+                continue
+            arguments = action.arguments if isinstance(action.arguments, dict) else {}
+            target = next((arguments[key] for key in ("path", "query", "op", "command")
+                           if isinstance(arguments.get(key), str) and arguments[key]), None)
+            steps.append({
+                "actionId": action.action_request_id, "toolName": action.tool_name,
+                "status": action.status.value,
+                "target": target[:120] if isinstance(target, str) else None,
+            })
+            if len(steps) == _MAX_STEPS:
+                break
+        return list(reversed(steps))
 
     def snapshot(self, page_id: str) -> dict:
         """Observe without creating a session, waking a runner or making a call."""
@@ -201,7 +220,7 @@ class PageExecution:
                         "pageId": page_id, "sessionId": None, "turnId": None,
                         "status": "idle", "canCancel": False, "pendingActions": [],
                         "pendingActionsTruncated": False, "recoveryRequired": False,
-                        "failureCode": None, "replay": None,
+                        "failureCode": None, "steps": [], "replay": None,
                         **history,
                         "updatedAt": None,
                     }
@@ -270,6 +289,8 @@ class PageExecution:
                 "recoveryRequired": recovery,
                 "failureCode": (self._turn_error_code(turn.scope)
                                 if turn and turn.status in {TurnStatus.FAILED, TurnStatus.BLOCKED} else None),
+                "steps": (self._steps(turn.scope)
+                          if turn and turn.status not in _TERMINAL else []),
                 "replay": {"sourceCount": len(entry["message_ids"]),
                            **({"focus": entry["focus"]} if "focus" in entry else {})} if entry else None,
                 **history,
