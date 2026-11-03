@@ -90,7 +90,7 @@ def _model_factory(state, seen):
                     "function": {"name": "mutate_file", "arguments": json.dumps({
                         "path": "rim-choice-followup.txt",
                         "expected_digest": None,
-                        "content": "A real approval-gated Work artifact from a scripted model fixture.\\n",
+                        "content": "A real approval-gated Work artifact from a scripted model fixture.\n",
                     })},
                 }]}, finish="tool_calls")
             if (last.get("content") or "").startswith(INSTRUCTION):
