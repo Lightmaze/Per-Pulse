@@ -112,6 +112,53 @@ def test_cross_page_transfer_is_explicit_and_raw_encounter_stays_at_source(tmp_p
             subject_id=client.app.state.pages.runtime.continuity_engram_id,
             context_id="",
         )["episodes"] == []
+        # Native model admission already excludes inactive lessons. The
+        # HTTP experience pane must not disclose a withdrawn lesson to a
+        # receiving Work that never reported an outcome either.
+        assert client.get(f"/api/pages/{page}/posture").json()["experiences"] == []
+        later = new_page(client, title="Later unrelated Work")["page"]["id"]
+        assert client.get(f"/api/pages/{later}/posture").json()["experiences"] == []
+        owner = client.get("/api/pages/home/posture").json()["experiences"][0]
+        assert owner["id"] == saved["id"] and not owner["active"]
+
+
+def test_withdrawn_shared_lesson_preserves_own_recipient_feedback_only(tmp_path, monkeypatch):
+    with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
+        _, source, feedback = observed_pair(client)
+        saved = client.post("/api/pages/home/posture/experiences",
+                            json=lesson(source, feedback)).json()["experience"]
+        prior = new_page(client, title="Previously reported Work")["page"]["id"]
+        other = new_page(client, title="Another Work")["page"]["id"]
+        report = client.post(
+            f"/api/pages/{prior}/posture/experiences/{saved['id']}/feedback",
+            json={"expectedRevision": 1, "verdict": "useful",
+                  "evidence": "I tried the first playable moment in this Work."},
+        )
+        assert report.status_code == 200, report.text
+        withdrawn = client.patch(
+            f"/api/pages/home/posture/experiences/{saved['id']}",
+            json={"expectedRevision": 2, "changes": {"active": False}},
+        )
+        assert withdrawn.status_code == 200, withdrawn.text
+        assert client.get(f"/api/pages/{other}/posture").json()["experiences"] == []
+        retained = client.get(f"/api/pages/{prior}/posture").json()["experiences"]
+        assert len(retained) == 1 and retained[0]["id"] == saved["id"]
+        assert not retained[0]["active"] and not retained[0]["canReport"]
+        assert len(retained[0]["feedback"]) == 1
+        assert retained[0]["feedback"][0]["evidence"].startswith("I tried")
+        assert "encounter" not in retained[0] and "source" not in retained[0]
+        denied = client.post(
+            f"/api/pages/{other}/posture/experiences/{saved['id']}/feedback",
+            json={"expectedRevision": 3, "verdict": "useful",
+                  "evidence": "Unexposed recipient cannot rate withdrawn content."},
+        )
+        assert denied.status_code == 404
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        assert client.get(f"/api/pages/{other}/posture").json()["experiences"] == []
+        retained = client.get(f"/api/pages/{prior}/posture").json()["experiences"]
+        assert len(retained) == 1 and retained[0]["id"] == saved["id"]
+        assert not retained[0]["active"] and len(retained[0]["feedback"]) == 1
+        assert not client.get("/api/pages/home/posture").json()["experiences"][0]["active"]
 
 
 def test_a_saved_lesson_is_available_in_every_page_of_the_subject_by_default(tmp_path, monkeypatch):
