@@ -72,6 +72,20 @@ class PulseResult:
     execution_regime: str = "ordinary"
 
 
+class PulseParked(Exception):
+    """An already-admitted turn awaiting a user, with no attached worker.
+
+    This is a process-local continuation for the original durable turn.
+    It is never an outcome, provider error, or replay authorization.
+    """
+
+    def __init__(self, turn_id: str, ready, resume):
+        super().__init__("the original Kernel turn is awaiting human approval")
+        self.turn_id = turn_id
+        self.ready = ready
+        self.resume = resume
+
+
 @dataclass
 class SuccessionResult:
     """Outcome of a succession: the successor id plus the summary call's own
@@ -638,6 +652,44 @@ class EngramManager:
                 turn_id=turn.id,
             )
         except HarnessError as exc:
+            if exc.code == "kernel_turn_parked":
+                if not (hasattr(self._harness, "resume_parked_turn")
+                        and hasattr(self._harness, "parked_turn_terminal")):
+                    raise RuntimeError("native parked turn has no continuation authority")
+
+                def ready():
+                    return self._harness.parked_turn_terminal(engram_id, turn.id)
+
+                def resume():
+                    # Reacquire only the original logical context's call guard.
+                    # The already accepted input must never be submitted again.
+                    with self._harness_call_lock(engram_id, execution_context):
+                        self._assert_generation_pulse_admissible(engram_id)
+                        try:
+                            resumed_result = self._harness.resume_parked_turn(
+                                engram_id, turn.id,
+                            )
+                        except HarnessError as resume_error:
+                            self._causal_ledger.fail_turn(
+                                turn.id,
+                                acceptance=resume_error.prompt_accepted,
+                                code=resume_error.code,
+                                phase=resume_error.phase,
+                                retry_allowed=False,
+                                runtime_fence=runtime_fence,
+                                known_provider_tokens=resume_error.known_provider_tokens,
+                            )
+                            self._notify_turn_terminal(turn.id)
+                            if resume_error.prompt_accepted is not False:
+                                self._remember_harness_input_cursor(
+                                    engram_id, turn.cursor_after,
+                                )
+                            raise
+                        return self._settle_causal_harness_result(
+                            engram_id, turn, event, resumed_result, runtime_fence,
+                        )
+
+                raise PulseParked(turn.id, ready, resume) from None
             # Only an explicitly rejected prompt may requeue this same event.
             # Accepted and unknown outcomes become uncertain and advance the
             # anti-replay cursor inside the ledger transaction.
@@ -662,6 +714,14 @@ class EngramManager:
                 )
             raise
 
+        return self._settle_causal_harness_result(
+            engram_id, turn, event, harness_result, runtime_fence,
+        )
+
+    def _settle_causal_harness_result(
+        self, engram_id, turn, event, harness_result, runtime_fence,
+    ) -> PulseResult:
+        """Commit one physical Kernel result into the original causal turn."""
         try:
             settled_turn, result_event = self._causal_ledger.settle_turn(
                 turn.id,

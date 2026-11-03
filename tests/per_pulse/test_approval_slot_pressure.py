@@ -112,14 +112,15 @@ def test_waiting_approvals_park_without_starving_new_work_or_replaying_approval(
         deadline = time.monotonic() + 5
         while True:
             before = runtime.scheduling_snapshot()
-            if before["capacity"]["worker_parked"] == capacity:
+            if (before["capacity"]["worker_parked"] == capacity
+                    and before["capacity"]["worker_attached"] == 0):
                 break
             assert time.monotonic() < deadline, before
             time.sleep(0.02)
         assert before["capacity"]["worker_limit"] == capacity
         assert before["capacity"]["worker_running"] == 0
         assert before["capacity"]["worker_available"] > 0
-        assert before["capacity"]["worker_attached"] == capacity
+        assert before["capacity"]["worker_attached"] == 0
         assert len(calls) == capacity
         assert not list((tmp_path / "workspace").glob("approval-pressure-*.txt"))
 
@@ -133,9 +134,16 @@ def test_waiting_approvals_park_without_starving_new_work_or_replaying_approval(
         )
         assert admitted["turnId"]
         assert len(calls) == capacity + 1
-        after = runtime.scheduling_snapshot()
+        deadline = time.monotonic() + 5
+        while True:
+            after = runtime.scheduling_snapshot()
+            if (after["capacity"]["worker_parked"] == capacity + 1
+                    and after["capacity"]["worker_attached"] == 0):
+                break
+            assert time.monotonic() < deadline, after
+            time.sleep(0.02)
         assert after["capacity"]["worker_limit"] == capacity
-        assert after["capacity"]["worker_attached"] >= capacity + 1
+        assert after["capacity"]["worker_available"] == capacity
         for old_work, old_turn, old_action in waiting:
             observed = execution.snapshot(old_work)
             assert observed["turnId"] == old_turn
@@ -296,14 +304,13 @@ def test_one_live_model_limit_is_preserved_when_old_approvals_are_parked(
             release.set()
 
 
-def test_exhausted_physical_approval_slots_are_visible_and_recoverable(
+def test_detached_human_approvals_are_visible_without_blocking_foreground(
     tmp_path, monkeypatch,
 ):
-    """Three human-held original turns fill the 1+2 physical slot fleet.
+    """Three original approvals hold logical rights without physical slots.
 
-    A fourth foreground Work must remain genuinely queued, not fabricated as
-    an approval. The user can resolve one original action to admit the fourth.
-    The activity observation is read-only and cannot approve an action.
+    A fourth foreground Work gets its own genuine Kernel pending approval
+    before any old Work is decided. Observation cannot authorize a file.
     """
     requests = []
     factory = _factory(monkeypatch, requests)
@@ -333,32 +340,29 @@ def test_exhausted_physical_approval_slots_are_visible_and_recoverable(
             assert time.monotonic() < deadline
             time.sleep(0.02)
         newcomer = _new_page(client, "WRITE_ONE_FOURTH_FOREGROUND")
+        admitted = _wait(
+            execution, newcomer,
+            lambda state: state["status"] == "needs_attention"
+            and len(state["pendingActions"]) == 1
+            and state["pendingActions"][0]["canResolve"],
+            timeout=12,
+        )
         deadline = time.monotonic() + 5
         while True:
             observation = client.get("/api/pulse/observation").json()
-            queue = [
-                entry for entry in observation["pulse"]["foregroundQueuedByPage"]
-                if entry["pageId"] == newcomer and entry["queued"] > 0
-            ]
-            if queue:
+            capacity = observation["pulse"]["workerCapacity"]
+            if capacity["approvalHeld"] == 4 and capacity["attached"] == 0:
                 break
-            assert time.monotonic() < deadline, observation["pulse"]["queue"]
+            assert time.monotonic() < deadline, capacity
             time.sleep(0.02)
-        # Background local Pulse activity does not include foreground stimuli;
-        # cross-reading the two projections would hide a genuine queued Work.
-        assert not any(
-            entry["pageId"] == newcomer
-            for entry in observation["pulse"]["queueByContext"]
-        )
-        capacity = observation["pulse"]["workerCapacity"]
         assert capacity == {
-            "computeLimit": 1, "computeRunning": 0, "approvalHeld": 3,
-            "attached": 3, "approvalParkedLimit": 2, "available": 0,
+            "computeLimit": 1, "computeRunning": 0, "approvalHeld": 4,
+            "attached": 0, "approvalParkedLimit": 2, "available": 1,
         }
         assert observation["workspaceId"] == runtime.world_id
         assert observation["pulse"]["providerConfigured"] is True
-        assert execution.snapshot(newcomer)["turnId"] is None
-        assert len(requests) == 3
+        assert admitted["turnId"] not in {turn for _, turn, _ in originals}
+        assert len(requests) == 4
         assert not (tmp_path / "workspace" / "one.txt").exists()
 
         # No status read or foreground admission has approved the prior turns.
@@ -369,13 +373,7 @@ def test_exhausted_physical_approval_slots_are_visible_and_recoverable(
         original_work, _, original_action = originals[0]
         receipt = execution.resolve_approval(original_work, original_action, "deny")
         assert receipt["accepted"]
-        admitted = _wait(
-            execution, newcomer,
-            lambda state: state["status"] == "needs_attention"
-            and len(state["pendingActions"]) == 1,
-            timeout=12,
-        )
-        assert admitted["turnId"] is not None
+        assert execution.snapshot(newcomer)["turnId"] == admitted["turnId"]
         assert not (tmp_path / "workspace" / "one.txt").exists()
         for work, turn, action in originals[1:]:
             current = execution.snapshot(work)
