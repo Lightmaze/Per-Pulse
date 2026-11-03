@@ -1255,6 +1255,31 @@ class KernelHarnessRuntime:
             if self.kernel is not None:
                 for scope in abortable:
                     self.kernel._runtimes[scope.session_id].runner.abort(scope, reason="world_shutdown")
+                # A detached approval has no worker left to unwind its
+                # run_turn() finally block. After the original durable abort,
+                # retire only its process-local ownership and timer. Otherwise
+                # _active keeps close() waiting forever and the Runtime lease
+                # cannot be released for a clean restart. This is NOT a
+                # successful turn or permission to re-submit its input.
+                with self._lock:
+                    parked_on_shutdown = tuple(self._parked_turns.items())
+                for turn_id, parked in parked_on_shutdown:
+                    scope, _runtime, _expired, timer, active_key = parked
+                    run_lock = self._runner_locks[scope.session_id]
+                    with run_lock:
+                        with self._lock:
+                            if self._parked_turns.get(turn_id) != parked:
+                                continue
+                            self._parked_turns.pop(turn_id, None)
+                            self._starting_turn_ids.discard(turn_id)
+                            self._abort_before_create.pop(turn_id, None)
+                            if self._active.get(active_key) == scope:
+                                self._active.pop(active_key, None)
+                            self._terminal_notice_generation += 1
+                            self._lock.notify_all()
+                    if timer is not None:
+                        timer.cancel()
+                        timer.join()
             with self._lock:
                 # Admitted aborts can also be cancelling subordinate Work,
                 # posture or cognition activity. Drain them before closing
