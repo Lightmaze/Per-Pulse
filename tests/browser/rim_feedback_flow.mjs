@@ -164,6 +164,48 @@ try {
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await editor().getByText('Saved for this collaborator across Works.').waitFor();
   checks.push('same source-bound guidance survives Chinese and English user navigation');
+
+  // The receiving Work must finish an actual approved file operation, not
+  // stop at a collaborator-selection panel. This is a separate scripted
+  // model call, not an unprompted provider-learning experiment.
+  await page.goto(base + '/page/' + works.shared);
+  const artifactsBefore = (await get('/api/pages/' + works.shared + '/artifacts')).artifacts.length;
+  await page.locator('.composer textarea').fill('BUILD_RIM_APPROVED_ARTIFACT');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await page.getByText('Your approval is needed', { exact: true }).waitFor({ timeout: 20000 });
+  assert.equal((await get('/api/pages/' + works.shared + '/artifacts')).artifacts.length,
+    artifactsBefore, 'unapproved model proposal must not create an artifact');
+  await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+  await page.getByRole('button', { name: /rim-choice-followup\\.txt/ }).waitFor({ timeout: 20000 });
+  await wait(async () => (await get('/api/pages/' + works.shared + '/artifacts')).artifacts.length > artifactsBefore,
+    'real native file result recorded in receiving Work');
+  await page.getByRole('button', { name: /rim-choice-followup\\.txt/ }).click();
+  await page.getByText(/A real approval-gated Work artifact from a scripted model fixture/).waitFor();
+  checks.push('later source-influenced Work can produce a real file only after its own approval');
+
+  // Return an actual selected file-turn result to Home, retaining the exact
+  // originating message, then navigate back to that Work's original position.
+  const fileResult = page.locator('.message-assistant')
+    .filter({ hasText: 'Consultation prepared in the original Work.' }).last();
+  await fileResult.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  const returnDialog = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
+  await returnDialog.waitFor();
+  await returnDialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
+  const returnedResult = page.locator('.message-user')
+    .filter({ hasText: 'Consultation prepared in the original Work.' }).last();
+  const returnSource = returnedResult.locator('.source-line a.session-link');
+  await returnSource.waitFor();
+  assert.match(await returnSource.getAttribute('href'), /#message-/);
+  await returnSource.click();
+  await page.getByRole('heading', { name: 'After explicit sharing', exact: true }).waitFor();
+  assert.ok(new URL(page.url()).pathname.endsWith('/' + works.shared));
+  await page.locator('.composer textarea').fill('Leave my later Work draft in place.');
+  checks.push('approved Work artifact returns through Home with original message source and draft continuity');
+
+  await page.goto(base + '/page/' + works.source);
+  await openDecisions();
+  await openFeedback();
   await editor().getByRole('button', { name: 'Withdraw guidance', exact: true }).click();
   await editor().getByText('Withdraw this guidance from future use?', { exact: false }).waitFor();
   await editor().getByRole('button', { name: 'Confirm', exact: true }).click();
