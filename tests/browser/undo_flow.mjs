@@ -64,14 +64,14 @@ try {
   const receiverId = (await json('/api/bootstrap')).pages.find(item => item.title === 'Review draft')?.id;
   assert.ok(receiverId, 'real receiving Work exists');
   const beforeReceiver = (await json('/api/pages/' + receiverId)).messages.map(message => message.id);
-  await files.getByRole('button', { name: /^plan\\.md/ }).click();
+  await files.getByRole('button', { name: /^plan\.md/ }).click();
   await files.getByRole('button', { name: 'Add full file to another Work draft', exact: true }).click();
   await page.getByRole('dialog', { name: 'Add full file to another Work draft' })
     .getByRole('option', { name: 'Review draft' }).click();
   await page.getByRole('heading', { name: 'Review draft', exact: true }).waitFor();
   const receivingDraft = await page.locator('.composer textarea').inputValue();
-  assert.match(receivingDraft, /Keep this review draft\\./);
-  assert.match(receivingDraft, /Verified file from Launch plan: plan\\.md/);
+  assert.match(receivingDraft, /Keep this review draft\./);
+  assert.match(receivingDraft, /Verified file from Launch plan: plan\.md/);
   await page.locator('.composer-materials').getByText('plan.md', { exact: true }).waitFor();
   assert.deepEqual((await json('/api/pages/' + receiverId)).messages.map(message => message.id), beforeReceiver,
     'attaching a verified file must not silently run the receiving Work');
