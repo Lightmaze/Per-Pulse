@@ -28,7 +28,7 @@ from pulse_harness.life.service import LifeHub
 from pulse_harness.life import tools as life_tools
 from pulse_harness.adapters.history import ConversationHistoryTools, HISTORY_SCHEMAS
 from pulse_harness.adapters.command import CommandWorkspaceToolProvider, DockerCommandExecutor, recover_world_commands
-from pulse_harness.core import HarnessScope, ModelRoundStatus, SessionStatus, TurnStatus
+from pulse_harness.core import ActionStatus, HarnessScope, ModelRoundStatus, SessionStatus, TurnStatus
 from pulse_harness.core.errors import HarnessError as KernelError, LeaseFenced, ScopeConflict
 from pulse_harness.core.lifecycle import HarnessRuntimeBootstrap
 from pulse_harness.core.provider import validate_model_adapter
@@ -952,11 +952,17 @@ class KernelHarnessRuntime:
             assert self.kernel is not None
             first = self.kernel.store.get_session(scope.session_scope()).transcript_cursor == 0
             submitted = "\n\n".join(part for part in (bootstrap_text if first else None, prompt) if part)
-            # An old pending/blocked turn is never silently displaced on
-            # restart. It remains observable and explicitly cancellable.
+            # An old pending/blocked turn is never silently displaced while it
+            # may still have an effect: it remains observable and explicitly
+            # cancellable. A turn blocked only by a model error, with no action
+            # left in doubt, is cancelled by the next message instead of
+            # leaving the page unable to answer anything.
             for previous in self.kernel.store.turns_for_session(scope.session_scope(), limit=128):
                 if previous.scope.turn_id != scope.turn_id and previous.status not in {
                     TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED}:
+                    if self.can_supersede(previous):
+                        runtime.runner.abort(previous.scope, reason="superseded_by_new_message")
+                        continue
                     raise _error("kernel_recovery_required", "resolve the previous nonterminal Kernel turn before new work")
             internal = self._input_for_turn(engram_id, scope.turn_id) if self._input_for_turn and turn_id is not None else None
             if internal is not None:
@@ -1213,6 +1219,20 @@ class KernelHarnessRuntime:
 
     def steer(self, engram_id: str, content: str) -> None:
         raise _error("kernel_steer_requires_world_input", "append the message through PulseWorld input; do not bypass its causal history")
+
+    def can_supersede(self, previous) -> bool:
+        """A blocked turn whose actions are all settled cannot have an effect in doubt."""
+        if previous.status is not TurnStatus.BLOCKED:
+            return False
+        assert self.kernel is not None
+        in_doubt = (ActionStatus.INTENT, ActionStatus.APPROVAL_PENDING, ActionStatus.STARTING,
+                    ActionStatus.RUNNING, ActionStatus.TERMINALIZING, ActionStatus.UNCERTAIN)
+        session_scope = previous.scope.session_scope()
+        for status in in_doubt:
+            for action in self.kernel.store.actions_for_session(session_scope, status=status, limit=4096):
+                if action.scope.turn_id == previous.scope.turn_id:
+                    return False
+        return True
 
     def succeed(self, old_engram_id: str, new_engram_id: str,
                 *, capacity_timeout_sec: float | None = None) -> None:
