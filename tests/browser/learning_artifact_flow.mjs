@@ -235,13 +235,11 @@ try {
   assert.equal(afterWithdrawal.tasks.at(-1)?.hasLesson, false);
   assert.equal(afterWithdrawal.tasks.at(-1)?.leaksCorrection, false);
   assert.equal(afterWithdrawal.tasks.at(-1)?.leaksOriginal, false);
-  // Inactive history stays inspectable in the receiving Work; eligibility
-  // for automatic action materials is separately fail-closed.
+  // An unreported receiving Work does not retain withdrawn guidance in
+  // its experience pane. Only the original Work can inspect the inactive
+  // history; earlier recipients with their own feedback retain that record.
   const pausedProjection = await (await fetch(base + '/api/pages/' + withdrawnId + '/posture')).json();
-  assert.equal(pausedProjection.experiences.length, 1);
-  assert.equal(pausedProjection.experiences[0].active, false);
-  assert.equal(pausedProjection.experiences[0].canEdit, false);
-  assert.equal('encounter' in pausedProjection.experiences[0], false);
+  assert.equal(pausedProjection.experiences.length, 0);
   await page.getByRole('button', { name: 'Decline', exact: true }).click();
   checks.push('source withdrawal removes influence from another Work without executing its file');
 
@@ -251,10 +249,8 @@ try {
   const sourceAfterRestart = await (await fetch(base + '/api/pages/' + originalId + '/posture')).json();
   assert.equal(sourceAfterRestart.experiences[0].active, false);
   const targetAfterRestart = await (await fetch(base + '/api/pages/' + withdrawnId + '/posture')).json();
-  assert.equal(targetAfterRestart.experiences.length, 1);
-  assert.equal(targetAfterRestart.experiences[0].active, false);
-  assert.equal('encounter' in targetAfterRestart.experiences[0], false);
-  checks.push('inactive audit visibility, revoked influence and privacy survive SQLite restart');
+  assert.equal(targetAfterRestart.experiences.length, 0);
+  checks.push('source-owned inactive audit, no revoked recipient visibility, and privacy survive SQLite restart');
 
   // A user may carry one real settled result into an existing Work without
   // copying the source transcript or losing either Work's unfinished draft.
