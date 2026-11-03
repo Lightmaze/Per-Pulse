@@ -54,6 +54,8 @@ def _model_factory(state, seen):
             seen.append((scope.engram_id, body))
             last = body["messages"][-1]
             if last["role"] == "tool":
+                if last.get("tool_call_id") == "rim-approved-file":
+                    return _answer("Approved file work completed in the receiving Work.")
                 payload = json.loads(last["content"])
                 if isinstance(payload, dict) and "output" in payload:
                     state["tool_output"] = payload["output"]
