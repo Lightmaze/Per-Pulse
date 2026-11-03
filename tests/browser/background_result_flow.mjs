@@ -110,6 +110,58 @@ try {
   assert.equal(reopened.budget.used, 1);
   assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
   checks.push('Restart preserves the exact result, draft and single admission without creating another turn.');
+
+  // Browser-only presentation fixture: each link resolves to a real native
+  // assistant message from a separate Work; ONLY the extra Pulse observation
+  // records are synthetic to exercise Home's fourth-result disclosure. This
+  // does not claim five real background activations or provider learning.
+  const otherResults = [];
+  for (let index = 0; index < 5; index++) {
+    const created = await fetch(base + '/api/pages', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Result ' + index, instruction: 'Test a normal Work reply.' }),
+    });
+    assert.equal(created.status, 201);
+    const pageId = (await created.json()).page.id;
+    let resultMessageId;
+    await wait(async () => {
+      const messages = (await get('/api/pages/' + pageId)).messages;
+      resultMessageId = messages.find(message => message.role === 'assistant' && message.content.includes('Synthetic fixture response.'))?.id;
+      return Boolean(resultMessageId);
+    }, 'native result for Work ' + index);
+    otherResults.push({
+      eventId: 'browser-only-local-result-' + index,
+      centerId: pageId, pageId, messageId: null, resultMessageId,
+      kind: 'spontaneous', status: 'settled', createdAt: '2026-11-03T15:00:00Z',
+      sourceEventId: null, sourceMessageId: null,
+      sourceCenterId: null, sourcePageId: null, deferredReason: null,
+    });
+  }
+  await page.route('**/api/pulse/observation', async route => {
+    const upstream = await route.fetch();
+    const observation = await upstream.json();
+    observation.pulse.recentActivations = [...otherResults, ...observation.pulse.recentActivations];
+    await route.fulfill({ response: upstream, json: observation });
+  });
+  await page.goto(base);
+  const localResults = page.locator('#home-local-results .home-continuation-open');
+  await wait(async () => await localResults.count() === 3, 'quiet preview of three local results');
+  const reveal = page.getByRole('button', { name: '查看当前可见的 5 项局部结果' });
+  await reveal.click();
+  assert.equal(await page.locator('button[aria-controls="home-local-results"]').getAttribute('aria-expanded'), 'true');
+  assert.equal(await localResults.count(), 5);
+  await localResults.nth(4).click();
+  await wait(() => new URL(page.url()).hash === '#message-' + otherResults[4].resultMessageId,
+    'open fifth verified native message from expanded Home');
+  await page.locator('#message-' + otherResults[4].resultMessageId).waitFor();
+  await page.locator('.return-to-thread').click();
+  await wait(() => new URL(page.url()).pathname === '/', 'return from expanded result to Home');
+  assert.equal(await page.locator('.composer textarea').inputValue(), homeDraft);
+  await wait(async () => await localResults.count() === 3, 'quiet preview after reading fifth result');
+  await page.getByRole('button', { name: '查看当前可见的 4 项局部结果' }).click();
+  assert.equal(await localResults.count(), 4, 'reading one result does not hide the other four');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  checks.push('Chinese mobile Home expands five distinct Work results and opens the fifth exact native message; original Home draft and receipt persist.');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'] }, null, 2));
 } catch (error) {
