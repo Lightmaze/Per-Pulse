@@ -538,8 +538,18 @@ def audit_ordinary_transfer(output: Path) -> dict:
             state = world.execute("SELECT state FROM component_state WHERE component=?", ("per-pulse-posture-v1:" + record["world_id"],)).fetchone()
             journal = json.loads(state["state"])["experiences"] if state else {}
             lessons = record["learned_lessons"]
+            # Preserve read-only audit of pre-default-sharing trial exports:
+            # those captures were genuinely Work-local at revision 1. A new
+            # trial cannot omit scope_controls and relabel its intervention as
+            # spontaneous, even if it recomputes the host record digest.
+            legacy_local_capture = (
+                "scope_controls" not in record
+                and record.get("sharing_policy")
+                    == "Operator explicitly promotes only source-attributed native lessons after both no-memory targets settle."
+            )
             controls = record.get("scope_controls", [])
-            if (not isinstance(controls, list)
+            if not legacy_local_capture and (
+                    not isinstance(controls, list)
                     or len(controls) != len(lessons)
                     or sorted(value.get("id") for value in controls if isinstance(value, dict))
                         != sorted(value.get("id") for value in lessons)):
@@ -553,7 +563,15 @@ def audit_ordinary_transfer(output: Path) -> dict:
                 # it cannot be silently relabelled as a model-local choice.
                 control = next((item for item in controls if isinstance(item, dict)
                                 and item.get("id") == lesson["id"]), None)
-                if control is None or control.get("localized_scope") != "context" or (
+                if legacy_local_capture:
+                    # The old record and the original native journal must both
+                    # show a local revision-1 capture before promotion.
+                    native_history = journal.get(lesson["id"], {}).get("history", [])
+                    if (lesson.get("scope") != "context" or lesson.get("revision") != 1
+                            or not native_history or native_history[0].get("scope") != "context"
+                            or native_history[0].get("revision") != 1):
+                        errors.append("study_scope_control_mismatch")
+                elif control is None or control.get("localized_scope") != "context" or (
                         lesson["scope"] != "context"
                         or control.get("localized_revision") != lesson["revision"]):
                     errors.append("study_scope_control_mismatch")
