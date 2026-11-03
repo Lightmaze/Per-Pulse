@@ -223,3 +223,14 @@ or focus, or making another model request. A held Home response also checks
 that finishing navigation does not interrupt a draft already being edited.
 It checks ordinary foreground Work
 observations; it does not activate background Pulse or schedule a new turn.
+
+## Continue a page with /tick
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  node tests/browser/tick_flow.mjs
+```
+
+Types `/tick 3` into Home and checks that exactly three quiet steps follow from
+the page's own history, that **Stop** ends a longer run before its next step,
+and that your own message ends a run. Model replies are a synthetic fixture.

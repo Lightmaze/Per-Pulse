@@ -102,7 +102,7 @@ def test_actual_encounter_is_host_captured_and_only_admitted_after_settlement(na
         "action": "The first screen is a twelve-field intake form.",
         "outcome": "Let me try the interaction before asking for a profile.",
     }
-    assert record["scope"] == "context" and record["revision"] == 1
+    assert record["scope"] == "subject" and record["revision"] == 1
     assert record["source"]["source_action_id"] == "synthetic-action"
     assert record["source"]["learning_turn_id"] == native.current.id
     assert record["source"]["source_message_id"] == native.original.id

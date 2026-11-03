@@ -95,6 +95,8 @@ try {
     has: page.getByRole('heading', { name: 'First usable interaction', exact: true }),
   });
   await lesson.getByText('In use · v1', { exact: true }).waitFor();
+  await lesson.getByRole('button', { name: 'Keep in this page', exact: true }).click();
+  await lesson.getByText('In use · v2', { exact: true }).waitFor();
   await lesson.getByText('Source experience', { exact: true }).click();
   assert.match(await lesson.innerText(), /twelve-field intake form/);
   checks.push('ordinary Work correction forms an inspectable sourced experience');
@@ -112,7 +114,7 @@ try {
   await page.goto(base + '/page/' + originalId);
   await openLessons();
   await lesson.getByRole('button', { name: 'Use in other pages', exact: true }).click();
-  await lesson.getByText('In use · v2', { exact: true }).waitFor();
+  await lesson.getByText('In use · v3', { exact: true }).waitFor();
   await closeDialog();
   const learnedId = await create('Informed delivery', 'BUILD_PRACTICE_ARTIFACT');
   await page.getByText('Your approval is needed', { exact: true }).waitFor();
@@ -224,7 +226,7 @@ try {
   await page.goto(base + '/page/' + originalId);
   await openLessons();
   await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).click();
-  await lesson.getByText('Paused · v3', { exact: true }).waitFor();
+  await lesson.getByText('Paused · v4', { exact: true }).waitFor();
   await closeDialog();
   const withdrawnId = await create('After withdrawal', 'BUILD_PRACTICE_ARTIFACT');
   await page.getByText('Your approval is needed', { exact: true }).waitFor();

@@ -11,3 +11,9 @@ Keep all product copy, example content, documentation and new tests in English. 
 Use real persistence and provider interfaces. Never silently substitute scripted replies for a model. Explicit sample content is acceptable for exploring the interface. Protect user histories and credentials; commit source and synthetic fixtures only.
 
 Use branches, review the diff, and verify the actual user flow in a browser. Record the checks actually run. Ship ordinary working features without introducing speculative research gates.
+
+Acceptance is ordinary correctness tests plus the actual browser flow; do not add evaluation suites, blinded reviews or evidence archives to the product package. Optional study tooling lives under `research/`.
+
+Do not repeat what a feature does not prove in the README, UI copy or CLI output; state the evidence level once per release.
+
+One feature per PR into `main`; do not build stacked PR chains or time-boxed research gates.

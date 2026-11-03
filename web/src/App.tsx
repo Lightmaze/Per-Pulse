@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { messageBody } from './messageBody';
+import { parseTickCommand } from './tickCommand';
 import { useLanguage } from './i18n';
 import { useWorkspace } from './useWorkspace';
 import { getPageActivity } from './status';
@@ -146,6 +147,12 @@ export default function App() {
     const id = route.id;
     const key = draftKey;
     const outgoing = draft;
+    // `/tick` is a control command for this page; it never reaches the model.
+    const command = outgoing.materials?.length ? null : parseTickCommand(outgoing.text);
+    if (command?.kind === 'invalid') {
+      setSendErrors(previous => ({ ...previous, [key]: t('tick.countInvalid') }));
+      return;
+    }
     // Only this local context is saving. Another Work remains usable while
     // this request is awaiting the native World/Kernel response.
     pendingSends.current.add(key);
@@ -153,8 +160,12 @@ export default function App() {
     setSendErrors(previous => ({ ...previous, [key]: '' }));
     setError('');
     try {
-      const response = await api.send(id, outgoing.text.trim(), outgoing.references.filter(reference => outgoing.text.includes(reference.label)), outgoing.materials?.map(item => item.id));
+      const response = command?.kind === 'start' ? await api.tick(id, command.count)
+        : command?.kind === 'stop' ? await api.stopTick(id)
+        : await api.send(id, outgoing.text.trim(), outgoing.references.filter(reference => outgoing.text.includes(reference.label)), outgoing.materials?.map(item => item.id));
       applyView(response.view);
+      if (command) setToast(command.kind === 'stop' ? t('tick.stopped')
+        : command.count === 1 ? t('tick.startedOne') : t('tick.started', { count: command.count }));
       const empty = { text: '', references: [] };
       const currentDraft = draftsRef.current[draftKey] ?? readDraft(workspaceId, id);
       const nextDraft = currentDraft.text === outgoing.text && JSON.stringify(currentDraft.references) === JSON.stringify(outgoing.references) && JSON.stringify(currentDraft.materials ?? []) === JSON.stringify(outgoing.materials ?? []) ? empty : currentDraft;
@@ -163,7 +174,8 @@ export default function App() {
       setDrafts(updated);
       saveDraft(workspaceId, id, nextDraft);
       if (currentPage.current === id) {
-        requestAnimationFrame(() => { if (currentPage.current === id) document.getElementById(`message-${response.messageId}`)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });
+        const messageId = 'messageId' in response ? response.messageId : null;
+        if (messageId) requestAnimationFrame(() => { if (currentPage.current === id) document.getElementById(`message-${messageId}`)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });
         input.current?.focus();
       }
     } catch (problem) {
@@ -373,6 +385,14 @@ export default function App() {
           {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} onUseInHome={view.page.kind === 'work' ? prepareArtifactHome : undefined} /> : null}
           {view?.page.kind === 'work' ? <CollaboratorChoices key={`${workspaceId}/${route.id}`} pageId={route.id} pages={pages} navigate={navigate} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection, needsExactExcerpt) => openModal({ kind: 'return', message, content: selection, needsExactExcerpt })} onTransfer={(message, excerpt, needsExactExcerpt) => openModal({ kind: 'transfer', message, excerpt, needsExactExcerpt })} onSaveExample={bootstrap?.postureEnabled ? (message, content, needsExactExcerpt) => openModal({ kind: 'save-example', message, content, needsExactExcerpt }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
+          {view?.tick?.status === 'running' && view.provider.configured ? <div className="tick-status" role="status">
+            <span className="activity-indicator tone-active"><span className="activity-dot" aria-hidden="true" />{t('tick.running', { completed: view.tick.completed, target: view.tick.target })}</span>
+            <button type="button" className="text-button" onClick={() => {
+              const id = route.id;
+              api.stopTick(id).then(response => { applyView(response.view); setToast(t('tick.stopped')); })
+                .catch(problem => setSendErrors(previous => ({ ...previous, [draftKey]: errorText(problem) })));
+            }}>{t('tick.stop')}</button>
+          </div> : null}
           {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>

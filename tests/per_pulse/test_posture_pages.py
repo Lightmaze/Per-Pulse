@@ -87,7 +87,7 @@ def test_cross_page_transfer_is_explicit_and_raw_encounter_stays_at_source(tmp_p
     factory = http_factory(monkeypatch, [])
     with client_for(tmp_path, posture=True, model_factory=factory) as client:
         _, source, feedback = observed_pair(client)
-        saved = client.post("/api/pages/home/posture/experiences", json=lesson(source, feedback)).json()["experience"]
+        saved = client.post("/api/pages/home/posture/experiences", json=lesson(source, feedback, scope="context")).json()["experience"]
         page = new_page(client, title="New task", instruction="Maintain a registration tool.")["page"]["id"]
         assert client.get(f"/api/pages/{page}/posture").json()["experiences"] == []
         endpoint = "/api/pages/home/posture/experiences/" + saved["id"]
@@ -114,6 +114,21 @@ def test_cross_page_transfer_is_explicit_and_raw_encounter_stays_at_source(tmp_p
         )["episodes"] == []
 
 
+def test_a_saved_lesson_is_available_in_every_page_of_the_subject_by_default(tmp_path, monkeypatch):
+    with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
+        _, source, feedback = observed_pair(client)
+        saved = client.post("/api/pages/home/posture/experiences", json=lesson(source, feedback)).json()["experience"]
+        assert saved["scope"] == "subject"
+        page = new_page(client, title="New task", instruction="Maintain a registration tool.")["page"]["id"]
+        shared = client.get(f"/api/pages/{page}/posture").json()["experiences"][0]
+        assert shared["id"] == saved["id"] and shared["canReport"] and not shared["canEdit"]
+        assert "encounter" not in shared and "feedback" not in shared and "source" not in shared
+        endpoint = "/api/pages/home/posture/experiences/" + saved["id"]
+        kept = client.patch(endpoint, json={"expectedRevision": 1, "changes": {"scope": "context"}})
+        assert kept.status_code == 200 and kept.json()["experience"]["scope"] == "context"
+        assert client.get(f"/api/pages/{page}/posture").json()["experiences"] == []
+
+
 def test_cross_page_source_cannot_be_imported_as_local_experience(tmp_path, monkeypatch):
     with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
         _, source, feedback = observed_pair(client)
@@ -129,7 +144,7 @@ def test_work_origin_remains_editable_at_its_source_and_locatable_from_home(tmp_
         wait_for(client, page, lambda v: any(m["role"] == "assistant" for m in v["messages"]))
         _, source, feedback = observed_pair(client, page)
         endpoint = f"/api/pages/{page}/posture/experiences"
-        response = client.post(endpoint, json=lesson(source, feedback))
+        response = client.post(endpoint, json=lesson(source, feedback, scope="context"))
         assert response.status_code == 201, response.text
         saved = response.json()["experience"]
         assert saved["sourcePageId"] == page and saved["canEdit"]
@@ -261,7 +276,7 @@ def test_receiving_work_can_report_shared_lesson_outcome_without_importing_priva
         wait_for(client, source_work, lambda v: any(m["role"] == "assistant" for m in v["messages"]))
         _, original, correction = observed_pair(client, source_work)
         source_endpoint = f"/api/pages/{source_work}/posture/experiences"
-        saved = client.post(source_endpoint, json=lesson(original, correction)).json()["experience"]
+        saved = client.post(source_endpoint, json=lesson(original, correction, scope="context")).json()["experience"]
         receiving_work = new_page(client, title="Later task", instruction="Fix a registration page.")["page"]["id"]
         wait_for(client, receiving_work, lambda v: any(m["role"] == "assistant" for m in v["messages"]))
         receiving_endpoint = f"/api/pages/{receiving_work}/posture/experiences/{saved['id']}"

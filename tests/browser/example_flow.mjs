@@ -139,7 +139,7 @@ try {
   await card.getByText('No follow-up attached', { exact: true }).waitFor();
   const initial = (await experiences(origin))[0];
   assert.equal(initial.representation, 'example');
-  assert.equal(initial.scope, 'context');
+  assert.equal(initial.scope, 'subject');
   assert.equal(initial.source.selected_excerpt.sha256.length, 64);
   assert.equal(initial.source.feedback_evidence_class, 'not_attached');
   assert.deepEqual(initial.feedback, []);
@@ -152,8 +152,7 @@ try {
   await card.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).fill('PRIVATE_NOTE_REVIEW: a new service state needs fresh checking.');
   await card.getByRole('button', { name: 'Save refinement', exact: true }).click();
   await card.getByText('In use · v2', { exact: true }).waitFor();
-  await card.getByRole('button', { name: 'Use in other pages', exact: true }).click();
-  await card.getByText('In use · v3', { exact: true }).waitFor();
+  await card.getByText(/^Available across your pages/).waitFor();
   await page.getByRole('searchbox', { name: 'Find experience', exact: true }).fill('PRIVATE_USER_CONTEXT');
   await page.getByText('No experience matches this search.', { exact: true }).waitFor();
   await page.getByRole('searchbox', { name: 'Find experience', exact: true }).fill('Search is slow');
@@ -191,7 +190,7 @@ try {
   await receivedCard.getByRole('button', { name: 'Give feedback', exact: true }).click();
   await receivedCard.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill('The old update time is wrong for this incident. PRIVATE_RECIPIENT_REPORT.');
   await receivedCard.getByRole('button', { name: 'It hurt · pause', exact: true }).click();
-  await receivedCard.getByText('Paused · v4', { exact: true }).waitFor();
+  await receivedCard.getByText('Paused · v3', { exact: true }).waitFor();
   assert.equal((await experiences(receiver))[0].active, false);
   assert.equal((await experiences(origin))[0].feedback.at(-1).source.page_id, receiver);
   await close();

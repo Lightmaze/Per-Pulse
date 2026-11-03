@@ -896,6 +896,35 @@ class CausalLedger:
             )
             return cancelled.rowcount
 
+    def cancel_context_tick(
+        self,
+        event_id: str,
+        *,
+        world_id: str,
+        runtime_fence: RuntimeFence | None = None,
+    ) -> bool:
+        """Cancel one queued, unstarted ``/tick`` step; running work is untouched.
+
+        Uses the same claim/cancel transaction boundary as connection removal,
+        so a worker cannot subsequently claim the cancelled step.
+        """
+
+        event_id = _require_id(event_id, "event_id")
+        world_id = _require_id(world_id, "world_id")
+        now = _now()
+        with self._transaction() as conn:
+            self._assert_runtime_fence_uncommitted(conn, runtime_fence)
+            cancelled = conn.execute(
+                "UPDATE causal_events SET status = 'cancelled', "
+                "metadata = json_set(metadata, '$.context_cancel_reason', 'tick_stopped'), "
+                "updated_at = ?, settled_at = ?, resolution = NULL, resolution_note = NULL "
+                "WHERE id = ? AND world_id = ? AND status = 'queued' AND flow IS NULL "
+                "AND domain = 'pulse' AND kind = 'spontaneous' AND source = 'self' "
+                "AND json_extract(metadata, '$.context_pulse') = 'tick'",
+                (_ts(now), _ts(now), event_id, world_id),
+            )
+            return cancelled.rowcount == 1
+
     def get_event(self, event_id: str) -> CausalEvent | None:
         with self._storage._lock:
             return self._get_event_uncommitted(self._storage._conn, event_id)

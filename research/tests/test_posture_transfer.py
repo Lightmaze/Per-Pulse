@@ -8,8 +8,8 @@ import json
 import httpx
 import pytest
 
-from per_pulse.posture_evaluation import _canonical, _digest, _record_digest, main
-from per_pulse.posture_transfer import (
+from per_pulse_research.posture_evaluation import _canonical, _digest, _record_digest, main
+from per_pulse_research.posture_transfer import (
     ORDINARY_FEEDBACK, SOURCE_MARKER, STAGES, audit_ordinary_transfer, run_ordinary_transfer, trial_stages,
 )
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
@@ -245,7 +245,7 @@ def test_pre_transport_journal_failure_blocks_external_model_call(tmp_path, monk
     def rejected_sync(_fd):
         raise OSError("simulated admission log storage failure")
 
-    monkeypatch.setattr("per_pulse.posture_transfer.os.fsync", rejected_sync)
+    monkeypatch.setattr("per_pulse_research.posture_transfer.os.fsync", rejected_sync)
     result = run_ordinary_transfer(tmp_path / "trial", model_factory=factory, stage_timeout=10)
     assert result["status"] == "failed"
     assert requests == [], "provider must never receive a request without a durable admission"
@@ -274,7 +274,7 @@ def test_two_independent_native_worlds_make_separately_blinded_fixture_packets(t
     durable World identity so each new trial must independently capture its
     own attributed experience. This is NOT real-provider learning evidence.
     """
-    from per_pulse.posture_study import run_study
+    from per_pulse_research.posture_study import run_study
 
     per_world = {}
     requests_by_world = {}
@@ -309,8 +309,8 @@ def test_two_independent_native_worlds_make_separately_blinded_fixture_packets(t
     # QA ratings are authored fixtures, not an independent human assessment.
     # Real sealed private keys and audited native World traces are used.
     import hashlib
-    from per_pulse.blinded_review import SCHEMA as REVIEW_SCHEMA
-    from per_pulse.posture_study import summarize_reviews
+    from per_pulse_research.blinded_review import SCHEMA as REVIEW_SCHEMA
+    from per_pulse_research.posture_study import summarize_reviews
     ratings = {}
     for arm in result["arms"]:
         packet_file = root / arm["reviewer_only_directory"] / "review-packet.json"

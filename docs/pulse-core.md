@@ -52,12 +52,10 @@ user input remains available when a background quota is exhausted.
 
 ## Configuration and API
 
-Background computation is opt-in.
-
-Start the ordinary local workspace with `per-pulse --pulse`. Set its background
-admission ceiling with `--pulse-budget 12`; the default is twelve admissions in
-a rolling hour. The normal command without `--pulse` keeps background
-computation disabled.
+`per-pulse` enables background computation when a model is connected, with at
+most twelve background admissions in a rolling hour. Change the ceiling with
+`--pulse-budget N`, or turn background computation off with `--no-pulse`.
+Library callers of `create_app` keep it off unless they pass `PulseSettings`.
 
 Python callers can configure the local rhythm directly:
 
@@ -111,6 +109,32 @@ creates a new edge identity that applies to subsequently settled results.
 Removing or changing an edge cancels its queued, unstarted deliveries; a model
 turn already running may finish normally. Recreating an edge does not revive
 cancelled deliveries or retroactively relay old results.
+
+## Explicit time steps: `/tick`
+
+Typing `/tick N` in a page's composer gives that page exactly `N` more quiet
+turns (1–256; `/tick` alone means one). `/tick stop` ends the run before its
+next step. The command never reaches the model.
+
+Each step is the same content-free local reentry a background pulse uses: the
+page continues from its own history, with no new instruction or goal. A step is
+queued only after the previous step's reply has settled, and only when the page
+has no other turn waiting, so a running turn is never steered. A run ends when
+it reaches `N`, when a step fails or stays uncertain, when you stop it, or when
+you send your own message in that page.
+
+Steps are requested by the person, so they do not use the hourly background
+budget and they continue while background activity is off (`--no-pulse`) or
+held. Each run is stored in the same pulse checkpoint and survives restart.
+
+| Endpoint | Meaning |
+| --- | --- |
+| `POST /api/pages/{pageId}/tick` | Start a run with `{"count": N}`. |
+| `POST /api/pages/{pageId}/tick/stop` | Stop the page's running run. |
+
+Page views and `GET /api/pulse` include the current run (`tick`/`tickRuns`)
+with its `status` (`running`, `complete` or `stopped`), `reason`, `target`,
+`delivered` and `completed` counts.
 
 ## Bounds and recovery
 

@@ -136,8 +136,7 @@ try {
   await editor.getByRole('button', { name: 'Save example', exact: true }).click();
   await page.getByRole('heading', { name: 'A possibility to test', exact: true }).waitFor();
   await page.getByText(meaning, { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Use in other pages', exact: true }).click();
-  await page.getByText('In use · v2', { exact: true }).waitFor();
+  await page.getByText(/^Available across your pages/).waitFor();
   await close();
   const receiver = await create('Try a possibility');
   await experience();

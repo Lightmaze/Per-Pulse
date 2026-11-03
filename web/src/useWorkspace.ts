@@ -152,7 +152,8 @@ export function useWorkspace() {
   const cachedView = views[route.id];
   const activeView = pageBelongsToWorkspace(cachedView, bootstrap)
     ? { ...cachedView!, provider: bootstrap!.provider } : undefined;
-  const shouldPoll = activeView?.provider.configured && ['queued', 'working', 'needs_attention'].includes(activeView.page.status);
+  const shouldPoll = activeView?.provider.configured && (['queued', 'working', 'needs_attention'].includes(activeView.page.status)
+    || activeView.tick?.status === 'running');
   const shouldPollWorkspace = bootstrap?.provider.configured && bootstrap.pages.some(page =>
     page.id !== route.id && ['queued', 'working', 'needs_attention'].includes(page.status));
   useEffect(() => {

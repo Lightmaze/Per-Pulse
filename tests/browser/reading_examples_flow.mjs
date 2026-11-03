@@ -80,10 +80,16 @@ try {
   await wait(async () => (await experiences(source)).experiences.length === 1, 'native experience admission');
   const saved = (await experiences(source)).experiences[0];
   assert.equal(saved.sourceKind, 'reading');
+  assert.equal(saved.scope, 'subject', 'a retained passage is shared across the subject by default');
+  const keptLocal = await fetch(`${base}/api/pages/${source}/posture/experiences/${saved.id}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ expectedRevision: 1, changes: { scope: 'context' } }),
+  });
+  assert.equal(keptLocal.status, 200);
   assert.deepEqual((await experiences(receiver)).experiences, []);
   await send(receiver, 'APPLY_READING_FIXTURE:' + JSON.stringify({ experience_id: saved.id, path: 'comparison.md' }));
   assert.ok((await view(receiver)).messages.at(-1).content.includes('not available'));
-  checks.push('an actual observed passage is retained locally; the receiving Work cannot get it before sharing');
+  checks.push('an observed passage kept to its page is unavailable to another Work until shared');
 
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
     args: process.env.PLAYWRIGHT_CHROMIUM_ARGS ? JSON.parse(process.env.PLAYWRIGHT_CHROMIUM_ARGS) : undefined });

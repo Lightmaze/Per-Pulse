@@ -246,6 +246,7 @@ button, a, input, textarea { outline-offset: 4px; }
 .tone-attention, .status-attention { --activity-color: var(--attention); }
 .tone-error, .status-error { --activity-color: var(--error); }
 .message-status[class*="tone-"], .message-status.status-neutral, .message-status.status-active, .message-status.status-attention, .message-status.status-error { color: var(--activity-color, var(--muted)); }
+.tick-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 8px; padding: 6px 2px; }
 .page-activity-detail { flex-basis: 100%; color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0; }
 .sync-notice { border-color: var(--border); color: var(--muted); }
 .sync-notice button { color: var(--accent); }

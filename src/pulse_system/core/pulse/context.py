@@ -15,6 +15,7 @@ import json
 import hashlib
 import random
 from typing import Callable
+from uuid import uuid4
 
 from pulse_system.core.connection.context import ContextConnectionNetwork
 from pulse_system.core.causality import may_emit_content_propagation
@@ -86,6 +87,18 @@ class _QuotaReached(Exception):
     pass
 
 
+TICK_LIMIT = 256
+_TICK_STATES = {"running", "complete", "stopped"}
+
+
+class TickError(ValueError):
+    """A /tick request that cannot start in this context right now."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 class ContextPulseController:
     """Durable result projection, local reentry and bounded result diffusion.
 
@@ -109,7 +122,7 @@ class ContextPulseController:
                 "version": 1, "world_id": world_id, "cursor": 0,
                 "observed_cursor": 0, "last_check_at": None, "contexts": {},
                 "paused": False, "held_contexts": [],
-                "retained_attention": {}, "pending_attention": {},
+                "retained_attention": {}, "pending_attention": {}, "tick_runs": {},
             }
 
     @staticmethod
@@ -133,7 +146,7 @@ class ContextPulseController:
         """
         required = {"version", "world_id", "cursor", "last_check_at", "contexts"}
         optional = {"observed_cursor", "paused", "held_contexts",
-                    "retained_attention", "pending_attention"}
+                    "retained_attention", "pending_attention", "tick_runs"}
         if (not isinstance(checkpoint, dict)
                 or set(checkpoint) - optional != required
                 or type(checkpoint.get("paused", False)) is not bool
@@ -149,6 +162,19 @@ class ContextPulseController:
         state.setdefault("held_contexts", [])
         state.setdefault("retained_attention", {})
         state.setdefault("pending_attention", {})
+        state.setdefault("tick_runs", {})
+        if not isinstance(state["tick_runs"], dict) or len(state["tick_runs"]) > 4096:
+            raise ValueError("invalid context pulse tick checkpoint")
+        for key, run in state["tick_runs"].items():
+            if (not isinstance(run, dict)
+                    or run.get("status") not in _TICK_STATES
+                    or key != self._key(run.get("center_id"))
+                    or not isinstance(run.get("run_id"), str)
+                    or any(type(run.get(name)) is not int or run[name] < 0
+                           for name in ("target", "delivered", "completed", "after_seq"))
+                    or not 1 <= run["target"] <= TICK_LIMIT
+                    or not run["completed"] <= run["delivered"] <= run["target"]):
+                raise ValueError("invalid context pulse tick run")
         if (not isinstance(state["retained_attention"], dict)
                 or not isinstance(state["pending_attention"], dict)
                 or len(state["retained_attention"]) > 4096
@@ -587,8 +613,22 @@ class ContextPulseController:
         # Workers may settle after the observation pass and before this tick's
         # admission selection. Read the authoritative latest ordinary result
         # so that a stale projection cannot bypass the local refractory period.
-        latest = self.storage._conn.execute(
-            "SELECT result.settled_at FROM causal_events result "
+        latest = self._latest_ordinary_result(center_id)
+        if latest and latest[2]:
+            authoritative_at = datetime.fromisoformat(latest[2])
+            settled_at = max(settled_at, authoritative_at) if settled_at else authoritative_at
+        if settled_at:
+            elapsed = (now - settled_at).total_seconds()
+            if elapsed < self.config.refractory_seconds:
+                return "refractory"
+        if inhibition is None:
+            inhibition = self.connections.inhibition_level(center_id, now=now)
+        return "inhibited" if inhibition >= 1.0 else None
+
+    def _latest_ordinary_result(self, center_id: str | None):
+        """Return (id, seq, settled_at) of this context's latest ordinary settled result."""
+        return self.storage._conn.execute(
+            "SELECT result.id, result.seq, result.settled_at FROM causal_events result "
             "JOIN causal_events root ON root.id = result.parent_event_id "
             "JOIN harness_turns turn ON turn.result_event_id = result.id "
             "WHERE result.world_id = ? AND result.center_id IS ? "
@@ -605,16 +645,149 @@ class ContextPulseController:
             "ORDER BY result.seq DESC LIMIT 1",
             (self.world_id, center_id, self.subject()),
         ).fetchone()
-        if latest and latest[0]:
-            authoritative_at = datetime.fromisoformat(latest[0])
-            settled_at = max(settled_at, authoritative_at) if settled_at else authoritative_at
-        if settled_at:
-            elapsed = (now - settled_at).total_seconds()
-            if elapsed < self.config.refractory_seconds:
-                return "refractory"
-        if inhibition is None:
-            inhibition = self.connections.inhibition_level(center_id, now=now)
-        return "inhibited" if inhibition >= 1.0 else None
+
+    # ── Explicit time steps (/tick) ───────────────────────────────
+
+    def start_ticks(self, center_id: str | None, count: int, *, now: datetime | None = None) -> dict:
+        """Give one context ``count`` quiet continuation turns, one at a time.
+
+        A time step is the same content-free reentry used by background
+        pulses: the context continues from its own history with no new goal.
+        Steps are requested by the person, so they do not use the hourly
+        background budget, and each waits for the previous turn to finish.
+        """
+        now = now or _now()
+        if type(count) is not int or not 1 <= count <= TICK_LIMIT:
+            raise TickError("tick_count_invalid", f"Choose between 1 and {TICK_LIMIT} time steps.")
+        with self.storage._lock:
+            key = self._key(center_id)
+            current = self._state["tick_runs"].get(key)
+            if current is not None and current["status"] == "running":
+                raise TickError("tick_running", "This page is already continuing. Stop it first.")
+            if not self._current_context(center_id):
+                raise TickError("tick_context_unavailable", "This page cannot continue right now.")
+            if self._open(center_id):
+                raise TickError("tick_context_busy", "Wait for the current reply to finish.")
+            if self._latest_ordinary_result(center_id) is None:
+                raise TickError("tick_needs_conversation", "Start with a message, then continue after its reply.")
+            after_seq = self.storage._conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) FROM causal_events WHERE world_id = ?",
+                (self.world_id,),
+            ).fetchone()[0]
+            before = deepcopy(self._state)
+            self._state["tick_runs"][key] = {
+                "run_id": uuid4().hex, "center_id": center_id, "target": count,
+                "delivered": 0, "completed": 0, "status": "running", "reason": None,
+                "last_event_id": None, "after_seq": after_seq,
+                "started_at": now.isoformat(), "updated_at": now.isoformat(),
+            }
+            try:
+                self._advance_tick(key, now)
+                self._save(now)
+            except BaseException:
+                self._state = before
+                raise
+            return deepcopy(self._state["tick_runs"][key])
+
+    def stop_ticks(self, center_id: str | None, *, now: datetime | None = None) -> dict | None:
+        """Stop before the next time step; a turn already running may finish.
+
+        A step that is queued but has not started is cancelled.
+        """
+        now = now or _now()
+        with self.storage._lock:
+            run = self._state["tick_runs"].get(self._key(center_id))
+            if run is None:
+                return None
+            if run["status"] == "running":
+                before = deepcopy(self._state)
+                self._finish_tick(run, "stopped", "operator", now)
+                try:
+                    if run["last_event_id"] is not None and self.ledger.cancel_context_tick(
+                            run["last_event_id"], world_id=self.world_id, runtime_fence=self.fence()):
+                        run["delivered"] = run["completed"]
+                    self._save(now)
+                except BaseException:
+                    self._state = before
+                    raise
+            return deepcopy(run)
+
+    def tick_run(self, center_id: str | None) -> dict | None:
+        with self.storage._lock:
+            run = self._state["tick_runs"].get(self._key(center_id))
+            return deepcopy(run) if run is not None else None
+
+    @staticmethod
+    def _finish_tick(run: dict, status: str, reason: str | None, now: datetime) -> None:
+        run["status"], run["reason"], run["updated_at"] = status, reason, now.isoformat()
+
+    def _advance_ticks(self, now: datetime) -> bool:
+        changed = False
+        for key, run in self._state["tick_runs"].items():
+            if run["status"] == "running":
+                before = deepcopy(run)
+                self._advance_tick(key, now)
+                changed = changed or run != before
+        return changed
+
+    def _advance_tick(self, key: str, now: datetime) -> None:
+        run = self._state["tick_runs"][key]
+        center_id = run["center_id"]
+        if not self._current_context(center_id):
+            self._finish_tick(run, "stopped", "context_unavailable", now)
+            return
+        if run["last_event_id"] is not None:
+            event = self.ledger.get_event(run["last_event_id"])
+            if event is None:
+                self._finish_tick(run, "stopped", "missing", now)
+                return
+            if event.status in (CausalEventStatus.QUEUED, CausalEventStatus.RUNNING):
+                return
+            if event.status is not CausalEventStatus.SETTLED:
+                self._finish_tick(run, "stopped", event.status.value, now)
+                return
+            if run["completed"] < run["delivered"]:
+                settled_reply = self.storage._conn.execute(
+                    "SELECT 1 FROM causal_events WHERE parent_event_id = ? "
+                    "AND kind = 'assistant_result' AND status = 'settled' LIMIT 1",
+                    (event.id,),
+                ).fetchone()
+                if settled_reply is None:
+                    self._finish_tick(run, "stopped", "no_reply", now)
+                    return
+                run["completed"] += 1
+                run["updated_at"] = now.isoformat()
+            if run["completed"] >= run["target"]:
+                self._finish_tick(run, "complete", None, now)
+                return
+        # A person writing in this context takes over from the time steps.
+        if self.storage._conn.execute(
+            "SELECT 1 FROM causal_events WHERE world_id = ? AND center_id IS ? "
+            "AND kind = 'stimulus' AND source = 'user' AND seq > ? LIMIT 1",
+            (self.world_id, center_id, run["after_seq"]),
+        ).fetchone() is not None:
+            self._finish_tick(run, "stopped", "user_message", now)
+            return
+        if self._open(center_id):
+            return
+        latest = self._latest_ordinary_result(center_id)
+        if latest is None:
+            self._finish_tick(run, "stopped", "no_reply", now)
+            return
+        index = run["delivered"] + 1
+        event = self.ledger.enqueue(
+            world_id=self.world_id, flow=None, domain=CausalEventDomain.PULSE,
+            kind=CausalEventKind.SPONTANEOUS, source=CausalEventSource.SELF,
+            content=None, parent_event_id=latest[0], engram_id=self.subject(),
+            center_id=center_id,
+            metadata={"context_pulse": "tick", "tick_run_id": run["run_id"],
+                      "tick_index": index, "tick_target": run["target"],
+                      "source_result_id": latest[0], "depth": 0},
+            idempotency_key=f"context-tick:{self.world_id}:{run['run_id']}:{index}",
+            runtime_fence=self.fence(),
+        )
+        run["delivered"], run["last_event_id"] = index, event.id
+        run["updated_at"] = now.isoformat()
 
     def _source_root(self, result):
         """Only ordinary accepted turns may seed future autonomous work."""
@@ -737,6 +910,10 @@ class ContextPulseController:
             # Commit/discard staged model intents even when autonomous
             # admission is held. No background model is started here.
             self._reconcile_attention(now)
+            # Explicit time steps belong to the person who asked for them;
+            # they continue even when background activity is off or held.
+            if self._advance_ticks(now):
+                self._save(now)
             if not self.config.enabled or self._state["paused"]:
                 # Retain both observation cursors, including settled results
                 # from in-flight turns, until the operator resumes activity.
@@ -978,4 +1155,5 @@ class ContextPulseController:
                 "queue": {"queued": queue[0], "running": queue[1], "oldestQueuedAt": queue[2]},
                 "queueByContext": queue_by_context,
                 "recentActivations": activations,
+                "tickRuns": [deepcopy(run) for run in self._state["tick_runs"].values()],
             }

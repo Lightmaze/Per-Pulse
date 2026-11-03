@@ -439,8 +439,8 @@ actions against artifact hashes. Its six runnable cases are `experience_entry`,
 case, not one of the six bundled tasks.
 
 ```sh
-python -m per_pulse.posture_evaluation catalog
-python -m per_pulse.posture_evaluation run exact_svg \
+python -m per_pulse_research.posture_evaluation catalog
+python -m per_pulse_research.posture_evaluation run exact_svg \
   --condition bare --output ./private-runs/svg-bare --pair-id svg-01
 ```
 
@@ -458,9 +458,9 @@ all costs and failed runs when comparing conditions; a faster result is not
 automatically a more useful one.
 
 ```sh
-python -m per_pulse.posture_evaluation evaluate \
+python -m per_pulse_research.posture_evaluation evaluate \
   ./private-runs/svg-bare/record.json --artifacts ./private-runs/svg-bare/artifacts
-python -m per_pulse.posture_evaluation compare ./private-runs/*/evaluation.json
+python -m per_pulse_research.posture_evaluation compare ./private-runs/*/evaluation.json
 ```
 
 A complete comparison requires the five matched conditions: `bare`, `explicit`,

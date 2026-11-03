@@ -2,63 +2,41 @@
 
 **A place to keep going.**
 
-Per Pulse is an open-source workspace for connected, persistent conversations. Start in Home, open a focused session from a link inside the conversation, and bring a selected result back with its source attached.
+Per Pulse is an open-source workspace for one continuing conversation. Start in
+Home, open a focused page from a link inside the conversation, and bring a
+selected result back with its source attached.
 
-Home and session pages are contexts of the same continuing subject. Each session has its own conversation history; a link opens that existing context without copying the entire Home conversation into it.
+Home and pages are contexts of the same continuing subject. Each page keeps its
+own history; a link opens that context without copying the Home conversation
+into it. With a model connected, pages can also continue on their own within an
+hourly budget.
 
-The alpha candidate provides English and 简体中文 interface controls, a separate reply-language preference, a local Python service, and a React client. It continues the existing Pulse Home/Work and Harness Kernel implementation.
+The interface is available in English and 简体中文. Per Pulse is a local Python
+service with a React client, built on the existing Pulse Home/Work and Harness
+Kernel implementation.
 
 ## What you can do
 
-- Create a session page from Home or another page, with a focused opening instruction.
-- Insert lightweight page links directly into a message and reuse a page from several conversations.
-- Continue in the linked page and return to the source while retaining your unsent draft and reading position.
-- See a running page finish in the sidebar while you keep writing in another page.
-- Bring selected text back to Home with a reference to its source page and message.
-- Carry a digest-verified native Work file into the **unsent Home draft**, preserving its source Work and any existing Home or Work text. The whole file is attached only after you choose the action, and is not sent until you press Send; changed file versions are refused.
-- Rename and search pages, follow breadcrumbs and backlinks, and reopen persisted conversations.
-- Browse earlier messages in bounded ranges, then open an original message to continue, link, or bring a selected passage Home.
-- Open **Materials** beside the message composer to upload and preview a text file, reuse an existing file, and attach the version you inspected to your draft.
-- Read structured replies and notes with headings, lists, tables, and code blocks. Copy a code block or the original Markdown, and keep native page links connected to their source.
-- Recognize a native selected-history replay while it runs, inspect its original messages, and retain the interpretation's provenance when saving an example or bringing it Home.
-- Use a separate, clearly labeled example workspace to explore the interface without a model.
-- Enable bounded local pulses: a context can continue from its retained history, and explicit computational connections can carry its results into related contexts.
+- Create a page from Home or another page, link pages inline, and return to
+  where you were with your unsent draft and reading position intact.
+- Bring selected text Home with a link to its source message, or pass a
+  selected result from one Work to another.
+- Attach text materials (Markdown, CSV, JSON or code, up to 1 MiB) and read
+  structured replies with headings, tables and code blocks.
+- Let pages continue: background pulses within an hourly budget, or type
+  `/tick 3` to give a page three more steps.
+- Keep examples and lessons from your corrections. They are available across
+  your pages unless you keep one to its page.
+- Approve the file changes a model proposes, one action at a time (opt-in).
+- Browse and search the whole history, and move a stopped workspace to another
+  directory.
 
-The server stores pages, messages, and references in the existing Pulse persistence layer. Browser storage holds only local drafts and navigation positions, scoped to the persistent workspace and page. When no model is configured, the interface says **AI disconnected** and saves messages as queued input. It never substitutes a scripted answer for a model response.
-
-Message formatting uses CommonMark with GitHub-style tables and task lists.
-Raw HTML remains text, and image references open only when selected; reading a
-message does not automatically fetch a remote image. Code stays literal, even
-when it contains the name of a linked page. A reference that appears only in
-code or across separate formatting spans keeps a separate page link below the
-message. **Copy** preserves the original message text, including Markdown;
-**Copy code** preserves the displayed code's spacing and line breaks.
-
-The existing `replay` tool lets the model reconsider one to four saved messages
-within its current turn. After its successful native entry, only the selected
-history reader remains available for that turn; finishing restores ordinary
-tools for the next turn. The interface shows this activity and provides verified
-links to the original input or reply. The raw message keeps its full provenance
-prefix when copied. Saved examples and lessons retain the replay origin even
-when the selected passage omits that prefix; shared experience exposes its
-tentative nature without copying the private source material. Bringing a
-selected interpretation Home also preserves its nature in the actual input.
-By default this bounded regime retains the original conversation. Optional
-`replay.enter(message_ids, focus)` declares a question of up to 1,000 characters.
-After its successful native entry, subsequent requests retain host system
-instructions, that declared focus, selected source references and replay
-exchanges. Other conversation, pre-entry reasoning/preambles and experience
-advice are omitted; auxiliary expert and delivery computations pause for the
-rest of that turn. Its final interpretation contains only text produced after
-entry; earlier preambles remain in the native transcript. Normal context and
-advice return next turn. The interface identifies this focused input in
-the activity and source details. It does not erase earlier provider exposure,
-create a separate identity, grant extra rounds, or establish sleep scheduling,
-new external evidence or model learning.
+When no model is configured, the interface says **AI disconnected** and keeps
+your messages as queued input. It never substitutes a scripted reply for a model.
 
 ## Run from source
 
-Requirements: Python 3.12 or later and Node.js 20.19 or later. The runnable **local alpha source is now on `main`**, following [PR #31](https://github.com/Lightmaze/Per-Pulse/pull/31). It has passed the native and installed-browser CI on its reviewed integration head; this is **not** a hosted deployment, package-registry release, or evidence of improved real-provider model quality. Start from a fresh clone:
+Requirements: Python 3.12 or later and Node.js 20.19 or later.
 
 ```sh
 git clone https://github.com/Lightmaze/Per-Pulse.git
@@ -71,394 +49,112 @@ python -m pip install -e '.[dev]'
 per-pulse
 ```
 
-Open **http://127.0.0.1:8000**. On Windows, activate the environment with `.venv\Scripts\Activate.ps1` in PowerShell instead of `source`.
+Open **http://127.0.0.1:8000**. On Windows, activate the environment with
+`.venv\Scripts\Activate.ps1` in PowerShell.
 
-The ordinary workspace starts empty. Data persists in `~/.local/share/per-pulse` by default. Choose another directory or port with:
+Data lives in `~/.local/share/per-pulse` by default. Choose another directory
+or port with `per-pulse --data-dir ./data/my-workspace --port 8000`.
 
-```sh
-per-pulse --data-dir ./data/my-workspace --port 8000
-```
+## Connect a model
 
-### Explore the example
-
-```sh
-per-pulse --example
-```
-
-The example includes English notes and connected pages. The interface identifies these as authored sample material. Example mode always disables model requests, including when provider environment variables are set. Its data lives in an `example` child directory, separate from the ordinary workspace.
-
-### Connect a model
-
-Per Pulse uses the inherited HTTP Chat Completions adapter. Configure an endpoint that supports streaming OpenAI-compatible Chat Completions, tool calls, and usage reporting:
+Per Pulse uses an OpenAI-compatible Chat Completions endpoint with streaming,
+tool calls and usage reporting:
 
 ```sh
 export P_PULSE_CHAT_ENDPOINT='https://your-provider.example/v1/chat/completions'
 export P_PULSE_CHAT_MODEL='your-model-id'
 export P_PULSE_API_KEY='your-api-key'
-per-pulse
-```
-
-Replace the placeholders with your provider's values. The endpoint is a complete URL, not a base URL. Credentials stay in the server environment; the browser never receives them. You can use `P_PULSE_CREDENTIAL_ENV` to name a different environment variable containing the key.
-
-For Windows PowerShell, use `$env:P_PULSE_CHAT_ENDPOINT = '...'`, `$env:P_PULSE_CHAT_MODEL = '...'`, and `$env:P_PULSE_API_KEY = '...'` in the **same PowerShell session** before running `per-pulse doctor` and `per-pulse`. When disconnected, **Settings → How to connect a model** now provides a POSIX or PowerShell terminal template and a copy control. It contains only placeholders; never enter your real API key into the browser. The local `doctor` preflight sends no provider request and cannot verify remote connectivity, model behavior, or spending limits.
-
-An **optional credential-free local model** can use the same real Kernel/World path with an explicitly operator-configured loopback HTTP Chat Completions server. Start a model server on your own computer first; no model is installed by Per Pulse. For a compatible server exposing the example port (change the port/model to match your server):
-
-```sh
-export P_PULSE_CHAT_ENDPOINT='http://127.0.0.1:11434/v1/chat/completions'
-export P_PULSE_CHAT_MODEL='your-local-model-id'
-export P_PULSE_ALLOW_LOCAL_HTTP='1'
-export P_PULSE_LOCAL_NO_AUTH='1'
 per-pulse doctor
 per-pulse
 ```
 
-On Windows PowerShell use `$env:NAME = 'value'` for each environment assignment. The disconnected **Settings → How to connect a model** also provides both terminal variants in the *Model server on this computer* option. Credential-free mode is refused unless both flags are set and the endpoint is explicitly loopback HTTP; it never bypasses credentials for remote HTTPS providers. Requests have no `Authorization` header in this mode. It remains one native Kernel and one World; no additional proxy or model runtime is created.
+The endpoint is a complete URL. The key stays in the server environment; the
+browser never receives it. `per-pulse doctor` checks the local configuration
+without contacting the provider. A model server on your own computer works too.
+See [Connect a model](docs/models.md) for local models, PowerShell and the
+other provider options.
 
-`doctor` checks only the local configuration, **not** whether the local server is running, supports streaming/tool calls/usage, or provides good judgments. Local models may not implement the required OpenAI-compatible SSE and usage fields; incompatible responses fail normally, with no scripted fallback or learning claims. Per Pulse's background token budget remains an admission envelope rather than a hard GPU/billing cap. Run a real Work and inspect its outcome before depending on it for later actions.
+## Let pages continue
 
-If neither endpoint nor model is set, the workspace runs disconnected. Setting only one is a configuration error. Restart after changing provider configuration. Queued input from the ordinary workspace can be processed after connecting a model, so use a separate data directory when you want a fresh conversation.
+With a model connected, Per Pulse lets a page continue from its own history in
+the background, up to 12 background turns per hour. Change the budget with
+`--pulse-budget N`, or turn it off with `--no-pulse`.
 
-Before starting a provider-backed Work or a paid posture experiment, check the
-**local configuration** without sending any network request:
+To give one page more time yourself, type in its composer:
 
-```sh
-per-pulse doctor
-per-pulse doctor --json
-```
+- `/tick` — one more step;
+- `/tick 3` — exactly three more steps (up to 256), one after another;
+- `/tick stop` — stop before the next step.
 
-This uses the same adapter configuration validation and local credential-presence
-check as the runtime. It distinguishes intentional disconnected mode, incomplete
-settings, missing credentials, and locally configured settings; no secret value,
-model response or source conversation is printed. The JSON form is suitable for
-a local executor's preflight. A locally configured result is **not** a remote
-connectivity, authentication, streaming/tool-call, usage-reporting, model-quality
-or money-cap verification. The doctor sends zero provider requests, leaves the
-World untouched, and returns a nonzero exit code for invalid/missing settings.
+A step continues the page's own conversation without a new instruction, and
+starts only after the previous reply finishes. Writing your own message in that
+page ends the run. Steps you ask for do not use the background budget. Pages can
+also pass finished results to each other through connections; see
+[Local pulses](docs/pulse-core.md).
 
-Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_MAX_OUTPUT_TOKENS`, `P_PULSE_REASONING_FIELD=reasoning_content`, and `P_PULSE_PROVIDER_NAMESPACE=openrouter`. Per Pulse also enforces a default **8 MiB maximum serialized request body** at the outbound Chat Completions boundary, configurable with `P_PULSE_MAX_REQUEST_BYTES`. This rejects oversized requests *before network send*, including those arising from long history, side computations, tool schemas or image parts. It never silently truncates the saved context; a blocked turn remains visible for review. This byte guard is **not** a context-token limit, provider bill cap, or solution to automatic long-history management. Provider compatibility must be verified separately.
-
-### Bring source material into a conversation
-
-Open **Materials**, choose a UTF-8 text file up to 1 MiB, and select **Upload
-file**. Inspect the preview, then **Add to draft**. Your existing text and page
-links stay in place. Tell Per Pulse what you want to do with the material and
-send the message when it is ready. Existing files can be reopened from the
-same dialog without uploading them again.
-
-Files belong to the shared native workspace and can be read from any page;
-conversation histories remain separate. Each Work keeps its own attachment
-record without copying the shared file. A source chip identifies the original
-name and version; reopening or sending it checks that the bytes still match.
-Open a source chip and choose **Download original** to save its complete uploaded
-bytes and original filename, including content beyond the preview. The source
-is checked again when requested; a changed file cannot replace the selected
-version. Closing its preview cancels a pending download. This also works after
-restart with the model disconnected.
-Remove the chip to leave the file out of a message. Uploading or previewing does
-not run the model, and adding a reference does not mean the model has read the file. With a configured
-provider, the existing read tools can open it when working on your request.
-Uploads create new files and do not grant model write permissions.
-
-Markdown materials and file results have **Read** and **Source** views. Headings,
-lists, tables and code are readable while the original text remains available.
-Images appear as descriptions; links to external sources open only when chosen.
-CSV and TSV files also have a table view. Values remain text, including leading
-zeros and empty cells. Use **First row contains headings** to match the file.
-The view shows up to 200 data rows and 64 columns, with keyboard scrolling for
-wide tables. **Columns** lets you compare a subset without changing the file;
-your choices survive switching between Read and Source during that preview.
-A partial preview is labelled and omits an unfinished trailing
-row; irregular quotes, unequal rows or wider files fall back to source text.
-The **Add to draft** action stays visible while reading a long material.
-
-### Keep concrete examples and learn from corrections
-
-Enable attributed experience when starting the same workspace:
+## Explore the example
 
 ```sh
-per-pulse --posture
-```
-
-Use **Save example** on a completed reply to retain an exact passage, an optional
-note, and optionally a later message from that page. Selecting text first fills
-the passage editor when that selection matches the original text. An example
-can stand on its own without a rule or evaluation. You can save one from a
-previous reply even while the model is disconnected. The source passage stays
-intact when you later edit its note.
-
-When that experience began with an attached file, **Source experience** shows
-the readable message and an **Open source message** link to its original file
-references. The stored encounter retains its exact input. Shared experiences
-keep that private input and its file references in the source page.
-Later feedback used by a native refinement also links back to its exact
-message and attached files. Its original evidence remains unchanged.
-
-With a model connected, explain what worked or what should change after a reply.
-The model may save a conditional lesson with its original result and your
-correction. **Settings → View this page’s experience** lets you inspect that
-source, refine the guidance and its exceptions, pause it, or explicitly make
-it available in other pages. The model can also retain a concrete example.
-Model capture is optional: a correction does not guarantee that anything is saved.
-
-In a later Work, **Give feedback** records your observation of a shared lesson or example.
-You can optionally link a completed reply from that Work; the source page's
-feedback history then opens the exact result, including older messages outside
-the recent window. A described observation can also stand without a linked
-reply. **No clear benefit** records a neutral observation and keeps the experience's
-current active state. Harmful feedback pauses it; only its source page can
-edit or reactivate it. A lesson's abstraction or an example's selected passage
-and note can travel, while the surrounding conversation and private feedback
-stay at the source.
-
-Linking a result establishes where to inspect it, not that the experience caused
-it. Saving an example does not certify its success or future applicability.
-Real-provider learning benefits still need output comparison and review.
-Example mode remains model-free and does not enable experience learning.
-
-### Enable local pulse computation
-
-```sh
-per-pulse --pulse --pulse-budget 12
-```
-
-With a model configured, this enables local reentry and propagation through
-explicit context connections, with at most twelve background pulse admissions
-per rolling hour. Home and Work retain one subject and separate histories.
-Refractory time, decaying inhibition and a causal depth ceiling bound the local
-activity. The quota and causal evidence survive restart. Ordinary user messages
-remain available when the background quota is exhausted.
-
-`GET /api/pulse` exposes the current state and recent activation outcomes;
-`POST /api/pulse/connections` connects source and target page IDs. Page links
-remain navigation links. The detailed [pulse core contract](docs/pulse-core.md)
-explains configuration, connection semantics, recovery and verification.
-
-An optional `--pulse-hourly-tokens N` adds a separate background token
-*admission* envelope. Each local activation reserves
-`--pulse-token-reservation` tokens (default 8192) until accounted usage is
-available. A positive `N` must cover at least one reservation; the CLI rejects
-an impossible pairing rather than silently starving every local activation.
-Use `N=0` to intentionally prevent new background token admission. This is
-not a hard model-token or monetary spending limit.
-
-The default command leaves automatic pulses disabled. The quota counts
-background admissions, not individual provider requests, tokens or money.
-
-### Observe a continuing body over actual elapsed time
-
-To record an already-running local Per Pulse instance over one hour without
-creating new tasks, model calls, or another scheduler, use a **separate terminal**:
-
-```sh
-python -m per_pulse.pulse_observer --url http://127.0.0.1:8000 \
-  --duration-seconds 3600 --interval-seconds 10 \
-  --output ./private-pulse-observation.jsonl
-```
-
-This read-only observer polls native `/api/pulse/observation` (one response
-binds the persistent World, current service instance and Pulse status),
-retains one World identity, records queue/budget snapshots and changed local
-activation IDs with source links, and writes a private, create-only JSONL file
-(mode 0600 on POSIX). Interrupted runs have no completed success footer unless
-the observer catches the interruption; a caught interruption is marked
-`interrupted`. Poll failures and a full twenty-event server window are
-explicit evidence gaps, never silently counted as successful endurance.
-The observed event count is a **lower bound**, not an exhaustive ledger read.
-The summary separates settled background activations from **navigable Work results**:
-only a settled local event with an exact receiving message verified by the
-native page lineage counts as a navigable result, grouped by receiving Work.
-Events without such a message are still recorded as activity, never promoted to
-completed user-visible work. The report also distinguishes sampled running and
-paused states; neither an accessible message nor a running process proves that
-the result was useful, learned from, or delivered by a real model.
-The native bootstrap exposes an ephemeral `serviceInstanceId`: when a running
-service restarts under the same persistent World identity, the observer ends
-with `service_restarted` instead of claiming uninterrupted process activity.
-The Context Body and its history can remain persistent across that restart.
-
-This command does not enable Pulse or a provider for you: start Per Pulse
-normally, with `--pulse` and any explicitly authorized model, before observing.
-A connected-provider status is not proof that a real provider ran, that
-background activity improved a result, or that currency was capped. For a
-long-horizon claim, inspect the actual file, elapsed wall time, native sources,
-provider request/usage evidence, and whether relevant Works yielded useful
-new outcomes; do not use a short synthetic CI run as that evidence.
-
-### Native workspace actions and sourced file results
-
-Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. Example mode keeps model requests and model file changes disabled. See [Core Harness](docs/harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
-
-**Download file** takes the complete verified text result out of the workspace.
-It checks the file again when requested and verifies the received bytes before
-starting the browser download. A later overwrite, protected content, or missing
-file produces an explanation; **Refresh file preview** checks its current state.
-Downloads preserve UTF-8 text, line endings and the original filename, including
-non-ASCII names. Redacted previews cannot be downloaded as original files.
-This works for existing results while disconnected and after restart. File
-access remains limited to text up to 1 MiB; the native write path currently
-has a separate 64 KiB output bound. It does not restore older overwritten bytes.
-
-The **Materials** flow accepts UTF-8 text, Markdown, CSV, JSON or code in
-Home or Work. **Upload file** saves the original bytes; **Add to draft** selects
-the inspected version; only **Send** submits it to the conversation.
-Text and file-only drafts survive browser refresh. Each
-message can include up to five files of at most 1 MiB each. PDF, images and
-other binary files are not supported. A source chip opens its original text
-preview; **Bring to Home** lets you include the source files with your selected
-message while preserving their original page links.
-
-The native input carries paths and recorded digests, not a claim that a model
-read the files. `reading.open` can check that expected version before returning
-its first passage, and continuation verifies the same source. Changed or
-missing selected files are refused before sending; replacement bytes are not
-silently substituted. Upload receipts and files persist across restart and
-the existing stopped Pulse Image transfer. The native source API lists the latest
-100 receipts per page, with a workspace limit of 1,024 receipts; older message
-attachments remain accessible. Source-chip previews are bounded to 64 KiB and
-redact sensitive values. The workspace library previews up to 64,000 characters.
-Files are shared native workspace material, not isolated
-per-page filesystem permissions.
-
-To locate a specific phrase in a long source, the native `reading.find` operation
-searches literal text in the redacted view and returns up to eight short excerpts
-with exact source coordinates and digests. It checks an optional expected file
-version, identifies when more matches remain, and reports when its search stopped
-early. Finding a passage is distinct from reading or understanding the whole file.
-To read more at a selected hit, use `reading.follow(receipt_id, match_index)`
-with the find result's receipt and zero-based match index. It starts a bounded
-passage at that original match and supplies a normal continuation receipt.
-Follow rechecks the complete source bytes, redacted view and workspace root;
-it accepts neither an invented offset nor another Work's private receipt.
-After relocating a workspace, run find again before following a hit. The
-coordinate unit is Python Unicode characters in the redacted view, not raw
-UTF-8 bytes or JavaScript UTF-16 indices.
-
-For expansion-aware Unicode matching, explicitly pass `casefold=true` to
-`reading.find`: `STRASSE` can locate the original `Straße`, and `FFI` can
-locate `ﬃ`. Matches cover whole original characters; `fi` does not match
-part of `ﬃ`. The returned `case_mode` records the selected semantics, and
-follow/continue still use the original source coordinates. The default
-remains Python regex case-insensitive matching; `case_sensitive=true` selects
-exact case and cannot be combined with `casefold=true`. Casefold adds neither
-accent normalization nor locale rules. See [Unicode source search](docs/unicode-source-search.md)
-for examples and the actual prototype experiment.
-
-A lost upload response is shown as unconfirmed and never retried automatically.
-Open **Materials → uploads/** to inspect the saved file and add it to the draft.
-The native file creation
-and receipt storage are separate durable effects: a process or storage failure
-between them can leave an unlisted file in `workspace/uploads`. Inspect that
-directory before manually uploading again when no receipt can be recovered.
-
-### Carry a stopped workspace to another directory (POSIX alpha)
-
-Per Pulse uses the **existing native cold Pulse Image** format, not a second
-history store or a live agent clone. After cleanly stopping the server, save
-a private archive outside the source directory:
-
-```sh
-per-pulse image save ./per-pulse-private.zip --data-dir ~/.local/share/per-pulse
-per-pulse image inspect ./per-pulse-private.zip
-per-pulse image restore ./per-pulse-private.zip --data-dir ./restored-per-pulse
-per-pulse --data-dir ./restored-per-pulse
-```
-
-Restore requires a **new, nonexistent directory** and an archive made with
-a compatible **Per Pulse** implementation; an upstream P-Pulse image alone
-is not assumed to be interchangeable. Save refuses an active World or
-unfinished Kernel turns/actions. Restore checks member digests and the
-matching Python implementation before writing, preserves the native
-World/Kernel identities and source links, and does not start any model.
-Historical World turns marked uncertain after process recovery or a native
-turn timeout block export by default. To deliberately keep that history in a
-private copy, after recovering the original workspace and stopping any pending
-turn, use:
-
-```sh
-per-pulse image save ./per-pulse-private.zip --data-dir ~/.local/share/per-pulse --include-recovered-history
-```
-
-This option requires a released World lease, finished Kernel turns/actions
-and operations, and an exact matching Kernel turn for each recovered World
-record. A retained native timeout must have accepted input, the original
-settled uncertain event and its exact cancelled Kernel turn. A completed read
-or file write can travel with that history; a write with an unknown outcome
-still blocks export. The option cannot carry an uncertain file or other tool
-effect. The archive and restore receipt list `retained_uncertain_turns`; those original messages
-and records stay uncertain in both copies. Restore verifies that list against
-the native history, and never retries an old request or action. A completed
-Stop alone does not establish that every effect can be safely copied.
-Native file checkpoints, including retained pre-write bytes, are carried with
-their original workspace provenance. Moving those records does not authorize
-an old write or checkpoint restore against the new workspace root.
-If a restore fails, do not start its incomplete destination. The archive
-contains **private conversations, histories and workspace files**: do not
-publish or share it. Model credentials and external tool/resource bindings
-must be configured deliberately after restore.
-
-To continue a partly read source after moving the workspace, the native model
-can use `reading.recent` to find its earlier passage, then explicitly call
-`reading.resume(receipt_id)`. Resume checks the same relative path, complete
-file bytes and redacted text view before reading from the saved position.
-The new receipt retains its original receipt and workspace provenance; later
-`reading.continue` calls use the new receipt. A changed file must be opened
-deliberately from the beginning. This does not carry approvals, cross logical
-session boundaries, or establish that the material was understood.
-
-This is a **cold copy**: it does not transfer a running process, merge later
-changes made to the original home, or copy browser-local unsent drafts and
-scroll positions. The old and restored homes can diverge; treat the
-restored copy as the continuation you choose to use, not a synchronized
-second subject. Image save/restore currently support POSIX hosts only.
-Compatibility is bound to current Python source code, not a guarantee of
-semantic equivalence across other model/provider versions.
-
-## Develop
-
-Run the backend in one terminal:
-
-```sh
-source .venv/bin/activate
 per-pulse --example
 ```
 
-Run the client in another:
+The example workspace contains English sample notes and connected pages. It
+never calls a model, even when provider settings are present, and keeps its data
+in a separate `example` directory.
+
+## Other options
+
+| Option | What it does |
+| --- | --- |
+| `--posture` | Save examples and lessons from corrections. See [Experience](docs/experience.md). |
+| `--allow-workspace-actions` | Let the model propose file changes for your approval. See [Workspace actions](docs/workspace-actions.md). |
+| `per-pulse image save/inspect/restore` | Move a stopped workspace to a new directory. See [Workspace image](docs/image.md). |
+| `python -m per_pulse.pulse_observer` | Record a running workspace's activity over time. See [Observer](docs/observer.md). |
+
+## Develop
+
+Run the backend and the client in two terminals:
 
 ```sh
+per-pulse --example
 npm --prefix web run dev
 ```
 
-Open **http://localhost:5173**. Vite proxies `/api` to the backend on port 8000.
+Open **http://localhost:5173**; Vite proxies `/api` to port 8000.
 
 ```sh
 python -m pytest
+npm --prefix web run test
 npm --prefix web run typecheck
 npm --prefix web run build
 python -m build --no-isolation
 ```
 
-Build the client before building a wheel. The wheel includes the compiled client, so an installed wheel serves the same interface without a Node.js process. No package has been published to PyPI by this repository's initial implementation.
+Build the client before building a wheel; the wheel serves the compiled client.
+Optional study tooling lives in [`research/`](research/README.md).
 
 ## How the pieces fit
 
 | Layer | Responsibility |
 | --- | --- |
-| `web/` | English conversation UI, inline references, page navigation, local drafts |
-| `src/per_pulse/` | Local HTTP API, page projection, explicit example mode, CLI |
-| `src/pulse_system/` | Existing World, native Home/Work, causal events, runtime service |
-| `src/pulse_harness/` | Existing Kernel, model transport, turn history, tool and approval machinery |
+| `web/` | Conversation UI, inline references, page navigation, local drafts |
+| `src/per_pulse/` | Local HTTP API, page projection, example mode, CLI |
+| `src/pulse_system/` | World, native Home/Work, causal events, pulses, runtime service |
+| `src/pulse_harness/` | Kernel, model transport, turn history, tools and approvals |
 
-Page IDs are native Work IDs, and message IDs are native causal-event IDs. Reference metadata lives in the same World's component state. Creating or following a reference does not copy another page's history or start an additional agent. Bringing text Home is an explicit user contribution with provenance; the source page remains open.
-
-See [the API contract](docs/api.md), [pulse core](docs/pulse-core.md) and [source lineage](docs/source-lineage.md).
+Page IDs are native Work IDs and message IDs are native causal-event IDs.
+References live in the same World store. Opening or linking a page never copies
+another page's history or starts another agent.
 
 ## Current scope
 
-This is an alpha, single-user application bound to loopback. It does not yet provide account login, shared workspaces, cloud hosting, deletion/archive controls, or a model setup wizard. The main conversation shows the latest 500 messages. **Earlier messages** reads older native history in groups of 100; **Find a message** searches the whole current conversation. Opening a result retains its original source and the current draft. The first UI does not expose the inherited runtime's full operational or approval console.
+This is a local, single-user alpha bound to loopback. It has no accounts,
+shared workspaces, cloud hosting or deletion controls yet. Automated tests use
+local test transports; they check behavior, not model quality.
 
-Workspace mutation remains disabled by default and requires an explicit `--allow-workspace-actions` opt-in plus approval of each actionable proposal. Live provider access is explicit. Automated integration tests use local test transports and validate persistence and routing; they do not certify real-model performance or autonomous work quality.
+All documentation is listed in [docs/README.md](docs/README.md).
 
 ## License
 
-Apache-2.0. The inherited Pulse copyright and attribution are preserved in [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0. The inherited Pulse copyright and attribution are preserved in
+[LICENSE](LICENSE) and [NOTICE](NOTICE).

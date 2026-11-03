@@ -11,7 +11,7 @@ import json
 import httpx
 import pytest
 
-from per_pulse.posture_evaluation import (
+from per_pulse_research.posture_evaluation import (
     CASE_BY_ID, CONDITIONS, SCHEMA, TRANSFER_TASK, audit_transfer_trial, compare_runs, evaluate_run, main, run_provider_case, run_transfer_trial,
 )
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
@@ -498,7 +498,7 @@ def test_continuing_transfer_uses_native_source_and_action_ids_without_fixture_p
     # request, even if an exporter has consistently rebound its host manifest.
     duplicated = deepcopy(result)
     duplicated["provider_request_audit"][1]["request_sha256"] = duplicated["provider_request_audit"][0]["request_sha256"]
-    from per_pulse.posture_evaluation import _record_digest
+    from per_pulse_research.posture_evaluation import _record_digest
     manifest_path = output / "transfer-manifest.json"
     manifest = json.loads(manifest_path.read_text())
     duplicate_manifest = {**manifest, "record_digest": _record_digest(duplicated)}
@@ -541,7 +541,7 @@ def test_custom_transfer_prompt_with_explicit_reminder_never_gets_default_withdr
 
 
 def test_legacy_explicit_teaching_record_remains_auditable_after_preference_prompt_change(tmp_path, monkeypatch):
-    from per_pulse import posture_evaluation as evaluator
+    from per_pulse_research import posture_evaluation as evaluator
     output = tmp_path / "legacy"
     current = evaluator.TRAINING_CORRECTION
     monkeypatch.setattr(evaluator, "TRAINING_CORRECTION", evaluator.LEGACY_TRAINING_CORRECTION)
