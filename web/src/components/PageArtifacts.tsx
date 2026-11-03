@@ -12,7 +12,7 @@ function unavailableReason(reason: string | null, t: Translate): string {
   return t('artifacts.missing');
 }
 
-export function PageArtifacts({ view, onUseInHome, onChanged }: { view: PageView; onUseInHome?: (artifact: Artifact) => Promise<void>; onChanged?: () => Promise<unknown> }) {
+export function PageArtifacts({ view, onUseInHome, onUseInWork, onChanged }: { view: PageView; onUseInHome?: (artifact: Artifact) => Promise<void>; onUseInWork?: (artifact: Artifact) => void; onChanged?: () => Promise<unknown> }) {
   const { t, errorText } = useLanguage();
   const [opened, setOpened] = useState<string | null>(null);
   const [result, setResult] = useState<ArtifactRead | null>(null);
@@ -116,10 +116,12 @@ export function PageArtifacts({ view, onUseInHome, onChanged }: { view: PageView
           {result.downloadable ? <div className="artifact-actions">
             <button type="button" className="secondary-button" disabled={downloadState === 'loading' || carrying} onClick={() => void download(artifact)}>{t(downloadState === 'loading' ? 'artifacts.downloading' : 'artifacts.download')}</button>
             {onUseInHome && view.page.kind === 'work' ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => void useInHome(artifact)}>{t(carrying ? 'library.artifactToHomeBusy' : 'library.artifactToHome')}</button> : null}
+            {onUseInWork && view.page.kind === 'work' ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => onUseInWork(artifact)}>{t('library.artifactToWork')}</button> : null}
             {downloadState === 'started' ? <span role="status">{t('artifacts.downloadStarted')}</span> : null}
           </div> : null}
           {!result.downloadable && !result.redacted ? <p className="artifact-intro">{t('artifacts.originalUnavailable')}</p> : null}
           {onUseInHome && view.page.kind === 'work' && result.downloadable ? <p className="artifact-intro">{t('library.artifactToHomeHint')}</p> : null}
+          {onUseInWork && view.page.kind === 'work' && result.downloadable ? <p className="artifact-intro">{t('library.artifactToWorkHint')}</p> : null}
         </> : result?.state === 'changed' ? <p role="status">{t('artifacts.changed')}</p> : result ? <p role="status">{unavailableReason(result.reason, t)}</p> : null}
         {!loading ? <button type="button" className="text-button" onClick={() => void read(artifact, true)}>{t('artifacts.refresh')}</button> : null}
       </div> : null}
