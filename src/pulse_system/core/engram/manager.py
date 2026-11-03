@@ -199,6 +199,7 @@ _SUCCESSION_PROMPT = (
 )
 
 HARNESS_INPUT_COMPONENT = "harness.pulse.inputs.v1"
+_SAME_TIMEOUT = object()
 _HARNESS_INPUT_VERSION = 1
 
 
@@ -216,6 +217,7 @@ class EngramManager:
         harness: "HarnessRuntime | None" = None,
         harness_turn_runner: Any | None = None,
         harness_turn_timeout_sec: float | None = None,
+        harness_background_turn_timeout_sec: float | None | object = _SAME_TIMEOUT,
         causal_ledger: "CausalLedger | None" = None,
         causal_world_id: str | None = None,
         causal_context_for_center: Callable[[str | None], str] | None = None,
@@ -237,6 +239,15 @@ class EngramManager:
         # leave it unset and retain the direct port call.
         self._harness_turn_runner = harness_turn_runner
         self._harness_turn_timeout_sec = harness_turn_timeout_sec
+        # A person's own message may run as long as it needs; they can Stop it.
+        # Spontaneous, propagated and requested-continuation turns run
+        # unattended, so they keep a wall-clock bound and cannot hold an
+        # execution slot indefinitely.
+        self._harness_background_turn_timeout_sec = (
+            harness_turn_timeout_sec
+            if harness_background_turn_timeout_sec is _SAME_TIMEOUT
+            else harness_background_turn_timeout_sec
+        )
         # Optional durable execution ledger.  The Runtime composition root must
         # call recover_inflight() before constructing this manager; this class
         # deliberately does not recover or mutate scheduler state on its own.
@@ -637,7 +648,7 @@ class EngramManager:
             prompt_messages = session[turn.cursor_before:turn.cursor_after]
         prompt = self._join_natural_messages(prompt_messages)
 
-        timeout_sec = self._harness_turn_timeout_sec
+        timeout_sec = self._turn_timeout_for(event)
         if runtime_config is not None:
             timeout_sec = getattr(runtime_config, "deadline_sec", timeout_sec)
 
@@ -717,6 +728,13 @@ class EngramManager:
         return self._settle_causal_harness_result(
             engram_id, turn, event, harness_result, runtime_fence,
         )
+
+    def _turn_timeout_for(self, event) -> float | None:
+        """Unbounded only for a person's own message; unattended turns stay bounded."""
+        if (event.kind is CausalEventKind.STIMULUS
+                and event.source is CausalEventSource.USER):
+            return self._harness_turn_timeout_sec
+        return self._harness_background_turn_timeout_sec
 
     def _settle_causal_harness_result(
         self, engram_id, turn, event, harness_result, runtime_fence,

@@ -78,6 +78,9 @@ FOREGROUND_MODEL_ROUNDS = 256
 # turn has no wall-clock limit (it ends when it finishes, on Stop, or at the
 # round limit). Background turns keep their own small round allowance.
 APPROVAL_TTL_SECONDS = 7 * 24 * 60 * 60
+# Background turns (Pulse, propagation, /tick steps) run unattended and keep
+# a wall-clock bound so one cannot hold an execution slot indefinitely.
+BACKGROUND_TURN_TIMEOUT_SECONDS = 600.0
 # Estimated input budget for one model request. Older turns beyond it are left
 # out of the request (never deleted) and stay searchable with the history
 # tools. Set P_PULSE_CONTEXT_TOKENS to match a smaller or larger model.
@@ -163,6 +166,7 @@ class PageService:
             living_concern_reentry_budget_per_tick=0,
             context_pulse=pulse or PulseSettings(),
             harness_turn_timeout_sec=None,
+            harness_background_turn_timeout_sec=BACKGROUND_TURN_TIMEOUT_SECONDS,
         )
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
