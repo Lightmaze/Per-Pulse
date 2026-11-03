@@ -260,6 +260,7 @@ export const workspaceEnglish = {
   'dialogs.chooseHint': '↑ ↓ to choose · Enter to {action} · Esc to close',
   'dialogs.openAction': 'open',
   'dialogs.linkAction': 'link',
+  'dialogs.attachAction': 'attach',
   'dialogs.from': 'From',
   'dialogs.thisPage': 'this page',
 } as const;
@@ -525,6 +526,7 @@ export const workspaceChinese = {
   'dialogs.chooseHint': '↑ ↓ 选择 · Enter {action} · Esc 关闭',
   'dialogs.openAction': '打开',
   'dialogs.linkAction': '关联',
+  'dialogs.attachAction': '附加',
   'dialogs.from': '来自',
   'dialogs.thisPage': '此页面',
 } satisfies Record<keyof typeof workspaceEnglish, string>;

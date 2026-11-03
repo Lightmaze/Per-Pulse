@@ -209,6 +209,73 @@ export default function App() {
   const selectPage = async (page: PageSummary) => {
     if (modal?.kind !== 'picker') return;
     if (modal.mode === 'search') { navigate(page.id); return; }
+    if (modal.mode === 'artifact') {
+      const artifact = modal.artifact;
+      const sourceId = route.id;
+      const sourceSerial = route.serial;
+      const sourceModal = modal;
+      if (!bootstrap || !workspaceId || !view || sourceId === 'home'
+          || artifact.pageId !== sourceId || page.kind !== 'work' || page.id === sourceId) {
+        setModalError(t('library.referenceUnconfirmed'));
+        return;
+      }
+      const targetKey = `${workspaceId}/${page.id}`;
+      const before = draftsRef.current[targetKey] ?? readDraft(workspaceId, page.id);
+      if ((before.materials?.length ?? 0) >= 5) {
+        setModalError(t('materials.selectionFull'));
+        return;
+      }
+      const sourceTitle = view.page.title;
+      setBusy(true); setModalError('');
+      try {
+        // The existing native material receipt verifies World, file version,
+        // source bytes and the receiving Work. No model or tool action starts.
+        const response = await api.referenceMaterial(page.id, artifact, bootstrap);
+        if (response.workspaceId !== workspaceId
+            || response.serviceInstanceId !== bootstrap.serviceInstanceId
+            || response.material.pageId !== page.id
+            || response.material.sha256 !== artifact.sha256
+            || response.material.path !== artifact.path) {
+          throw new Error(t('library.referenceUnconfirmed'));
+        }
+        // A different tab or route may have edited the destination draft
+        // during the native check. Never overwrite its later text/attachments.
+        const current = draftsRef.current[targetKey] ?? readDraft(workspaceId, page.id);
+        if ((current.materials?.length ?? 0) >= 5
+            && !current.materials?.some(item => item.id === response.material.id)) {
+          throw new Error(t('materials.selectionFull'));
+        }
+        if (!current.materials?.some(item => item.id === response.material.id)) {
+          const existingLink = current.references.find(item => item.targetPageId === sourceId);
+          const sourceLine = t('library.artifactToHomeSource', {
+            title: existingLink?.label ?? sourceTitle, path: artifact.path,
+          });
+          const next: Draft = {
+            ...current,
+            text: current.text ? `${current.text}\n\n${sourceLine}` : sourceLine,
+            references: existingLink ? current.references
+              : [...current.references, { targetPageId: sourceId, label: sourceTitle }],
+            materials: [...(current.materials ?? []), { id: response.material.id, name: response.material.name }],
+          };
+          const updated = { ...draftsRef.current, [targetKey]: next };
+          draftsRef.current = updated;
+          setDrafts(updated);
+          saveDraft(workspaceId, page.id, next);
+        }
+        // A late native answer may update that Work, never hijack a newer
+        // route or close another dialog the user has since opened.
+        if (currentPage.current === sourceId && currentRouteSerial.current === sourceSerial
+            && currentModal.current === sourceModal) {
+          navigate(page.id, { pageId: sourceId });
+        }
+        setToast(t('library.artifactToWorkAdded'));
+      } catch (problem) {
+        if (currentPage.current === sourceId && currentRouteSerial.current === sourceSerial
+            && currentModal.current === sourceModal) setModalError(errorText(problem));
+        else setToast(errorText(problem));
+      } finally { setBusy(false); }
+      return;
+    }
     if (modal.mode === 'compose') {
       const { start, end } = composerSelection.current;
       const before = draft.text.slice(0, start);
@@ -382,7 +449,7 @@ export default function App() {
           {sendError && !error ? <div className="error-notice" role="alert"><span>{sendError}</span><button disabled={isRefreshing} onClick={() => { setSendErrors(previous => ({ ...previous, [draftKey]: '' })); refreshWorkspace().catch(problem => setError(errorText(problem))); }}>{t('app.retry')}</button></div> : null}
           {syncError && !error && !sendError ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
-          {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} onUseInHome={view.page.kind === 'work' ? prepareArtifactHome : undefined} onChanged={() => refreshPage(view.page.id)} /> : null}
+          {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} onUseInHome={view.page.kind === 'work' ? prepareArtifactHome : undefined} onUseInWork={view.page.kind === 'work' && pages.some(page => page.kind === 'work' && page.id !== view.page.id) ? artifact => openModal({ kind: 'picker', mode: 'artifact', artifact }) : undefined} onChanged={() => refreshPage(view.page.id)} /> : null}
           {view?.page.kind === 'work' ? <CollaboratorChoices key={`${workspaceId}/${route.id}`} pageId={route.id} pages={pages} navigate={navigate} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection, needsExactExcerpt) => openModal({ kind: 'return', message, content: selection, needsExactExcerpt })} onTransfer={(message, excerpt) => openModal({ kind: 'transfer', message, excerpt })} onSaveExample={bootstrap?.postureEnabled ? (message, content, needsExactExcerpt) => openModal({ kind: 'save-example', message, content, needsExactExcerpt }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
           {view?.tick?.status === 'running' && view.provider.configured ? <div className="tick-status" role="status">
@@ -402,7 +469,7 @@ export default function App() {
       navigate={navigate} onClose={() => setPulseOpen(false)} /> : null}
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
     {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
-    {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.message })} /> : null}
+    {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : modal.mode === 'artifact' ? pages.filter(page => page.kind === 'work' && page.id !== modal.artifact.pageId) : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.mode === 'artifact' ? undefined : modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} sourceText={messageBody(modal.message)} needsExactExcerpt={modal.needsExactExcerpt} materials={modal.message.materials} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'transfer' ? <TransferWorkDialog key={`${route.id}/${modal.message.id}`} excerpt={modal.excerpt}
       sourceTitle={view?.page.title} sourceText={messageBody(modal.message)}
