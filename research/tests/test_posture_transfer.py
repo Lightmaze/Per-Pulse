@@ -95,6 +95,12 @@ def test_ordinary_feedback_keeps_native_capture_and_fresh_transfer_separate(tmp_
     assert lesson["source"]["source_message_id"] == source["result_event_id"]
     assert lesson["source"]["feedback_message_id"] == feedback["input_event_id"]
     assert lesson["scope"] == "context"
+    assert lesson["revision"] == 2  # operator localized original subject-default v1
+    assert lesson["history"][0]["scope"] == "subject"
+    assert result["scope_controls"] == [{
+        "id": lesson["id"], "captured_scope": "subject", "captured_revision": 1,
+        "localized_scope": "context", "localized_revision": 2, "operator_changed": True,
+    }]
     assert result["shared_lessons"] == [{"id": lesson["id"], "revision": lesson["revision"] + 1,
                                           "previous_revision": lesson["revision"], "scope": "subject"}]
     assert result["provider_requests"] == {"training": 4, "bare_transfer": 1, "bare_negative": 1,
@@ -116,6 +122,23 @@ def test_ordinary_feedback_keeps_native_capture_and_fresh_transfer_separate(tmp_
     audit = audit_ordinary_transfer(output)
     assert audit["status"] == "verified", audit
     assert not audit["eligible_for_behavior_comparison"]
+
+    # A forged after-the-fact claim that the model captured a local lesson
+    # must fail even if the host record digest is recomputed.
+    trial_record = output / "ordinary-transfer.json"
+    original_record = trial_record.read_bytes()
+    manifest_path = output / "ordinary-transfer-manifest.json"
+    original_manifest = manifest_path.read_bytes()
+    forged = deepcopy(result)
+    forged["scope_controls"][0]["captured_scope"] = "context"
+    trial_record.write_text(json.dumps(forged))
+    manifest = json.loads(original_manifest)
+    manifest["record_digest"] = _record_digest(forged)
+    manifest_path.write_text(json.dumps(manifest))
+    assert "study_scope_control_mismatch" in audit_ordinary_transfer(output)["errors"]
+    trial_record.write_bytes(original_record)
+    manifest_path.write_bytes(original_manifest)
+    assert audit_ordinary_transfer(output)["status"] == "verified"
 
     # A corrupt, missing or truncated pre-transport admission journal cannot
     # masquerade as a reconciled provider request history.
@@ -189,7 +212,7 @@ def test_absent_capture_is_an_observed_outcome_and_never_seeded_by_host(tmp_path
     result = run_ordinary_transfer(output, model_factory=fixture_factory(monkeypatch, requests, capture=False), stage_timeout=10)
     assert result["status"] == result["capture_status"] == "capture_absent", result
     assert len(result["stages"]) == 2
-    assert result["learned_lessons"] == result["shared_lessons"] == result["experiences"] == []
+    assert result["learned_lessons"] == result["shared_lessons"] == result["experiences"] == result["scope_controls"] == []
     assert result["provider_requests"]["training"] == len(requests) == 2
     assert sum(result["provider_requests"].values()) == 2
     audit = audit_ordinary_transfer(output)
