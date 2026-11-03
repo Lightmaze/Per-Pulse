@@ -142,7 +142,7 @@ class PageService:
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
         self.execution = PageExecution(self.runtime)
-        self.artifacts = PageArtifacts(self.runtime, execution=self.execution)
+        self.artifacts = PageArtifacts(self.runtime, execution=self.execution, undone_record=self)
         self.replay = PageReplay(self)
         from .learning import PageLearning
         self.learning = PageLearning(self)
@@ -483,6 +483,22 @@ class PageService:
     def _save(self) -> None:
         self.runtime._require_runtime_owner()
         self.runtime.storage.save_component_state(self._state_key, self._state)
+
+    def is_undone(self, action_id: str) -> bool:
+        with self._lock:
+            return action_id in self._state.get("undoneChanges", {})
+
+    def mark_undone(self, action_id: str) -> None:
+        with self._lock:
+            undone = self._state.setdefault("undoneChanges", {})
+            if action_id in undone:
+                return
+            undone[action_id] = _now()
+            try:
+                self._save()
+            except BaseException:
+                undone.pop(action_id, None)
+                raise
 
     def _front(self, page_id: str) -> Any:
         if page_id == "home":

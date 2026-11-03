@@ -19,6 +19,8 @@ provider. It applies only while the file still has that change's content.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
+from pathlib import Path
 import re
 from typing import Any
 
@@ -58,11 +60,16 @@ def _digest(value: Any) -> bool:
 class PageArtifacts:
     """Read page-scoped write evidence without creating sessions or runners."""
 
-    def __init__(self, runtime, *, execution: PageExecution | None = None):
+    def __init__(self, runtime, *, execution: PageExecution | None = None,
+                 undone_record: Any = None):
         self.runtime = runtime
         # Share the existing Home/Work -> Kernel scope mapping. This helper
         # owns no additional authority or persisted session identity.
         self.execution = execution if execution is not None else PageExecution(runtime)
+        # Durable record of undone changes (``is_undone``/``mark_undone``).
+        # Kernel events roll over in a long session, so they cannot be the
+        # only record that a change was undone.
+        self._undone_record = undone_record
 
     @staticmethod
     def _item(page_id: str, action: ActionRecord) -> dict | None:
@@ -112,10 +119,30 @@ class PageArtifacts:
         }
 
     def _undone(self, action: ActionRecord) -> bool:
+        if self._undone_record is not None and self._undone_record.is_undone(action.action_request_id):
+            return True
         return self.execution._kernel.store.has_event(
             action.scope.session_scope(), "checkpoint.restored",
             action_request_id=action.action_request_id,
         )
+
+    def _mark_undone(self, action: ActionRecord) -> None:
+        if self._undone_record is not None:
+            self._undone_record.mark_undone(action.action_request_id)
+
+    def _has_before_image(self, item: dict) -> bool:
+        """Whether the file already has the content it had before this change."""
+        path = Path(self.execution._kernel.workspace_root) / item["path"]
+        try:
+            regular = path.is_file() and not path.is_symlink()
+            if regular and path.stat().st_size > MAX_FILE_BYTES:
+                return False
+            data = path.read_bytes() if regular else None
+        except OSError:
+            return False
+        if item["beforeSha256"] is None:
+            return data is None and not path.exists() and not path.is_symlink()
+        return data is not None and hashlib.sha256(data).hexdigest() == item["beforeSha256"]
 
     @staticmethod
     def _limits() -> dict:
@@ -196,6 +223,11 @@ class PageArtifacts:
         try:
             self.execution._kernel.restore_checkpoint(action.scope, item["checkpointId"])
         except WorkspaceDigestConflict as error:
+            if self._has_before_image(item):
+                # Already back to its earlier content (for example, an undo
+                # that finished before its record was saved).
+                self._mark_undone(action)
+                return {"pageId": page_id, "artifact": {**item, "undone": True, "state": "unchecked"}}
             raise ArtifactError(
                 "artifact_version_changed",
                 "This file has changed since this change. Undo the later change first.", 409,
@@ -214,6 +246,7 @@ class PageArtifacts:
             raise ArtifactError(
                 "artifact_undo_unavailable", "This change can no longer be undone.", 409,
             ) from error
+        self._mark_undone(action)
         return {"pageId": page_id, "artifact": {**item, "undone": True, "state": "unchecked"}}
 
     def read(self, page_id: str, artifact_id: str) -> dict:
