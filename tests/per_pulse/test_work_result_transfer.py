@@ -99,7 +99,7 @@ def test_explicit_selected_source_reaches_another_work_with_native_provenance(tm
         assert client.get("/api/bootstrap").json()["workspaceId"] == native.world_id
 
 
-def test_handoff_rejects_unsettled_foreign_or_edited_source_without_side_effect(tmp_path, monkeypatch):
+def test_handoff_rejects_unsettled_foreign_or_empty_source_without_side_effect(tmp_path, monkeypatch):
     observed = []
     with client_for(tmp_path, model_factory=http_factory(monkeypatch, observed)) as client:
         first = new_page(client, title="Source", instruction="source input")
@@ -116,7 +116,7 @@ def test_handoff_rejects_unsettled_foreign_or_edited_source_without_side_effect(
             ({"targetPageId": "does-not-exist"}, 404),
             ({"messageId": second["initialMessageId"]}, 404),
             ({"messageId": first["initialMessageId"]}, 409),
-            ({"excerpt": "Fabricated source result"}, 422),
+            ({"excerpt": "   "}, 422),
         ]
         for patch, expected_status in mutations:
             response = client.post(f"/api/pages/{source_id}/transfer", json={**valid, **patch})
@@ -125,3 +125,29 @@ def test_handoff_rejects_unsettled_foreign_or_edited_source_without_side_effect(
         assert [m["id"] for m in before["messages"]] == [m["id"] for m in after["messages"]]
         assert before["references"] == after["references"]
         assert client.get("/api/pages/home").json()["messages"] == []
+
+
+def test_an_edited_excerpt_is_sent_with_its_source_and_marked_edited(tmp_path, monkeypatch):
+    observed = []
+    with client_for(tmp_path, model_factory=http_factory(monkeypatch, observed)) as client:
+        source_id = new_page(client, title="Source", instruction="source input")["page"]["id"]
+        target_id = new_page(client, title="Receiver", instruction="receiver input")["page"]["id"]
+        reply = _settled_reply(client, source_id)
+        _settled_reply(client, target_id)
+        edited = "My summary of that result, in my own words."
+        response = client.post(f"/api/pages/{source_id}/transfer", json={
+            "targetPageId": target_id, "messageId": reply["id"],
+            "excerpt": edited, "instruction": "Build on this summary.",
+        })
+        assert response.status_code == 201, response.text
+        sent = next(m for m in response.json()["view"]["messages"] if m["id"] == response.json()["messageId"])
+        envelope = json.loads(sent["content"].split("SOURCE_EXCERPT_JSON\n", 1)[1].split("\n\nMy request", 1)[0])
+        assert envelope == {"edited": True, "excerpt": edited,
+                            "sourceMessageId": reply["id"], "sourcePageId": source_id}
+        assert sent["sourcePageId"] == source_id and sent["sourceMessageId"] == reply["id"]
+        exact = client.post(f"/api/pages/{source_id}/transfer", json={
+            "targetPageId": target_id, "messageId": reply["id"],
+            "excerpt": reply["content"], "instruction": "Use the exact result.",
+        }).json()
+        verbatim = next(m for m in exact["view"]["messages"] if m["id"] == exact["messageId"])
+        assert '"edited"' not in verbatim["content"]

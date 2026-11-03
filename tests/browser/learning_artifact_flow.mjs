@@ -266,7 +266,7 @@ try {
     hasText: 'The first screen is a twelve-field intake form. [Synthetic browser fixture]',
   }).first();
   // A DOM selection can contain rendered labels/Markdown not contiguous in
-  // the native result. It must never silently expand into the full source.
+  // the native result. It is kept as the person selected it, marked edited.
   await page.evaluate(() => {
     const article = [...document.querySelectorAll('.message-assistant')]
       .find(node => node.textContent?.includes('The first screen is a twelve-field intake form. [Synthetic browser fixture]'));
@@ -283,17 +283,21 @@ try {
   });
   const mismatchDialog = page.getByRole('dialog', { name: 'Carry this result into another Work', exact: true });
   await mismatchDialog.waitFor();
-  assert.equal(await mismatchDialog.locator('#transfer-work-excerpt').inputValue(), '');
-  await mismatchDialog.locator('#transfer-work-instruction').fill('Use only an exact quote.');
-  assert.equal(await mismatchDialog.getByRole('button', { name: 'Send to Work', exact: true }).isDisabled(), true);
-  await mismatchDialog.locator('#transfer-work-excerpt').fill('A fabricated quote');
-  assert.equal(await mismatchDialog.getByRole('button', { name: 'Send to Work', exact: true }).isDisabled(), true);
+  const editedNote = mismatchDialog.getByText('Edited from the original. The link to its source stays.', { exact: true });
+  const sendButton = mismatchDialog.getByRole('button', { name: 'Send to Work', exact: true });
+  assert.match(await mismatchDialog.locator('#transfer-work-excerpt').inputValue(), /twelve-field intake form/);
+  await editedNote.waitFor();
+  await mismatchDialog.locator('#transfer-work-instruction').fill('Use this note.');
+  assert.equal(await sendButton.isEnabled(), true);
+  await mismatchDialog.locator('#transfer-work-excerpt').fill('');
+  assert.equal(await sendButton.isDisabled(), true, 'an empty excerpt cannot be sent');
   await mismatchDialog.getByRole('button', { name: 'Use entire source result', exact: true }).click();
   assert.match(await mismatchDialog.locator('#transfer-work-excerpt').inputValue(), /twelve-field intake form/);
-  assert.equal(await mismatchDialog.getByRole('button', { name: 'Send to Work', exact: true }).isEnabled(), true);
+  assert.equal(await editedNote.count(), 0, 'the exact result is not marked edited');
+  assert.equal(await sendButton.isEnabled(), true);
   await mismatchDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
-  checks.push('nonliteral rendered selection cannot silently disclose an entire Work result');
+  checks.push('a rendered selection is offered as an edited excerpt; the exact result is one click away');
 
   // A completed native handoff must not steal Home/another Work if the user
   // navigates while the request is still in flight. Its event still persists

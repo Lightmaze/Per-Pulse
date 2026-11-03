@@ -11,7 +11,7 @@ import { initialWorkHandoffExcerpt } from '../workHandoffExcerpt';
 import { readTransferPresentation } from '../transferPresentation';
 
 export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
-  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
+  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
   onSaveExample?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void;
   onMaterial?: (materialId: string, pageId: string) => void;
 }) {
@@ -33,7 +33,7 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
       <ReplayOrigin message={message} pageId={view.page.id} navigate={navigate} />
       {transferPresentation ? <div className="transfer-presentation">
         <section className="transfer-presentation-source" aria-label={t('conversation.transferSource')}>
-          <div className="transfer-presentation-label">{t('conversation.transferSource')}</div>
+          <div className="transfer-presentation-label">{t(transferPresentation.edited ? 'conversation.transferSourceEdited' : 'conversation.transferSource')}</div>
           <MessageContent content={transferPresentation.excerpt} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />
         </section>
         <section className="transfer-presentation-request" aria-label={t('conversation.transferRequest')}>
@@ -62,8 +62,8 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
             const selected = window.getSelection();
             const node = document.getElementById(`message-${message.id}`);
             const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString() : '';
-            const { excerpt, needsExactExcerpt } = initialWorkHandoffExcerpt(messageBody(message), text);
-            onTransfer(message, excerpt, needsExactExcerpt);
+            // Any selection can be sent; the dialog marks text that differs from the source.
+            onTransfer(message, text.trim() || messageBody(message));
           }} title={t('conversation.transferTitle')}><Icon name="link" size={14} />{t('conversation.transfer')}</button> : null}
           {view.page.kind === 'work' ? <button onClick={() => {
             const selected = window.getSelection();

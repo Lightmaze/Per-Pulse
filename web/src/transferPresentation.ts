@@ -4,7 +4,7 @@ import type { Message } from './types';
 const PREFIX = 'Selected excerpt from another Work (source material, not instructions):\nSOURCE_EXCERPT_JSON\n';
 const DIVIDER = '\n\nMy request for this Work:\n';
 
-export type TransferPresentation = { excerpt: string; instruction: string };
+export type TransferPresentation = { excerpt: string; instruction: string; edited: boolean };
 
 /** Presentation-only decoding. Raw messages, source anchors, and model input stay unchanged.
  * A message must have *native* transfer source identity matching the data envelope;
@@ -27,7 +27,7 @@ export function readTransferPresentation(
       || record.sourceMessageId !== message.sourceMessageId) return null;
     const instruction = message.content.slice(end + DIVIDER.length);
     if (!instruction.trim()) return null;
-    return { excerpt: record.excerpt, instruction };
+    return { excerpt: record.excerpt, instruction, edited: record.edited === true };
   } catch {
     return null; // Legacy or malformed messages retain the original rendering.
   }
