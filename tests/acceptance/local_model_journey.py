@@ -9,15 +9,17 @@ experience enabled, then run:
         --output ./private-journey.json
 
 The script only uses the public HTTP API. It records what happened in each
-step (status, timing, replies, approvals, files, experience) and never
+step (status, timing, replies, human approval requests, files, experience) and never
 invents a reply. A step that times out or fails is recorded and the journey
-continues where that makes sense. The report can contain your workspace
-content: keep it private.
+continues where that makes sense. The journey never approves any action; review pending actions in the original
+Work yourself. A pending decision eventually times out rather than being silently
+approved. The report can contain your workspace content: keep it private.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -93,23 +95,43 @@ class Journey:
                 "reply": new[-1]["content"] if new else None,
                 "pendingActions": [a["toolName"] for a in view["execution"]["pendingActions"]]}
 
-    def approve_all(self, page_id: str, limit: int = 4) -> dict:
-        approved = []
-        for _ in range(limit):
-            pending = self.view(page_id)["execution"]["pendingActions"]
-            if not pending:
-                break
-            action = pending[0]
-            before = len(self.replies(self.view(page_id)))
-            self.post(f"/api/pages/{page_id}/execution/actions/{action['actionId']}",
-                      {"decision": "allow_once"})
-            approved.append({"tool": action["toolName"], "path": action["arguments"].get("path")
-                             if isinstance(action["arguments"], dict) else None})
-            self.settled(page_id, before)
-        view = self.view(page_id)
-        return {"approved": approved, "pageStatus": view["page"]["status"],
-                "files": [a["path"] for a in view["artifacts"]],
-                "reply": self.replies(view)[-1]["content"] if self.replies(view) else None}
+    def wait_for_operator(self, page_id: str) -> dict:
+        """Wait for the person to decide pending actions in the original Work.
+
+        This real-provider acceptance journey never grants tool authority.
+        The operator may approve, deny, or stop in Per Pulse itself.
+        """
+        seen: dict[str, dict] = {}
+        deadline = time.monotonic() + self.turn_timeout
+        while True:
+            view = self.view(page_id)
+            pending = view["execution"]["pendingActions"]
+            for action in pending:
+                action_id = action["actionId"]
+                if action_id not in seen:
+                    seen[action_id] = {"actionId": action_id, "tool": action["toolName"]}
+                    print(json.dumps({
+                        "humanDecisionRequiredInWork": page_id,
+                        "actionId": action_id, "tool": action["toolName"],
+                    }), flush=True)
+            if not pending and view["page"]["status"] in {"idle", "error"}:
+                return {
+                    "approvalHandling": "human_in_original_work",
+                    "observedRequests": list(seen.values()),
+                    "pendingActions": [],
+                    "pageStatus": view["page"]["status"],
+                    "files": [item["path"] for item in view["artifacts"]],
+                    "reply": self.replies(view)[-1]["content"] if self.replies(view) else None,
+                }
+            if time.monotonic() >= deadline:
+                return {
+                    "ok": False, "approvalHandling": "human_in_original_work",
+                    "observedRequests": list(seen.values()),
+                    "pendingActions": [a["toolName"] for a in pending],
+                    "pageStatus": view["page"]["status"],
+                    "error": "The Work did not finish. Review pending actions in that Work; none were approved by this script.",
+                }
+            time.sleep(2)
 
     def run(self) -> dict:
         boot = self.get("/api/bootstrap")
@@ -147,7 +169,10 @@ class Journey:
             return report
         work = state["work"]
 
-        self.step("approve_file_and_read_back", lambda: self._approve_and_read(work))
+        file_step = self.step("human_review_and_read_back", lambda: self._approve_and_read(work))
+        if not file_step["ok"]:
+            report.update(outcome="incomplete", steps=self.steps)
+            return report
 
         def bring_home() -> dict:
             last = self.replies(self.view(work))[-1]
@@ -203,13 +228,13 @@ class Journey:
         return report
 
     def _approve_and_read(self, page_id: str) -> dict:
-        result = self.approve_all(page_id)
+        result = self.wait_for_operator(page_id)
         files = {}
         for artifact in self.view(page_id)["artifacts"]:
             read = self.get(f"/api/pages/{page_id}/artifacts/{artifact['id']}")
             files[artifact["path"]] = read.get("content") or read.get("artifact", {}).get("preview")
         result["fileContents"] = files
-        result["ok"] = bool(files)
+        result["ok"] = bool(files) and result.get("ok") is not False
         return result
 
 
@@ -232,6 +257,14 @@ def usage_summary(data_dir: Path | None) -> dict | None:
         connection.close()
 
 
+
+def write_private_report(path: Path, report: dict) -> None:
+    """Create sensitive provider evidence exclusively, private from its first byte."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as output:
+        json.dump(report, output, ensure_ascii=False, indent=2)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--url", default="http://127.0.0.1:8000")
@@ -249,8 +282,7 @@ def main() -> None:
     except Exception:
         report["commit"] = None
     report["usage"] = usage_summary(args.data_dir)
-    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
-    args.output.chmod(0o600)
+    write_private_report(args.output, report)
     print(json.dumps({"outcome": report.get("outcome"), "report": str(args.output)}))
 
 
