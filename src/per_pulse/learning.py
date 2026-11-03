@@ -217,7 +217,26 @@ class PageLearning:
                 subject_id=self._subject(page_id),
                 context_id=context_id, include_inactive=True,
             )
-            return {"enabled": True, "experiences": [self._public(r, context_id, page_id) for r in records]}
+            # The source Work can inspect and restore its own inactive history.
+            # A withdrawn shared lesson must not remain discoverable from every
+            # unrelated Work merely because this projection includes inactive
+            # records. A former recipient may still inspect feedback it actually
+            # authored, even after the source withdraws the lesson.
+            def visible(record):
+                if record["context_id"] == context_id or record["active"]:
+                    return True
+                return any(
+                    isinstance(entry.get("source"), dict)
+                    and entry["source"].get("kind") == "operator_report"
+                    and entry["source"].get("relation") == "shared_recipient"
+                    and entry["source"].get("page_id") == page_id
+                    for entry in record.get("feedback", [])
+                )
+
+            return {"enabled": True, "experiences": [
+                self._public(record, context_id, page_id)
+                for record in records if visible(record)
+            ]}
 
     def create(self, page_id, data):
         from pulse_system.service.native_posture import capture_encounter
