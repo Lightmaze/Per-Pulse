@@ -219,14 +219,15 @@ def run_ordinary_transfer(
         "schema": SCHEMA, "status": "running", "origin": "synthetic_fixture" if test_only else "real_provider",
         "provider_identity": identity, "budget": ceilings, "stage_timeout_seconds": stage_timeout,
         "protocol": protocol, "task_order": task_order, "stages": [], "learned_lessons": [], "shared_lessons": [],
+        "scope_controls": [],
         "capture_status": "pending", "review_status": "unreviewed", "eligible_for_behavior_comparison": False,
         "ordinary_feedback_has_learning_instruction": False,
-        "sharing_policy": "Operator explicitly promotes only source-attributed native lessons after both no-memory targets settle.",
+        "sharing_policy": "For study isolation, the operator keeps a verified native capture local before fresh baseline Works, then shares it only after both baseline Works settle.",
         "condition_order": [name for name, _, _ in stages[2:]],
         "limitations": [
             "Baseline runs before sharing; task-order reversal only counterbalances notice versus outline within each phase.",
             "Conditional trials add posture computations; equal request ceilings do not match realized compute.",
-            "Explicit operator sharing tests abstraction transfer, not spontaneous cross-page promotion.",
+            "Captures now default to subject scope in the product. Operator-controlled localization before baseline, and later sharing, are declared study interventions rather than spontaneous transfer.",
             "Absence checks cover exact source text and private packet fields, not all semantic paraphrases.",
             "Native capture and request exposure do not score the usefulness of the later response.",
         ],
@@ -334,23 +335,47 @@ def run_ordinary_transfer(
                     record["status"] = "failed"
                     break
                 if name == "feedback":
-                    # Runtime drains native staged captures after World settlement.
+                    # The native product now admits lessons to subject scope by default.
+                    # Detect the actual model-origin capture first, then explicitly keep
+                    # it in its source Work before either no-memory target exists.
+                    # This is an operator study intervention, NOT model learning or an
+                    # assertion that the model originally chose private scope.
                     until = min(deadline, time.monotonic() + 2)
                     source_result = record["stages"][0]["result_event_id"]
                     while True:
-                        lessons = runtime.harness.posture_memory.list_experiences(subject_id=runtime.continuity_engram_id)
-                        record["learned_lessons"] = [value for value in lessons
-                            if value["context_id"] == entry["context_id"] and value["scope"] == "context"
+                        lessons = runtime.harness.posture_memory.list_experiences(
+                            subject_id=runtime.continuity_engram_id,
+                        )
+                        captured = [value for value in lessons
+                            if value["context_id"] == entry["context_id"]
+                            and value["scope"] in {"context", "subject"}
                             and value.get("source", {}).get("source_message_id") == source_result
                             and value.get("source", {}).get("feedback_message_id") == input_id
                             and value.get("source", {}).get("learning_turn_id") == turn.id
                             and value.get("source", {}).get("source_action_id") in {
                                 action["id"] for action in entry["actions"]
                                 if action["tool"] == "posture" and action["status"] == "succeeded"}]
-                        if record["learned_lessons"] or time.monotonic() >= until:
+                        if captured or time.monotonic() >= until:
                             break
                         await asyncio.sleep(.05)
-                    record["capture_status"] = "native_lesson_admitted" if record["learned_lessons"] else "capture_absent"
+                    for lesson in captured:
+                        if lesson["scope"] == "subject":
+                            pages.learning.revise(source_page, lesson["id"], lesson["revision"],
+                                                  {"scope": "context"})
+                        localized = runtime.harness.posture_memory.get_experience(lesson["id"])
+                        if localized["scope"] != "context":
+                            raise ValueError("study baseline cannot proceed with shared native capture")
+                        record["scope_controls"].append({
+                            "id": lesson["id"], "captured_scope": lesson["scope"],
+                            "captured_revision": lesson["revision"],
+                            "localized_scope": localized["scope"],
+                            "localized_revision": localized["revision"],
+                            "operator_changed": localized["revision"] != lesson["revision"],
+                        })
+                        record["learned_lessons"].append(localized)
+                    record["capture_status"] = (
+                        "native_lesson_admitted" if record["learned_lessons"] else "capture_absent"
+                    )
                     if not record["learned_lessons"]:
                         record["status"] = "capture_absent"
                         break
@@ -513,9 +538,39 @@ def audit_ordinary_transfer(output: Path) -> dict:
             state = world.execute("SELECT state FROM component_state WHERE component=?", ("per-pulse-posture-v1:" + record["world_id"],)).fetchone()
             journal = json.loads(state["state"])["experiences"] if state else {}
             lessons = record["learned_lessons"]
+            controls = record.get("scope_controls", [])
+            if (not isinstance(controls, list)
+                    or len(controls) != len(lessons)
+                    or sorted(value.get("id") for value in controls if isinstance(value, dict))
+                        != sorted(value.get("id") for value in lessons)):
+                errors.append("study_scope_control_mismatch")
             if bool(lessons) != (record["capture_status"] == "native_lesson_admitted"):
                 errors.append("native_capture_status_mismatch")
             for lesson in lessons:
+                # Reconcile the model's actual captured scope with the later
+                # operator-only baseline isolation. A new subject-shared
+                # capture must leave its revision-1 snapshot in native history;
+                # it cannot be silently relabelled as a model-local choice.
+                control = next((item for item in controls if isinstance(item, dict)
+                                and item.get("id") == lesson["id"]), None)
+                if control is None or control.get("localized_scope") != "context" or (
+                        lesson["scope"] != "context"
+                        or control.get("localized_revision") != lesson["revision"]):
+                    errors.append("study_scope_control_mismatch")
+                else:
+                    changed = control.get("operator_changed") is True
+                    if changed:
+                        original = next((previous for previous in lesson.get("history", [])
+                                         if previous.get("revision") == control.get("captured_revision")), None)
+                        if (control.get("captured_scope") != "subject"
+                                or type(control.get("captured_revision")) is not int
+                                or lesson["revision"] != control["captured_revision"] + 1
+                                or original is None or original.get("scope") != "subject"):
+                            errors.append("study_scope_control_mismatch")
+                    elif (control.get("operator_changed") is not False
+                          or control.get("captured_scope") != "context"
+                          or control.get("captured_revision") != lesson["revision"]):
+                        errors.append("study_scope_control_mismatch")
                 source = lesson["source"]
                 action = kernel.execute("SELECT * FROM actions WHERE action_request_id=?", (source.get("source_action_id"),)).fetchone()
                 if (action is None or action["tool_name"] != "posture" or action["status"] != "succeeded"
