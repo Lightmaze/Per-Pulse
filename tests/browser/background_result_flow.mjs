@@ -22,10 +22,10 @@ await new Promise(done => socket.close(done));
 const base = `http://127.0.0.1:${port}`;
 let serverLog = '', browser, page, server;
 const errors = [], checks = [];
-const start = () => {
+const start = (disablePulse = false) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/attention_server.py'), '--data-dir', directory,
-    '--port', String(port), '--spontaneous',
+    '--port', String(port), '--spontaneous', ...(disablePulse ? ['--no-pulse'] : []),
   ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', value => { serverLog += value; });
   child.stderr.on('data', value => { serverLog += value; });
@@ -100,16 +100,17 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), homeDraft);
   assert.equal(await page.locator('.home-continuation-open').count(), 0);
   checks.push('Activity opens the same answer in English and Chinese; visiting it does not resurrect an older Home item.');
-  await stop(server); server = start();
+  await stop(server); server = start(true);
   await wait(async () => (await fetch(base + '/api/health')).ok, 'reopen same World');
   await page.goto(base + '/page/' + work + '#message-' + activation.resultMessageId);
   await page.locator('#message-' + activation.resultMessageId).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), workDraft);
   const reopened = await get('/api/pulse');
+  assert.equal(reopened.enabled, false, 'restarted World must not admit more autonomous pulses');
   assert.equal(reopened.recentActivations[0].resultMessageId, activation.resultMessageId);
   assert.equal(reopened.budget.used, 1);
   assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
-  checks.push('Restart preserves the exact result, draft and single admission without creating another turn.');
+  checks.push('Restart with Pulse disabled preserves the exact result, draft and single prior admission without new autonomous turns.');
 
   // Browser-only presentation fixture: each link resolves to a real native
   // assistant message from a separate Work; ONLY the extra Pulse observation
@@ -144,6 +145,9 @@ try {
     await route.fulfill({ response: upstream, json: observation });
   });
   await page.goto(base);
+  const disabledObservation = await get('/api/pulse/observation');
+  assert.equal(disabledObservation.pulse.enabled, false);
+  assert.equal(disabledObservation.pulse.recentActivations[0].resultMessageId, activation.resultMessageId);
   const localResults = page.locator('#home-local-results .home-continuation-open');
   await wait(async () => await localResults.count() === 3, 'quiet preview of three local results');
   const reveal = page.getByRole('button', { name: '查看当前可见的 5 项局部结果' });
@@ -161,7 +165,7 @@ try {
   await page.getByRole('button', { name: '查看当前可见的 4 项局部结果' }).click();
   assert.equal(await localResults.count(), 4, 'reading one result does not hide the other four');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-  checks.push('Chinese mobile Home expands five distinct Work results and opens the fifth exact native message; original Home draft and receipt persist.');
+  checks.push('With autonomous Pulse actually disabled, Chinese mobile Home still opens an earlier native result and expands five source-verified Work messages; drafts and receipts persist.');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'] }, null, 2));
 } catch (error) {
