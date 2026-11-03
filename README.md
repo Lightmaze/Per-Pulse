@@ -27,7 +27,7 @@ Kernel implementation.
   `/tick 3` to give a page three more steps.
 - Keep examples and lessons from your corrections. They are available across
   your pages unless you keep one to its page.
-- Approve the file changes a model proposes, one action at a time (opt-in).
+- Approve the file changes a model proposes, one action at a time.
 - Browse and search the whole history, and move a stopped workspace to another
   directory.
 
@@ -106,8 +106,8 @@ in a separate `example` directory.
 
 | Option | What it does |
 | --- | --- |
-| `--posture` | Save examples and lessons from corrections. See [Experience](docs/experience.md). |
-| `--allow-workspace-actions` | Let the model propose file changes for your approval. See [Workspace actions](docs/workspace-actions.md). |
+| `--no-posture` | Don't keep examples and lessons from corrections (kept by default). See [Experience](docs/experience.md). |
+| `--no-workspace-actions` | Don't let the model propose file changes (by default it may, each needing your approval). See [Workspace actions](docs/workspace-actions.md). |
 | `per-pulse image save/inspect/restore` | Move a stopped workspace to a new directory. See [Workspace image](docs/image.md). |
 | `python -m per_pulse.pulse_observer` | Record a running workspace's activity over time. See [Observer](docs/observer.md). |
 

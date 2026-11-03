@@ -1,10 +1,7 @@
 # Keep examples and learn from corrections
 
-Enable attributed experience when starting the same workspace:
-
-```sh
-per-pulse --posture
-```
+`per-pulse` keeps examples and lessons by default; start it with
+`--no-posture` to turn this off. The example workspace never keeps experience.
 
 Use **Save example** on a completed reply to retain an exact passage, an optional
 note, and optionally a later message from that page. Selecting text first fills

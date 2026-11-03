@@ -1,6 +1,6 @@
 # Workspace actions and file results
 
-Opt in with `per-pulse --allow-workspace-actions`. This enables native Kernel workspace proposals subject to action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. Example mode keeps model requests and model file changes disabled. See [Core Harness](harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
+`per-pulse` lets the model propose workspace changes by default; turn this off with `--no-workspace-actions`. Each proposal needs action-specific approval, without creating a second runner. A Work's pending approval and exact-turn Stop remain in its original page; completed text-file changes can be opened from **Files from this page**, with original-action provenance and digest checks. Example mode keeps model requests and model file changes disabled. See [Core Harness](harness-foundation.md) for authority, recovery, and limits. Persistent monetary reservations and native browser tools are not yet included.
 
 **Download file** takes the complete verified text result out of the workspace.
 It checks the file again when requested and verifies the received bytes before

@@ -15,10 +15,11 @@ weights.
 
 ## Use it
 
-Configure the provider as described in [the README](../README.md), then start:
+Configure the provider as described in [the README](../README.md), then start
+`per-pulse`; experience is on by default (`--no-posture` turns it off):
 
 ```sh
-per-pulse --posture
+per-pulse
 ```
 
 `PER_PULSE_POSTURE=1` enables the same feature. It is off by default, and example
