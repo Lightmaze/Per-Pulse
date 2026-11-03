@@ -186,14 +186,14 @@ try {
   // Return an actual selected file-turn result to Home, retaining the exact
   // originating message, then navigate back to that Work's original position.
   const fileResult = page.locator('.message-assistant')
-    .filter({ hasText: 'Consultation prepared in the original Work.' }).last();
+    .filter({ hasText: 'Approved file work completed in the receiving Work.' }).last();
   await fileResult.getByRole('button', { name: 'Bring to Home', exact: true }).click();
   const returnDialog = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
   await returnDialog.waitFor();
   await returnDialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
   await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
   const returnedResult = page.locator('.message-user')
-    .filter({ hasText: 'Consultation prepared in the original Work.' }).last();
+    .filter({ hasText: 'Approved file work completed in the receiving Work.' }).last();
   const returnSource = returnedResult.locator('.source-line a.session-link');
   await returnSource.waitFor();
   assert.match(await returnSource.getAttribute('href'), /#message-/);
