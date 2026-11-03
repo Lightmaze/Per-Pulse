@@ -432,7 +432,7 @@ try {
   assert.equal(await chinesePicker.inputValue(), reportedResult.id);
   assert.equal(await lesson.getByRole('textbox', { name: '结果发生了什么变化？', exact: true }).inputValue(), receiverOutcome);
   await lesson.getByRole('button', { name: '没有明显帮助', exact: true }).waitFor();
-  await lesson.getByText('可选择此页面已加载的一条完整回复。关联会保留结果来源，但不代表已证明经验导致了该结果。', { exact: true }).waitFor();
+  await lesson.getByText('可选择此页面已加载的一条完整回复。', { exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await chinesePicker.scrollIntoViewIfNeeded();
   const pickerBounds = await chinesePicker.boundingBox();
