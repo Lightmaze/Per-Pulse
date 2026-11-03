@@ -890,10 +890,10 @@ class PulseEngine:
         for thread in abort_threads:
             thread.join(timeout=deadline.remaining_seconds())
 
-        pulse_unresolved = (
-            max(0, len(pulse_entries) - len(pulse_claimed))
-            + parked_unresolved
-        )
+        # A detached approval has no Python carrier: an unsettled logical
+        # turn is a durable-recovery concern, not proof that a worker escaped.
+        # Physical join and logical settlement must be reported independently.
+        pulse_unresolved = max(0, len(pulse_entries) - len(pulse_claimed))
         succession_unresolved = max(
             0,
             len(succession_entries) - len(succession_claimed),
@@ -911,17 +911,37 @@ class PulseEngine:
         if not succession_finalized:
             succession_unresolved = max(1, succession_unresolved)
 
-        reports = (
-            self._worker_shutdown_report(
-                component="pulse_workers",
+        pulse_report = self._worker_shutdown_report(
+            component="pulse_workers",
+            started_at=started_at,
+            started_monotonic=started_monotonic,
+            active_before=len(pulse_entries) + len(parked_entries),
+            unresolved=pulse_unresolved,
+            cancelled=cancelled_pulses,
+            errors=pulse_errors,
+            finalized=pulse_finalized,
+        )
+        if parked_unresolved and pulse_report.physical_exit_proven:
+            # Preserve uncertainty about the original uncompleted causal
+            # record while proving that the worker pool itself has joined.
+            # Holding the Runtime lease for a thread that no longer exists
+            # would prevent the next Runtime from recovering that record.
+            pulse_report = component_report(
+                "pulse_workers",
+                effect=ShutdownEffectState.UNCERTAIN,
+                owner=ShutdownOwnerState.JOINED,
+                process_tree=ShutdownProcessTreeState.NOT_APPLICABLE,
+                cancel=(ShutdownCancelState.SIGNALLED
+                        if abort_threads else ShutdownCancelState.UNKNOWN),
                 started_at=started_at,
                 started_monotonic=started_monotonic,
                 active_before=len(pulse_entries) + len(parked_entries),
-                unresolved=pulse_unresolved,
-                cancelled=cancelled_pulses,
-                errors=pulse_errors,
-                finalized=pulse_finalized,
-            ),
+                unresolved=parked_unresolved,
+                error_code=("shutdown_bookkeeping_failed" if pulse_errors
+                            else "detached_turn_recovery_required"),
+            )
+        reports = (
+            pulse_report,
             self._worker_shutdown_report(
                 component="succession_workers",
                 started_at=started_at,
