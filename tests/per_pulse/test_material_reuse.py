@@ -26,7 +26,7 @@ def reference(client, page_id, path, digest, *, headers=None):
                        json={"path": path, "sha256": digest}, headers=headers or identity(client))
 
 
-def test_browser_upload_rejects_old_service_identity_before_creating_bytes(tmp_path):
+def test_browser_upload_rejects_another_world_before_creating_bytes(tmp_path):
     with client_for(tmp_path, model_factory=None) as client:
         old = identity(client)
     with client_for(tmp_path, model_factory=None) as client:
@@ -34,11 +34,13 @@ def test_browser_upload_rejects_old_service_identity_before_creating_bytes(tmp_p
         headers = {**old, "Content-Type": "application/octet-stream",
                    "X-Per-Pulse-Upload-Id": uuid4().hex,
                    "X-Per-Pulse-File-SHA256": hashlib.sha256(content).hexdigest()}
-        stale = client.post("/api/pages/home/materials?name=Source.txt", headers=headers, content=content)
-        assert stale.status_code == 409 and stale.json()["error"]["code"] == "workspace_changed"
+        other = client.post("/api/pages/home/materials?name=Source.txt",
+                            headers={**headers, "X-Per-Pulse-World": "another-world"}, content=content)
+        assert other.status_code == 409 and other.json()["error"]["code"] == "material_workspace_changed"
         assert not list((tmp_path / "workspace").glob("uploads/*"))
+        # The same World after a restart accepts a page opened before it.
         current = identity(client)
-        saved = client.post("/api/pages/home/materials?name=Source.txt", headers={**headers, **current}, content=content)
+        saved = client.post("/api/pages/home/materials?name=Source.txt", headers=headers, content=content)
         assert saved.status_code == 201
         assert saved.json()["workspaceId"] == current["X-Per-Pulse-World"]
         assert saved.json()["serviceInstanceId"] == current["X-Per-Pulse-Service-Instance"]
@@ -71,7 +73,9 @@ def test_explicit_reuse_keeps_one_file_and_independent_native_message_ownership(
         assert "expected_digest=sha256" in messages[-1]["content"]
         stale = identity(client)
     with client_for(tmp_path, model_factory=None) as client:
-        assert reference(client, second, original["path"], original["sha256"], headers=stale).status_code == 409
+        assert reference(client, second, original["path"], original["sha256"], headers=stale).status_code == 201
+        assert reference(client, second, original["path"], original["sha256"],
+                         headers={**stale, "X-Per-Pulse-World": "another-world"}).status_code == 409
         preview = client.get(f"/api/pages/{second}/materials/{selected['id']}").json()
         assert preview["content"].encode() == content and preview["material"] == selected
         assert client.get(f"/api/pages/{first}/materials").json()["materials"] == [original]

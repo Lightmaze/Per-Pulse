@@ -106,8 +106,7 @@ export const api = {
     const response = await fetchResponse(`${pagePath(pageId)}/materials/${encodeURIComponent(material.id)}/download`, {
       headers: pulseWriteHeaders(identity), signal,
     });
-    if (response.headers.get('x-per-pulse-world') !== identity.workspaceId
-      || response.headers.get('x-per-pulse-service-instance') !== identity.serviceInstanceId) {
+    if (response.headers.get('x-per-pulse-world') !== identity.workspaceId) {
       throw new ApiError('The workspace changed. Reload before downloading the source.', 'workspace_changed', 409);
     }
     return verifiedDownload(response, material.sha256, 'material_download_unverified');

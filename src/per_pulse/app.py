@@ -432,11 +432,6 @@ def create_app(
         service.execution._scope(page_id)
         if request.headers.get("x-per-pulse-world") != service.runtime.world_id:
             raise MaterialError("material_workspace_changed", "The workspace changed. Refresh before uploading.")
-        # The first-party browser also fences uploads to the service instance it
-        # observed. Retain compatibility with existing World-only native clients.
-        if "x-per-pulse-service-instance" in request.headers:
-            service.require_file_identity(request.headers.get("x-per-pulse-world"),
-                                          request.headers.get("x-per-pulse-service-instance"))
         data = bytearray()
         async for chunk in request.stream():
             if len(data) + len(chunk) > MAX_FILE_BYTES:

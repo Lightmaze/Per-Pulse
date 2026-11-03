@@ -47,8 +47,10 @@ def test_original_download_exceeds_preview_and_survives_restart_without_a_model(
         assert runtime.kernel_service.store.sessions_for_world(runtime.world_id) == ()
 
     with client_for(tmp_path, model_factory=None) as client:
-        assert download(client, "home", record, old_identity).status_code == 409
+        # The same World after a restart still serves the original bytes.
+        assert download(client, "home", record, old_identity).content == content
         assert download(client, "home", record).content == content
+        assert download(client, "home", record, {**old_identity, "X-Per-Pulse-World": "another"}).status_code == 409
         assert not client.app.state.pages.runtime.kernel_service._runtimes
         assert (tmp_path / "workspace" / record["path"]).read_bytes() == content
 

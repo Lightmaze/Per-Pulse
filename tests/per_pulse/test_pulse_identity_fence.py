@@ -16,7 +16,7 @@ def _headers(observation):
     }
 
 
-def test_pulse_activity_write_fence_across_service_restart(tmp_path):
+def test_pulse_activity_writes_are_fenced_to_the_world_not_the_process(tmp_path):
     pulse = PulseSettings(enabled=True, spontaneous_rate=0)
     with client_for(tmp_path, pulse=pulse, model_factory=None) as client:
         observation = client.get("/api/pulse/observation").json()
@@ -25,11 +25,10 @@ def test_pulse_activity_write_fence_across_service_restart(tmp_path):
         assert client.patch("/api/pulse", json={"paused": True}, headers=valid).status_code == 200
         source = page(client, "Source", "Read an original local source.")
         target = page(client, "Receiver", "Continue in a distinct local Work.")
+        # Only a different World is refused; the server process is not.
         invalid = (
             {**valid, "X-Per-Pulse-World": "another-world"},
-            {**valid, "X-Per-Pulse-Service-Instance": "restarted-service"},
-            {"X-Per-Pulse-World": observation["workspaceId"]},
-            {"X-Per-Pulse-Service-Instance": observation["serviceInstanceId"]},
+            {"X-Per-Pulse-World": "another-world"},
         )
         operations = (
             ("PATCH", "/api/pulse", {"paused": False}),
@@ -66,20 +65,17 @@ def test_pulse_activity_write_fence_across_service_restart(tmp_path):
         reopened = client.get("/api/pulse/observation").json()
         assert reopened["workspaceId"] == observation["workspaceId"]
         assert reopened["serviceInstanceId"] != observation["serviceInstanceId"]
-        assert client.patch("/api/pulse", json={"paused": False},
-                            headers=valid).status_code == 409
-        assert client.request("DELETE", "/api/pulse/connections", json={
-            "sourcePageId": source, "targetPageId": target,
-        }, headers=valid).status_code == 409
         retained = client.get("/api/pulse").json()
         assert retained["paused"] is True
         assert retained["connections"][0]["sourcePageId"] == source
-        fresh = _headers(reopened)
+        # A page opened before the restart keeps working with the same World.
         assert client.patch("/api/pulse", json={"paused": False},
-                            headers=fresh).status_code == 200
+                            headers=valid).status_code == 200
         assert client.request("DELETE", "/api/pulse/connections", json={
             "sourcePageId": source, "targetPageId": target,
-        }, headers=fresh).status_code == 200
+        }, headers=valid).status_code == 200
+        assert client.patch("/api/pulse", json={"paused": False},
+                            headers={"X-Per-Pulse-World": "another-world"}).status_code == 409
         final = client.get("/api/pulse").json()
         assert final["paused"] is False
         assert final["connections"] == []

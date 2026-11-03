@@ -349,9 +349,13 @@ class PageService:
                 "pulse": self.pulse_status(),
             }
 
-    def require_file_identity(self, world_id: str | None, instance_id: str | None) -> None:
-        """Bind material access to the World and process the browser observed."""
-        if world_id != self.runtime.world_id or instance_id != self.service_instance_id:
+    def require_file_identity(self, world_id: str | None, instance_id: str | None = None) -> None:
+        """Bind material access to the World the browser observed.
+
+        A restarted server for the same World serves the same files; only a
+        different World (another data directory on this port) is refused.
+        """
+        if world_id != self.runtime.world_id:
             raise PageError(
                 "workspace_changed",
                 "The workspace changed. Reload before opening or uploading materials.",
@@ -378,16 +382,16 @@ class PageService:
             except HarnessError as error:
                 raise self.execution._translate(error) from error
 
-    def require_pulse_identity(self, world_id: str | None, instance_id: str | None) -> None:
-        """Fence first-party Activity edits to their observed World and process.
+    def require_pulse_identity(self, world_id: str | None, instance_id: str | None = None) -> None:
+        """Refuse Activity edits made against a different World.
 
-        Legacy clients may omit both headers; partial or mismatched identities
-        are rejected before any native pause, resume or connection change.
+        Clients that send no World header are accepted; a restarted server
+        for the same World accepts the edit.
         """
-        if world_id is None and instance_id is None:
+        if world_id is None:
             return
         with self._lock:
-            if world_id != self.runtime.world_id or instance_id != self.service_instance_id:
+            if world_id != self.runtime.world_id:
                 raise PageError(
                     "pulse_workspace_changed",
                     "The workspace changed while Activity was open. Reload before changing its activity.",
