@@ -171,7 +171,28 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             )
             _tick(world, lambda record_id=record_id:
                   world.storage.get_delegation(record_id)["result_summary"] is not None
+                  and world.causal_ledger.find_delegation_result_by_record_id(
+                      world.world_id, record_id,
+                  ) is not None
                   and not world.harness._active)
+            assert world._delegation_result_view(
+                world.storage.get_delegation(record_id),
+            )["outcome_eligible"]
+            if not records:
+                # A summary alone is not a rated outcome: the recipient
+                # must have the source-bound immutable delivery first.
+                with monkeypatch.context() as patch:
+                    patch.setattr(
+                        world.causal_ledger,
+                        "find_delegation_result_by_record_id",
+                        lambda *args, **kwargs: None,
+                    )
+                    assert not world._delegation_result_view(
+                        world.storage.get_delegation(record_id),
+                    )["outcome_eligible"]
+                    with pytest.raises(ServiceError) as premature:
+                        world.record_delegation_outcome(record_id, outcome)
+                    assert premature.value.error == "delegation_outcome_rejected"
             update = world.record_delegation_outcome(record_id, outcome)
             assert update["outcome"] == outcome
             records.append(record_id)
