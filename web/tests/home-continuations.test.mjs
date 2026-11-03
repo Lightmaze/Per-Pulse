@@ -73,9 +73,24 @@ test('Home never promotes pending, uncertain, failed or fabricated source events
   assert.equal(rows[0].source, null, 'a hidden source cannot gain a Home deep link');
 });
 
-test('Home fails closed when disabled or no traceable settled Work has appeared', () => {
+test('Home keeps previously settled results when future Pulse activity is disabled', () => {
+  const history = state(
+    event('latest', 'receiver'),
+    event('running', 'another', { status: 'running' }),
+    event('wrong', 'another', { messageId: 'unrelated' }),
+  );
+  const disabled = { ...history, enabled: false, paused: true };
+  const rows = homeContinuations(disabled, pages);
+  assert.deepEqual(rows.map(row => row.event.eventId), ['latest']);
+  assert.deepEqual(rows[0].receiver, { pageId: 'receiver', messageId: 'latest' });
+  assert.deepEqual(rows[0].source, { pageId: 'source', messageId: 'original-latest' });
+  assert.deepEqual(homeContinuations(disabled, pages, 3, new Set(['latest'])), [],
+    'a visited result must stay visited even if Pulse is disabled');
+});
+
+test('Home still fails closed without native, traceable settled Work evidence', () => {
   assert.deepEqual(homeContinuations(null, pages), []);
-  assert.deepEqual(homeContinuations({ ...state(event('a', 'receiver')), enabled: false }, pages), []);
+  assert.deepEqual(homeContinuations({ enabled: false, recentActivations: [] }, pages), []);
   assert.deepEqual(homeContinuations(state(event('a', 'receiver')), pages, 0), []);
   assert.deepEqual(homeContinuations(state(event('a', 'receiver', { messageId: null })), pages), []);
 });
@@ -176,5 +191,10 @@ test('Home can expand the live recent result window beyond three distinct Works'
   const afterOpening = homeContinuations(pulse, morePages, morePages.length, new Set(['result-0']));
   assert.deepEqual(afterOpening.map(row => row.event.eventId),
     ['result-1', 'result-2', 'result-3', 'result-4']);
-  assert.deepEqual(homeContinuations({ ...pulse, enabled: false }, morePages, morePages.length), []);
+  assert.deepEqual(
+    homeContinuations({ ...pulse, enabled: false }, morePages, morePages.length)
+      .map(row => row.event.eventId),
+    ['result-0', 'result-1', 'result-2', 'result-3', 'result-4'],
+    'turning off future Pulse must not hide prior verified results or collapse the expanded window',
+  );
 });
