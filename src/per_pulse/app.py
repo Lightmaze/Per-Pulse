@@ -151,7 +151,7 @@ class NewExperience(Input):
     conditions: Any
     counterexamples: list[Content] = Field(min_length=1, max_length=8)
     shift: ExperienceShift
-    scope: Literal["context", "subject"] = "context"
+    scope: Literal["context", "subject"] = "subject"
 
 
 class ReviseExperience(Input):

@@ -265,7 +265,7 @@ class PageLearning:
                     title=data["title"], excerpt=data["excerpt"], note=data.get("note", ""),
                     encounter=captured["encounter"],
                     source={**captured["source"], "capture_kind": "operator_selected_example"},
-                    record_type=captured["record_type"],
+                    record_type=captured["record_type"], scope="subject",
                 )
             except (ValueError, RedactionRequired) as error:
                 raise self._invalid(error) from error

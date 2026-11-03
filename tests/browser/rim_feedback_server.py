@@ -63,6 +63,13 @@ def seed(data_dir: Path, model_factory, state):
                       world.world_id, record_id) is not None
                   and not world.harness._active, seconds=20)
             assert world.record_delegation_outcome(record_id, outcome)["outcome"] == outcome
+            # Rated outcomes reach the subject's other Works by default. Keep
+            # these earlier seeds to the source Work so the journey isolates
+            # the one result whose guidance the browser edits.
+            pages.update_collaborator_feedback(source.id, record_id, {
+                "expected_revision": 0, "content": "Earlier seeded result.",
+                "scope": "work", "withdrawn": False,
+            })
 
         # Native RIM first selects and executes an actual adaptive team action
         # in the original Work. The UI can edit only its completed result.

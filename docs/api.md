@@ -168,7 +168,7 @@ These failures do not change the lesson. Old results outside the most recent
 500 messages remain valid. Stale `expectedRevision` gives 409.
 
 The source page may report its own lesson. Another page may report only an
-active, explicitly shared lesson of the same subject. Useful feedback leaves
+active lesson shared across the same subject (the default). Useful feedback leaves
 it active; harmful or withdrawn feedback pauses it. Editing, sharing and
 reactivating remain source-page operations.
 

@@ -30,14 +30,13 @@ receives the selected historical excerpts, not source transcripts, other
 contributors' histories, or private feedback. The delivered contribution
 retains this exact source selection and remains inspectable after restart.
 The quotes **do not** themselves change RIM candidate probabilities.
-Settled, operator-rated outcomes from this Work can influence selection.
-A rated outcome from another Work may do so only if its original owner has
-separately saved an active **collaborator-scope** feedback annotation on that
-exact completed contribution. Work-only notes and withdrawn annotations
-never authorize a new cross-Work selection. This uses the existing operator
-feedback revision/withdrawal interface and the original native World/Kernel,
-not a global reward store or automatic lesson promotion. An
-explicit single-recipient `consult` still avoids probabilistic sharing.
+Settled, operator-rated outcomes from any Work of the same subject can
+influence selection. A Work keeps a rated outcome to itself with an active
+**Work-only** note on that contribution, or by withdrawing a note it had
+shared; either applies to later selections at once. This uses the existing
+operator feedback revision/withdrawal interface and the original native
+World/Kernel, not a global reward store. An explicit single-recipient
+`consult` still avoids probabilistic sharing.
 
 Candidate weights are the model's relative starting preferences, **not**
 provider-token probabilities or a learned optimal policy. The host reads at
@@ -45,9 +44,8 @@ most 128 existing caller delegations, accepts only completed contributions
 with explicitly recorded `adopted`, `revised` or `discarded` outcomes,
 and verifies each outcome's settled native causal event, matching result
 parent, same owner and original Work identity, target and task. For a different
-receiving Work it also revalidates active explicit collaborator-scope sharing
-at selection time, failing closed on a missing or withdrawn annotation. It
-ignores invalid sources. The model still has to choose `consult_adaptive` in
+receiving Work it rereads the original Work's current note at selection time
+and skips an outcome kept to that Work. It ignores invalid sources. The model still has to choose `consult_adaptive` in
 its own Work; this feature does not autonomously invoke the tool. Repeated identical candidate/task/contract combinations
 contribute at most one outcome.
 
@@ -77,7 +75,7 @@ decision engine. It shows the originally selected collaborator, reference
 weight versus persisted selection weight, eligible rated source results,
 and the original completed result. Links are offered only for native events checked against their **original**
 displayable Work: same-Work results return within the current Work, while
-explicitly consented cross-Work evidence opens its exact originating Work
+cross-Work evidence opens its exact originating Work
 message and returns to the receiving Work. Missing or invalid source links
 remain unavailable, never guessed. The endpoint returns
 an empty list for Home or an unrelated Work and rejects unknown pages.
@@ -95,11 +93,10 @@ that collaborator improved a delivered work artifact.
 
 The feature does not silently form habits when the model does not select
 `consult_adaptive`, and it does not teach the provider's weights. A completed
-contribution without explicit operator outcome is not a reward. Outcomes remain immutable and the default evidence scope is the current
-Work. Explicit collaborator-scope annotations already have a native operator
-interface, so this slice reuses that consent to influence **future** choices.
-Withdrawing consent prevents later cross-Work selection but does not erase
-choices already persisted or text already sent. It does not infer rewards from
+contribution without explicit operator outcome is not a reward. Outcomes remain immutable and the default evidence scope is the
+whole subject. A Work-only note or a withdrawn note keeps an outcome out of
+**future** choices in other Works; it does not erase choices already persisted
+or text already sent. It does not infer rewards from
 feedback prose, improve the underlying provider weights or generalize to
 arbitrary cognitive strategies.
 

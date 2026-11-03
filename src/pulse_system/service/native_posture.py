@@ -99,15 +99,15 @@ def descriptor() -> ToolDescriptor:
         "message provenance and ordering, not whether the message is a correction. "
         "Do not treat an unrelated later message as feedback. Conditions need "
         "not hold everywhere, and a routine approach can be correct. Remember only "
-        "a useful reusable correction, not every message. A remember call stages a "
-        "context-local experience; it is saved only after this turn succeeds. "
+        "a useful reusable correction, not every message. A remember call stages an "
+        "experience for all of this subject's pages; it is saved only after this turn succeeds. "
         "Alternatively, remember_example(source_message_id, title, excerpt, optional note, "
         "optional feedback_message_id) retains an exact passage from an earlier settled "
         "assistant result in this context without inventing an abstract lesson. "
         "The excerpt must occur verbatim in that result; note is your revisable interpretation. "
         "A missing feedback_message_id is explicitly unreviewed, not a successful outcome. "
         "When supplied, feedback must be a later actual user message visible to this turn. "
-        "Examples follow the same local scope and successful-turn admission as lessons. "
+        "Examples follow the same scope and successful-turn admission as lessons. "
         "remember_reading(receipt_id, title, excerpt, optional note) instead keeps an "
         "exact passage already exposed by reading.open/continue/resume/follow in this "
         "context, including this turn. Use its real receipt_id. Search matches alone "
@@ -132,8 +132,8 @@ def descriptor() -> ToolDescriptor:
         "The revision and its attributed correction are saved together only "
         "after this turn succeeds. It cannot change sharing or resume a paused lesson. "
         "Finish the current work instead of polling the pending record. Saving is "
-        "not evidence of improved ability. This tool cannot promote experiences "
-        "to other contexts, grant tools, change permissions, or schedule new work.",
+        "not evidence of improved ability. This tool cannot change an experience's "
+        "sharing, grant tools, change permissions, or schedule new work.",
         capability="posture.internal", source="pulse.native-posture",
     )
 
@@ -492,7 +492,7 @@ class NativePosture:
         encounter = capture["encounter"]
         return {"subject_id": scope.engram_id, "context_id": scope.context_id,
                 "experience_id": "posture-native-" + request_id.split(":")[-1][:40],
-                "encounter": encounter, "source": source, "scope": "context",
+                "encounter": encounter, "source": source, "scope": "subject",
                 "record_type": capture["record_type"],
                 **content}
 
@@ -556,7 +556,7 @@ class NativePosture:
     def _receipt(record) -> dict:
         return {key: record[key] for key in (
             "request_id", "experience_id", "status", "revision", "error_code",
-        )} | {"scope": "context", "effect": "experience_not_proven_ability",
+        )} | {"scope": "subject", "effect": "experience_not_proven_ability",
              "admission": "after_successful_native_turn"}
 
     def execute(self, scope, call, cancellation, *, action_request_id=None):

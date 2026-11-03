@@ -158,8 +158,8 @@ def test_examples_keep_original_sources_through_committed_succession_and_cold_im
         assert second["source"]["source_subject_id"] == predecessor
         assert second["sourceAnchor"]["resultMessageId"] == original.result_event_id
         assert first["source"] == shared["source"]
-        assert pages.learning.view("home")["experiences"][0]["id"] == first["id"]
-        assert "encounter" not in pages.learning.view("home")["experiences"][0]
+        at_home = {item["id"]: item for item in pages.learning.view("home")["experiences"]}
+        assert first["id"] in at_home and "encounter" not in at_home[first["id"]]
         world_id = runtime.world_id
     finally:
         assert pages.runtime.close().clean
@@ -266,17 +266,20 @@ def test_page_example_capture_share_report_and_restart_keep_native_sources(tmp_p
         assert saved["source"]["feedback_evidence_class"] == "not_attached"
         assert "outcome" not in saved["encounter"] and "lesson" not in saved
         assert saved["source"]["capture_kind"] == "operator_selected_example"
+        assert saved["scope"] == "subject"
         target = new_page(client, title="Later practice")["page"]["id"]
-        assert client.get(f"/api/pages/{target}/posture").json()["experiences"] == []
         assert client.post(f"/api/pages/{target}/posture/examples", json=body).status_code == 404
         update = f"/api/pages/{page_id}/posture/experiences/{saved['id']}"
-        assert client.patch(update, json={"expectedRevision": 1, "changes": {"scope": "subject"}}).status_code == 200
+        # Shared across the subject by default; the source page can keep it local.
+        assert client.patch(update, json={"expectedRevision": 1, "changes": {"scope": "context"}}).status_code == 200
+        assert client.get(f"/api/pages/{target}/posture").json()["experiences"] == []
+        assert client.patch(update, json={"expectedRevision": 2, "changes": {"scope": "subject"}}).status_code == 200
         shared = client.get(f"/api/pages/{target}/posture").json()["experiences"][0]
         assert shared["excerpt"] == excerpt and shared["canReport"] and not shared["canEdit"]
         assert not {"encounter", "source", "feedback"} & set(shared)
         assert "PRIVATE_ORIGINAL_REQUEST" not in json.dumps(shared)
         report = client.post(f"/api/pages/{target}/posture/experiences/{saved['id']}/feedback", json={
-            "expectedRevision": 2, "verdict": "not_useful", "evidence": "PRIVATE_REPORT: the new requirement differed.",
+            "expectedRevision": 3, "verdict": "not_useful", "evidence": "PRIVATE_REPORT: the new requirement differed.",
         })
         assert report.status_code == 200 and report.json()["experience"]["active"]
         # The receiving Work may revisit its own testimony, but never the
@@ -290,7 +293,7 @@ def test_page_example_capture_share_report_and_restart_keep_native_sources(tmp_p
         assert all(field not in reported for field in ("encounter", "source"))
     with client_for(tmp_path, posture=True, model_factory=None) as client:
         source_view = client.get(f"/api/pages/{page_id}/posture").json()["experiences"][0]
-        assert source_view["id"] == saved["id"] and source_view["revision"] == 3
+        assert source_view["id"] == saved["id"] and source_view["revision"] == 4
         assert source_view["excerpt"] == excerpt
         assert source_view["feedback"][0]["evidence"].startswith("PRIVATE_REPORT")
         assert client.get(f"/api/pages/{page_id}?sourceMessageId={source['id']}").status_code == 200

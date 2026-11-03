@@ -107,16 +107,16 @@ try {
   await page.goto(base + '/page/' + works.source);
   await openDecisions();
   await openFeedback();
-  await editor().getByText('No guidance saved. A result assessment does not grant sharing consent.').waitFor();
+  await editor().getByText('No guidance saved.').waitFor();
   await editor().locator('textarea').fill('Check recorded cache timing before proposing a fix.');
   await submit();
   await editor().getByText('Saved for this Work only.').waitFor();
   assert.equal((await feedback(works.source, works.record)).current.scope, 'work');
-  checks.push('actual browser saves Work-local guidance without silent cross-Work consent');
+  checks.push('actual browser saves Work-only guidance that keeps this rated result local');
 
   const before = await sendChoice(works.baseline);
   assert.deepEqual(before.evidence, []);
-  checks.push('a different native Work excludes rated but unshared history');
+  checks.push('a Work-only note keeps the rated result out of a different native Work');
 
   await page.goto(base + '/page/' + works.source);
   await openDecisions();

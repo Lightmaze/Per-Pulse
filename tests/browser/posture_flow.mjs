@@ -228,8 +228,7 @@ try {
   assert.equal(afterManualRefinement.feedback.at(-1).source.kind, 'operator_described_refinement');
   await lesson.getByText('Later feedback (2)', { exact: true }).click();
   await lesson.getByText(reportedRevision, { exact: false }).waitFor();
-  await lesson.getByRole('button', { name: 'Use in other pages', exact: true }).click();
-  await lesson.getByText('In use · v6', { exact: true }).waitFor();
+  await lesson.getByText(/^Available across your pages/).waitFor();
   await close();
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Registration tool');
@@ -278,19 +277,19 @@ try {
   await other.getByRole('button', { name: 'Settings', exact: true }).click();
   await other.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
   await other.getByRole('button', { name: 'Pause lesson', exact: true }).click();
-  await other.getByText('Paused · v7', { exact: true }).waitFor();
+  await other.getByText('Paused · v6', { exact: true }).waitFor();
   await other.close();
   await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).click();
   await page.getByRole('alert').getByText('This experience changed. Refresh it before saving.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Refresh experience', exact: true }).click();
-  await lesson.getByText('Paused · v7', { exact: true }).waitFor();
+  await lesson.getByText('Paused · v6', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
-  await lesson.getByText('In use · v8', { exact: true }).waitFor();
+  await lesson.getByText('In use · v7', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
   assert.equal(await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).isEnabled(), false);
   await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill('A preview delayed the requested registration task.');
   await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).click();
-  await lesson.getByText('Paused · v9', { exact: true }).waitFor();
+  await lesson.getByText('Paused · v8', { exact: true }).waitFor();
   await lesson.getByText('Later feedback (3)', { exact: true }).click();
   assert.match(await lesson.innerText(), /A preview delayed/);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -396,7 +395,7 @@ try {
   await page.locator('.breadcrumbs').getByRole('button', { name: 'Home', exact: true }).click();
   await openLessons();
   await lesson.getByRole('button', { name: 'Use again', exact: true }).click();
-  await lesson.getByText('In use · v10', { exact: true }).waitFor();
+  await lesson.getByText('In use · v9', { exact: true }).waitFor();
   await close();
   const pageNavigation = page.getByRole('navigation', { name: 'Pages', exact: true });
   if (!(await pageNavigation.isVisible())) {
@@ -442,7 +441,7 @@ try {
   await changeInterfaceLanguage('en');
   assert.equal(await resultPicker.inputValue(), reportedResult.id);
   await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).click();
-  await lesson.getByText('Paused · v11', { exact: true }).waitFor();
+  await lesson.getByText('Paused · v10', { exact: true }).waitFor();
   assert.equal(await lesson.getByRole('button', { name: 'Give feedback', exact: true }).count(), 0);
   const receivingLesson = (await (await fetch(base + '/api/pages/' + encodeURIComponent(receiverId) + '/posture')).json()).experiences[0];
   assert.equal(receivingLesson.canEdit, false);
@@ -460,7 +459,7 @@ try {
   assert.equal(await lesson.getByRole('button', { name: 'View reported result', exact: true }).count(), 1,
     'The receiving Work should be able to reopen its own verified native outcome.');
   const originLesson = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
-  assert.equal(originLesson.revision, 11);
+  assert.equal(originLesson.revision, 10);
   assert.equal(originLesson.feedback.at(-1).evidence, receiverOutcome);
   assert.equal(originLesson.feedback.at(-1).source.page_id, receiverId);
   assert.equal(originLesson.feedback.at(-1).source.relation, 'shared_recipient');
@@ -516,7 +515,7 @@ try {
   await wait(() => sourceWriteHeld, 'source-page mutation response held');
   await page.goBack();
   await page.getByRole('button', { name: 'Registration tool', exact: true }).waitFor();
-  await lesson.getByText('In use · v12', { exact: true }).waitFor();
+  await lesson.getByText('In use · v11', { exact: true }).waitFor();
   assert.equal(await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).count(), 0);
   releaseSourceWrite();
   await wait(() => sourceWriteDelivered, 'old source response delivered after context changed');
@@ -532,7 +531,7 @@ try {
   await reportField.fill(conflictDraft);
   const concurrentEdit = await fetch(base + '/api/pages/home/posture/experiences/' + initialLesson.id, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ expectedRevision: 12, changes: { active: true } }),
+    body: JSON.stringify({ expectedRevision: 11, changes: { active: true } }),
   });
   assert.equal(concurrentEdit.status, 200);
   await lesson.getByRole('button', { name: 'It helped', exact: true }).click();
@@ -543,15 +542,15 @@ try {
   if (screenshots) await page.screenshot({ path: join(screenshots, 'posture-conflict-draft-zh.png') });
   await changeInterfaceLanguage('en');
   await page.getByRole('button', { name: 'Refresh experience', exact: true }).click();
-  await lesson.getByText('In use · v13', { exact: true }).waitFor();
+  await lesson.getByText('In use · v12', { exact: true }).waitFor();
   assert.equal(await reportField.inputValue(), conflictDraft);
   await lesson.getByRole('button', { name: 'It helped', exact: true }).click();
-  await lesson.getByText('In use · v14', { exact: true }).waitFor();
+  await lesson.getByText('In use · v13', { exact: true }).waitFor();
   await lesson.getByText('Later feedback (2)', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
   await reportField.fill('The result was adequate, but I saw no clear benefit from this guidance.');
   await lesson.getByRole('button', { name: 'No clear benefit', exact: true }).click();
-  await lesson.getByText('In use · v15', { exact: true }).waitFor();
+  await lesson.getByText('In use · v14', { exact: true }).waitFor();
   const neutralReport = (await (await fetch(base + '/api/pages/home/posture')).json()).experiences[0];
   assert.equal(neutralReport.active, true);
   assert.equal(neutralReport.feedback.at(-1).verdict, 'not_useful');

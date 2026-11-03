@@ -61,10 +61,12 @@ def test_reading_example_preserves_observed_text_and_source_after_change_share_a
                        title="A retained observation", excerpt=selected)
         assert again[-1]["status"] == "succeeded"
         receiver = work(client)
-        assert client.get(f"/api/pages/{receiver}/posture").json()["experiences"] == []
-        shared = client.patch(f"/api/pages/{page_id}/posture/experiences/{saved['id']}",
-                             json={"expectedRevision": 1, "changes": {"scope": "subject"}}).json()["experience"]
-        offered = client.get(f"/api/pages/{receiver}/posture").json()["experiences"][0]
+        # A retained reading example is available across the subject by default.
+        assert saved["scope"] == "subject"
+        shared = next(x for x in client.get(f"/api/pages/{page_id}/posture").json()["experiences"]
+                      if x["id"] == saved["id"])
+        offered = next(x for x in client.get(f"/api/pages/{receiver}/posture").json()["experiences"]
+                       if x["id"] == saved["id"])
         assert offered["sourceKind"] == "reading" and offered["excerpt"] == selected
         assert not {"source", "readingSource", "encounter", "feedback"} & set(offered)
         assert path.name not in json.dumps(offered) and reading["receipt_id"] not in json.dumps(offered)
@@ -79,7 +81,8 @@ def test_reading_example_preserves_observed_text_and_source_after_change_share_a
     with client_for(tmp_path, posture=True, model_factory=None) as client:
         restored = client.get(f"/api/pages/{page_id}/posture").json()["experiences"]
         assert next(x for x in restored if x["id"] == saved["id"]) == shared
-        assert client.get(f"/api/pages/{receiver}/posture").json()["experiences"][0] == offered
+        assert next(x for x in client.get(f"/api/pages/{receiver}/posture").json()["experiences"]
+                    if x["id"] == saved["id"]) == offered
 
 
 def test_unseen_foreign_search_and_nonverbatim_sources_cannot_create_examples(tmp_path, monkeypatch):

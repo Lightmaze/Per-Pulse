@@ -359,29 +359,28 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             reopened._native_team.drain()
         assert len(reopened.storage.list_delegations(caller_id=owner)) == 4
 
-        # The same words in an unrelated Work are NOT transferable evidence.
+        # Another Work of the same subject learns from these rated outcomes by default.
         other = reopened.world.create_task_bundle_for_existing_engram(
             "Unrelated private investigation", owner
         ).front
         other_scope = reopened.harness.scope_for(owner, "work:" + other.center_id)
-        neutral = choose(reopened._native_team, other_scope, other, {
+        by_default = choose(reopened._native_team, other_scope, other, {
             "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
             "instruction": INSTRUCTION,
         })
-        assert not neutral["changed"]
-        assert neutral["evidence"] == []
-        assert neutral["probabilities"] == neutral["prior"]
+        assert by_default["evidence"]
+        assert {item["source_work_id"] for item in by_default["evidence"]} == {front.id}
 
-        # Actual native feedback is a separate, operator-controlled consent:
-        # Work-only notes do not transfer even when the original outcome is rated.
+        # A Work-only note keeps an outcome to its original Work.
         details = {"expected_revision": 0, "content": "Use the proven startup evidence.",
                    "scope": "work", "withdrawn": False}
         assert page_projection.collaborator_feedback(front.id, records[1])["revision"] == 0
         with pytest.raises(PageError) as wrong_feedback_home:
             page_projection.collaborator_feedback("home", records[1])
         assert wrong_feedback_home.value.code == "collaboration_feedback_unavailable"
-        work_only = page_projection.update_collaborator_feedback(front.id, records[1], details)
-        assert work_only["revision"] == 1
+        for record_id in [*records, new_record["id"]]:
+            kept = page_projection.update_collaborator_feedback(front.id, record_id, details)
+            assert kept["revision"] == 1
         assert page_projection.collaborator_feedback(front.id, records[1])["current"]["scope"] == "work"
         still_private = choose(reopened._native_team, other_scope, other, {
             "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
@@ -390,8 +389,7 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert still_private["evidence"] == []
         assert still_private["probabilities"] == still_private["prior"]
 
-        # Only explicit collaborator-scope sharing lets the same subject use
-        # that verified outcome in another Work's native decision.
+        # Sharing the note again lets another Work use that one outcome.
         shared = page_projection.update_collaborator_feedback(front.id, records[1], {
             **details, "expected_revision": 1, "scope": "collaborator",
         })

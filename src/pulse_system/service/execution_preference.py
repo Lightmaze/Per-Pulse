@@ -38,8 +38,27 @@ def _vector(value):
     return tuple(n / length for n in numbers) if length else tuple(numbers)
 
 
+def kept_to_its_work(annotation) -> bool:
+    """A rated outcome is shared across the subject unless its Work keeps it local.
+
+    The owner keeps an outcome to its original Work with an active Work-only
+    note, or by withdrawing a shared note. No note means the subject's ordinary
+    default: its Works learn from each other's rated results.
+    """
+    if annotation is None:
+        return False
+    if not isinstance(annotation, dict):
+        return True
+    withdrawn = annotation.get("withdrawn") is not False
+    if annotation.get("scope") == "collaborator":
+        return withdrawn
+    if annotation.get("scope") == "work":
+        return not withdrawn
+    return True
+
+
 def _verified_outcome(team, owner, front, record):
-    """Verify a native outcome; a different Work also requires explicit live sharing."""
+    """Verify a native outcome from this subject; another Work may keep it local."""
     runtime = team.runtime
     actual, request, origin = team._record(owner, record["id"])
     if (actual.get("outcome") not in OUTCOMES
@@ -47,18 +66,15 @@ def _verified_outcome(team, owner, front, record):
             or actual.get("result_summary") is None):
         raise ValueError("not a completed, rated outcome")
     if origin.id != front.id:
-        # Sharing an annotation is explicit operator authority to reuse the
-        # already-rated outcome, not permission to infer a reward from its text.
-        # Re-read current scope on every new selection so withdrawal fails closed.
+        # Re-read the original Work's current choice on every new selection,
+        # so keeping an outcome local applies to later choices at once.
         from .runtime import ServiceError
         try:
             annotation = team.feedback.get(origin.id, actual["id"])["current"]
         except ServiceError as exc:
             raise ValueError("shared outcome source is no longer available") from exc
-        if (not isinstance(annotation, dict)
-                or annotation.get("scope") != "collaborator"
-                or annotation.get("withdrawn") is not False):
-            raise ValueError("cross-Work outcome has no active collaborator-scope consent")
+        if kept_to_its_work(annotation):
+            raise ValueError("this outcome is kept to its original Work")
     outcome_id = runtime.storage.find_delegation_outcome_event_id(actual["id"])
     event = runtime.causal_ledger.get_event(outcome_id) if outcome_id else None
     if event is None:
