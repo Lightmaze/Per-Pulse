@@ -137,8 +137,7 @@ The optional `python tests/per_pulse/benchmark_message_history.py` compares the
 actual native page queries with and without this index in a disposable
 100,000-row fixture. On the development host, median bootstrap time fell from
 237 ms to 7 ms, and a 100-message older range from 18 ms to 1 ms (20 measured
-reads after five warmups). These are local synthetic measurements, not a
-latency guarantee for other hardware or histories.
+reads after five warmups) on a synthetic fixture.
 
 Message search scans matching-context native text; it is not a separate search
 index or transcript copy. `python tests/per_pulse/benchmark_message_search.py`

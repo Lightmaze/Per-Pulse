@@ -14,6 +14,6 @@ Use branches, review the diff, and verify the actual user flow in a browser. Rec
 
 Acceptance is ordinary correctness tests plus the actual browser flow; do not add evaluation suites, blinded reviews or evidence archives to the product package. Optional study tooling lives under `research/`.
 
-Do not repeat what a feature does not prove in the README, UI copy or CLI output; state the evidence level once per release.
+Do not repeat what a feature does not prove in the README, UI copy, CLI output or model-facing tool text.
 
 One feature per PR into `main`; do not build stacked PR chains or time-boxed research gates.

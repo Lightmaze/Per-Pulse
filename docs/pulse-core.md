@@ -266,8 +266,7 @@ remains in the original PageService/World; no new state or scheduler exists.
 source target invariant. `tests/browser/attention_flow.mjs` checks real
 Chromium navigation, a Kernel-held thought and its original Home event,
 Work isolation, bilingual deep linking, process restart, browser draft
-continuation and a later Kernel release. The HTTP model transport is explicitly
-synthetic, not evidence of a live provider's autonomous usefulness.
+continuation and a later Kernel release, using a synthetic HTTP model.
 
 The quota counts background pulse admissions. It is not a currency limit or a
 hard token ceiling for a provider: a Kernel turn may contain more than one
