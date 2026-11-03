@@ -79,7 +79,7 @@ def test_a_key_in_your_message_reaches_the_model(tmp_path, monkeypatch):
 
 def test_the_model_reads_a_config_file_that_holds_a_key(tmp_path, monkeypatch):
     (tmp_path / "workspace").mkdir()
-    (tmp_path / "workspace" / "config.env").write_text(CONFIG)
+    (tmp_path / "workspace" / "config.env").write_text(CONFIG, encoding="utf-8", newline="")
     requests = []
     factory = _factory(monkeypatch, requests, tool=("read_file", {"path": "config.env"}))
     with TestClient(create_app(tmp_path, model_factory=factory, allow_workspace_actions=True),
@@ -93,7 +93,7 @@ def test_the_model_reads_a_config_file_that_holds_a_key(tmp_path, monkeypatch):
 def test_the_model_edits_a_file_that_holds_a_key(tmp_path, monkeypatch):
     (tmp_path / "workspace").mkdir()
     config = tmp_path / "workspace" / "config.env"
-    config.write_text(CONFIG)
+    config.write_text(CONFIG, encoding="utf-8", newline="")
     edit = {"path": "config.env", "expected_digest": hashlib.sha256(CONFIG.encode()).hexdigest(),
             "patch": {"edits": [{"old": "postgres://localhost/app", "new": "postgres://db/app"}]}}
     factory = _factory(monkeypatch, [], tool=("mutate_file", edit))
@@ -101,7 +101,7 @@ def test_the_model_edits_a_file_that_holds_a_key(tmp_path, monkeypatch):
                                auto_apply_edits=True), base_url="http://localhost") as client:
         page_id = _page(client, "Point the app at the db host.")
         assert _reply(client, page_id) == "Done."
-        assert config.read_text() == CONFIG.replace("postgres://localhost/app", "postgres://db/app")
+        assert config.read_text(encoding="utf-8") == CONFIG.replace("postgres://localhost/app", "postgres://db/app")
         item, = client.get(f"/api/pages/{page_id}/artifacts").json()["artifacts"]
         assert client.post(f"/api/pages/{page_id}/artifacts/{item['id']}/undo", json={}).status_code == 200
-        assert config.read_text() == CONFIG
+        assert config.read_text(encoding="utf-8") == CONFIG

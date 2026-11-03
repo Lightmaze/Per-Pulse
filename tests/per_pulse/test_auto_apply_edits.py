@@ -93,7 +93,7 @@ def test_a_file_change_applies_without_approval_and_undo_puts_it_back(tmp_path, 
     original, revised = "Original notes.\n", "Revised notes.\n"
     (tmp_path / "workspace").mkdir()
     notes = tmp_path / "workspace" / "notes.md"
-    notes.write_text(original, encoding="utf-8")
+    notes.write_text(original, encoding="utf-8", newline="")
     factory = _factory(monkeypatch, {"REVISE_NOTES": {
         "path": "notes.md", "expected_digest": _sha(original), "content": revised,
     }})
@@ -136,13 +136,13 @@ def test_undo_leaves_a_later_edit_alone_and_removes_a_new_file(tmp_path, monkeyp
         assert draft.read_text(encoding="utf-8") == created
         item, = client.get(f"/api/pages/{page_id}/artifacts").json()["artifacts"]
 
-        draft.write_text("Edited by hand.\n", encoding="utf-8")
+        draft.write_text("Edited by hand.\n", encoding="utf-8", newline="")
         refused = _undo(client, page_id, item["id"])
         assert refused.status_code == 409
         assert refused.json()["error"]["code"] == "artifact_version_changed"
         assert draft.read_text(encoding="utf-8") == "Edited by hand.\n"
 
-        draft.write_text(created, encoding="utf-8")
+        draft.write_text(created, encoding="utf-8", newline="")
         assert _undo(client, page_id, item["id"]).status_code == 200
         assert not draft.exists()
 
@@ -190,7 +190,7 @@ def test_undone_survives_kernel_event_rollover_and_restart(tmp_path, monkeypatch
     original = "Original notes.\n"
     (tmp_path / "workspace").mkdir()
     notes = tmp_path / "workspace" / "notes.md"
-    notes.write_text(original, encoding="utf-8")
+    notes.write_text(original, encoding="utf-8", newline="")
     factory = _factory(monkeypatch, {"REVISE_NOTES": {
         "path": "notes.md", "expected_digest": _sha(original), "content": "Revised.\n",
     }})
@@ -217,7 +217,7 @@ def test_a_file_already_back_to_its_earlier_content_counts_as_undone(tmp_path, m
     original = "Original notes.\n"
     (tmp_path / "workspace").mkdir()
     notes = tmp_path / "workspace" / "notes.md"
-    notes.write_text(original, encoding="utf-8")
+    notes.write_text(original, encoding="utf-8", newline="")
     factory = _factory(monkeypatch, {"REVISE_NOTES": {
         "path": "notes.md", "expected_digest": _sha(original), "content": "Revised.\n",
     }})
@@ -226,7 +226,7 @@ def test_a_file_already_back_to_its_earlier_content_counts_as_undone(tmp_path, m
         page_id = _page(client, "REVISE_NOTES")
         _settle(client, page_id)
         item, = client.get(f"/api/pages/{page_id}/artifacts").json()["artifacts"]
-        notes.write_text(original, encoding="utf-8")  # put back by hand
+        notes.write_text(original, encoding="utf-8", newline="")  # put back by hand
         undone = _undo(client, page_id, item["id"])
         assert undone.status_code == 200, undone.text
         assert undone.json()["artifacts"]["artifacts"][0]["undone"] is True

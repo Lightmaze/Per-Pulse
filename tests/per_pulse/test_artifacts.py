@@ -293,7 +293,7 @@ def test_rejected_file_actions_and_unattributed_files_are_not_artifacts(tmp_path
         waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
         action_id = waiting["pendingActions"][0]["actionId"]
         execution.resolve_approval(page_id, action_id, decision)
-        (tmp_path / "workspace" / "unattributed.txt").write_text("A user file, not a page-owned output.")
+        (tmp_path / "workspace" / "unattributed.txt").write_text("A user file, not a page-owned output.", encoding="utf-8", newline="")
         assert artifacts.snapshot(page_id)["artifacts"] == []
         with pytest.raises(ArtifactError):
             artifacts.read(page_id, action_id)
@@ -306,13 +306,13 @@ def test_failed_digest_guard_does_not_claim_an_artifact(tmp_path, monkeypatch):
     factory = _factory(monkeypatch, {"WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": "A replacement."}}, requests)
     with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
         original = tmp_path / "workspace" / "report.txt"
-        original.write_text("Existing source.")
+        original.write_text("Existing source.", encoding="utf-8", newline="")
         runtime = client.app.state.pages.runtime
         execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
         page_id = _page(client)
         action_id = _approve(execution, page_id)
         assert artifacts.snapshot(page_id)["artifacts"] == []
-        assert original.read_text() == "Existing source."
+        assert original.read_text(encoding="utf-8") == "Existing source."
         with pytest.raises(ArtifactError):
             artifacts.read(page_id, action_id)
 
@@ -360,7 +360,7 @@ def test_preview_uses_existing_path_file_type_and_size_guards(tmp_path, monkeypa
         action_id = _approve(execution, page_id)
         target = tmp_path / "workspace" / "report.txt"
         outside = tmp_path / "private.txt"
-        outside.write_text("Outside the tool workspace.")
+        outside.write_text("Outside the tool workspace.", encoding="utf-8", newline="")
         target.unlink()
         assert artifacts.read(page_id, action_id)["state"] == "unavailable"
         target.symlink_to(outside)
@@ -393,7 +393,7 @@ def test_preview_uses_existing_path_file_type_and_size_guards(tmp_path, monkeypa
         original_workspace = tmp_path / "original-workspace"
         replacement = tmp_path / "replacement"
         replacement.mkdir()
-        (replacement / "report.txt").write_text("A replacement root's private content.")
+        (replacement / "report.txt").write_text("A replacement root's private content.", encoding="utf-8", newline="")
         workspace.rename(original_workspace)
         try:
             workspace.symlink_to(replacement, target_is_directory=True)
@@ -424,7 +424,7 @@ def test_preview_shows_the_users_own_text_bounded_after_verifying_original_bytes
         "patch": {"edits": [{"old": "Draft heading.", "new": "Final heading."}]},
     }}, requests)
     with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
-        (tmp_path / "workspace" / "report.txt").write_text(before)
+        (tmp_path / "workspace" / "report.txt").write_text(before, encoding="utf-8", newline="")
         runtime = client.app.state.pages.runtime
         execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
         page_id = _page(client, "PATCH_REPORT")
@@ -461,7 +461,7 @@ def test_preview_rejects_hidden_marker_beyond_bounded_prefix(tmp_path, monkeypat
         "patch": {"edits": [{"old": "Draft status.", "new": "Final status."}]},
     }}, [])
     with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
-        (tmp_path / "workspace" / "late-marker.txt").write_text(before)
+        (tmp_path / "workspace" / "late-marker.txt").write_text(before, encoding="utf-8", newline="")
         runtime = client.app.state.pages.runtime
         execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
         page_id = _page(client, "PATCH_LATE_MARKER")
@@ -548,13 +548,13 @@ def test_download_serves_verified_snapshot_without_reopening_a_replaced_path(tmp
 
         def replace_after_read(files, path):
             snapshot = read(files, path)
-            (tmp_path / "workspace" / path).write_text(replacement)
+            (tmp_path / "workspace" / path).write_text(replacement, encoding="utf-8", newline="")
             return snapshot
 
         monkeypatch.setattr(WorkspaceFiles, "read", replace_after_read)
         downloaded = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
         assert downloaded.status_code == 200 and downloaded.content == original.encode()
-        assert (tmp_path / "workspace" / "report.txt").read_text() == replacement
+        assert (tmp_path / "workspace" / "report.txt").read_text(encoding="utf-8") == replacement
         refused = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
         assert refused.status_code == 409 and replacement not in refused.text
 
@@ -593,7 +593,7 @@ def test_large_native_diff_preserves_compact_receipt_artifact_and_continuation(t
     }}, requests)
     with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
         target = tmp_path / "workspace" / "large.txt"
-        target.write_text(before)
+        target.write_text(before, encoding="utf-8", newline="")
         runtime = client.app.state.pages.runtime
         execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
         page_id = _page(client, "PATCH_LARGE")
@@ -601,7 +601,7 @@ def test_large_native_diff_preserves_compact_receipt_artifact_and_continuation(t
         action_id = waiting["pendingActions"][0]["actionId"]
         execution.resolve_approval(page_id, action_id, "allow_once")
         _wait(execution, page_id, lambda view: view["status"] == "idle")
-        assert target.read_text() == after
+        assert target.read_text(encoding="utf-8") == after
         snapshot = artifacts.snapshot(page_id)
         item, = snapshot["artifacts"]
         assert item["id"] == action_id and item["sha256"] == _sha(after)
@@ -642,7 +642,7 @@ def test_large_native_read_reaches_continuation_with_bounded_text_and_exact_dige
                        tool_name="read_file", tool_call_id="fixture-read-" * 250)
     with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
         target = tmp_path / "workspace" / "large.txt"
-        target.write_text(body)
+        target.write_text(body, encoding="utf-8", newline="")
         runtime = client.app.state.pages.runtime
         execution = client.app.state.pages.execution
         page_id = _page(client, "READ_LARGE")
@@ -658,7 +658,7 @@ def test_large_native_read_reaches_continuation_with_bounded_text_and_exact_dige
         assert output["content"].startswith("[TRUNCATED sha256=")
         assert output["workspace_provenance"]["adapter"] == "pulse_harness.workspace.v1"
         assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
-        assert target.read_text() == body
+        assert target.read_text(encoding="utf-8") == body
 
 
 def test_unrepresentable_receipt_metadata_rejects_before_the_file_effect(tmp_path, monkeypatch):
@@ -704,7 +704,7 @@ def test_legacy_truncated_receipt_is_not_reconstructed_from_file_existence(tmp_p
         legacy.setattr(StructuredWorkspaceToolProvider, "_bounded_text_output", old_text_only_bound)
         with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
             target = tmp_path / "workspace" / "legacy.txt"
-            target.write_text(before)
+            target.write_text(before, encoding="utf-8", newline="")
             execution = client.app.state.pages.execution
             page_id = _page(client, "PATCH_LEGACY")
             waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
@@ -712,7 +712,7 @@ def test_legacy_truncated_receipt_is_not_reconstructed_from_file_existence(tmp_p
             receipt = execution.resolve_approval(page_id, action_id, "allow_once")
             assert receipt["actionCompleted"]
             assert receipt["continuationError"]["code"] == "payload_too_large"
-            assert target.read_text() == after
+            assert target.read_text(encoding="utf-8") == after
 
     with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
         artifacts = client.app.state.pages.artifacts
@@ -720,4 +720,4 @@ def test_legacy_truncated_receipt_is_not_reconstructed_from_file_existence(tmp_p
         assert snapshot["artifacts"] == [] and snapshot["truncated"]
         with pytest.raises(ArtifactError):
             artifacts.read(page_id, action_id)
-        assert target.read_text() == after
+        assert target.read_text(encoding="utf-8") == after

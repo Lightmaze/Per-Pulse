@@ -148,12 +148,12 @@ def test_native_file_guards_apply_to_materials_browser(tmp_path):
         identity = _identity(client)
         root = tmp_path / "workspace"
         outside = tmp_path / "private.txt"
-        outside.write_text("This is outside the material workspace.")
+        outside.write_text("This is outside the material workspace.", encoding="utf-8", newline="")
         (root / "linked.txt").symlink_to(outside)
         os.link(outside, root / "hardlinked.txt")
-        (root / "secrets.env").write_text("Protected.")
+        (root / "secrets.env").write_text("Protected.", encoding="utf-8", newline="")
         (root / "nested").mkdir()
-        (root / "nested" / "source.txt").write_text("A nested source.")
+        (root / "nested" / "source.txt").write_text("A nested source.", encoding="utf-8", newline="")
         listing = client.get("/api/workspace/files", headers=identity).json()
         assert "linked.txt" not in {entry["name"] for entry in listing["entries"]}
         assert "secrets.env" not in {entry["name"] for entry in listing["entries"]}
