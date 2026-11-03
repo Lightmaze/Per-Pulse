@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 import per_pulse.service as page_service_module
 from per_pulse.execution import PageExecution
 from per_pulse.service import PulseSettings
@@ -153,3 +155,126 @@ def test_stop_one_of_three_attached_approvals_admits_next_work_without_replaying
         assert execution.snapshot(queued)["pendingActions"][0]["actionId"] == (
             third_wait["pendingActions"][0]["actionId"]
         )
+
+
+@pytest.mark.parametrize("capacity", (2, 4))
+def test_full_approval_fleet_saturation_requires_a_real_release_before_foreground(
+    tmp_path, monkeypatch, capacity,
+):
+    """Reproduce the physical capacity boundary, not just compute-permit pressure.
+
+    Currently capacity + min(16, 2 * capacity) physical workers exist.
+    WAITING_APPROVAL yields compute but not its physical carrier. A newer
+    foreground Work must remain queued at that boundary until one original
+    turn is explicitly stopped. This records the unresolved #80 blocker,
+    not a desirable policy; true thread-free parking should eventually
+    admit the newcomer without cancelling any older Work.
+    """
+    requests = []
+    base_config = page_service_module.RuntimeServiceConfig
+    monkeypatch.setattr(
+        page_service_module, "RuntimeServiceConfig",
+        lambda **kwargs: base_config(**kwargs, pulse_worker_capacity=capacity),
+    )
+    physical_limit = capacity + min(16, 2 * capacity)
+    with client_for(
+        tmp_path,
+        pulse=PulseSettings(
+            enabled=True, spontaneous_rate=0, check_interval_seconds=0.02,
+        ),
+        model_factory=_factory(monkeypatch, requests),
+        allow_workspace_actions=True,
+    ) as client:
+        runtime = client.app.state.pages.runtime
+        execution = PageExecution(runtime)
+        held = []
+        for _ in range(physical_limit):
+            work = _new_page(client, "WRITE_ONE")
+            state = _wait(
+                execution, work,
+                lambda item: item["status"] == "needs_attention"
+                and len(item["pendingActions"]) == 1
+                and item["pendingActions"][0]["canResolve"],
+                timeout=15,
+            )
+            held.append((
+                work, state["turnId"], state["pendingActions"][0]["actionId"],
+            ))
+        assert len({turn for _, turn, _ in held}) == physical_limit
+        assert len({action for _, _, action in held}) == physical_limit
+
+        deadline = time.monotonic() + 6
+        while True:
+            slots = runtime.scheduling_snapshot()["capacity"]
+            if slots["worker_parked"] == physical_limit:
+                break
+            assert time.monotonic() < deadline, slots
+            time.sleep(0.025)
+        assert slots["worker_limit"] == capacity
+        assert slots["approval_parked_limit"] == physical_limit - capacity
+        assert slots["worker_running"] == 0
+        assert slots["worker_attached"] == physical_limit
+        assert len(requests) == physical_limit
+
+        incoming = _new_page(client, "WRITE_TWO")
+        time.sleep(0.35)
+        # This is a queued Work, not a manufactured needs_attention state.
+        assert execution.snapshot(incoming)["turnId"] is None
+        assert len(requests) == physical_limit
+        assert not (tmp_path / "workspace" / "one.txt").exists()
+        assert not (tmp_path / "workspace" / "two.txt").exists()
+
+        first, first_turn, _ = held[0]
+        stopped = execution.cancel(first, first_turn)
+        assert stopped["accepted"] and not stopped["repeated"]
+        assert execution.cancel(first, first_turn)["repeated"]
+        _wait(
+            execution, first,
+            lambda item: item["turnId"] == first_turn
+            and item["status"] == "stopped"
+            and not item["pendingActions"],
+            timeout=15,
+        )
+        arrived = _wait(
+            execution, incoming,
+            lambda item: item["status"] == "needs_attention"
+            and len(item["pendingActions"]) == 1
+            and item["pendingActions"][0]["canResolve"],
+            timeout=15,
+        )
+        assert arrived["turnId"] not in {turn for _, turn, _ in held}
+        assert len(requests) == physical_limit + 1
+        for peer, original_turn, original_action in held[1:]:
+            current = execution.snapshot(peer)
+            assert current["turnId"] == original_turn
+            assert current["status"] == "needs_attention"
+            assert current["pendingActions"][0]["actionId"] == original_action
+        assert not (tmp_path / "workspace" / "one.txt").exists()
+        assert not (tmp_path / "workspace" / "two.txt").exists()
+
+        second, second_turn, second_action = held[1]
+        accepted = execution.resolve_approval(second, second_action, "allow_once")
+        assert accepted["accepted"] and not accepted["repeated"]
+        _wait(
+            execution, second,
+            lambda item: item["turnId"] == second_turn
+            and item["status"] == "idle"
+            and not item["pendingActions"],
+            timeout=15,
+        )
+        assert (tmp_path / "workspace" / "one.txt").read_text() == (
+            "Written by one.txt.\n"
+        )
+        assert not (tmp_path / "workspace" / "two.txt").exists()
+        assert execution.resolve_approval(second, second_action, "allow_once")["repeated"]
+        scope = runtime.kernel_service.store.action_scope_for_session(
+            execution._scope(second), second_action,
+        )
+        assert runtime.kernel_service.store.action_terminal_count(
+            scope, second_action,
+        ) == 1
+        for peer, original_turn, original_action in held[2:]:
+            current = execution.snapshot(peer)
+            assert current["turnId"] == original_turn
+            assert current["status"] == "needs_attention"
+            assert current["pendingActions"][0]["actionId"] == original_action
