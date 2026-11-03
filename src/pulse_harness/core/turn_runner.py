@@ -109,6 +109,8 @@ def _action_request_id(scope: HarnessScope, call: ToolCall) -> str:
 
 
 _MODEL_STREAM_CLEANUP_UNCERTAIN = "model_stream_cleanup_uncertain"
+_COALESCED_DELTA_KINDS = frozenset({ModelDeltaKind.TEXT, ModelDeltaKind.REASONING})
+_COALESCED_DELTA_BYTES = 8 * 1024
 
 
 class TurnRunner:
@@ -837,15 +839,30 @@ class TurnRunner:
                             "ModelAdapter emitted a delta after DONE",
                             code="model_terminal_violation",
                         )
-                    if len(deltas) >= self.max_model_deltas:
-                        raise ProviderProtocolError(
-                            "ModelAdapter exceeded the model delta bound",
-                            code="model_stream_too_large",
-                        )
                     delta_bytes = self._model_delta_admission_bytes(delta)
                     if stream_bytes + delta_bytes > self.max_model_stream_bytes:
                         raise ProviderProtocolError(
                             "ModelAdapter exceeded the aggregate stream byte bound",
+                            code="model_stream_too_large",
+                        )
+                    # Providers usually stream one token per chunk. Join
+                    # adjacent text (or reasoning) chunks so the delta bound
+                    # limits stored events, not the length of a reply.
+                    previous = deltas[-1] if deltas else None
+                    if (
+                        previous is not None
+                        and delta.kind in _COALESCED_DELTA_KINDS
+                        and previous.kind is delta.kind
+                        and self._plain_text_delta(previous)
+                        and self._plain_text_delta(delta)
+                        and len(previous.text.encode("utf-8")) + delta_bytes <= _COALESCED_DELTA_BYTES
+                    ):
+                        stream_bytes += delta_bytes
+                        deltas[-1] = ModelDelta(delta.kind, text=previous.text + delta.text)
+                        continue
+                    if len(deltas) >= self.max_model_deltas:
+                        raise ProviderProtocolError(
+                            "ModelAdapter exceeded the model delta bound",
                             code="model_stream_too_large",
                         )
                     stream_bytes += delta_bytes
@@ -1346,6 +1363,13 @@ class TurnRunner:
                 review = decode_review_envelope(message.content)
                 return review["context"] is not None and review["round_id"] == round_record.round_id
         return False
+
+    @staticmethod
+    def _plain_text_delta(delta: ModelDelta) -> bool:
+        return (
+            delta.tool_call is None and delta.finish_reason is None
+            and delta.usage is None and delta.provider_response_id is None
+        )
 
     @staticmethod
     def _model_delta_admission_bytes(delta: ModelDelta) -> int:
