@@ -52,12 +52,10 @@ user input remains available when a background quota is exhausted.
 
 ## Configuration and API
 
-Background computation is opt-in.
-
-Start the ordinary local workspace with `per-pulse --pulse`. Set its background
-admission ceiling with `--pulse-budget 12`; the default is twelve admissions in
-a rolling hour. The normal command without `--pulse` keeps background
-computation disabled.
+`per-pulse` enables background computation when a model is connected, with at
+most twelve background admissions in a rolling hour. Change the ceiling with
+`--pulse-budget N`, or turn background computation off with `--no-pulse`.
+Library callers of `create_app` keep it off unless they pass `PulseSettings`.
 
 Python callers can configure the local rhythm directly:
 

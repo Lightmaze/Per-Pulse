@@ -40,3 +40,33 @@ def test_equal_budget_or_explicit_zero_hold_remains_valid(
     assert len(started) == 1
     assert started[0].max_background_provider_tokens_per_hour == limit
     assert started[0].background_provider_token_reservation == reservation
+
+
+def _captured_settings(argv, monkeypatch):
+    import uvicorn
+    import per_pulse.app as app
+
+    started = []
+    monkeypatch.setattr(app, "create_app", lambda *args, **kwargs: kwargs["pulse"])
+    monkeypatch.setattr(uvicorn, "run", lambda settings, **kwargs: started.append(settings))
+    main(argv)
+    assert len(started) == 1
+    return started[0]
+
+
+def test_pulse_is_on_by_default_with_the_hourly_budget(monkeypatch):
+    settings = _captured_settings([], monkeypatch)
+    assert settings.enabled is True
+    assert settings.max_background_pulses_per_hour == 12
+    assert _captured_settings(["--pulse-budget", "3"], monkeypatch).max_background_pulses_per_hour == 3
+    assert _captured_settings(["--pulse"], monkeypatch).enabled is True
+
+
+def test_no_pulse_turns_background_continuation_off(monkeypatch, capsys):
+    assert _captured_settings(["--no-pulse"], monkeypatch).enabled is False
+    with pytest.raises(SystemExit) as stopped:
+        main(["--no-pulse", "--pulse-hourly-tokens", "8192"])
+    assert stopped.value.code == 2
+    assert "--no-pulse" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        main(["--pulse", "--no-pulse"])
