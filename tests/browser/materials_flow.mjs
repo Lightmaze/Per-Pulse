@@ -200,10 +200,13 @@ try {
   await stop(server);
   server = start();
   await ready();
-  const stale = await fetch(base + '/api/workspace/files', { headers: {
+  // The same World after a restart keeps serving its files; another World does not.
+  const sameWorld = await fetch(base + '/api/workspace/files', { headers: {
     'X-Per-Pulse-World': oldIdentity.workspaceId, 'X-Per-Pulse-Service-Instance': oldIdentity.serviceInstanceId,
   } });
-  assert.equal(stale.status, 409);
+  assert.equal(sameWorld.status, 200);
+  const otherWorld = await fetch(base + '/api/workspace/files', { headers: { 'X-Per-Pulse-World': 'another-world' } });
+  assert.equal(otherWorld.status, 409);
   await page.reload();
   await page.locator('.composer textarea').waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), 'This draft must stay in the first Work.');

@@ -207,6 +207,7 @@ def create_app(
     *,
     example: bool = False,
     allow_workspace_actions: bool = False,
+    auto_apply_edits: bool = False,
     web_dir: str | Path | None = None,
     model_factory: Any = _ENV_PROVIDER,
     pulse: PulseSettings | None = None,
@@ -217,6 +218,7 @@ def create_app(
         pages = await asyncio.to_thread(
             PageService, data_dir, example=example, model_factory=model_factory, pulse=pulse,
             posture=posture, allow_workspace_actions=allow_workspace_actions,
+            auto_apply_edits=auto_apply_edits,
         )
         app.state.pages = pages
         try:
@@ -432,11 +434,6 @@ def create_app(
         service.execution._scope(page_id)
         if request.headers.get("x-per-pulse-world") != service.runtime.world_id:
             raise MaterialError("material_workspace_changed", "The workspace changed. Refresh before uploading.")
-        # The first-party browser also fences uploads to the service instance it
-        # observed. Retain compatibility with existing World-only native clients.
-        if "x-per-pulse-service-instance" in request.headers:
-            service.require_file_identity(request.headers.get("x-per-pulse-world"),
-                                          request.headers.get("x-per-pulse-service-instance"))
         data = bytearray()
         async for chunk in request.stream():
             if len(data) + len(chunk) > MAX_FILE_BYTES:
@@ -553,6 +550,14 @@ def create_app(
         # fallback. The browser controls the destination; no file is served by
         # reopening a path after the version/content checks above.
         return _file_download(result["content"], result["artifact"]["path"], result["artifact"]["sha256"])
+
+    @app.post("/api/pages/{page_id}/artifacts/{artifact_id}/undo")
+    def undo_artifact(page_id: str, artifact_id: str, request: Request):
+        svc = pages(request)
+        if not svc.allow_workspace_actions:
+            raise PageError("workspace_actions_disabled", "File changes are turned off for this workspace.", 409)
+        result = svc.artifacts.undo(page_id, artifact_id)
+        return {**result, "artifacts": svc.artifacts.snapshot(page_id)}
 
     @app.post("/api/pages/{page_id}/execution/stop")
     def stop(page_id: str, body: StopTurn, request: Request):

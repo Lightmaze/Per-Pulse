@@ -283,7 +283,8 @@ class KernelHarnessRuntime:
                  model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None = None,
                  allow_mutations: bool = False,
                  allow_unconfigured: bool = False,
-                 enable_posture: bool | None = None) -> None:
+                 enable_posture: bool | None = None,
+                 auto_apply_edits: bool = False) -> None:
         self.db_path = str(db_path) if str(db_path) == ":memory:" else str(Path(db_path).expanduser().resolve())
         self.workspace = Path(workspace).expanduser().resolve()
         self.checkpoint_root = checkpoint_root
@@ -297,6 +298,9 @@ class KernelHarnessRuntime:
         )
         self._allow_unconfigured = allow_unconfigured
         self._allow_mutations = allow_mutations
+        # File changes inside the workspace apply without a per-change
+        # approval and can be undone from their checkpoint. Commands still ask.
+        self._auto_apply_edits = bool(allow_mutations and auto_apply_edits)
         self.life = LifeHub()
         self.work = None
         self.team = None
@@ -545,6 +549,7 @@ class KernelHarnessRuntime:
                 response_reviewer_factory=(self._make_response_reviewer
                     if self.coverme is not None or self.posture_memory is not None else None),
                 turn_advisor_factory=(self.expert.advisor if self.expert is not None else None),
+                auto_apply_capabilities=(("workspace.write",) if self._auto_apply_edits else ()),
                 tool_provider_factory=lambda store, root, checkpoints: _WorldWorkspace(
                     store, root, checkpoints, guard=self._check,
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
@@ -1231,10 +1236,12 @@ class KernelHarnessFactory:
                  model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None = None,
                  allow_mutations: bool = False,
                  allow_unconfigured: bool = False,
-                 enable_posture: bool | None = None) -> None:
+                 enable_posture: bool | None = None,
+                 auto_apply_edits: bool = False) -> None:
         self._kwargs = dict(db_path=db_path, workspace=workspace, checkpoint_root=checkpoint_root,
                             model_factory=model_factory, allow_mutations=allow_mutations,
-                            allow_unconfigured=allow_unconfigured, enable_posture=enable_posture)
+                            allow_unconfigured=allow_unconfigured, enable_posture=enable_posture,
+                            auto_apply_edits=auto_apply_edits)
         self._bootstrapped = False
 
     def bootstrap(self, *, workspace, config, owner_id, epoch):

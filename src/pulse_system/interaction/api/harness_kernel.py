@@ -281,6 +281,7 @@ class HarnessKernelService:
         max_events_per_session: int = 4096,
         max_payload_bytes: int = 64 * 1024,
         approval_ttl_sec: float = 300.0,
+        auto_apply_capabilities: frozenset[str] | set[str] | tuple[str, ...] = (),
     ) -> None:
         if model_adapter_factory is None:
             from pulse_harness.adapters.chat_http import model_factory_from_env
@@ -301,6 +302,7 @@ class HarnessKernelService:
         self._tool_provider_factory = tool_provider_factory
         self._response_reviewer_factory = response_reviewer_factory
         self._turn_advisor_factory = turn_advisor_factory
+        self._auto_apply_capabilities = frozenset(auto_apply_capabilities)
         self._runtimes: dict[str, KernelSessionRuntime] = {}
         self._runtime_lock = threading.RLock()
         self._closed = False
@@ -388,10 +390,35 @@ class HarnessKernelService:
                 ),
                 turn_advisor=(self._turn_advisor_factory(self.store, adapter, session_scope)
                               if self._turn_advisor_factory is not None else None),
+                auto_apply_capabilities=self._auto_apply_capabilities,
             )
             runtime = KernelSessionRuntime(session_scope, runner, provider)
             self._runtimes[session_scope.session_id] = runtime
             return runtime
+
+    def restore_checkpoint(self, scope: HarnessScope, checkpoint_id: str) -> Mapping[str, Any]:
+        """Undo one applied file change from its sealed checkpoint.
+
+        ``scope`` is the changing action's own turn scope. The provider restores
+        only while the file still has that change's content, so a later edit is
+        never overwritten. Existing session providers are reused; no runner or
+        turn is created.
+        """
+
+        with self._runtime_lock:
+            self._require_open()
+            runtime = self._runtimes.get(scope.session_id)
+            provider = (
+                runtime.provider
+                if runtime is not None and runtime.scope == scope.session_scope()
+                else self._provider()
+            )
+        restore = getattr(provider, "restore", None)
+        if not callable(restore):
+            raise HarnessKernelApiError(
+                "this workspace cannot restore checkpoints", code="restore_unavailable"
+            )
+        return restore(scope, checkpoint_id)
 
     def create(self, scope: HarnessScope) -> dict[str, Any]:
         self._require_open()

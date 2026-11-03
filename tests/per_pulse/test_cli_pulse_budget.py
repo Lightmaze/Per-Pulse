@@ -70,3 +70,35 @@ def test_no_pulse_turns_background_continuation_off(monkeypatch, capsys):
     assert "--no-pulse" in capsys.readouterr().err
     with pytest.raises(SystemExit):
         main(["--pulse", "--no-pulse"])
+
+
+def _captured_options(argv, monkeypatch):
+    import uvicorn
+    import per_pulse.app as app
+
+    started = []
+    monkeypatch.setattr(app, "create_app", lambda *args, **kwargs: kwargs)
+    monkeypatch.setattr(uvicorn, "run", lambda options, **kwargs: started.append(options))
+    main(argv)
+    return started[0]
+
+
+def test_experience_and_workspace_actions_are_on_by_default(monkeypatch):
+    options = _captured_options([], monkeypatch)
+    assert options["posture"] is True
+    assert options["allow_workspace_actions"] is True
+    assert options["auto_apply_edits"] is True
+    off = _captured_options(["--no-posture", "--no-workspace-actions"], monkeypatch)
+    assert off["posture"] is False
+    assert off["allow_workspace_actions"] is False
+    assert _captured_options(["--allow-workspace-actions", "--posture"], monkeypatch)["posture"] is True
+
+
+def test_ask_before_edits_restores_per_change_approval(monkeypatch, capsys):
+    options = _captured_options(["--ask-before-edits"], monkeypatch)
+    assert options["allow_workspace_actions"] is True
+    assert options["auto_apply_edits"] is False
+    with pytest.raises(SystemExit) as stopped:
+        main(["--ask-before-edits", "--no-workspace-actions"])
+    assert stopped.value.code == 2
+    assert "--ask-before-edits" in capsys.readouterr().err

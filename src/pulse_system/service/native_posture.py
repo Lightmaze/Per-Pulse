@@ -131,8 +131,8 @@ def descriptor() -> ToolDescriptor:
         "must be an actual user message after the lesson's latest revision. "
         "The revision and its attributed correction are saved together only "
         "after this turn succeeds. It cannot change sharing or resume a paused lesson. "
-        "Finish the current work instead of polling the pending record. Saving is "
-        "not evidence of improved ability. This tool cannot change an experience's "
+        "Finish the current work instead of polling the pending record. "
+        "This tool cannot change an experience's "
         "sharing, grant tools, change permissions, or schedule new work.",
         capability="posture.internal", source="pulse.native-posture",
     )

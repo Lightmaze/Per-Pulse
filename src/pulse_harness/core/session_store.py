@@ -679,6 +679,9 @@ class HarnessStore:
         # connection still observes the same committed database and policy.
         # This is an in-process optimization, never persisted authority.
         self._validated_read_stamp: tuple[object, ...] | None = None
+        # Cookies of a validated database at the start of this store's own
+        # write transaction; None when the transaction did not start validated.
+        self._transaction_base: tuple[object, ...] | None = None
         # Exact persisted bytes may reuse their pure envelope checks. This
         # never certifies a relationship, sequence, schema or mutable action.
         # The store lock owns the bounded memo; nothing is written to disk.
@@ -1416,15 +1419,32 @@ class HarnessStore:
 
     @contextmanager
     def _transaction(self) -> Iterator[None]:
+        """Run one write transaction of this store.
+
+        A transaction that starts from a validated database, with no other
+        writer (BEGIN IMMEDIATE), only adds rows through this store's own
+        validated write paths. Its result stays validated instead of
+        re-checking every stored row on the next read; an external commit,
+        schema change or migration still forces full validation.
+        """
         self._require_open()
+        base = self._read_validation_stamp_locked()
+        trusted = base is not None and base == self._validated_read_stamp
         self._db.execute("BEGIN IMMEDIATE")
+        self._transaction_base = base if trusted else None
         try:
             yield
         except BaseException:
+            self._transaction_base = None
             self._db.rollback()
             raise
         else:
             self._db.commit()
+            self._transaction_base = None
+            if trusted:
+                after = self._read_validation_stamp_locked()
+                if after is not None and after[0] == base[0] and after[2:] == base[2:]:
+                    self._validated_read_stamp = after
 
     def _require_open(self) -> None:
         if self._closed:
@@ -1445,6 +1465,7 @@ class HarnessStore:
         clone._lock = RLock()
         clone._closed = True
         clone._envelope_checks = ValidationMemo()
+        clone._transaction_base = None
         clone._model_round_writers = {}
         clone._model_round_owners = {}
         return clone
@@ -3618,7 +3639,23 @@ class HarnessStore:
             return None
         return stamp
 
+    def _transaction_cookies_locked(self) -> tuple[object, ...]:
+        """The external, schema and policy part of a validation stamp."""
+        return (
+            int(self._db.execute("PRAGMA main.data_version").fetchone()[0]),
+            int(self._db.execute("PRAGMA main.schema_version").fetchone()[0]),
+            int(self._db.execute("PRAGMA temp.schema_version").fetchone()[0]),
+            int(self._db.execute("PRAGMA main.user_version").fetchone()[0]),
+            self.max_payload_bytes, self.max_events_per_session,
+        )
+
     def _validate_database_locked(self, *, expected_version: int | None = None) -> None:
+        if (expected_version is None and self._db.in_transaction
+                and self._transaction_base is not None
+                and self._transaction_cookies_locked() == self._transaction_base[2:]):
+            # Validated before this exclusive transaction began; only this
+            # store's own write paths have changed it since.
+            return
         try:
             stamp = self._read_validation_stamp_locked() if expected_version is None else None
             if stamp is not None and stamp == self._validated_read_stamp:

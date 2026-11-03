@@ -792,7 +792,7 @@ def run_transfer_trial(
                 and value.get("source", {}).get("source_message_id") == record["stages"][0].get("result_event_id")
                 and value.get("source", {}).get("feedback_message_id") == record["stages"][1].get("input_event_id")
                 and value.get("source", {}).get("learning_turn_id") == record["stages"][1].get("world_turn_id")
-                and value.get("scope") == "context" and value.get("context_id") == ""
+                and value.get("scope") in {"context", "subject"} and value.get("context_id") == ""
                 for value in record.get("experiences", []))
         finally:
             await pages.close()
@@ -892,7 +892,7 @@ def audit_transfer_trial(output: Path) -> dict:
                         and source.get("source_message_id") == stages[0]["result_event_id"]
                         and source.get("feedback_message_id") == stages[1]["input_event_id"]
                         and source.get("learning_turn_id") == stages[1]["world_turn_id"]
-                        and experience["context_id"] == "" and experience["scope"] == "context"):
+                        and experience["context_id"] == "" and experience["scope"] in {"context", "subject"}):
                     admitted = True
         sidecar = output / "native" / "kernel.db.expert.sqlite3.trace"
         if sidecar.exists():

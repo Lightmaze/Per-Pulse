@@ -86,8 +86,7 @@ def descriptor() -> ToolDescriptor:
         "recent(limit?) finds the "
         "latest exposed positions in THIS logical session, including after reopen, "
         "without opening files. Use an older receipt to reread its following page; "
-        "use open to deliberately start a changed version. A passage receipt is "
-        "not proof of understanding or a claim that earlier pages were read. "
+        "use open to deliberately start a changed version. "
         "No automatic next step, summary, file write, or task is created. "
         "Only bounded UTF-8 files in the configured shared workspace are supported.",
         mutable=False, requires_approval=False, capability="workspace.read",

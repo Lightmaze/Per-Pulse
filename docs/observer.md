@@ -30,10 +30,5 @@ service restarts under the same persistent World identity, the observer ends
 with `service_restarted` instead of claiming uninterrupted process activity.
 The Context Body and its history can remain persistent across that restart.
 
-This command does not enable Pulse or a provider for you: start Per Pulse
-normally, with `--pulse` and any explicitly authorized model, before observing.
-A connected-provider status is not proof that a real provider ran, that
-background activity improved a result, or that currency was capped. For a
-long-horizon claim, inspect the actual file, elapsed wall time, native sources,
-provider request/usage evidence, and whether relevant Works yielded useful
-new outcomes; do not use a short synthetic CI run as that evidence.
+The observer only reads: start Per Pulse with a model first. To judge a long
+run, open the Works it lists and look at what they actually produced.

@@ -137,8 +137,7 @@ The optional `python tests/per_pulse/benchmark_message_history.py` compares the
 actual native page queries with and without this index in a disposable
 100,000-row fixture. On the development host, median bootstrap time fell from
 237 ms to 7 ms, and a 100-message older range from 18 ms to 1 ms (20 measured
-reads after five warmups). These are local synthetic measurements, not a
-latency guarantee for other hardware or histories.
+reads after five warmups) on a synthetic fixture.
 
 Message search scans matching-context native text; it is not a separate search
 index or transcript copy. `python tests/per_pulse/benchmark_message_search.py`
@@ -422,7 +421,7 @@ escaped, images become descriptions without remote requests, and only explicit
 absolute HTTP(S) links become external navigation. Relative and executable URLs
 remain text. The same reading component presents confirmed Markdown artifacts.
 
-## Native execution and file results (opt-in)
+## Native execution and file results
 
 `GET /api/pages/{id}/execution` observes a native turn with exact-action approvals. `POST /api/pages/{id}/execution/stop` takes `{turnId}`; `POST /api/pages/{id}/execution/actions/{actionId}` takes `{decision: 'allow_once'|'deny'|'cancel'}`. Each returns a source-bound receipt and current page view. Scope is derived from the page server-side. Completed effects are preserved separately from a failed continuation.
 
@@ -439,7 +438,16 @@ succession in the same Work; Stop cannot undo
 an effect. The UI exposes them in **Actions with unconfirmed outcomes** only
 on their originating page, without a retry or approval button.
 
-`GET /api/pages/{id}/artifacts` projects bounded successful native `mutate_file` receipts; `GET /api/pages/{id}/artifacts/{artifactId}` verifies original action/page, regular text file and content SHA-256 before presenting a bounded redacted preview. A changed or missing file has no substitute preview. Page view includes `execution`, `artifacts`, `artifactsTruncated`; provider includes `workspaceActions`. See [Harness foundation](harness-foundation.md) for exact contracts.
+`GET /api/pages/{id}/artifacts` projects bounded successful native `mutate_file` receipts; `GET /api/pages/{id}/artifacts/{artifactId}` verifies original action/page, regular text file and content SHA-256 before presenting a bounded redacted preview. A changed or missing file has no substitute preview. Page view includes `execution`, `artifacts`, `artifactsTruncated`; provider includes `workspaceActions` and `autoApplyEdits`. Each artifact has `undone`. See [Harness foundation](harness-foundation.md) for exact contracts.
+
+`POST /api/pages/{id}/artifacts/{artifactId}/undo` (body `{}`) restores the
+change's own Kernel checkpoint: the file returns to its content before that
+change, or is removed if the change created it. It returns `{pageId, artifact,
+artifacts}`. Errors: `409 artifact_version_changed` when the file changed again
+afterwards, `409 artifact_already_undone`, `409 artifact_undo_unavailable`
+(for example, a change carried from another workspace),
+`409 workspace_actions_disabled`, and `500 artifact_undo_uncertain` when the
+restore could not be confirmed.
 
 `GET /api/pages/{id}/artifacts/{artifactId}/download` repeats that same exact
 action/page and file-version verification, then returns complete captured bytes

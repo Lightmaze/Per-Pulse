@@ -70,7 +70,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "localhost", "::1"], help="Local address to listen on.")
     parser.add_argument("--port", type=int, default=8000, help="Local HTTP port (default: 8000).")
     parser.add_argument("--example", action="store_true", help="Open a separate, clearly marked example workspace without a model.")
-    parser.add_argument("--allow-workspace-actions", action="store_true", help="Enable workspace effects with exact-action approvals (off by default).")
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument("--allow-workspace-actions", dest="workspace_actions", action="store_true", default=True,
+                         help="Let the model change files in the workspace; you can undo each change (default).")
+    actions.add_argument("--no-workspace-actions", dest="workspace_actions", action="store_false",
+                         help="Do not let the model change files.")
+    parser.add_argument("--ask-before-edits", action="store_true",
+                        help="Ask before each file change instead of applying it.")
     pulse_mode = parser.add_mutually_exclusive_group()
     pulse_mode.add_argument("--pulse", dest="pulse", action="store_true", default=True,
                             help="Let pages continue in the background within the hourly budget (default when a model is connected).")
@@ -83,8 +89,11 @@ def main(argv: list[str] | None = None) -> None:
                         help="Tokens reserved for each background turn until its usage is known (default: 8192).")
     parser.add_argument("--pulse-main-rounds", type=int, default=4,
                         help="Maximum model rounds in one background turn (1..16; default 4).")
-    parser.add_argument("--posture", action="store_true", default=None,
-                        help="Enable attributed native experience learning (off by default).")
+    posture = parser.add_mutually_exclusive_group()
+    posture.add_argument("--posture", dest="posture", action="store_true", default=True,
+                         help="Keep examples and lessons from your corrections (default).")
+    posture.add_argument("--no-posture", dest="posture", action="store_false",
+                         help="Do not keep examples or lessons.")
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535.")
@@ -103,6 +112,8 @@ def main(argv: list[str] | None = None) -> None:
             "--pulse-hourly-tokens must be 0 (to hold background admission) "
             "or at least --pulse-token-reservation; otherwise no local activation can be admitted."
         )
+    if args.ask_before_edits and not args.workspace_actions:
+        parser.error("--ask-before-edits cannot be combined with --no-workspace-actions.")
     if not 1 <= args.pulse_main_rounds <= 16:
         parser.error("--pulse-main-rounds must be between 1 and 16.")
     if args.pulse_main_rounds != 4 and not args.pulse:
@@ -126,7 +137,8 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Background tokens: about {args.pulse_hourly_tokens} per hour, "
                   f"{args.pulse_token_reservation} reserved per turn.")
     uvicorn.run(create_app(data_dir, example=args.example, posture=args.posture,
-                           allow_workspace_actions=args.allow_workspace_actions,
+                           allow_workspace_actions=args.workspace_actions,
+                           auto_apply_edits=not args.ask_before_edits,
                           pulse=PulseSettings(enabled=args.pulse,
                                               max_background_pulses_per_hour=args.pulse_budget,
                                               max_background_provider_tokens_per_hour=args.pulse_hourly_tokens,

@@ -41,6 +41,8 @@ const errorKeys: Record<string, MessageKey> = {
   experience_not_found: 'learning.notAvailable', posture_disabled: 'learning.disabled',
   artifact_version_changed: 'artifacts.changed', artifact_download_redacted: 'artifacts.downloadRedacted',
   artifact_download_unverified: 'artifacts.downloadUnverified',
+  artifact_already_undone: 'artifacts.alreadyUndone', artifact_undo_unavailable: 'artifacts.undoUnavailable',
+  artifact_undo_uncertain: 'artifacts.undoUncertain', workspace_actions_disabled: 'artifacts.undoOff',
   file_too_large: 'artifacts.tooLarge', text_files_only: 'artifacts.nonText',
   credential_content_blocked: 'artifacts.sensitive', file_changed_retry: 'artifacts.retry',
   file_unavailable: 'artifacts.missing', path_unavailable: 'artifacts.missing',

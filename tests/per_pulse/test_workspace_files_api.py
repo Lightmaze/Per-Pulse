@@ -65,8 +65,11 @@ def test_materials_are_native_create_only_files_and_survive_restart(tmp_path):
 
     with _client(tmp_path) as client:
         assert _identity(client)["X-Per-Pulse-World"] == identity["X-Per-Pulse-World"]
-        assert client.get("/api/workspace/files/content", params={"path": path}, headers=identity).status_code == 409
-        assert _upload(client, headers=identity).status_code == 409
+        # A page opened before the restart keeps working with the same World.
+        assert client.get("/api/workspace/files/content", params={"path": path}, headers=identity).json()["content"] == data.decode()
+        other_world = {**identity, "X-Per-Pulse-World": "another-world"}
+        assert client.get("/api/workspace/files/content", params={"path": path}, headers=other_world).status_code == 409
+        assert _upload(client, headers=other_world).status_code == 409
         refreshed = client.get("/api/workspace/files/content", params={"path": path}, headers=_identity(client))
         assert refreshed.json()["content"] == data.decode()
         assert len(list((tmp_path / "workspace" / "uploads").iterdir())) == 2

@@ -112,6 +112,7 @@ jobs:
       - name: Verify /tick continuation and Stop in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TICK_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/tick_flow.mjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_UNDO_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/undo_flow.mjs
       - name: Keep workspace status browser evidence
         if: always()
         uses: actions/upload-artifact@v4

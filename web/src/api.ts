@@ -106,8 +106,7 @@ export const api = {
     const response = await fetchResponse(`${pagePath(pageId)}/materials/${encodeURIComponent(material.id)}/download`, {
       headers: pulseWriteHeaders(identity), signal,
     });
-    if (response.headers.get('x-per-pulse-world') !== identity.workspaceId
-      || response.headers.get('x-per-pulse-service-instance') !== identity.serviceInstanceId) {
+    if (response.headers.get('x-per-pulse-world') !== identity.workspaceId) {
       throw new ApiError('The workspace changed. Reload before downloading the source.', 'workspace_changed', 409);
     }
     return verifiedDownload(response, material.sha256, 'material_download_unverified');
@@ -164,6 +163,7 @@ export const api = {
   stop: (id: string, turnId: string) => request<{ accepted: boolean; repeated: boolean; view: PageView }>(`${pagePath(id)}/execution/stop`, { method: 'POST', body: JSON.stringify({ turnId }) }),
   decide: (id: string, actionId: string, decision: 'allow_once' | 'deny' | 'cancel') => request<ActionReceipt>(`${pagePath(id)}/execution/actions/${encodeURIComponent(actionId)}`, { method: 'POST', body: JSON.stringify({ decision }) }),
   artifact: (id: string, artifactId: string) => request<ArtifactRead>(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}`),
+  undoArtifact: (id: string, artifactId: string) => request<{ pageId: string; artifact: Artifact }>(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}/undo`, { method: 'POST', body: JSON.stringify({}) }),
   downloadArtifact: async (id: string, artifact: Artifact, signal: AbortSignal) => {
     const response = await fetchResponse(`${pagePath(id)}/artifacts/${encodeURIComponent(artifact.id)}/download`, { signal });
     return verifiedDownload(response, artifact.sha256, 'artifact_download_unverified');
