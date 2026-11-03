@@ -15,6 +15,7 @@ from dataclasses import asdict
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 import threading
 from typing import Any
 from uuid import uuid4
@@ -77,6 +78,23 @@ FOREGROUND_MODEL_ROUNDS = 256
 # turn has no wall-clock limit (it ends when it finishes, on Stop, or at the
 # round limit). Background turns keep their own small round allowance.
 APPROVAL_TTL_SECONDS = 7 * 24 * 60 * 60
+# Estimated input budget for one model request. Older turns beyond it are left
+# out of the request (never deleted) and stay searchable with the history
+# tools. Set P_PULSE_CONTEXT_TOKENS to match a smaller or larger model.
+DEFAULT_CONTEXT_TOKENS = 96_000
+
+
+def context_tokens_from_env() -> int:
+    raw = os.environ.get("P_PULSE_CONTEXT_TOKENS", "").strip()
+    if not raw:
+        return DEFAULT_CONTEXT_TOKENS
+    try:
+        value = int(raw)
+    except ValueError:
+        raise PageError("context_tokens_invalid", "P_PULSE_CONTEXT_TOKENS must be a whole number of tokens.", 500) from None
+    if value < 1024:
+        raise PageError("context_tokens_invalid", "P_PULSE_CONTEXT_TOKENS must be at least 1024.", 500)
+    return value
 
 
 class PageService:
@@ -151,6 +169,7 @@ class PageService:
             model_factory=factory, allow_unconfigured=True, allow_mutations=self.allow_workspace_actions,
             enable_posture=False if example else posture, auto_apply_edits=self.auto_apply_edits,
             max_model_rounds=FOREGROUND_MODEL_ROUNDS, approval_ttl_sec=APPROVAL_TTL_SECONDS,
+            max_context_tokens=context_tokens_from_env(),
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
         self.execution = PageExecution(self.runtime)

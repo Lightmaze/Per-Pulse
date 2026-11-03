@@ -283,6 +283,7 @@ class HarnessKernelService:
         approval_ttl_sec: float = 300.0,
         auto_apply_capabilities: frozenset[str] | set[str] | tuple[str, ...] = (),
         max_model_rounds: int = 16,
+        max_context_tokens: int | None = None,
     ) -> None:
         if max_model_rounds < 1:
             raise ValueError("max_model_rounds must be positive")
@@ -307,6 +308,7 @@ class HarnessKernelService:
         self._turn_advisor_factory = turn_advisor_factory
         self._auto_apply_capabilities = frozenset(auto_apply_capabilities)
         self._max_model_rounds = max_model_rounds
+        self._max_context_tokens = max_context_tokens
         self._runtimes: dict[str, KernelSessionRuntime] = {}
         self._runtime_lock = threading.RLock()
         self._closed = False
@@ -396,6 +398,7 @@ class HarnessKernelService:
                               if self._turn_advisor_factory is not None else None),
                 auto_apply_capabilities=self._auto_apply_capabilities,
                 max_model_rounds=self._max_model_rounds,
+                max_context_tokens=self._max_context_tokens,
             )
             runtime = KernelSessionRuntime(session_scope, runner, provider)
             self._runtimes[session_scope.session_id] = runtime

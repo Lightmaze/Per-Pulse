@@ -45,6 +45,7 @@ from .errors import (
 )
 from .events import EventDraft
 from .hooks import HookContext, HookDecision, HookRejected, HookSet, HookStage
+from .context_window import fit_context
 from .provider import (
     CancellationRequested,
     CancellationToken,
@@ -129,6 +130,7 @@ class TurnRunner:
         response_reviewer: ResponseReviewer | None = None,
         turn_advisor: TurnAdvisor | None = None,
         auto_apply_capabilities: frozenset[str] | set[str] | tuple[str, ...] = (),
+        max_context_tokens: int | None = None,
     ) -> None:
         if max_model_rounds < 1:
             raise ValueError("max_model_rounds must be positive")
@@ -136,6 +138,8 @@ class TurnRunner:
             raise ValueError("max_model_deltas must be positive")
         if max_model_stream_bytes is not None and max_model_stream_bytes < 1:
             raise ValueError("max_model_stream_bytes must be positive")
+        if max_context_tokens is not None and max_context_tokens < 1:
+            raise ValueError("max_context_tokens must be positive")
         self.store = store
         self.model_adapter = model_adapter
         self.tool_provider = tool_provider
@@ -146,6 +150,9 @@ class TurnRunner:
         # per-action approval. They still carry durable authority and their
         # own guards (checkpoints, expected digests, recovery).
         self.auto_apply_capabilities = frozenset(auto_apply_capabilities)
+        # Estimated input budget for one model request; None sends the whole
+        # transcript. See pulse_harness.core.context_window.
+        self.max_context_tokens = max_context_tokens
         self.max_model_rounds = max_model_rounds
         self.max_model_deltas = max_model_deltas
         self.max_model_stream_bytes = (
@@ -1749,6 +1756,8 @@ class TurnRunner:
                        and message.get("role") in {"system", "user", "assistant", "tool", "reasoning"}
                        and isinstance(message.get("content"), str) for message in messages):
                 raise ProviderProtocolError("invalid scoped model input projection")
+        if self.max_context_tokens is not None:
+            messages = fit_context(messages, self.max_context_tokens)
         cursor = self.store.get_session(scope.session_scope()).cursor
         return ModelRequest(
             scope=scope,
