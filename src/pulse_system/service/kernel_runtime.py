@@ -340,6 +340,9 @@ class KernelHarnessRuntime:
         # Turn admission is serialized per subject-owned context. Lifecycle
         # operations (abort, succession, shutdown) remain subject-wide.
         self._active: dict[tuple[str, str], HarnessScope] = {}
+        # Logical Kernel turns are still owned here after their physical
+        # dispatch thread returns from WAITING_APPROVAL.
+        self._parked_turns: dict[str, tuple] = {}
         # A claimed scope exists before create_turn has written its durable row.
         # Abort/close must record cancellation intent during that admission gap,
         # rather than call TurnRunner.abort against an unknown turn.
@@ -913,6 +916,7 @@ class KernelHarnessRuntime:
         claimed = False
         active_key = None
         timer = None
+        parked = False
         runtime = None
         try:
             context_id = ""
@@ -988,99 +992,23 @@ class KernelHarnessRuntime:
                 with self._compute_permit(scope):
                     self._check()
                     result = runtime.runner.run(scope, prompt=None if internal is not None else submitted)
-            # A human may leave this durable action unanswered for hours.
-            # Avoid polling its SQLite terminal state 40 times per second per
-            # held turn. Approval, Stop and timeout signal this condition; a
-            # bounded fallback still detects owner loss and external changes.
-            # This does NOT release the Pulse worker's physical thread: the
-            # separate thread-free park/resume design remains outstanding.
-            while result.status not in _TERMINAL:
+            # A pending human decision is a durable logical turn, not a
+            # reason to retain a physical Pulse worker. Approval/Stop/timeout
+            # keep using the original Kernel scope and action authority.
+            if result.status not in _TERMINAL:
                 with self._lock:
-                    notice_generation = self._terminal_notice_generation
-                self._check()
-                result = runtime.runner._outcome(scope)
-                if result.status not in _TERMINAL:
-                    with self._lock:
-                        # A notification between the durable read and wait
-                        # must never be lost to the next wait interval.
-                        if self._terminal_notice_generation == notice_generation:
-                            self._lock.wait(timeout=0.25)
-            self._check()
-            rounds = self.kernel.store.model_rounds_for_turn(scope)
-            if self.expert is not None:
-                try:
-                    self.expert.record_outcome(self.kernel.store, scope, result)
-                except (sqlite3.Error, ValueError):
-                    # Keep successful work deliverable; an unrecorded outcome
-                    # cannot receive training credit and stays visibly pending.
-                    logging.getLogger(__name__).warning("expert_outcome_not_recorded", exc_info=False)
-            completed_rounds = tuple(
-                round_record
-                for round_record in rounds
-                if round_record.status is ModelRoundStatus.COMPLETED
-            )
-            usage = {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cached_tokens": 0,
-                "cache_write_tokens": 0,
-                "provider_requests": len(completed_rounds),
-            }
-            accounted = True
-            for round_record in completed_rounds:
-                if round_record.provider_usage is None:
-                    accounted = False
-                    continue
-                for key in (
-                    "input_tokens",
-                    "output_tokens",
-                    "cached_tokens",
-                    "cache_write_tokens",
-                ):
-                    usage[key] += int(round_record.provider_usage[key])
-            from .coverme import recorded_fork_usage
-            fork_usage, fork_accounted = recorded_fork_usage(
-                self.kernel.store, scope, trace=self.coverme.store if self.coverme is not None else None,
-            )
-            for key in usage:
-                usage[key] += fork_usage[key]
-            accounted = accounted and fork_accounted
-            from .expert_computation import recorded_expert_usage
-            expert_usage, expert_accounted = recorded_expert_usage(
-                self.kernel.store, scope, trace=self.expert.trace if self.expert is not None else None,
-            )
-            for key in usage:
-                usage[key] += expert_usage[key]
-            accounted = accounted and expert_accounted
-            if result.status is not TurnStatus.SUCCEEDED or not result.assistant_text.strip():
-                code = "world_turn_timeout" if expired.is_set() else result.error_code or f"kernel_turn_{result.status.value}"
-                # A later model/tool failure does not erase *completed* main,
-                # CoverMe or expert provider usage. Keep the known lower bound
-                # while the incomplete request remains unaccounted for.
-                completed_requests = usage["provider_requests"]
-                known_tokens = (
-                    usage["input_tokens"] + usage["output_tokens"]
-                    if completed_requests else None
-                )
-                raise _error(
-                    code, "Kernel turn did not produce a settled final response",
-                    accepted=True, known_provider_tokens=known_tokens,
-                )
-            projected, regime = native_replay.project_text(self.kernel.store, scope, result.assistant_text)
-            return HarnessTurnResult(
-                execution_regime=regime,
-                engram_id=engram_id, session_file=self.db_path, session_id=scope.session_id,
-                content=projected, stop_reason="stop", **usage,
-                tool_calls=self.kernel.store.count_actions_for_turn(scope),
-                evidence_class=(
-                    "TEST_DOUBLE"
-                    if runtime.runner.model_adapter.capabilities.test_only
-                    else (
-                        "KERNEL_PROVIDER_USAGE_DURABLE"
-                        if accounted
-                        else "KERNEL_PROVIDER_USAGE_UNACCOUNTED"
+                    self._parked_turns[scope.turn_id] = (
+                        scope, runtime, expired, timer, active_key,
                     )
-                ),
+                    parked = True
+                raise _error(
+                    "kernel_turn_parked",
+                    "the original turn is waiting for an authorized decision",
+                    accepted=True,
+                )
+            self._check()
+            return self._project_terminal(
+                engram_id, scope, runtime, result, expired,
             )
         except KernelError as exc:
             raise _error(
@@ -1088,16 +1016,147 @@ class KernelHarnessRuntime:
                 known_provider_tokens=getattr(exc, "known_provider_tokens", None),
             ) from exc
         finally:
-            if timer is not None:
-                timer.cancel()
-                timer.join()
-            with self._lock:
-                if claimed:
-                    self._starting_turn_ids.discard(scope.turn_id)
-                    self._abort_before_create.pop(scope.turn_id, None)
-                if claimed and self._active.get(active_key) == locals().get("scope"):
-                    self._active.pop(active_key, None)
-                self._lock.notify_all()
+            if not parked:
+                if timer is not None:
+                    timer.cancel()
+                    timer.join()
+                with self._lock:
+                    if claimed:
+                        self._starting_turn_ids.discard(scope.turn_id)
+                        self._abort_before_create.pop(scope.turn_id, None)
+                    if claimed and self._active.get(active_key) == locals().get("scope"):
+                        self._active.pop(active_key, None)
+                    self._lock.notify_all()
+
+    def _project_terminal(self, engram_id, scope, runtime, result, expired):
+        """Project a settled original Kernel turn; never rerun a prompt."""
+        assert self.kernel is not None
+        rounds = self.kernel.store.model_rounds_for_turn(scope)
+        if self.expert is not None:
+            try:
+                self.expert.record_outcome(self.kernel.store, scope, result)
+            except (sqlite3.Error, ValueError):
+                # Keep successful work deliverable; an unrecorded outcome
+                # cannot receive training credit and stays visibly pending.
+                logging.getLogger(__name__).warning("expert_outcome_not_recorded", exc_info=False)
+        completed_rounds = tuple(
+            round_record
+            for round_record in rounds
+            if round_record.status is ModelRoundStatus.COMPLETED
+        )
+        usage = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
+            "provider_requests": len(completed_rounds),
+        }
+        accounted = True
+        for round_record in completed_rounds:
+            if round_record.provider_usage is None:
+                accounted = False
+                continue
+            for key in (
+                "input_tokens",
+                "output_tokens",
+                "cached_tokens",
+                "cache_write_tokens",
+            ):
+                usage[key] += int(round_record.provider_usage[key])
+        from .coverme import recorded_fork_usage
+        fork_usage, fork_accounted = recorded_fork_usage(
+            self.kernel.store, scope, trace=self.coverme.store if self.coverme is not None else None,
+        )
+        for key in usage:
+            usage[key] += fork_usage[key]
+        accounted = accounted and fork_accounted
+        from .expert_computation import recorded_expert_usage
+        expert_usage, expert_accounted = recorded_expert_usage(
+            self.kernel.store, scope, trace=self.expert.trace if self.expert is not None else None,
+        )
+        for key in usage:
+            usage[key] += expert_usage[key]
+        accounted = accounted and expert_accounted
+        if result.status is not TurnStatus.SUCCEEDED or not result.assistant_text.strip():
+            code = "world_turn_timeout" if expired.is_set() else result.error_code or f"kernel_turn_{result.status.value}"
+            # A later model/tool failure does not erase *completed* main,
+            # CoverMe or expert provider usage. Keep the known lower bound
+            # while the incomplete request remains unaccounted for.
+            completed_requests = usage["provider_requests"]
+            known_tokens = (
+                usage["input_tokens"] + usage["output_tokens"]
+                if completed_requests else None
+            )
+            raise _error(
+                code, "Kernel turn did not produce a settled final response",
+                accepted=True, known_provider_tokens=known_tokens,
+            )
+        projected, regime = native_replay.project_text(self.kernel.store, scope, result.assistant_text)
+        return HarnessTurnResult(
+            execution_regime=regime,
+            engram_id=engram_id, session_file=self.db_path, session_id=scope.session_id,
+            content=projected, stop_reason="stop", **usage,
+            tool_calls=self.kernel.store.count_actions_for_turn(scope),
+            evidence_class=(
+                "TEST_DOUBLE"
+                if runtime.runner.model_adapter.capabilities.test_only
+                else (
+                    "KERNEL_PROVIDER_USAGE_DURABLE"
+                    if accounted
+                    else "KERNEL_PROVIDER_USAGE_UNACCOUNTED"
+                )
+            ),
+        )
+
+    def parked_turn_terminal(self, engram_id: str, turn_id: str) -> bool:
+        """Check durable completion, not whether an approval is merely absent."""
+        with self._lock:
+            if self._closing or self._closed or self.kernel is None:
+                return False
+            parked = self._parked_turns.get(turn_id)
+            if parked is None or parked[0].engram_id != engram_id:
+                return False
+            scope = parked[0]
+        try:
+            return self.kernel.store.get_turn(scope).status in _TERMINAL
+        except (KernelError, sqlite3.Error, ValueError, KeyError):
+            return False
+
+    def resume_parked_turn(self, engram_id: str, turn_id: str) -> HarnessTurnResult:
+        """Finalize the same already-executed turn; no second model admission."""
+        with self._lock:
+            self._check()
+            parked = self._parked_turns.get(turn_id)
+            if parked is None or parked[0].engram_id != engram_id:
+                raise _error("kernel_parked_turn_unknown",
+                             "the exact parked turn is no longer owned", accepted=True)
+            scope, runtime, expired, timer, active_key = parked
+            run_lock = self._runner_locks[scope.session_id]
+        with run_lock:
+            self._check()
+            result = runtime.runner._outcome(scope)
+            if result.status not in _TERMINAL:
+                raise _error("kernel_parked_turn_not_terminal",
+                             "the original turn is still awaiting completion", accepted=True)
+            try:
+                return self._project_terminal(
+                    engram_id, scope, runtime, result, expired,
+                )
+            except KernelError as exc:
+                raise _error(exc.code, str(exc), accepted=True) from exc
+            finally:
+                if timer is not None:
+                    timer.cancel()
+                    timer.join()
+                with self._lock:
+                    if self._parked_turns.get(turn_id) == parked:
+                        self._parked_turns.pop(turn_id, None)
+                    self._starting_turn_ids.discard(turn_id)
+                    self._abort_before_create.pop(turn_id, None)
+                    if self._active.get(active_key) == scope:
+                        self._active.pop(active_key, None)
+                    self._terminal_notice_generation += 1
+                    self._lock.notify_all()
 
     def abort(self, engram_id: str) -> None:
         assert self.kernel is not None
