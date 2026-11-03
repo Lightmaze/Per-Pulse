@@ -1,4 +1,4 @@
-import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, WorkspaceSettings } from './types';
+import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, TickRun, WorkspaceSettings } from './types';
 import type { AdaptiveWorkChoices, CollaboratorOutcome, CollaboratorFeedbackScope, CollaboratorFeedbackView, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
@@ -96,6 +96,10 @@ export const api = {
     request<{ page: PageSummary; reference: PageReference; initialMessageId: string; view: PageView }>('/pages', { method: 'POST', body: JSON.stringify(data) }),
   send: (id: string, content: string, references: DraftReference[], materials: string[] = []) =>
     request<{ messageId: string; view: PageView }>(`${pagePath(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, references, materials }) }),
+  tick: (id: string, count: number) =>
+    request<{ tick: TickRun; view: PageView }>(`${pagePath(id)}/tick`, { method: 'POST', body: JSON.stringify({ count }) }),
+  stopTick: (id: string) =>
+    request<{ tick: TickRun | null; view: PageView }>(`${pagePath(id)}/tick/stop`, { method: 'POST', body: '{}' }),
   materials: (id: string, signal?: AbortSignal) => request<MaterialList>(`${pagePath(id)}/materials`, { signal }),
   material: (id: string, materialId: string, signal?: AbortSignal) => request<MaterialRead>(`${pagePath(id)}/materials/${encodeURIComponent(materialId)}`, { signal }),
   downloadMaterial: async (pageId: string, material: Material, identity: WorkspaceFileIdentity, signal: AbortSignal) => {

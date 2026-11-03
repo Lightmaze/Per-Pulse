@@ -242,6 +242,26 @@ Response `201`: `{messageId:string, reference:PageReference, view:PageView}`. `v
 
 `PATCH /api/pages/{id}` with `{"title":"New title"}` -> `PageView` (Work only).
 
+## Continue a page (`/tick`)
+
+`POST /api/pages/{pageId}/tick` with `{"count": N}` (1–256, default 1) gives
+the page `N` quiet continuation turns, one after another, and returns
+`{ "tick": TickRun, "view": PageView }` with status 201. `POST
+/api/pages/{pageId}/tick/stop` with `{}` stops the run before its next step.
+`PageView.tick` is the page's latest run or `null`:
+
+```ts
+type TickRun = {
+  status: 'running' | 'complete' | 'stopped';
+  reason: string | null;   // e.g. "operator", "user_message", "failed"
+  target: number; delivered: number; completed: number;
+  startedAt: string; updatedAt: string;
+};
+```
+
+Errors: `tick_count_invalid` (422), `tick_running`, `tick_context_busy`,
+`tick_needs_conversation`, `tick_model_unavailable` (409).
+
 ## Pause or resume native background activity
 
 `PATCH /api/pulse` with `{"paused":true}` holds background admission;

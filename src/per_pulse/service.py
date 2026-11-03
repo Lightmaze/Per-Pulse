@@ -251,6 +251,8 @@ class PageService:
                 for center_id, queued in foreground_rows
                 if page_id_for(center_id) is not None
             ]
+            for run in state.get("tickRuns", []):
+                run["pageId"] = page_id_for(run["center_id"])
             for retained in state.get("retainedAttention", []):
                 # A model's retained local thought has its own original causal
                 # source. Do not infer a navigable message from a turn/action
@@ -425,6 +427,38 @@ class PageService:
                 raise PageError("invalid_connection", str(exc)) from exc
             return {"connection": {**asdict(edge), "sourcePageId": source_page_id,
                                     "targetPageId": target_page_id}, "pulse": self.pulse_status()}
+
+    def _tick_view(self, run: dict | None) -> dict | None:
+        if run is None:
+            return None
+        return {"status": run["status"], "reason": run["reason"], "target": run["target"],
+                "delivered": run["delivered"], "completed": run["completed"],
+                "startedAt": run["started_at"], "updatedAt": run["updated_at"]}
+
+    def tick(self, page_id: str, count: int) -> dict:
+        """Give a page ``count`` quiet continuation turns (``/tick N``)."""
+        from pulse_system.core.pulse.context import TickError
+
+        with self._lock:
+            front = self._front(page_id)
+            if not self.configured or not self.runtime.running:
+                raise PageError("tick_model_unavailable", "Connect a model to continue this page.", 409)
+            self.runtime._require_runtime_owner()
+            try:
+                run = self.runtime.context_pulse.start_ticks(front.center_id if front else None, count)
+            except TickError as error:
+                status = 422 if error.code == "tick_count_invalid" else 409
+                raise PageError(error.code, str(error), status) from error
+            return {"tick": self._tick_view(run), "view": self.view(page_id)}
+
+    def stop_tick(self, page_id: str) -> dict:
+        with self._lock:
+            front = self._front(page_id)
+            if not self.runtime.running:
+                raise PageError("tick_model_unavailable", "Connect a model to continue this page.", 409)
+            self.runtime._require_runtime_owner()
+            run = self.runtime.context_pulse.stop_ticks(front.center_id if front else None)
+            return {"tick": self._tick_view(run), "view": self.view(page_id)}
 
     def disconnect_pages(self, source_page_id: str, target_page_id: str) -> dict:
         with self._lock:
@@ -604,6 +638,10 @@ class PageService:
             status = "working"
         elif (execution["recoveryRequired"] or execution["status"] == "needs_attention") and status != "error":
             status = "needs_attention"
+        if status in {"idle", "queued"} and self.runtime.running:
+            run = self.runtime.context_pulse.tick_run(front.center_id if front else None)
+            if run is not None and run["status"] == "running":
+                status = "working"
         return {
             "id": page_id, "kind": "work" if front else "home",
             "title": front.title if front else "Home",
@@ -748,6 +786,8 @@ class PageService:
                 "hasMore": has_more,
                 "historyBeforeMessageId": history_before,
                 "earlierSourceMessageId": earlier_source_id,
+                "tick": self._tick_view(self.runtime.context_pulse.tick_run(
+                    self._center(page_id))),
             }
 
     def _reference(self, source: str, target: str, message_id: str | None,

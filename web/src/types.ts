@@ -133,6 +133,17 @@ export type PageView = {
   hasMore: boolean;
   historyBeforeMessageId: string | null;
   earlierSourceMessageId?: string | null;
+  tick?: TickRun | null;
+};
+
+export type TickRun = {
+  status: 'running' | 'complete' | 'stopped';
+  reason: string | null;
+  target: number;
+  delivered: number;
+  completed: number;
+  startedAt: string;
+  updatedAt: string;
 };
 
 export type MessageHistory = {

@@ -100,6 +100,10 @@ class StopTurn(Input):
     turnId: Identifier
 
 
+class TickRequest(Input):
+    count: int = Field(default=1, strict=True)
+
+
 class DecideAction(Input):
     decision: Literal["allow_once", "deny", "cancel"]
 
@@ -473,6 +477,14 @@ def create_app(
     @app.post("/api/pages/{page_id}/return", status_code=201)
     def return_home(page_id: str, body: ReturnHome, request: Request):
         return pages(request).return_home(page_id, body.content, body.messageId, include_materials=body.includeMaterials)
+
+    @app.post("/api/pages/{page_id}/tick", status_code=201)
+    def tick(page_id: str, body: TickRequest, request: Request):
+        return pages(request).tick(page_id, body.count)
+
+    @app.post("/api/pages/{page_id}/tick/stop")
+    def stop_tick(page_id: str, request: Request):
+        return pages(request).stop_tick(page_id)
 
     @app.patch("/api/pages/{page_id}")
     def rename(page_id: str, body: Rename, request: Request):
