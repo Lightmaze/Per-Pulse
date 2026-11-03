@@ -73,6 +73,10 @@ def _selected_result_transfer_content(
 # agents set no small default cap; Stop ends a turn at any point. Background
 # turns keep their own allowance (--pulse-main-rounds).
 FOREGROUND_MODEL_ROUNDS = 256
+# A question waits for your answer: an approval stays open for a week, and a
+# turn has no wall-clock limit (it ends when it finishes, on Stop, or at the
+# round limit). Background turns keep their own small round allowance.
+APPROVAL_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 class PageService:
@@ -140,12 +144,13 @@ class PageService:
             connectivity_interval_ticks=None,
             living_concern_reentry_budget_per_tick=0,
             context_pulse=pulse or PulseSettings(),
+            harness_turn_timeout_sec=None,
         )
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
             model_factory=factory, allow_unconfigured=True, allow_mutations=self.allow_workspace_actions,
             enable_posture=False if example else posture, auto_apply_edits=self.auto_apply_edits,
-            max_model_rounds=FOREGROUND_MODEL_ROUNDS,
+            max_model_rounds=FOREGROUND_MODEL_ROUNDS, approval_ttl_sec=APPROVAL_TTL_SECONDS,
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
         self.execution = PageExecution(self.runtime)

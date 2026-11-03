@@ -231,3 +231,24 @@ def test_a_file_already_back_to_its_earlier_content_counts_as_undone(tmp_path, m
         assert undone.status_code == 200, undone.text
         assert undone.json()["artifacts"]["artifacts"][0]["undone"] is True
         assert notes.read_text(encoding="utf-8") == original
+
+
+def test_an_approval_waits_for_you_instead_of_expiring_in_minutes(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    factory = _factory(monkeypatch, {"WRITE_DRAFT": {
+        "path": "draft.md", "expected_digest": None, "content": "Draft.\n",
+    }})
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True,
+                 auto_apply_edits=False) as client:
+        runtime = client.app.state.pages.runtime
+        assert runtime.config.harness_turn_timeout_sec is None
+        page_id = _page(client, "WRITE_DRAFT")
+        execution = PageExecution(runtime)
+        deadline = time.monotonic() + 8
+        while not execution.snapshot(page_id)["pendingActions"]:
+            assert time.monotonic() < deadline
+            time.sleep(0.025)
+        pending, = execution.snapshot(page_id)["pendingActions"]
+        expires = datetime.fromisoformat(pending["expiresAt"])
+        assert expires - datetime.now(timezone.utc) > timedelta(days=6)

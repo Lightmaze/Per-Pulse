@@ -12,6 +12,8 @@ Start with `--ask-before-edits` to approve each file change instead, or
 `--no-workspace-actions` to let the model read files without changing them.
 Commands (available when `P_PULSE_COMMAND_IMAGE` names a container image) always
 ask first. A pending approval and exact-turn Stop stay in their original page.
+An approval waits for you for up to a week, and a turn you start has no time
+limit: it ends when it finishes, when you press Stop, or after 256 tool steps.
 Example mode never calls a model or changes files. See
 [Core Harness](harness-foundation.md) for authority, recovery and limits.
 
