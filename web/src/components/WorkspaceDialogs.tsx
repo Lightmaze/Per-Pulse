@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { useLanguage } from '../i18n';
-import type { Bootstrap, Material, Message, PageSummary, ResponseLanguage } from '../types';
+import type { Artifact, Bootstrap, Material, Message, PageSummary, ResponseLanguage } from '../types';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { messageBody } from '../messageBody';
@@ -12,6 +12,7 @@ import { CopyButton } from './CopyButton';
 export type Modal =
   | { kind: 'create'; message?: Message }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
+  | { kind: 'picker'; mode: 'artifact'; artifact: Artifact }
   | { kind: 'return'; message: Message; content: string; needsExactExcerpt?: boolean }
   | { kind: 'transfer'; message: Message; excerpt: string }
   | { kind: 'settings' }
@@ -40,7 +41,7 @@ export function CreatePageDialog({ initial, busy, error, close, create }: { init
   </Dialog>;
 }
 
-export function PagePickerDialog({ pages, mode, busy, error, close, select, create }: { pages: PageSummary[]; mode: 'search' | 'compose' | 'reference'; busy: boolean; error: string; close: () => void; select: (page: PageSummary) => void; create: () => void }) {
+export function PagePickerDialog({ pages, mode, busy, error, close, select, create }: { pages: PageSummary[]; mode: 'search' | 'compose' | 'reference' | 'artifact'; busy: boolean; error: string; close: () => void; select: (page: PageSummary) => void; create: () => void }) {
   const { t } = useLanguage();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -49,7 +50,7 @@ export function PagePickerDialog({ pages, mode, busy, error, close, select, crea
   const selectedIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
   const activeId = matches[selectedIndex] ? `${pickerId}-${matches[selectedIndex].id}` : undefined;
   useEffect(() => { if (activeId) document.getElementById(activeId)?.scrollIntoView({ block: 'nearest' }); }, [activeId]);
-  return <Dialog title={mode === 'search' ? t('dialogs.findTitle') : t('dialogs.linkTitle')} onClose={close} className="picker-dialog">
+  return <Dialog title={mode === 'search' ? t('dialogs.findTitle') : mode === 'artifact' ? t('library.artifactToWork') : t('dialogs.linkTitle')} onClose={close} className="picker-dialog">
     <div className="search-field"><Icon name="search" size={19} /><input aria-label={t("dialogs.searchLabel")} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${pickerId}-results`} aria-activedescendant={activeId} aria-describedby={`${pickerId}-hint`} placeholder={t('dialogs.searchPlaceholder')} value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} onKeyDown={event => {
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -65,9 +66,9 @@ export function PagePickerDialog({ pages, mode, busy, error, close, select, crea
       {matches.map((page, index) => <button key={page.id} id={`${pickerId}-${page.id}`} type="button" role="option" aria-selected={index === selectedIndex} tabIndex={-1} className="picker-result" disabled={busy} onMouseEnter={() => setActiveIndex(index)} onClick={() => select(page)}><Icon name={page.kind === 'home' ? 'home' : 'page'} /><span><strong>{page.title}</strong>{page.description ? <small>{page.description}</small> : null}</span><Icon name="chevron" size={16} /></button>)}
     </div>
     {!matches.length ? <p className="picker-empty">{pages.length ? t('dialogs.noMatching') : t('dialogs.noPagesYet')}</p> : null}
-    <p id={`${pickerId}-hint`} className="picker-keyboard-hint">{t('dialogs.chooseHint', { action: mode === 'search' ? t('dialogs.openAction') : t('dialogs.linkAction') })}</p>
+    <p id={`${pickerId}-hint`} className="picker-keyboard-hint">{t('dialogs.chooseHint', { action: mode === 'search' ? t('dialogs.openAction') : mode === 'artifact' ? t('dialogs.attachAction') : t('dialogs.linkAction') })}</p>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
-    <button className="create-from-picker" disabled={busy} onClick={create}><Icon name="plus" size={18} />{t('dialogs.createNewPage')}</button>
+    {mode !== 'artifact' ? <button className="create-from-picker" disabled={busy} onClick={create}><Icon name="plus" size={18} />{t('dialogs.createNewPage')}</button> : null}
   </Dialog>;
 }
 
