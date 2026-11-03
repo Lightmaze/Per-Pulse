@@ -65,8 +65,8 @@ try {
   assert.ok(receiverId, 'real receiving Work exists');
   const beforeReceiver = (await json('/api/pages/' + receiverId)).messages.map(message => message.id);
   await files.getByRole('button', { name: /^plan\.md/ }).click();
-  await files.getByRole('button', { name: 'Add full file to another Work draft', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Add full file to another Work draft' })
+  await files.getByRole('button', { name: 'Add the full file to another page’s draft', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Add the full file to another page’s draft' })
     .getByRole('option', { name: 'Review draft' }).click();
   await page.getByRole('heading', { name: 'Review draft', exact: true }).waitFor();
   const receivingDraft = await page.locator('.composer textarea').inputValue();

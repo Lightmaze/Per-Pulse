@@ -81,7 +81,7 @@ try {
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
   const openDecisions = async () => {
-    await page.getByRole('button', { name: 'How this Work chose collaborators', exact: true }).click();
+    await page.getByRole('button', { name: 'How this page chose collaborators', exact: true }).click();
     await page.locator('.collaborator-choice').first().waitFor();
   };
   const openFeedback = async () => {
@@ -110,7 +110,7 @@ try {
   await editor().getByText('No guidance saved.').waitFor();
   await editor().locator('textarea').fill('Check recorded cache timing before proposing a fix.');
   await submit();
-  await editor().getByText('Saved for this Work only.').waitFor();
+  await editor().getByText('Saved for this page only.').waitFor();
   assert.equal((await feedback(works.source, works.record)).current.scope, 'work');
   checks.push('actual browser saves Work-only guidance that keeps this rated result local');
 
@@ -121,7 +121,7 @@ try {
   await page.goto(base + '/page/' + works.source);
   await openDecisions();
   await openFeedback();
-  await editor().getByText('Saved for this Work only.').waitFor();
+  await editor().getByText('Saved for this page only.').waitFor();
   await editor().locator('select').selectOption('collaborator');
   await editor().getByRole('button', { name: 'Review and save guidance', exact: true }).click();
   await editor().getByText('Share this note with the same collaborator in other Works?', { exact: false }).waitFor();

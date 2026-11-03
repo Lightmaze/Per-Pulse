@@ -69,6 +69,8 @@ test('physical approval saturation is visible only for genuinely queued local wo
   assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, foregroundQueuedByPage: queued, providerConfigured: false }), 'work-fourth'), false);
   assert.equal(pulseWorkerPressure(state({ workerCapacity: capacity, foregroundQueuedByPage: queued, running: false }), 'work-fourth'), false);
   assert.equal(pulseWorkerPressure(state(), 'work-fourth'), false);
-  assert.match(continuityEnglish['pulse.slotPressure'], /Nothing is approved automatically/);
-  assert.match(continuityChinese['pulse.slotPressure'], /不会自动批准/);
+  for (const text of [continuityEnglish['pulse.slotPressure'], continuityChinese['pulse.slotPressure']]) {
+    assert.match(text, /\{attached\}/);
+    assert.match(text, /\{parked\}/);
+  }
 });

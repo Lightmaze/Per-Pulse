@@ -408,7 +408,7 @@ try {
   await page.getByRole('textbox', { name: /^Message / }).fill(unsentWorkDraft);
   await openLessons();
   await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
-  await lesson.getByText('Report what happened in this Work.', { exact: false }).waitFor();
+  await lesson.getByText('Report what happened on this page.', { exact: false }).waitFor();
   const receiverPages = (await (await fetch(base + '/api/bootstrap')).json()).pages;
   const receiverId = receiverPages.find(item => item.title === 'Registration tool').id;
   const receiverView = await (await fetch(base + '/api/pages/' + encodeURIComponent(receiverId))).json();

@@ -85,7 +85,7 @@ try {
   });
   await page.locator('aside.sidebar').getByRole('link',{name:'Home',exact:true}).click();
   await wait(async()=>pulseReadIntercepted,'stalled read of background activity');
-  const needsWork = page.getByRole('region',{name:'Work needing attention',exact:true});
+  const needsWork = page.getByRole('region',{name:'Pages needing attention',exact:true});
   await needsWork.getByRole('button',{name:'Open Declined note',exact:true}).waitFor({timeout:15000});
   check('foreground Home review is independent of stalled Pulse and does not preapprove',
     !(await (await fetch(base+'/__fixture/status')).json()).files.includes('declined.txt'));
