@@ -380,12 +380,10 @@ def test_receiving_work_can_report_shared_lesson_outcome_without_importing_priva
         }).status_code == 404
 
         # The original owner retains full private records and native feedback
-        # attribution. A distinct receiving Work must see neither this Work's
-        # reports nor the original encounter, even when the lesson is paused.
+        # attribution. A previously unreported unrelated Work must see neither
+        # the withdrawn lesson nor the source/receiver's private history.
         unrelated_work = new_page(client, title="Unrelated Work")["page"]["id"]
-        other = client.get(f"/api/pages/{unrelated_work}/posture").json()["experiences"][0]
-        assert other["id"] == saved["id"]
-        assert all(field not in other for field in ("source", "encounter", "feedback"))
+        assert client.get(f"/api/pages/{unrelated_work}/posture").json()["experiences"] == []
         owner = client.get(f"/api/pages/{source_work}/posture").json()["experiences"][0]
         assert owner["id"] == saved["id"] and owner["revision"] == 4
         assert owner["source"] == saved["source"] and owner["encounter"] == saved["encounter"]
@@ -405,8 +403,7 @@ def test_receiving_work_can_report_shared_lesson_outcome_without_importing_priva
         own = client.get(f"/api/pages/{receiving_work}/posture").json()["experiences"][0]
         assert [item["verdict"] for item in own["feedback"]] == ["useful", "harmful"]
         assert all(field not in own for field in ("source", "encounter"))
-        other = client.get(f"/api/pages/{unrelated_work}/posture").json()["experiences"][0]
-        assert all(field not in other for field in ("source", "encounter", "feedback"))
+        assert client.get(f"/api/pages/{unrelated_work}/posture").json()["experiences"] == []
 
 
 @pytest.mark.parametrize("from_source", [False, True])
