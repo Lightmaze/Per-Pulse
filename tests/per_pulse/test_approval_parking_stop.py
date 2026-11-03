@@ -17,16 +17,14 @@ from test_execution import _factory, _new_page, _wait
 from test_pulse_integration import client_for
 
 
-def test_stop_one_of_three_attached_approvals_admits_next_work_without_replaying_peers(
+def test_three_detached_approvals_leave_foreground_capacity_and_keep_peer_authority(
     tmp_path, monkeypatch,
 ):
-    """Bounded parked capacity must be recyclable by a scoped explicit Stop.
+    """Three durable human approvals free every physical worker.
 
-    At compute capacity one, the executor has one compute position plus two
-    additional parked positions. THREE original human approvals fill those
-    three physical threads. A FOURTH Work cannot enter yet. Stopping only
-    the first original turn must admit the fourth, while the other two
-    original approvals retain their identities and later effects.
+    A fourth Work must execute without cancelling an earlier approval.
+    A later scoped Stop and a separate explicit approval still affect only
+    the original Kernel actions, with one terminal file effect.
     """
     requests = []
     base_config = page_service_module.RuntimeServiceConfig
@@ -80,19 +78,25 @@ def test_stop_one_of_three_attached_approvals_admits_next_work_without_replaying
         deadline = time.monotonic() + 5
         while True:
             slots = runtime.scheduling_snapshot()["capacity"]
-            if slots["worker_parked"] == 3:
+            if slots["worker_parked"] == 3 and slots["worker_attached"] == 0:
                 break
             assert time.monotonic() < deadline, slots
             time.sleep(0.025)
         assert slots["worker_limit"] == 1
         assert slots["worker_running"] == 0
-        assert slots["worker_attached"] == 3
-        assert slots["approval_parked_limit"] == 2
+        assert slots["worker_attached"] == 0
+        assert slots["worker_available"] == 1
 
         queued = _new_page(client, "WRITE_TWO")
-        time.sleep(0.3)
-        assert execution.snapshot(queued)["turnId"] is None
-        assert len(requests) == 3
+        third_wait = _wait(
+            execution, queued,
+            lambda state: state["status"] == "needs_attention"
+            and len(state["pendingActions"]) == 1
+            and state["pendingActions"][0]["canResolve"],
+            timeout=12,
+        )
+        assert third_wait["turnId"] not in {first_turn, second_turn, third_turn}
+        assert len(requests) == 4
         assert not (tmp_path / "workspace" / "one.txt").exists()
         assert not (tmp_path / "workspace" / "two.txt").exists()
 
@@ -107,14 +111,6 @@ def test_stop_one_of_three_attached_approvals_admits_next_work_without_replaying
             timeout=12,
         )
 
-        third_wait = _wait(
-            execution, queued,
-            lambda state: state["status"] == "needs_attention"
-            and len(state["pendingActions"]) == 1
-            and state["pendingActions"][0]["canResolve"],
-            timeout=12,
-        )
-        assert third_wait["turnId"] not in {first_turn, second_turn, third_turn}
         peer = execution.snapshot(second)
         assert peer["turnId"] == second_turn
         assert peer["status"] == "needs_attention"
@@ -158,17 +154,13 @@ def test_stop_one_of_three_attached_approvals_admits_next_work_without_replaying
 
 
 @pytest.mark.parametrize("capacity", (2, 4))
-def test_full_approval_fleet_saturation_requires_a_real_release_before_foreground(
+def test_full_approval_fleet_detaches_and_admits_foreground_without_release(
     tmp_path, monkeypatch, capacity,
 ):
-    """Reproduce the physical capacity boundary, not just compute-permit pressure.
+    """At capacity 2/4, all original approvals remain live but detached.
 
-    Currently capacity + min(16, 2 * capacity) physical workers exist.
-    WAITING_APPROVAL yields compute but not its physical carrier. A newer
-    foreground Work must remain queued at that boundary until one original
-    turn is explicitly stopped. This records the unresolved #80 blocker,
-    not a desirable policy; true thread-free parking should eventually
-    admit the newcomer without cancelling any older Work.
+    The newcomer must execute before Stop while every original turn/action
+    remains source-scoped and no file effect is approved implicitly.
     """
     requests = []
     base_config = page_service_module.RuntimeServiceConfig
@@ -206,21 +198,27 @@ def test_full_approval_fleet_saturation_requires_a_real_release_before_foregroun
         deadline = time.monotonic() + 6
         while True:
             slots = runtime.scheduling_snapshot()["capacity"]
-            if slots["worker_parked"] == physical_limit:
+            if slots["worker_parked"] == physical_limit and slots["worker_attached"] == 0:
                 break
             assert time.monotonic() < deadline, slots
             time.sleep(0.025)
         assert slots["worker_limit"] == capacity
         assert slots["approval_parked_limit"] == physical_limit - capacity
         assert slots["worker_running"] == 0
-        assert slots["worker_attached"] == physical_limit
+        assert slots["worker_attached"] == 0
+        assert slots["worker_available"] == capacity
         assert len(requests) == physical_limit
 
         incoming = _new_page(client, "WRITE_TWO")
-        time.sleep(0.35)
-        # This is a queued Work, not a manufactured needs_attention state.
-        assert execution.snapshot(incoming)["turnId"] is None
-        assert len(requests) == physical_limit
+        arrived = _wait(
+            execution, incoming,
+            lambda item: item["status"] == "needs_attention"
+            and len(item["pendingActions"]) == 1
+            and item["pendingActions"][0]["canResolve"],
+            timeout=15,
+        )
+        assert arrived["turnId"] not in {turn for _, turn, _ in held}
+        assert len(requests) == physical_limit + 1
         assert not (tmp_path / "workspace" / "one.txt").exists()
         assert not (tmp_path / "workspace" / "two.txt").exists()
 
@@ -235,15 +233,6 @@ def test_full_approval_fleet_saturation_requires_a_real_release_before_foregroun
             and not item["pendingActions"],
             timeout=15,
         )
-        arrived = _wait(
-            execution, incoming,
-            lambda item: item["status"] == "needs_attention"
-            and len(item["pendingActions"]) == 1
-            and item["pendingActions"][0]["canResolve"],
-            timeout=15,
-        )
-        assert arrived["turnId"] not in {turn for _, turn, _ in held}
-        assert len(requests) == physical_limit + 1
         for peer, original_turn, original_action in held[1:]:
             current = execution.snapshot(peer)
             assert current["turnId"] == original_turn
