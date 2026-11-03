@@ -176,10 +176,10 @@ try {
   assert.equal((await get('/api/pages/' + works.shared + '/artifacts')).artifacts.length,
     artifactsBefore, 'unapproved model proposal must not create an artifact');
   await page.getByRole('button', { name: 'Allow once', exact: true }).click();
-  await page.getByRole('button', { name: /rim-choice-followup\\.txt/ }).waitFor({ timeout: 20000 });
+  await page.getByRole('button', { name: /rim-choice-followup/ }).waitFor({ timeout: 20000 });
   await wait(async () => (await get('/api/pages/' + works.shared + '/artifacts')).artifacts.length > artifactsBefore,
     'real native file result recorded in receiving Work');
-  await page.getByRole('button', { name: /rim-choice-followup\\.txt/ }).click();
+  await page.getByRole('button', { name: /rim-choice-followup/ }).click();
   await page.getByText(/A real approval-gated Work artifact from a scripted model fixture/).waitFor();
   checks.push('later source-influenced Work can produce a real file only after its own approval');
 
