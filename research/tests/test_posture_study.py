@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from per_pulse import posture_study
+from per_pulse_research import posture_study
 
 
 class FakeAdapter:
@@ -63,7 +63,7 @@ def test_fixture_needs_explicit_qa_opt_in_before_creating_files(tmp_path):
 
 def test_study_keeps_two_independent_worlds_and_separate_blind_keys(tmp_path, monkeypatch):
     seen = []
-    from per_pulse.posture_transfer import _provider_identity
+    from per_pulse_research.posture_transfer import _provider_identity
     identity = _provider_identity(FakeAdapter())
 
     def fake_run(path: Path, **kwargs):
@@ -113,7 +113,7 @@ def test_unverified_first_trial_stops_before_second_or_blind_release(tmp_path, m
     def fake_run(path, **kwargs):
         seen.append(kwargs["task_order"])
         path.mkdir()
-        from per_pulse.posture_transfer import _provider_identity
+        from per_pulse_research.posture_transfer import _provider_identity
         record = {"origin": "real_provider", "provider_identity": _provider_identity(FakeAdapter()),
                   "world_id": "world-only", "status": "failed", "capture_status": "pending",
                   "stages": [], "provider_requests": {"training": 1}}
@@ -199,7 +199,7 @@ def test_keyboard_interrupt_during_native_arm_records_attempts_and_stops(tmp_pat
 
 
 def test_native_interrupted_result_does_not_look_like_completed_review(tmp_path, monkeypatch):
-    from per_pulse.posture_transfer import _provider_identity
+    from per_pulse_research.posture_transfer import _provider_identity
 
     def interrupted_native(path, **_kwargs):
         path.mkdir()
@@ -234,7 +234,7 @@ def test_native_interrupted_result_does_not_look_like_completed_review(tmp_path,
     ("review", "blind_packet_interrupted"),
 ])
 def test_interrupt_in_post_trial_phases_is_terminal(tmp_path, monkeypatch, phase, stop_reason):
-    from per_pulse.posture_transfer import _provider_identity
+    from per_pulse_research.posture_transfer import _provider_identity
 
     def completed_native(path, **_kwargs):
         path.mkdir()
@@ -267,7 +267,7 @@ def test_interrupt_in_post_trial_phases_is_terminal(tmp_path, monkeypatch, phase
 
 def test_blind_packet_exception_stops_second_arm(tmp_path, monkeypatch):
     seen = []
-    from per_pulse.posture_transfer import _provider_identity
+    from per_pulse_research.posture_transfer import _provider_identity
 
     def fake_run(path, **kwargs):
         seen.append(kwargs["task_order"])

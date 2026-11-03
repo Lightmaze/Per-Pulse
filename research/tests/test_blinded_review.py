@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from per_pulse import blinded_review as review
+from per_pulse_research import blinded_review as review
 
 
 @pytest.fixture

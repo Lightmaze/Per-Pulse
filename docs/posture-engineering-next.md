@@ -154,7 +154,7 @@ existing posture material projection. The source encounter and cross-page
 privacy behavior are unchanged.
 
 See [runtime behavior](posture-engineering.md) and
-[evaluation commands and limits](posture-evaluation.md). Source control keeps
+[evaluation commands and limits](../research/posture-evaluation.md). Source control keeps
 this plan beside the implementation so another continuation can start with
 the actual remaining question.
 

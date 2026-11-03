@@ -56,6 +56,6 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests/per_pulse"]
-pythonpath = ["src"]
+pythonpath = ["src", "research"]
 markers = ["real: requires explicit credentials and a real provider (excluded by default)"]
 addopts = "-m 'not real'"

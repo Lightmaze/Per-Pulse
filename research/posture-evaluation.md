@@ -15,7 +15,7 @@ terminology in the task.
 ## Inspect the tasks
 
 ```sh
-python -m per_pulse.posture_evaluation catalog
+python -m per_pulse_research.posture_evaluation catalog
 ```
 
 Each case contains an ordinary task prompt and a separate reviewer rubric.
@@ -40,11 +40,11 @@ credential environment described in the main README. Nothing is called when
 the provider is unconfigured. This command is an explicit provider run:
 
 ```sh
-python -m per_pulse.posture_evaluation run exact_svg \
+python -m per_pulse_research.posture_evaluation run exact_svg \
   --condition bare --pair-id replication-1 \
   --output /tmp/per-pulse-posture/bare-svg
 
-python -m per_pulse.posture_evaluation run exact_svg \
+python -m per_pulse_research.posture_evaluation run exact_svg \
   --condition conditional --pair-id replication-1 \
   --experiences tests/per_pulse/fixtures/posture-experiences.json \
   --output /tmp/per-pulse-posture/conditional-svg
@@ -91,7 +91,7 @@ conditional** phases. To reverse only that task order, run an independent
 new trial with:
 
 ```sh
-python -m per_pulse.posture_evaluation ordinary-transfer \\
+python -m per_pulse_research.posture_evaluation ordinary-transfer \\
   --task-order outline-first --output /tmp/per-pulse-posture/trial-outline-first
 ```
 
@@ -113,7 +113,7 @@ capture; neither condition is manufactured to fill it.
 ## Evaluate actual work
 
 ```sh
-python -m per_pulse.posture_evaluation evaluate /path/to/record.json \
+python -m per_pulse_research.posture_evaluation evaluate /path/to/record.json \
   --artifacts /path/to/artifacts
 ```
 
@@ -161,7 +161,7 @@ against trusted host files, not cryptographic attestation against their owner.
 ## Compare conditions
 
 ```sh
-python -m per_pulse.posture_evaluation compare \
+python -m per_pulse_research.posture_evaluation compare \
   /path/to/bare/evaluation.json /path/to/explicit/evaluation.json \
   /path/to/notes/evaluation.json /path/to/conditional/evaluation.json \
   /path/to/withdrawn/evaluation.json
@@ -185,11 +185,11 @@ The attributed lineage is not independently certified by this isolated runner.
 ## Exercise a continuing native subject
 
 ```sh
-python -m per_pulse.posture_evaluation transfer \
+python -m per_pulse_research.posture_evaluation transfer \
   --output /tmp/per-pulse-posture/continuing-trial \
   --training-calls 12 --interference-calls 4 --transfer-calls 8
 
-python -m per_pulse.posture_evaluation audit-transfer \
+python -m per_pulse_research.posture_evaluation audit-transfer \
   /tmp/per-pulse-posture/continuing-trial
 ```
 
@@ -239,11 +239,11 @@ reclassified as the newer teaching protocol.
 ## Observe ordinary feedback across fresh pages
 
 ```sh
-python -m per_pulse.posture_evaluation ordinary-transfer \
+python -m per_pulse_research.posture_evaluation ordinary-transfer \
   --output /tmp/per-pulse-posture/ordinary-trial \
   --training-calls 12 --trial-calls 8
 
-python -m per_pulse.posture_evaluation audit-ordinary-transfer \
+python -m per_pulse_research.posture_evaluation audit-ordinary-transfer \
   /tmp/per-pulse-posture/ordinary-trial
 ```
 
@@ -321,7 +321,7 @@ The audit validates exposure and native settled work, not response quality.
 After a completed real-provider ordinary-transfer trial, create a separate,
 condition-blind review packet:
 
-    python -m per_pulse.blinded_review prepare /tmp/per-pulse-posture/ordinary-trial --output /tmp/per-pulse-posture/review-001
+    python -m per_pulse_research.blinded_review prepare /tmp/per-pulse-posture/ordinary-trial --output /tmp/per-pulse-posture/review-001
 
 Give the reviewer **only** the generated
 `/tmp/per-pulse-posture/review-001/reviewer/` directory. It contains
@@ -347,7 +347,7 @@ authentication. Preparation also requires matching task prompts inside
 each blinded pair. Transfer only the completed ratings file back to the experimenter. With the private parent directory and
 ratings file available, the experimenter reveals descriptive paired results:
 
-    python -m per_pulse.blinded_review grade /tmp/per-pulse-posture/review-001 /tmp/per-pulse-posture/ratings-001.json
+    python -m per_pulse_research.blinded_review grade /tmp/per-pulse-posture/review-001 /tmp/per-pulse-posture/ratings-001.json
 
 New packets use separate `reviewer/` and `private/` subdirectories, with
 restricted local permissions and a parent .gitignore. Legacy flat-directory
@@ -389,18 +389,18 @@ model. Even if real provider variables are set, the fixture command uses only
 the explicitly injected transport.
 
 ```sh
-python -m per_pulse.posture_evaluation fixture-smoke \
+python -m per_pulse_research.posture_evaluation fixture-smoke \
   --experiences tests/per_pulse/fixtures/posture-experiences.json \
   --output /tmp/per-pulse-posture-fixture-001
 
-python -m per_pulse.posture_evaluation compare \
+python -m per_pulse_research.posture_evaluation compare \
   /tmp/per-pulse-posture-fixture-001/bare/evaluation.json \
   /tmp/per-pulse-posture-fixture-001/explicit/evaluation.json \
   /tmp/per-pulse-posture-fixture-001/notes/evaluation.json \
   /tmp/per-pulse-posture-fixture-001/conditional/evaluation.json \
   /tmp/per-pulse-posture-fixture-001/withdrawn/evaluation.json
 
-python -m pytest tests/per_pulse/test_posture_evaluation.py -q
+python -m pytest research/tests/test_posture_evaluation.py -q
 ```
 
 Expected smoke output: five `synthetic_fixture_runs`, zero
@@ -429,7 +429,7 @@ Configure an explicitly authorized real model as described in the README,
 then run from a **new private directory outside the Git checkout**:
 
 ~~~sh
-python -m per_pulse.posture_study --output /tmp/per-pulse-private/study-001 \
+python -m per_pulse_research.posture_study --output /tmp/per-pulse-private/study-001 \
   --training-calls 8 --trial-calls 4 --max-total-requests 48
 ~~~
 
@@ -464,7 +464,7 @@ allow_fixture=True; those observations are labeled synthetic and are not
 real-provider results.
 
 ~~~sh
-python -m pytest tests/per_pulse/test_posture_study.py -q
+python -m pytest research/tests/test_posture_study.py -q
 ~~~
 
 
@@ -479,7 +479,7 @@ the outline negative control, without seeing condition labels.
 
 On the experimenter's private machine, after both rating files are complete:
 
-    python -m per_pulse.posture_study summarize \
+    python -m per_pulse_research.posture_study summarize \
       --study /private/study \
       --notice-ratings /private/ratings-notice.json \
       --outline-ratings /private/ratings-outline.json \
