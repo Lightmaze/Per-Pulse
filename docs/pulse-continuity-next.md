@@ -127,8 +127,9 @@ All committed content is source, English documentation or synthetic fixtures.
 
 `--pulse-main-rounds N` (default 4, 1..16) bounds primary Kernel model
 rounds for causally verified spontaneous or propagated World turns. The
-original TurnRunner applies this ceiling on resume/recovery; foreground
-user turns keep their existing allowance. A single activation can still
+original TurnRunner applies this ceiling on resume/recovery; a turn you
+start may take up to 256 model rounds (tool steps), and Stop ends it at any
+point. A single activation can still
 perform several model/tool exchanges. This is not a new executor or a
 cron/resume interpretation of Pulse.
 

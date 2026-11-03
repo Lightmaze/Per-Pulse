@@ -69,6 +69,12 @@ def _selected_result_transfer_content(
     )
 
 
+# Model rounds (tool steps) one turn may take before it stops. Current coding
+# agents set no small default cap; Stop ends a turn at any point. Background
+# turns keep their own allowance (--pulse-main-rounds).
+FOREGROUND_MODEL_ROUNDS = 256
+
+
 class PageService:
     """One HTTP view of one native World, with serialized page metadata writes."""
 
@@ -139,6 +145,7 @@ class PageService:
             db_path=self.data_dir / "kernel.db", workspace=workspace,
             model_factory=factory, allow_unconfigured=True, allow_mutations=self.allow_workspace_actions,
             enable_posture=False if example else posture, auto_apply_edits=self.auto_apply_edits,
+            max_model_rounds=FOREGROUND_MODEL_ROUNDS,
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
         self.execution = PageExecution(self.runtime)
