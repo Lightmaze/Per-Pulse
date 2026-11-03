@@ -114,6 +114,7 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TICK_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/tick_flow.mjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_UNDO_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/undo_flow.mjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_FAILURE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/failure_flow.mjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_STEPS_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/steps_flow.mjs
       - name: Verify learned Work connections and spectrum in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_WORK_LEARNING_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/work_learning_flow.mjs
