@@ -138,14 +138,15 @@ try {
   assert.equal(executedHtml, 0);
   checks.push('HTML remains inert in the preview and is delivered only as an attachment');
 
-  await create('Sensitive report', 'WRITE_REDACTED');
+  await create('Report with a password line', 'WRITE_REDACTED');
   await page.getByRole('button', { name: /redacted\.txt/ }).click();
-  await artifacts.getByText('Sensitive values have been hidden.', { exact: true }).waitFor();
-  assert.equal(await artifacts.getByRole('button', { name: 'Download file', exact: true }).count(), 0);
+  // Your own file is shown and downloadable as it is.
+  await artifacts.getByText(/password=abc/).first().waitFor();
+  assert.equal(await artifacts.getByRole('button', { name: 'Download file', exact: true }).count(), 1);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'download-mobile.png') });
-  checks.push('redacted previews offer no original download and phone layout stays within the viewport');
+  checks.push('a file with a password line previews and downloads as it is; phone layout stays within the viewport');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, count: checks.length, errors, modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
 } catch (error) {

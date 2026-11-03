@@ -282,7 +282,11 @@ class HarnessKernelService:
         max_payload_bytes: int = 64 * 1024,
         approval_ttl_sec: float = 300.0,
         auto_apply_capabilities: frozenset[str] | set[str] | tuple[str, ...] = (),
+        max_model_rounds: int = 16,
+        max_context_tokens: int | None = None,
     ) -> None:
+        if max_model_rounds < 1:
+            raise ValueError("max_model_rounds must be positive")
         if model_adapter_factory is None:
             from pulse_harness.adapters.chat_http import model_factory_from_env
             model_adapter_factory = model_factory_from_env()
@@ -303,6 +307,8 @@ class HarnessKernelService:
         self._response_reviewer_factory = response_reviewer_factory
         self._turn_advisor_factory = turn_advisor_factory
         self._auto_apply_capabilities = frozenset(auto_apply_capabilities)
+        self._max_model_rounds = max_model_rounds
+        self._max_context_tokens = max_context_tokens
         self._runtimes: dict[str, KernelSessionRuntime] = {}
         self._runtime_lock = threading.RLock()
         self._closed = False
@@ -391,6 +397,8 @@ class HarnessKernelService:
                 turn_advisor=(self._turn_advisor_factory(self.store, adapter, session_scope)
                               if self._turn_advisor_factory is not None else None),
                 auto_apply_capabilities=self._auto_apply_capabilities,
+                max_model_rounds=self._max_model_rounds,
+                max_context_tokens=self._max_context_tokens,
             )
             runtime = KernelSessionRuntime(session_scope, runner, provider)
             self._runtimes[session_scope.session_id] = runtime

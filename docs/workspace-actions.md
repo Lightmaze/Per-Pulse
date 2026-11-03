@@ -12,6 +12,8 @@ Start with `--ask-before-edits` to approve each file change instead, or
 `--no-workspace-actions` to let the model read files without changing them.
 Commands (available when `P_PULSE_COMMAND_IMAGE` names a container image) always
 ask first. A pending approval and exact-turn Stop stay in their original page.
+An approval waits for you for up to a week, and a turn you start has no time
+limit: it ends when it finishes, when you press Stop, or after 256 tool steps.
 Example mode never calls a model or changes files. See
 [Core Harness](harness-foundation.md) for authority, recovery and limits.
 
@@ -20,10 +22,12 @@ original-action provenance and digest checks.
 
 **Download file** takes the complete verified text result out of the workspace.
 It checks the file again when requested and verifies the received bytes before
-starting the browser download. A later overwrite, protected content, or missing
-file produces an explanation; **Refresh file preview** checks its current state.
+starting the browser download. A later overwrite or a missing file produces
+an explanation; **Refresh file preview** checks its current state.
 Downloads preserve UTF-8 text, line endings and the original filename, including
-non-ASCII names. Redacted previews cannot be downloaded as original files.
+non-ASCII names. Previews and downloads show your file as it is, including any
+keys or passwords in it; only a result holding a stored `[REDACTED]` or
+truncation marker from a model reply is not offered as an original file.
 This works for existing results while disconnected and after restart. File
 access remains limited to text up to 1 MiB; the native write path currently
 has a separate 64 KiB output bound. It does not restore older overwritten bytes.
@@ -45,7 +49,7 @@ silently substituted. Upload receipts and files persist across restart and
 the existing stopped Pulse Image transfer. The native source API lists the latest
 100 receipts per page, with a workspace limit of 1,024 receipts; older message
 attachments remain accessible. Source-chip previews are bounded to 64 KiB and
-redact sensitive values. The workspace library previews up to 64,000 characters.
+show the file as it is. The workspace library previews up to 64,000 characters.
 Files are shared native workspace material, not isolated
 per-page filesystem permissions.
 

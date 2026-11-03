@@ -15,8 +15,6 @@ import stat
 from typing import Iterator
 from uuid import uuid4
 
-from pulse_harness.core.secrets import looks_like_bare_credential
-
 MAX_FILE_BYTES = 1024 * 1024
 MAX_LIST_ENTRIES = 200
 MAX_SCAN_ENTRIES = 4000
@@ -49,8 +47,6 @@ def _text(data: bytes) -> str:
         raise FileAccessError("text_files_only", 415) from None
     if "\x00" in text:
         raise FileAccessError("text_files_only", 415)
-    if looks_like_bare_credential(text):
-        raise FileAccessError("credential_content_blocked", 403)
     return text
 
 

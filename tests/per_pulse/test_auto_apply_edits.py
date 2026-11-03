@@ -181,3 +181,74 @@ def test_commands_still_ask_when_file_changes_apply_at_once():
     assert TurnRunner._requires_approval(policy, command) is True
     default = SimpleNamespace(auto_apply_capabilities=frozenset())
     assert TurnRunner._requires_approval(default, edit) is True
+
+
+def test_undone_survives_kernel_event_rollover_and_restart(tmp_path, monkeypatch):
+    """Kernel events roll over in long sessions; the undone mark must not."""
+    from pulse_harness.core.session_store import HarnessStore
+
+    original = "Original notes.\n"
+    (tmp_path / "workspace").mkdir()
+    notes = tmp_path / "workspace" / "notes.md"
+    notes.write_text(original, encoding="utf-8")
+    factory = _factory(monkeypatch, {"REVISE_NOTES": {
+        "path": "notes.md", "expected_digest": _sha(original), "content": "Revised.\n",
+    }})
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True,
+                 auto_apply_edits=True) as client:
+        page_id = _page(client, "REVISE_NOTES")
+        _settle(client, page_id)
+        item, = client.get(f"/api/pages/{page_id}/artifacts").json()["artifacts"]
+        assert _undo(client, page_id, item["id"]).status_code == 200
+
+    real_has_event = HarnessStore.has_event
+    monkeypatch.setattr(HarnessStore, "has_event", lambda self, scope, event_type, **kw: (
+        False if event_type == "checkpoint.restored" else real_has_event(self, scope, event_type, **kw)))
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        listed, = client.get(f"/api/pages/{page_id}/artifacts").json()["artifacts"]
+        assert listed["undone"] is True
+        again = _undo(client, page_id, item["id"])
+        assert again.status_code == 409
+        assert again.json()["error"]["code"] == "artifact_already_undone"
+        assert notes.read_text(encoding="utf-8") == original
+
+
+def test_a_file_already_back_to_its_earlier_content_counts_as_undone(tmp_path, monkeypatch):
+    original = "Original notes.\n"
+    (tmp_path / "workspace").mkdir()
+    notes = tmp_path / "workspace" / "notes.md"
+    notes.write_text(original, encoding="utf-8")
+    factory = _factory(monkeypatch, {"REVISE_NOTES": {
+        "path": "notes.md", "expected_digest": _sha(original), "content": "Revised.\n",
+    }})
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True,
+                 auto_apply_edits=True) as client:
+        page_id = _page(client, "REVISE_NOTES")
+        _settle(client, page_id)
+        item, = client.get(f"/api/pages/{page_id}/artifacts").json()["artifacts"]
+        notes.write_text(original, encoding="utf-8")  # put back by hand
+        undone = _undo(client, page_id, item["id"])
+        assert undone.status_code == 200, undone.text
+        assert undone.json()["artifacts"]["artifacts"][0]["undone"] is True
+        assert notes.read_text(encoding="utf-8") == original
+
+
+def test_an_approval_waits_for_you_instead_of_expiring_in_minutes(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    factory = _factory(monkeypatch, {"WRITE_DRAFT": {
+        "path": "draft.md", "expected_digest": None, "content": "Draft.\n",
+    }})
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True,
+                 auto_apply_edits=False) as client:
+        runtime = client.app.state.pages.runtime
+        assert runtime.config.harness_turn_timeout_sec is None
+        page_id = _page(client, "WRITE_DRAFT")
+        execution = PageExecution(runtime)
+        deadline = time.monotonic() + 8
+        while not execution.snapshot(page_id)["pendingActions"]:
+            assert time.monotonic() < deadline
+            time.sleep(0.025)
+        pending, = execution.snapshot(page_id)["pendingActions"]
+        expires = datetime.fromisoformat(pending["expiresAt"])
+        assert expires - datetime.now(timezone.utc) > timedelta(days=6)

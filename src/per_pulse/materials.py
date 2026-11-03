@@ -16,8 +16,8 @@ from uuid import uuid4
 
 from pulse_harness.adapters.resources import workspace_write_resource
 from pulse_harness.core.errors import HarnessError
-from pulse_harness.core.replay import bound_text, redact_text
 from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES, WorkspaceFiles
+from .artifacts import clip_text
 
 
 MAX_MATERIALS = 1024
@@ -184,21 +184,17 @@ class PageMaterials:
         with self.pages._lock:
             record = self._record(page_id, material_id)
             current = self._current(record)
-            clean, redacted = redact_text(current["content"])
-            content, bounded_redacted, truncated = bound_text(clean, MAX_PREVIEW_BYTES)
-            return {"material": record, "content": content, "redacted": redacted or bounded_redacted,
+            # The user's own uploaded source: shown as it is, bounded in length.
+            content, truncated = clip_text(current["content"], MAX_PREVIEW_BYTES)
+            return {"material": record, "content": content, "redacted": "[REDACTED]" in current["content"],
                     "truncated": truncated, "previewLimitBytes": MAX_PREVIEW_BYTES,
-                    "downloadable": clean == current["content"]}
+                    "downloadable": True}
 
     def download(self, page_id, material_id):
         """Read one complete receipt-bound source, preserving its original bytes."""
         with self.pages._lock:
             record = self._record(page_id, material_id)
             current = self._current(record)
-            clean, _ = redact_text(current["content"])
-            if clean != current["content"]:
-                raise MaterialError("material_download_redacted",
-                    "This source contains values that must be hidden and cannot be downloaded as original bytes.", 422)
             # An already-hidden marker may be literal user-supplied text. The
             # native upload digest identifies those exact original bytes; it
             # does not claim to recover any text omitted before the upload.

@@ -73,19 +73,18 @@ def test_original_download_refuses_wrong_owner_stale_identity_and_changed_source
         assert missing.status_code == 409 and missing.json()["error"]["code"] == "material_unavailable"
 
 
-def test_original_download_checks_hidden_content_beyond_the_preview(tmp_path):
+def test_the_users_own_source_downloads_whole_even_with_a_key_in_it(tmp_path):
     content = b"Ordinary source line.\n" * 4000 + b"api_key = SYNTHETIC_SECRET_MARKER_0123456789\n"
     with client_for(tmp_path, model_factory=None) as client:
-        uploaded = upload(client, "home", "source-with-hidden-line.txt", content)
+        uploaded = upload(client, "home", "source-with-key.txt", content)
         assert uploaded.status_code == 201, uploaded.text
         record = uploaded.json()["material"]
         preview = client.get(f"/api/pages/home/materials/{record['id']}").json()
-        assert preview["truncated"] and preview["redacted"]
-        assert not preview["downloadable"]
+        assert preview["truncated"] and not preview["redacted"]
+        assert preview["downloadable"]
         response = download(client, "home", record)
-        assert response.status_code == 422
-        assert response.json()["error"]["code"] == "material_download_redacted"
-        assert "SYNTHETIC_SECRET_MARKER" not in response.text
+        assert response.status_code == 200
+        assert response.content == content
 
 
 def test_another_work_downloads_only_its_explicit_reference_receipt(tmp_path):

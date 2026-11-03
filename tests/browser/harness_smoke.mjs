@@ -195,8 +195,8 @@ try {
   await page.getByRole('button',{name:'Allow once',exact:true}).click();
   await page.getByText('The action completed, but the follow-up response could not finish. Do not repeat the action.',{exact:true}).waitFor();
   await page.getByRole('button',{name:/redacted.txt/}).click();
-  await page.getByText('Sensitive values have been hidden.',{exact:true}).waitFor();
-  check('completed effect survives continuation failure with truthful UI and redacted preview',!(await page.textContent('body')).includes('password=abc'));
+  await page.getByText(/Final heading\./).first().waitFor();
+  check('completed effect survives continuation failure with truthful UI and its file preview',(await page.textContent('body')).includes('Final heading.'));
   await create('Long report','WRITE_LARGE');
   const largeId = new URL(page.url()).pathname.split('/').pop();
   await page.getByRole('button',{name:'Allow once',exact:true}).click();

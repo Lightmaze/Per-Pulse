@@ -94,7 +94,6 @@ def test_file_access_requires_observed_workspace_identity(tmp_path, headers):
     ("../outside.txt", b"outside", "protected_or_invalid_path", 400),
     ("folder/file.txt", b"nested", "filename_only", 400),
     ("world.db", b"protected", "protected_or_invalid_path", 400),
-    ("credentials.txt", b"api_key=sk-fictionalexampleabcdef", "credential_content_blocked", 403),
 ])
 def test_invalid_uploads_have_specific_errors_and_no_file_effect(tmp_path, name, data, code, status):
     with _client(tmp_path) as client:
@@ -227,3 +226,14 @@ def test_imported_source_is_read_by_existing_native_tools_in_separate_works(tmp_
             payload = json.dumps(request["messages"])
             assert not ("PRIVATE_FIRST_NOTE" in payload and "PRIVATE_SECOND_NOTE" in payload)
         assert (tmp_path / "workspace" / source_path).read_bytes() == source
+
+
+def test_a_file_with_a_key_in_it_uploads_and_reads_back_unchanged(tmp_path):
+    data = b"api_key=sk-fictionalexampleabcdef\nNotes for the deploy.\n"
+    with _client(tmp_path) as client:
+        response = _upload(client, data, "deploy-notes.txt")
+        assert response.status_code == 201, response.text
+        read = client.get("/api/workspace/files/content", params={"path": response.json()["path"]},
+                          headers=_identity(client))
+        assert read.status_code == 200, read.text
+        assert read.json()["content"] == data.decode("utf-8")

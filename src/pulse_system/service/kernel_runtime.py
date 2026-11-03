@@ -284,7 +284,10 @@ class KernelHarnessRuntime:
                  allow_mutations: bool = False,
                  allow_unconfigured: bool = False,
                  enable_posture: bool | None = None,
-                 auto_apply_edits: bool = False) -> None:
+                 auto_apply_edits: bool = False,
+                 max_model_rounds: int = 16,
+                 approval_ttl_sec: float = 300.0,
+                 max_context_tokens: int | None = None) -> None:
         self.db_path = str(db_path) if str(db_path) == ":memory:" else str(Path(db_path).expanduser().resolve())
         self.workspace = Path(workspace).expanduser().resolve()
         self.checkpoint_root = checkpoint_root
@@ -301,6 +304,11 @@ class KernelHarnessRuntime:
         # File changes inside the workspace apply without a per-change
         # approval and can be undone from their checkpoint. Commands still ask.
         self._auto_apply_edits = bool(allow_mutations and auto_apply_edits)
+        # Model rounds one foreground turn may take; background turns keep
+        # their own smaller allowance through model_round_limit_for_scope.
+        self._max_model_rounds = max_model_rounds
+        self._approval_ttl_sec = approval_ttl_sec
+        self._max_context_tokens = max_context_tokens
         self.life = LifeHub()
         self.work = None
         self.team = None
@@ -553,6 +561,9 @@ class KernelHarnessRuntime:
                     if self.coverme is not None or self.posture_memory is not None else None),
                 turn_advisor_factory=(self.expert.advisor if self.expert is not None else None),
                 auto_apply_capabilities=(("workspace.write",) if self._auto_apply_edits else ()),
+                max_model_rounds=self._max_model_rounds,
+                approval_ttl_sec=self._approval_ttl_sec,
+                max_context_tokens=self._max_context_tokens,
                 tool_provider_factory=lambda store, root, checkpoints: _WorldWorkspace(
                     store, root, checkpoints, guard=self._check,
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
@@ -1321,11 +1332,15 @@ class KernelHarnessFactory:
                  allow_mutations: bool = False,
                  allow_unconfigured: bool = False,
                  enable_posture: bool | None = None,
-                 auto_apply_edits: bool = False) -> None:
+                 auto_apply_edits: bool = False,
+                 max_model_rounds: int = 16,
+                 approval_ttl_sec: float = 300.0,
+                 max_context_tokens: int | None = None) -> None:
         self._kwargs = dict(db_path=db_path, workspace=workspace, checkpoint_root=checkpoint_root,
                             model_factory=model_factory, allow_mutations=allow_mutations,
                             allow_unconfigured=allow_unconfigured, enable_posture=enable_posture,
-                            auto_apply_edits=auto_apply_edits)
+                            auto_apply_edits=auto_apply_edits, max_model_rounds=max_model_rounds,
+                            approval_ttl_sec=approval_ttl_sec, max_context_tokens=max_context_tokens)
         self._bootstrapped = False
 
     def bootstrap(self, *, workspace, config, owner_id, epoch):

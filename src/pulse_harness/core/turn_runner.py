@@ -45,6 +45,7 @@ from .errors import (
 )
 from .events import EventDraft
 from .hooks import HookContext, HookDecision, HookRejected, HookSet, HookStage
+from .context_window import fit_context
 from .provider import (
     CancellationRequested,
     CancellationToken,
@@ -109,6 +110,8 @@ def _action_request_id(scope: HarnessScope, call: ToolCall) -> str:
 
 
 _MODEL_STREAM_CLEANUP_UNCERTAIN = "model_stream_cleanup_uncertain"
+_COALESCED_DELTA_KINDS = frozenset({ModelDeltaKind.TEXT, ModelDeltaKind.REASONING})
+_COALESCED_DELTA_BYTES = 8 * 1024
 
 
 class TurnRunner:
@@ -127,6 +130,7 @@ class TurnRunner:
         response_reviewer: ResponseReviewer | None = None,
         turn_advisor: TurnAdvisor | None = None,
         auto_apply_capabilities: frozenset[str] | set[str] | tuple[str, ...] = (),
+        max_context_tokens: int | None = None,
     ) -> None:
         if max_model_rounds < 1:
             raise ValueError("max_model_rounds must be positive")
@@ -134,6 +138,8 @@ class TurnRunner:
             raise ValueError("max_model_deltas must be positive")
         if max_model_stream_bytes is not None and max_model_stream_bytes < 1:
             raise ValueError("max_model_stream_bytes must be positive")
+        if max_context_tokens is not None and max_context_tokens < 1:
+            raise ValueError("max_context_tokens must be positive")
         self.store = store
         self.model_adapter = model_adapter
         self.tool_provider = tool_provider
@@ -144,6 +150,9 @@ class TurnRunner:
         # per-action approval. They still carry durable authority and their
         # own guards (checkpoints, expected digests, recovery).
         self.auto_apply_capabilities = frozenset(auto_apply_capabilities)
+        # Estimated input budget for one model request; None sends the whole
+        # transcript. See pulse_harness.core.context_window.
+        self.max_context_tokens = max_context_tokens
         self.max_model_rounds = max_model_rounds
         self.max_model_deltas = max_model_deltas
         self.max_model_stream_bytes = (
@@ -837,15 +846,30 @@ class TurnRunner:
                             "ModelAdapter emitted a delta after DONE",
                             code="model_terminal_violation",
                         )
-                    if len(deltas) >= self.max_model_deltas:
-                        raise ProviderProtocolError(
-                            "ModelAdapter exceeded the model delta bound",
-                            code="model_stream_too_large",
-                        )
                     delta_bytes = self._model_delta_admission_bytes(delta)
                     if stream_bytes + delta_bytes > self.max_model_stream_bytes:
                         raise ProviderProtocolError(
                             "ModelAdapter exceeded the aggregate stream byte bound",
+                            code="model_stream_too_large",
+                        )
+                    # Providers usually stream one token per chunk. Join
+                    # adjacent text (or reasoning) chunks so the delta bound
+                    # limits stored events, not the length of a reply.
+                    previous = deltas[-1] if deltas else None
+                    if (
+                        previous is not None
+                        and delta.kind in _COALESCED_DELTA_KINDS
+                        and previous.kind is delta.kind
+                        and self._plain_text_delta(previous)
+                        and self._plain_text_delta(delta)
+                        and len(previous.text.encode("utf-8")) + delta_bytes <= _COALESCED_DELTA_BYTES
+                    ):
+                        stream_bytes += delta_bytes
+                        deltas[-1] = ModelDelta(delta.kind, text=previous.text + delta.text)
+                        continue
+                    if len(deltas) >= self.max_model_deltas:
+                        raise ProviderProtocolError(
+                            "ModelAdapter exceeded the model delta bound",
                             code="model_stream_too_large",
                         )
                     stream_bytes += delta_bytes
@@ -1348,6 +1372,13 @@ class TurnRunner:
         return False
 
     @staticmethod
+    def _plain_text_delta(delta: ModelDelta) -> bool:
+        return (
+            delta.tool_call is None and delta.finish_reason is None
+            and delta.usage is None and delta.provider_response_id is None
+        )
+
+    @staticmethod
     def _model_delta_admission_bytes(delta: ModelDelta) -> int:
         """Measure one delta without retaining an unbounded stream buffer."""
 
@@ -1725,6 +1756,8 @@ class TurnRunner:
                        and message.get("role") in {"system", "user", "assistant", "tool", "reasoning"}
                        and isinstance(message.get("content"), str) for message in messages):
                 raise ProviderProtocolError("invalid scoped model input projection")
+        if self.max_context_tokens is not None:
+            messages = fit_context(messages, self.max_context_tokens)
         cursor = self.store.get_session(scope.session_scope()).cursor
         return ModelRequest(
             scope=scope,

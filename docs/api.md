@@ -356,8 +356,7 @@ silently retry a write against a different World.
   `Content-Type: application/octet-stream`. Its streamed body is limited to
   1 MiB, independent of Content-Length. Success is `201` with `path`, original
   `name`, `bytes`, `sha256` and `source: "user_upload"`. Empty, binary,
-  oversized, protected-path and credential-shaped uploads are rejected before
-  publication. A unique native `uploads/` file is created without replacing
+  oversized and protected-path uploads are rejected before publication. A unique native `uploads/` file is created without replacing
   an existing file. Short extensions survive long Unicode file names.
 
 These operations reuse `WorkspaceFiles`; they create no Kernel sessions,
@@ -392,8 +391,7 @@ their own observations when a configured model actually opens the file.
   complete file. It returns `application/octet-stream`, the receipt's source
   name in UTF-8 `filename*`, SHA-256 ETag, and the observed World/instance in
   response headers. The browser verifies both identity and actual bytes before
-  saving. Changed or missing files return 409; a file needing fresh redaction
-  returns `422 material_download_redacted`. An already-hidden marker can be
+  saving. Changed or missing files return 409. An already-hidden marker can be
   literal uploaded text and remains downloadable as those exact bytes, without
   claiming to recover anything omitted before upload. No preview is exported
   as though it were the complete source. Upload receipts retain the supplied
@@ -438,7 +436,7 @@ succession in the same Work; Stop cannot undo
 an effect. The UI exposes them in **Actions with unconfirmed outcomes** only
 on their originating page, without a retry or approval button.
 
-`GET /api/pages/{id}/artifacts` projects bounded successful native `mutate_file` receipts; `GET /api/pages/{id}/artifacts/{artifactId}` verifies original action/page, regular text file and content SHA-256 before presenting a bounded redacted preview. A changed or missing file has no substitute preview. Page view includes `execution`, `artifacts`, `artifactsTruncated`; provider includes `workspaceActions` and `autoApplyEdits`. Each artifact has `undone`. See [Harness foundation](harness-foundation.md) for exact contracts.
+`GET /api/pages/{id}/artifacts` projects bounded successful native `mutate_file` receipts; `GET /api/pages/{id}/artifacts/{artifactId}` verifies original action/page, regular text file and content SHA-256 before presenting a bounded preview of the file as it is. A changed or missing file has no substitute preview. Page view includes `execution`, `artifacts`, `artifactsTruncated`; provider includes `workspaceActions` and `autoApplyEdits`. Each artifact has `undone`. See [Harness foundation](harness-foundation.md) for exact contracts.
 
 `POST /api/pages/{id}/artifacts/{artifactId}/undo` (body `{}`) restores the
 change's own Kernel checkpoint: the file returns to its content before that
@@ -458,8 +456,8 @@ durable-content limit remain unchanged. Download does not create a model turn.
 
 An overwritten file returns `409 artifact_version_changed`. Unavailable,
 binary, oversized or protected files preserve the native file error code and
-status. Files needing redaction or containing stored redaction/truncation
-markers return `422 artifact_download_redacted`. Wrong-page and unconfirmed
+status. Files containing a stored `[REDACTED]` or truncation marker return
+`422 artifact_download_redacted`. Wrong-page and unconfirmed
 action IDs remain `404 artifact_not_found`. The response also carries the exact
 digest as an ETag; the browser checks the received bytes before saving them.
 

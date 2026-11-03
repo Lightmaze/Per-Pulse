@@ -15,6 +15,7 @@ from dataclasses import asdict
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 import threading
 from typing import Any
 from uuid import uuid4
@@ -67,6 +68,33 @@ def _selected_result_transfer_content(
         + json.dumps(data, ensure_ascii=False, sort_keys=True)
         + "\n\nMy request for this Work:\n" + instruction
     )
+
+
+# Model rounds (tool steps) one turn may take before it stops. Current coding
+# agents set no small default cap; Stop ends a turn at any point. Background
+# turns keep their own allowance (--pulse-main-rounds).
+FOREGROUND_MODEL_ROUNDS = 256
+# A question waits for your answer: an approval stays open for a week, and a
+# turn has no wall-clock limit (it ends when it finishes, on Stop, or at the
+# round limit). Background turns keep their own small round allowance.
+APPROVAL_TTL_SECONDS = 7 * 24 * 60 * 60
+# Estimated input budget for one model request. Older turns beyond it are left
+# out of the request (never deleted) and stay searchable with the history
+# tools. Set P_PULSE_CONTEXT_TOKENS to match a smaller or larger model.
+DEFAULT_CONTEXT_TOKENS = 96_000
+
+
+def context_tokens_from_env() -> int:
+    raw = os.environ.get("P_PULSE_CONTEXT_TOKENS", "").strip()
+    if not raw:
+        return DEFAULT_CONTEXT_TOKENS
+    try:
+        value = int(raw)
+    except ValueError:
+        raise PageError("context_tokens_invalid", "P_PULSE_CONTEXT_TOKENS must be a whole number of tokens.", 500) from None
+    if value < 1024:
+        raise PageError("context_tokens_invalid", "P_PULSE_CONTEXT_TOKENS must be at least 1024.", 500)
+    return value
 
 
 class PageService:
@@ -134,15 +162,18 @@ class PageService:
             connectivity_interval_ticks=None,
             living_concern_reentry_budget_per_tick=0,
             context_pulse=pulse or PulseSettings(),
+            harness_turn_timeout_sec=None,
         )
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
             model_factory=factory, allow_unconfigured=True, allow_mutations=self.allow_workspace_actions,
             enable_posture=False if example else posture, auto_apply_edits=self.auto_apply_edits,
+            max_model_rounds=FOREGROUND_MODEL_ROUNDS, approval_ttl_sec=APPROVAL_TTL_SECONDS,
+            max_context_tokens=context_tokens_from_env(),
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
         self.execution = PageExecution(self.runtime)
-        self.artifacts = PageArtifacts(self.runtime, execution=self.execution)
+        self.artifacts = PageArtifacts(self.runtime, execution=self.execution, undone_record=self)
         self.replay = PageReplay(self)
         from .learning import PageLearning
         self.learning = PageLearning(self)
@@ -483,6 +514,22 @@ class PageService:
     def _save(self) -> None:
         self.runtime._require_runtime_owner()
         self.runtime.storage.save_component_state(self._state_key, self._state)
+
+    def is_undone(self, action_id: str) -> bool:
+        with self._lock:
+            return action_id in self._state.get("undoneChanges", {})
+
+    def mark_undone(self, action_id: str) -> None:
+        with self._lock:
+            undone = self._state.setdefault("undoneChanges", {})
+            if action_id in undone:
+                return
+            undone[action_id] = _now()
+            try:
+                self._save()
+            except BaseException:
+                undone.pop(action_id, None)
+                raise
 
     def _front(self, page_id: str) -> Any:
         if page_id == "home":

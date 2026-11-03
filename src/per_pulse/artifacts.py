@@ -19,6 +19,8 @@ provider. It applies only while the file still has that change's content.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
+from pathlib import Path
 import re
 from typing import Any
 
@@ -27,7 +29,7 @@ from pulse_harness.adapters.workspace import (
 )
 from pulse_harness.core.contracts import ActionRecord, ActionStatus
 from pulse_harness.core.errors import HarnessError, ScopeConflict
-from pulse_harness.core.replay import bound_text, redact_text, stored_payload_flags, stored_text_flags
+from pulse_harness.core.replay import stored_payload_flags, stored_text_flags
 from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES, WorkspaceFiles
 
 from .execution import ExecutionError, PageExecution
@@ -51,6 +53,19 @@ def _identifier(value: Any) -> bool:
     )
 
 
+def clip_text(text: str, max_bytes: int) -> tuple[str, bool]:
+    """Shorten text to at most ``max_bytes`` of UTF-8 without changing it otherwise."""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text, False
+    return encoded[:max_bytes].decode("utf-8", errors="ignore"), True
+
+
+def _stored_markers(text: str) -> tuple[bool, bool]:
+    """Literal omission and truncation markers left by a stored model result."""
+    return "[REDACTED]" in text, stored_text_flags(text)[1]
+
+
 def _digest(value: Any) -> bool:
     return isinstance(value, str) and _SHA256.fullmatch(value) is not None
 
@@ -58,11 +73,16 @@ def _digest(value: Any) -> bool:
 class PageArtifacts:
     """Read page-scoped write evidence without creating sessions or runners."""
 
-    def __init__(self, runtime, *, execution: PageExecution | None = None):
+    def __init__(self, runtime, *, execution: PageExecution | None = None,
+                 undone_record: Any = None):
         self.runtime = runtime
         # Share the existing Home/Work -> Kernel scope mapping. This helper
         # owns no additional authority or persisted session identity.
         self.execution = execution if execution is not None else PageExecution(runtime)
+        # Durable record of undone changes (``is_undone``/``mark_undone``).
+        # Kernel events roll over in a long session, so they cannot be the
+        # only record that a change was undone.
+        self._undone_record = undone_record
 
     @staticmethod
     def _item(page_id: str, action: ActionRecord) -> dict | None:
@@ -112,10 +132,30 @@ class PageArtifacts:
         }
 
     def _undone(self, action: ActionRecord) -> bool:
+        if self._undone_record is not None and self._undone_record.is_undone(action.action_request_id):
+            return True
         return self.execution._kernel.store.has_event(
             action.scope.session_scope(), "checkpoint.restored",
             action_request_id=action.action_request_id,
         )
+
+    def _mark_undone(self, action: ActionRecord) -> None:
+        if self._undone_record is not None:
+            self._undone_record.mark_undone(action.action_request_id)
+
+    def _has_before_image(self, item: dict) -> bool:
+        """Whether the file already has the content it had before this change."""
+        path = Path(self.execution._kernel.workspace_root) / item["path"]
+        try:
+            regular = path.is_file() and not path.is_symlink()
+            if regular and path.stat().st_size > MAX_FILE_BYTES:
+                return False
+            data = path.read_bytes() if regular else None
+        except OSError:
+            return False
+        if item["beforeSha256"] is None:
+            return data is None and not path.exists() and not path.is_symlink()
+        return data is not None and hashlib.sha256(data).hexdigest() == item["beforeSha256"]
 
     @staticmethod
     def _limits() -> dict:
@@ -196,6 +236,11 @@ class PageArtifacts:
         try:
             self.execution._kernel.restore_checkpoint(action.scope, item["checkpointId"])
         except WorkspaceDigestConflict as error:
+            if self._has_before_image(item):
+                # Already back to its earlier content (for example, an undo
+                # that finished before its record was saved).
+                self._mark_undone(action)
+                return {"pageId": page_id, "artifact": {**item, "undone": True, "state": "unchecked"}}
             raise ArtifactError(
                 "artifact_version_changed",
                 "This file has changed since this change. Undo the later change first.", 409,
@@ -214,6 +259,7 @@ class PageArtifacts:
             raise ArtifactError(
                 "artifact_undo_unavailable", "This change can no longer be undone.", 409,
             ) from error
+        self._mark_undone(action)
         return {"pageId": page_id, "artifact": {**item, "undone": True, "state": "unchecked"}}
 
     def read(self, page_id: str, artifact_id: str) -> dict:
@@ -251,22 +297,17 @@ class PageArtifacts:
             response.update({"state": "changed", "reason": "artifact_version_changed"})
             response["artifact"] = {**item, "state": "changed"}
             return response
-        # Hash the original bytes above, then redact and bound the visible
-        # text. A redacted preview must never be mistaken for raw file bytes.
-        clean, redacted = redact_text(current["content"])
-        content, bound_redacted, truncated = bound_text(clean, MAX_PREVIEW_BYTES)
-        # The preview may end before a persisted redaction/truncation marker.
-        # Judge the *whole verified original*, as download() does; otherwise
-        # a clean-looking prefix could enable carrying the entire unsafe file.
-        stored_redacted, stored_truncated = stored_text_flags(current["content"])
+        # This is the user's own local file: show it as it is, bounded only
+        # in length. A file holding a stored omission marker from a model
+        # result is not a complete original, so it is not offered whole.
+        content, truncated = clip_text(current["content"], MAX_PREVIEW_BYTES)
+        marker, stored_truncated = _stored_markers(current["content"])
         response.update({
             "state": "current", "content": content,
-            "redacted": bool(redacted or bound_redacted or stored_redacted),
+            "redacted": marker,
             "truncated": bool(truncated or stored_truncated),
             # A clipped but otherwise complete file may still be transferred.
-            # A stored truncation marker is NOT such a file, even if it is
-            # readable and contains no concealed secrets.
-            "downloadable": not (redacted or bound_redacted or stored_redacted or stored_truncated),
+            "downloadable": not (marker or stored_truncated),
         })
         response["artifact"] = {**item, "state": "current"}
         return response
@@ -286,9 +327,8 @@ class PageArtifacts:
             raise ArtifactError(error.code, "This recorded file version is not available for download.", error.status) from error
         if current["sha256"] != item["sha256"]:
             raise ArtifactError("artifact_version_changed", "This file has changed since this page wrote it. Refresh the file preview.", 409)
-        clean, redacted = redact_text(current["content"])
-        # A literal stored redaction/truncation marker is ambiguous provenance,
+        # A literal stored omission/truncation marker is ambiguous provenance,
         # not a basis for claiming an exact original file download.
-        if redacted or clean != current["content"] or any(stored_text_flags(current["content"])):
-            raise ArtifactError("artifact_download_redacted", "This file requires redaction and cannot be downloaded as an original result.", 422)
+        if any(_stored_markers(current["content"])):
+            raise ArtifactError("artifact_download_redacted", "This file holds an incomplete stored result and cannot be downloaded as an original result.", 422)
         return {"artifact": item, "content": current["content"].encode("utf-8")}
