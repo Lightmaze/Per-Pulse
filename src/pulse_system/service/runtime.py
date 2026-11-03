@@ -11579,6 +11579,11 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             "outcome_eligible": (
                 row["mode"] == DURABLE_DELEGATION_MODE
                 and row["result_summary"] is not None
+                # The durable summary can precede the sourced delivery.
+                # Do not offer a rating until its causal anchor is present.
+                and self._causal_ledger.find_delegation_result_by_record_id(
+                    self._world_id, row["id"],
+                ) is not None
             ),
             "learning_receipt_ids": [receipt["id"] for receipt in receipts],
             "learning_state_generation": (
