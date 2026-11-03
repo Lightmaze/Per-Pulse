@@ -148,7 +148,7 @@ try {
   await wait(async () => await localResults.count() === 3, 'quiet preview of three local results');
   const reveal = page.getByRole('button', { name: '查看当前可见的 5 项局部结果' });
   await reveal.click();
-  assert.equal(await reveal.getAttribute('aria-expanded'), 'true');
+  assert.equal(await page.locator('button[aria-controls="home-local-results"]').getAttribute('aria-expanded'), 'true');
   assert.equal(await localResults.count(), 5);
   await localResults.nth(4).click();
   await wait(() => new URL(page.url()).hash === '#message-' + otherResults[4].resultMessageId,
