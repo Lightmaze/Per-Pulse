@@ -20,6 +20,7 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
 }) {
   const { t, pageTitle } = useLanguage();
   const [showAllPending, setShowAllPending] = useState(false);
+  const [showAllResults, setShowAllResults] = useState(false);
   const [visited, setVisited] = useState<{ workspaceId: string; eventIds: string[] }>(() => ({
     workspaceId, eventIds: readVisitedLocalEvents(workspaceId),
   }));
@@ -91,7 +92,13 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
   const currentPages = freshPages ?? pages;
   const visitedIds = visited.workspaceId === workspaceId
     ? visited.eventIds : readVisitedLocalEvents(workspaceId);
-  const items = homeContinuations(freshPages ? pulse : null, freshPages ?? [], 3, new Set(visitedIds));
+  // The native observation supplies a bounded recent window. Reveal every
+  // verified, not-yet-opened Work result in that window on request, instead
+  // of silently hiding the fourth result behind the quiet Home preview.
+  const availableResults = homeContinuations(
+    freshPages ? pulse : null, freshPages ?? [], freshPages?.length ?? 0, new Set(visitedIds),
+  );
+  const items = showAllResults ? availableResults : availableResults.slice(0, 3);
   // Show the first three without burying additional decisions or failed Works.
   // Expansion uses the same live, World-verified bootstrap; never cached page names.
   const pending = homeWorkNeedsAttention(freshPages ?? [], freshPages?.length ?? 0);
@@ -131,7 +138,7 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
     {items.length ? <section className="home-continuations" aria-label={t('pulse.home.title')}>
       <h2>{t('pulse.home.title')}</h2>
       <p className="home-continuations-intro">{t('pulse.home.info')}</p>
-      <ol className="home-continuations-list">
+      <ol id="home-local-results" className="home-continuations-list">
         {items.map(({ event, page, receiver, source }) => <li key={event.eventId}>
           <button type="button" className="home-continuation-open" onClick={() => openLocalResult(event.eventId, receiver.pageId, receiver.messageId)}>
             {t('pulse.home.open', { title: pageTitle(page) })}
@@ -146,6 +153,11 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
           <span className="home-continuation-event" title={event.eventId}>{t('pulse.home.provenance')}</span>
         </li>)}
       </ol>
+      {availableResults.length > 3 ? <button type="button" className="text-button"
+        aria-controls="home-local-results" aria-expanded={showAllResults}
+        onClick={() => setShowAllResults(value => !value)}>
+        {showAllResults ? t('pulse.home.showFewer') : t('pulse.home.showAll', { count: availableResults.length })}
+      </button> : null}
     </section> : null}
   </>;
 }
