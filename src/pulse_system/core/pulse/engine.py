@@ -36,6 +36,7 @@ from pulse_system.core.dendrite.processor import (
     DendriticReadyWindow,
 )
 from pulse_system.core.engram.manager import (
+    PulseParked,
     SuccessionHarnessError,
     SuccessionPreparation,
     SuccessionPreparationError,
@@ -521,6 +522,11 @@ class PulseEngine:
             Future,
             tuple[PulseEvent, CenterReservation | None],
         ] = {}
+        # An original Kernel turn can remain logically in flight without
+        # retaining an executor Future or a physical Python carrier thread.
+        self._parked: dict[
+            str, tuple[PulseEvent, CenterReservation | None, PulseParked]
+        ] = {}
         self._succession_lock = threading.RLock()
         self._succession_pending: dict[str, _SuccessionRequest] = {}
         self._succession_inflight: dict[Future, _SuccessionRequest] = {}
@@ -572,33 +578,27 @@ class PulseEngine:
         return self._causal_ledger
 
     def _worker_allocation(self) -> tuple[int, int, int, int]:
-        """(computing, human-parked, attached, available) under bounded capacity.
-
-        Durable causal work and its original Future stay attached while a human
-        decides. Only a source-checked, still-pending Kernel action can be
-        counted as parked. No event/reservation is settled by this projection.
-        """
+        """(computing, logical human waits, physical carriers, free carriers)."""
         with self._shutdown_lock:
             entries = tuple(self._inflight.values())
-        parked = 0
+            detached_parked = len(self._parked)
+        attached = len(entries)
+        attached_parked = 0
         if self._approval_parked is not None:
             for event, _reservation in entries:
                 try:
                     if self._approval_parked(*self._execution_key(event)):
-                        parked += 1
-                except Exception:  # noqa: BLE001 - fail closed on lost owner
+                        attached_parked += 1
+                except Exception:  # noqa: BLE001 - owner loss is not proof
                     continue
-        attached = len(entries)
-        computing = attached - parked
-        physical_free = max(
-            0, self._config.max_parallel_pulses
-            + self._config.approval_parked_limit - attached,
-        )
+        computing = attached - attached_parked
+        # The old approval_parked_limit is retained only as a compatibility
+        # config value; detached logical turns consume no physical worker.
         available = min(
             max(0, self._config.max_parallel_pulses - computing),
-            physical_free,
+            max(0, self._config.max_parallel_pulses - attached),
         )
-        return computing, parked, attached, available
+        return computing, detached_parked + attached_parked, attached, available
 
     def capacity_snapshot(self) -> dict[str, int | bool]:
         """Content-free facts about both compute and retained approval ownership."""
@@ -727,6 +727,7 @@ class PulseEngine:
                 pulse_executor = None
                 succession_executor = None
                 pulse_entries = []
+                parked_entries = []
                 succession_entries = []
             else:
                 first_caller = True
@@ -736,6 +737,8 @@ class PulseEngine:
                 self._pulse_executor = None
                 self._succession_executor = None
                 pulse_entries = list(self._inflight.items())
+                parked_entries = list(self._parked.values())
+                self._parked.clear()
                 with self._succession_lock:
                     self._succession_pending.clear()
                     succession_entries = list(self._succession_inflight.items())
@@ -773,6 +776,9 @@ class PulseEngine:
                 cancelled_pulses += 1
             elif not future.done():
                 running_engrams.append(event.engram_id)
+        running_engrams.extend(
+            event.engram_id for event, _reservation, _signal in parked_entries
+        )
         for future, request in succession_entries:
             if future.cancel():
                 cancelled_successions += 1
@@ -816,6 +822,36 @@ class PulseEngine:
         succession_claimed, succession_errors = self._reap_shutdown_successions(
             succession_entries
         )
+        # Detached logical turns still belong to the same Kernel. Wait only
+        # for the existing bounded abort callbacks, then project each original
+        # terminal without creating a new model request or a living activation.
+        for thread in abort_threads:
+            thread.join(timeout=deadline.remaining_seconds())
+        parked_unresolved = 0
+        for event, reservation, signal in parked_entries:
+            terminal = False
+            try:
+                if signal.ready():
+                    try:
+                        signal.resume()
+                    except HarnessError:
+                        # An explicit Stop produces a failed causal turn, not
+                        # a successful assistant or a replayable input.
+                        pass
+                    terminal = True
+            except Exception:  # noqa: BLE001 - recovery owns unknown state
+                pass
+            if reservation is not None and self._scheduler is not None:
+                try:
+                    self._scheduler.settle(
+                        reservation.id,
+                        CenterReservationOutcome.FAILED
+                        if terminal else CenterReservationOutcome.UNCERTAIN,
+                    )
+                except Exception:
+                    parked_unresolved += 1
+            if not terminal:
+                parked_unresolved += 1
 
         finalizers = {
             "pulse_workers": self._start_executor_finalizer(
@@ -854,7 +890,10 @@ class PulseEngine:
         for thread in abort_threads:
             thread.join(timeout=deadline.remaining_seconds())
 
-        pulse_unresolved = max(0, len(pulse_entries) - len(pulse_claimed))
+        pulse_unresolved = (
+            max(0, len(pulse_entries) - len(pulse_claimed))
+            + parked_unresolved
+        )
         succession_unresolved = max(
             0,
             len(succession_entries) - len(succession_claimed),
@@ -877,7 +916,7 @@ class PulseEngine:
                 component="pulse_workers",
                 started_at=started_at,
                 started_monotonic=started_monotonic,
-                active_before=len(pulse_entries),
+                active_before=len(pulse_entries) + len(parked_entries),
                 unresolved=pulse_unresolved,
                 cancelled=cancelled_pulses,
                 errors=pulse_errors,
@@ -1289,6 +1328,7 @@ class PulseEngine:
         # visible as one coordinator-owned boundary.
         self._reap_successions()
         results, activations, unexpected_errors = self._reap_completed()
+        self._resume_ready_parked()
         if unexpected_errors:
             # All other completed attempts in the reap batch have already
             # reached their terminal bookkeeping before one fault is surfaced.
@@ -1419,6 +1459,9 @@ class PulseEngine:
             excluded_execution_keys=cooling_execution_keys | {
                 self._execution_key(event)
                 for event, _reservation in self._inflight.values()
+            } | {
+                self._execution_key(event)
+                for event, _reservation, _parked in self._parked.values()
             },
         )
         if admission_budget <= 0 and to_execute:
@@ -2378,7 +2421,7 @@ class PulseEngine:
                 self._engram_mgr.pulse(event.engram_id),
                 None,
             )
-        except (ValueError, LLMCallError, HarnessError) as error:
+        except (ValueError, LLMCallError, HarnessError, PulseParked) as error:
             return (event, start, None, error)
         except Exception as error:  # noqa: BLE001 - reservation settles on owner thread
             return (event, start, None, error)
@@ -2463,6 +2506,39 @@ class PulseEngine:
                 limit=self._config.max_parallel_pulses,
             )
 
+    def _resume_one(self, event: PulseEvent, parked: PulseParked):
+        """Finish an already-admitted original turn without replaying input."""
+        start = _now()
+        try:
+            return event, start, parked.resume(), None
+        except Exception as error:  # noqa: BLE001 - coordinator settles once
+            return event, start, None, error
+
+    def _resume_ready_parked(self) -> None:
+        """Use the original Kernel terminal fact to schedule short continuations."""
+        with self._shutdown_lock:
+            entries = tuple(self._parked.items())
+        for turn_id, (event, reservation, parked) in entries:
+            try:
+                if not parked.ready():
+                    continue
+            except Exception:  # noqa: BLE001 - cannot prove terminal
+                continue
+            with self._shutdown_lock:
+                if self._parked.get(turn_id) != (event, reservation, parked):
+                    continue
+                executor = self._pulse_executor
+                if executor is None:
+                    return
+                future = executor.submit(self._resume_one, event, parked)
+                self._inflight[future] = (event, reservation)
+                self._parked.pop(turn_id)
+            self._record(
+                "approval_turn_resumed",
+                event_id=event.event_id,
+                engram=event.engram_id,
+            )
+
     def _reap_completed(
         self,
         *,
@@ -2488,6 +2564,17 @@ class PulseEngine:
                         None,
                         ValueError("pulse dispatch cancelled before execution"),
                     )
+                parked_signal = attempt[3] if len(attempt) == 4 else None
+                if isinstance(parked_signal, PulseParked):
+                    self._parked[parked_signal.turn_id] = (
+                        event, reservation, parked_signal,
+                    )
+                    self._record(
+                        "approval_turn_detached",
+                        event_id=event.event_id,
+                        engram=event.engram_id,
+                    )
+                    continue
                 attempts.append(attempt)
                 if event.event_id is not None and reservation is not None:
                     reservations[event.event_id] = reservation
