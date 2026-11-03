@@ -689,7 +689,7 @@ class CausalLedger:
         """Deliver a settled result to another context of the same subject.
 
         Ordinary child events still inherit their parent's Center. This is the
-        explicit exception for a configured context connection: it proves a
+        explicit exception for a native context connection: it proves a
         successful source turn, preserves its causal lineage and exact text,
         and only addresses an active or paused context of that subject (or a
         committed successor). Paused contexts retain the input; the separate
@@ -808,7 +808,11 @@ class CausalLedger:
                         conn, result.engram_id, existing.engram_id,
                     )
                     or existing.content != result.content
-                    or any(existing.metadata.get(key) != value for key, value in metadata.items())
+                    # Online connection learning may change today's priority.
+                    # The result/edge pair already owns its original admission;
+                    # an idempotent retry returns that frozen priority intact.
+                    or any(existing.metadata.get(key) != value for key, value in metadata.items()
+                           if key != "priority")
                 ):
                     raise CausalTransitionError(
                         "context connection delivery is already bound to another identity"

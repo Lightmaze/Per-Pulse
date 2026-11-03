@@ -183,12 +183,13 @@ class DendriteProcessor:
     def window_policy_snapshot(
         self,
         engram_id: str,
+        *, context_modifier: float = 1.0,
     ) -> DendriticWindowPolicySnapshot:
         base_silence = float(self._config.silence_threshold)
         base_max_wait = float(
             self._wait_times.get(engram_id, self._config.default_max_wait)
         )
-        modifier = float(self._wait_modifiers.get(engram_id, 1.0))
+        modifier = float(self._wait_modifiers.get(engram_id, 1.0)) * context_modifier
         return DendriticWindowPolicySnapshot(
             policy_version=DENDRITIC_WINDOW_POLICY_VERSION,
             base_silence_threshold_seconds=base_silence,

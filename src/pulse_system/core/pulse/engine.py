@@ -323,6 +323,7 @@ class PulseEngine:
         runtime_fence: RuntimeFence | None = None,
         execution_context: Callable[[PulseEvent], str] | None = None,
         admission_filter: Callable[[PulseEvent, datetime], bool] | None = None,
+        context_wait_modifier: Callable[[CausalEvent], float] | None = None,
         approval_parked: Callable[[str, str], bool] | None = None,
         unsettled_provider_usage: Callable[[], tuple[int, int, int] | None] | None = None,
     ):
@@ -330,6 +331,7 @@ class PulseEngine:
         self._engram_mgr = engram_manager
         self._connections = connection_network
         self._dendrite = dendrite
+        self._context_wait_modifier = context_wait_modifier
         self._runtime = runtime
         self._config = config or PulseEngineConfig()
         # Reject invalid dynamics before loading/publishing state or starting
@@ -1870,7 +1872,9 @@ class PulseEngine:
                         self._causal_ledger.ensure_dendritic_input_policy(
                             event.id,
                             self._dendrite.window_policy_snapshot(
-                                event.engram_id
+                                event.engram_id,
+                                context_modifier=(self._context_wait_modifier(event)
+                                                  if self._context_wait_modifier else 1.0),
                             ),
                             runtime_fence=self._runtime_fence,
                         )

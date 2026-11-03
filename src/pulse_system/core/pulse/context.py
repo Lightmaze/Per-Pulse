@@ -18,6 +18,9 @@ from typing import Callable
 from uuid import uuid4
 
 from pulse_system.core.connection.context import ContextConnectionNetwork
+from pulse_system.core.claustrum.context import ContextSpectrum
+from pulse_system.core.claustrum.modulator import EngramState
+from pulse_system.core.learning_policy import OnlineLearningAudit, OnlineLearningPolicy
 from pulse_system.core.causality import may_emit_content_propagation
 from pulse_system.core.types import (
     ActivityCenterStatus, CausalEventDomain, CausalEventKind,
@@ -39,6 +42,9 @@ class ContextPulseConfig:
     max_propagation_depth: int = 2
     propagation_threshold: float = 0.3
     activity_halflife_seconds: float = 600.0
+    adaptive_connections: bool = True
+    spectrum_enabled: bool = True
+    activity_window_seconds: float = 60.0
     # Optional persistent *admission* envelope. A reservation is charged when
     # background work is queued; settled trustworthy World/Kernel usage replaces
     # it. This is not a hard provider billing limit: one turn can exceed its
@@ -49,15 +55,16 @@ class ContextPulseConfig:
     max_background_main_model_rounds_per_turn: int = 4
 
     def __post_init__(self) -> None:
-        if type(self.enabled) is not bool:
-            raise ValueError("enabled must be a boolean")
+        for name in ("enabled", "adaptive_connections", "spectrum_enabled"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"{name} must be a boolean")
         for name in ("check_interval_seconds", "refractory_seconds",
-                     "activity_halflife_seconds", "spontaneous_rate", "propagation_threshold"):
+                     "activity_halflife_seconds", "activity_window_seconds", "spontaneous_rate", "propagation_threshold"):
             value = getattr(self, name)
             if (isinstance(value, bool) or not isinstance(value, (int, float))
                     or not math.isfinite(value) or value < 0):
                 raise ValueError(f"{name} must be a finite nonnegative number")
-        if self.check_interval_seconds == 0 or self.activity_halflife_seconds == 0:
+        if self.check_interval_seconds == 0 or self.activity_halflife_seconds == 0 or self.activity_window_seconds == 0:
             raise ValueError("check interval and activity half-life must be positive")
         if self.spontaneous_rate > 1 or self.propagation_threshold > 1:
             raise ValueError("probability and threshold must be at most 1")
@@ -110,10 +117,17 @@ class ContextPulseController:
     def __init__(self, storage, ledger, world, *, world_id: str,
                  subject: Callable[[], str], fence: Callable,
                  config: ContextPulseConfig,
-                 attention_outcome: Callable[[dict], dict] | None = None):
+                 attention_outcome: Callable[[dict], dict] | None = None,
+                 learning_policy: OnlineLearningPolicy | None = None,
+                 learning_audit: OnlineLearningAudit | None = None):
         self.storage, self.ledger, self.world = storage, ledger, world
         self.world_id, self.subject, self.fence, self.config = world_id, subject, fence, config
-        self.connections = ContextConnectionNetwork(storage, world_id)
+        self.learning_policy = learning_policy or OnlineLearningPolicy()
+        self.learning_audit = learning_audit or OnlineLearningAudit()
+        self.connections = ContextConnectionNetwork(storage, world_id,
+            learning_policy=self.learning_policy, learning_audit=self.learning_audit)
+        self._spectrum: ContextSpectrum | None = None
+        self._last_idle_stamp: tuple[int, int, ContextPulseConfig] | None = None
         self.attention_outcome = attention_outcome
         self.key = f"pulse-context-dynamics-v1:{world_id}"
         with storage._lock:
@@ -124,6 +138,8 @@ class ContextPulseController:
                 "paused": False, "held_contexts": [],
                 "retained_attention": {}, "pending_attention": {}, "tick_runs": {},
             }
+            if config.enabled and config.adaptive_connections:
+                self.connections.start_learning()
 
     @staticmethod
     def _checkpoint_time(value) -> datetime:
@@ -646,6 +662,60 @@ class ContextPulseController:
             (self.world_id, center_id, self.subject()),
         ).fetchone()
 
+    def _learning_context(self, center_id: str | None) -> bool:
+        return (self._current_context(center_id)
+                and self._key(center_id) not in self._state["held_contexts"])
+
+    def _update_spectrum(self, now: datetime, graph: dict) -> None:
+        if not self.config.spectrum_enabled:
+            return
+        entries = [entry for entry in self._state["contexts"].values()
+                   if self._learning_context(entry["center_id"])]
+        if not entries and self._spectrum is None:
+            return
+        if self._spectrum is None:
+            self._spectrum = ContextSpectrum(self.storage, self.world_id,
+                learning_policy=self.learning_policy, learning_audit=self.learning_audit)
+        activity, ages = {}, {}
+        for entry in entries:
+            center = entry["center_id"]
+            ages[center] = max(0.0, (now - datetime.fromisoformat(entry["settled_at"])).total_seconds())
+            activity[center] = math.exp(-math.log(2) * ages[center] / self.config.activity_halflife_seconds)
+        queues = dict(self.storage._conn.execute(
+            "SELECT center_id, COUNT(*) FROM causal_events WHERE world_id = ? "
+            "AND engram_id = ? AND status IN ('queued', 'running') GROUP BY center_id",
+            (self.world_id, self.subject()),
+        ).fetchall())
+        states = []
+        for center in activity:
+            edges = [edge for edge in graph["connections"]
+                     if center in (edge["source_center_id"], edge["target_center_id"])]
+            neighbors = {edge["target_center_id"] if edge["source_center_id"] == center
+                         else edge["source_center_id"] for edge in edges if edge["kind"] == "excitatory"}
+            cluster = [activity[neighbor] for neighbor in neighbors if neighbor in activity]
+            states.append(EngramState(self._key(center), activity[center], len(edges),
+                queues.get(center, 0), ages[center], sum(cluster) / len(cluster) if cluster else 0.0))
+        self._spectrum.update(states, now=now,
+            active=sum(age < self.config.activity_window_seconds for age in ages.values()),
+            # A fast queue poll is not another independent rhythm observation.
+            interval=max(1.0, self.config.check_interval_seconds))
+
+    def _factors(self, center_id: str | None) -> tuple[float, float, float, float]:
+        return (self._spectrum.factors(self._key(center_id))
+                if self.config.spectrum_enabled and self._spectrum else (1.0, 1.0, 1.0, 1.0))
+
+    def wait_modifier(self, event) -> float:
+        """Freeze only native autonomous input timing at its Dendrite opening.
+
+        Foreground messages, explicit /tick and TUNNEL retain their own policy.
+        An already-open window keeps the ledger's original frozen factor.
+        """
+        if (event.engram_id == self.subject() and
+                (event.metadata.get("context_connection_id") or
+                 event.metadata.get("context_pulse") in {"reentry", "convergence"})):
+            return self._factors(event.center_id)[1]
+        return 1.0
+
     # ── Explicit time steps (/tick) ───────────────────────────────
 
     def start_ticks(self, center_id: str | None, count: int, *, now: datetime | None = None) -> dict:
@@ -892,9 +962,28 @@ class ContextPulseController:
     def tick(self, *, now: datetime | None = None) -> None:
         now = now or _now()
         with self.storage._lock:
+            stamp = (self.storage._conn.total_changes,
+                     self.storage._conn.execute("PRAGMA data_version").fetchone()[0], self.config)
+            prior = self._state["last_check_at"]
+            if (stamp == self._last_idle_stamp and prior is not None
+                    and self.config.enabled and not self._state["paused"]
+                    and not self._state["pending_attention"]
+                    and not any(run["status"] == "running" for run in self._state["tick_runs"].values())
+                    and 0 <= (now - self._checkpoint_time(prior)).total_seconds() < self.config.check_interval_seconds
+                    and self.storage._conn.execute(
+                        "SELECT 1 FROM causal_events WHERE world_id = ? AND seq > ? "
+                        "AND kind = 'assistant_result' AND status = 'settled' LIMIT 1",
+                        (self.world_id, self._state["observed_cursor"]),
+                    ).fetchone() is None):
+                return
             before = deepcopy(self._state)
             try:
                 self._tick(now)
+                # Local writes and commits by other connections both invalidate
+                # this idle shortcut. SQLite remains the authority, not a graph
+                # cache. Inhibitory admission still reads the current trace.
+                self._last_idle_stamp = (self.storage._conn.total_changes,
+                    self.storage._conn.execute("PRAGMA data_version").fetchone()[0], self.config)
             except BaseException:
                 # A failed checkpoint must not silently move the live cursor
                 # past effects that still need reconciliation on the next tick.
@@ -903,6 +992,12 @@ class ContextPulseController:
 
     def _tick(self, now: datetime) -> None:
         with self.storage._lock:
+            prior = self._state["last_check_at"]
+            if prior is not None and now < self._checkpoint_time(prior):
+                # Reanchor before a quota-bound fanout can return early. An
+                # old future timestamp must not force permanent busy polling.
+                self._state["last_check_at"] = now.isoformat()
+                self._save(now)
             # A tick holds Storage's lock: reuse this validated graph while
             # traversing local contexts instead of reloading every edge list.
             graph = self.connections.snapshot(now=now)
@@ -918,6 +1013,11 @@ class ContextPulseController:
                 # Retain both observation cursors, including settled results
                 # from in-flight turns, until the operator resumes activity.
                 return
+            for edge_id in self.connections.decay_and_prune(
+                    now=now, enabled=self.config.adaptive_connections):
+                self.ledger.cancel_context_connection(edge_id, world_id=self.world_id,
+                                                     runtime_fence=self.fence())
+            graph = self.connections.snapshot(now=now)
             outgoing = {}
             for edge in graph["connections"]:
                 outgoing.setdefault(edge["source_center_id"], []).append(edge)
@@ -934,8 +1034,14 @@ class ContextPulseController:
                 after_seq=self._state["observed_cursor"], limit=100, world_id=self.world_id,
                 kind=CausalEventKind.ASSISTANT_RESULT, status=CausalEventStatus.SETTLED,
             )
+            ordinary = {result.id for result in observations
+                        if result.engram_id in lineage and self._source_root(result) is not None}
+            self.connections.observe_activities(
+                [result for result in observations if result.id in ordinary],
+                eligible=self._learning_context, enabled=self.config.adaptive_connections,
+            )
             for result in observations:
-                if result.engram_id in lineage and self._source_root(result) is not None:
+                if result.id in ordinary:
                     self._state["contexts"][self._key(result.center_id)] = {
                         "center_id": result.center_id, "result_event_id": result.id,
                         "settled_at": (result.settled_at or result.created_at).isoformat(),
@@ -954,6 +1060,13 @@ class ContextPulseController:
                                 )
                                 inhibition_changed = True
                 self._state["observed_cursor"] = result.seq
+            # Learning can change weights or create edges. New edges have a
+            # causal cutoff and never retroactively relay their training text.
+            graph = self.connections.snapshot(now=now)
+            outgoing = {}
+            for edge in graph["connections"]:
+                outgoing.setdefault(edge["source_center_id"], []).append(edge)
+            self._update_spectrum(now, graph)
             results = self.ledger.list_events(
                 after_seq=self._state["cursor"], limit=100, world_id=self.world_id,
                 kind=CausalEventKind.ASSISTANT_RESULT, status=CausalEventStatus.SETTLED,
@@ -969,7 +1082,7 @@ class ContextPulseController:
                 if retained(center_id):
                     for edge in outgoing.get(center_id, ()):
                         if (result.seq <= edge["created_after_seq"]
-                                or edge["weight"] < self.config.propagation_threshold
+                                 or edge["weight"] < self.config.propagation_threshold * self._factors(center_id)[2]
                                 or not retained(edge["target_center_id"])):
                             continue
                         if edge["kind"] == "excitatory" and depth < self.config.max_propagation_depth and result.content:
@@ -983,6 +1096,7 @@ class ContextPulseController:
                             except _QuotaReached:
                                 # Persist observed state but hold the cursor at
                                 # this result. Earlier deliveries are idempotent.
+                                self._state["last_check_at"] = now.isoformat()
                                 self._save(now)
                                 return
                 self._state["cursor"] = result.seq
@@ -994,13 +1108,6 @@ class ContextPulseController:
             prior = self._state.get("last_check_at")
             if prior:
                 elapsed = (now - self._checkpoint_time(prior)).total_seconds()
-                if elapsed < 0:
-                    # A wall-clock correction must neither freeze opportunities
-                    # indefinitely nor grant an immediate fresh check. Reanchor
-                    # once, durably, and wait one complete configured interval.
-                    self._state["last_check_at"] = now.isoformat()
-                    self._save(now)
-                    return
                 if elapsed < self.config.check_interval_seconds:
                     return
             self._state["last_check_at"] = now.isoformat()
@@ -1031,7 +1138,7 @@ class ContextPulseController:
                     self._key(center_id), {},
                 ).get("drive", 0.0)
                 probability = min(
-                    1.0, self.config.spontaneous_rate * (activity + 0.5 * drive),
+                    1.0, self.config.spontaneous_rate * (activity + 0.5 * drive) * self._factors(center_id)[0],
                 ) / (1.0 + inhibition)
                 if random.random() >= probability:
                     continue
@@ -1149,9 +1256,18 @@ class ContextPulseController:
                 "backgroundMainModelRoundLimit": self.config.max_background_main_model_rounds_per_turn,
                 "cursor": self._state["cursor"],
                 "observedCursor": self._state["observed_cursor"],
+                "adaptiveConnections": self.config.adaptive_connections,
+                "connectionLearning": graph["learning"],
+                "spectrum": {"enabled": self.config.spectrum_enabled,
+                             **(self._spectrum.snapshot() if self._spectrum else {})},
                 "contexts": [dict(item, inhibition=inhibition_by_center.get(item["center_id"], 0.0))
                              for item in self._state["contexts"].values()],
-                "connections": graph.get("connections", []),
+                "connections": [dict(edge,
+                    effectiveThreshold=self.config.propagation_threshold * (
+                        self._factors(edge["source_center_id"])[2] if edge["kind"] == "excitatory" else 1.0),
+                    aboveThreshold=edge["weight"] >= self.config.propagation_threshold * (
+                        self._factors(edge["source_center_id"])[2] if edge["kind"] == "excitatory" else 1.0),
+                ) for edge in graph.get("connections", [])],
                 "queue": {"queued": queue[0], "running": queue[1], "oldestQueuedAt": queue[2]},
                 "queueByContext": queue_by_context,
                 "recentActivations": activations,

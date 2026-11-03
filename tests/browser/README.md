@@ -20,6 +20,12 @@ temporary data directory, which is removed afterward. `PER_PULSE_PYTHON` can
 select another Python environment; it defaults to `.venv/bin/python`.
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an installed Chromium binary.
 `PLAYWRIGHT_CHROMIUM_ARGS` accepts an optional JSON array of launch arguments.
+
+Run `node tests/browser/work_learning_flow.mjs` with the same environment to
+check native Work connection learning, spectrum slots, source-only content
+delivery, bilingual Activity labels, operator removal, restart and explicit
+reconnection. Its histories come from accepted native turns over an explicitly
+synthetic HTTP model transport.
 `PER_PULSE_SCREENSHOTS` selects an optional output directory for desktop and
 mobile screenshots. Test data and images should stay outside the repository.
 
