@@ -636,18 +636,20 @@ class NativeTeam:
                     if 'contributions' in rec['arguments']:
                         from .shared_contributions import verify_for_delivery as verify_shared
                         verify_shared(r, rec)
-                    # Existing invitations extend membership; establishment has already
-                    # atomically retained it with the identity and its original source.
-                    if not any(m.engram_id == target_id for m in
-                               r.storage.list_center_memberships(center_id=front.center_id)):
-                        r.storage.add_center_membership(front.center_id, target_id)
-                    # Serialize consent validation with the actual native
-                    # outbox enqueue. Feedback revisions use this same World
-                    # lock, so withdrawal cannot slip between a successful
-                    # read and the *first* durable TUNNEL event. Replays of an
-                    # already-enqueued event returned above remain historical.
+                    # Validate consent before extending the receiving Work's
+                    # membership: revoked guidance must not leave a collaborator
+                    # behind in a Work whose consultation never dispatched.
+                    # The same World lock covers consent, membership and first
+                    # native TUNNEL enqueue, so a concurrent withdrawal cannot
+                    # interleave with this first durable dispatch. Historical
+                    # already-enqueued events returned above are unchanged.
                     with r.storage._lock:
                         self._verify_consultation_guidance(rec)
+                        # Establishment already retained its member. Existing
+                        # collaborators join this Work only on an admitted send.
+                        if not any(m.engram_id == target_id for m in
+                                   r.storage.list_center_memberships(center_id=front.center_id)):
+                            r.storage.add_center_membership(front.center_id, target_id)
                         record_id = r.delegate(consultation_content(rec),
                             to=target_id, caller_id=rec['subject'],
                             center_id=front.center_id, idempotency_key=rec['request_id'])
