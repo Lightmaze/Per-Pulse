@@ -85,6 +85,8 @@ BACKGROUND_TURN_TIMEOUT_SECONDS = 600.0
 # out of the request (never deleted) and stay searchable with the history
 # tools. Set P_PULSE_CONTEXT_TOKENS to match a smaller or larger model.
 DEFAULT_CONTEXT_TOKENS = 96_000
+# Effectively no World-wide token cap; see RuntimeServiceConfig below.
+UNCAPPED_WORLD_TOKENS_PER_HOUR = 10 ** 15
 
 
 def context_tokens_from_env() -> int:
@@ -167,6 +169,11 @@ class PageService:
             context_pulse=pulse or PulseSettings(),
             harness_turn_timeout_sec=None,
             harness_background_turn_timeout_sec=BACKGROUND_TURN_TIMEOUT_SECONDS,
+            # The World's own hourly token budget covers every turn, including a
+            # person's messages, and holds them silently once spent. Background
+            # work is bounded by PulseSettings instead (turns and tokens per
+            # hour), so the World budget must not cap foreground use.
+            hourly_token_budget=UNCAPPED_WORLD_TOKENS_PER_HOUR,
         )
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
