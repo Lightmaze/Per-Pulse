@@ -163,6 +163,19 @@ try {
   assert.equal(sourcedFile.originArtifactPageId, learnedId);
   assert.equal(sourcedFile.sha256, originalArtifact.sha256);
   assert.match(await page.locator('.composer textarea').inputValue(), /practice[.]txt/);
+  const homeUnsentDraft = await page.locator('.composer textarea').inputValue();
+  // Inspect the exact file and native origin before sending anything from Home.
+  await page.getByRole('button', { name: 'Inspect practice.txt before sending', exact: true }).click();
+  const attachedPreview = page.getByRole('dialog', { name: 'Source files', exact: true });
+  await attachedPreview.getByText('A playable first interaction.', { exact: true }).waitFor();
+  assert.match(await attachedPreview.innerText(), /Produced in Informed delivery/);
+  assert.match(await attachedPreview.innerText(), new RegExp(originalArtifact.id.slice(0, 12)));
+  assert.equal(await attachedPreview.getByRole('button', {
+    name: 'Open the Work that produced this file', exact: true,
+  }).isVisible(), true);
+  await attachedPreview.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  assert.equal(await page.locator('.composer textarea').inputValue(), homeUnsentDraft);
+  checks.push('unsent Home attachment opens exact file and producing action without sending or losing draft');
   await page.goBack();
   await page.getByRole('heading', { name: 'Informed delivery', exact: true }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), draft);
