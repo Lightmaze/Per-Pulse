@@ -523,6 +523,23 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert used[0]["guidance"][0]["sourceRecordId"] == records[1]
         assert used[0]["guidance"][0]["sourceMessageId"]
         assert used[0]["guidance"][0]["content"] == "Use the proven startup evidence."
+        # The finished ordinary consultation can now receive the same
+        # explicit, immutable operator outcome as an adaptive consultation.
+        # This is a rating of the actual result, not inferred model adoption.
+        assert used[0]["outcome"] is None
+        with pytest.raises(PageError) as foreign_guided_rating:
+            page_projection.rate_adaptive_choice(front.id, first_direct["record_id"], "adopted")
+        assert foreign_guided_rating.value.code == "collaboration_outcome_unavailable"
+        rated_direct = page_projection.rate_adaptive_choice(
+            other.id, first_direct["record_id"], "revised")
+        assert rated_direct["changed"] and rated_direct["outcome"] == "revised"
+        repeat_direct = page_projection.rate_adaptive_choice(
+            other.id, first_direct["record_id"], "revised")
+        assert not repeat_direct["changed"]
+        assert page_projection.adaptive_choices(other.id)["guidedConsultations"][0]["outcome"] == "revised"
+        with pytest.raises(PageError) as conflicting_guided_rating:
+            page_projection.rate_adaptive_choice(other.id, first_direct["record_id"], "discarded")
+        assert conflicting_guided_rating.value.code == "collaboration_outcome_conflict"
         assert page_projection.adaptive_choices("home")["guidedConsultations"] == []
         assert page_projection.adaptive_choices(fresh_other.id)["guidedConsultations"] == []
 
