@@ -64,11 +64,13 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--spontaneous", action="store_true",
                         help="Exercise one real contentless background input.")
+    parser.add_argument("--no-pulse", action="store_true",
+                        help="Reopen a persisted World without new autonomous activity.")
     args = parser.parse_args()
     os.environ["PER_PULSE_ATTENTION_BROWSER_KEY"] = "explicit-synthetic-browser-credential"
     uvicorn.run(
         create_app(args.data_dir, pulse=PulseSettings(
-            enabled=True, spontaneous_rate=1 if args.spontaneous else 0,
+            enabled=not args.no_pulse, spontaneous_rate=1 if args.spontaneous else 0,
             max_background_pulses_per_hour=1 if args.spontaneous else 2,
             check_interval_seconds=0.01, refractory_seconds=.05 if args.spontaneous else 0,
             max_background_provider_tokens_per_hour=128,
