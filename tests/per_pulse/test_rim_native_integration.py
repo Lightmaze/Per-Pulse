@@ -481,9 +481,20 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         # The ordinary (non-adaptive) native consult now actually delivers
         # operator-consented guidance to the chosen collaborator. The host
         # does not need the model to request a second special RIM tool.
+        # This Work has not invited the known collaborator yet. A revoked,
+        # undelivered consultation must not silently add that participant.
+        fresh_other = reopened.world.create_task_bundle_for_existing_engram(
+            "Independent Work receiving conditional guidance", owner
+        ).front
+        def fresh_has_collaborator():
+            return any(m.engram_id == state["good"] for m in
+                       reopened.storage.list_center_memberships(
+                           center_id=fresh_other.center_id))
+        assert not fresh_has_collaborator()
+
         def direct_requests():
             return [row for row in reopened.storage.native_team_requests(limit=64)
-                    if row["work_id"] == other.id
+                    if row["work_id"] in (other.id, fresh_other.id)
                     and row["arguments"]["op"] == "consult"]
 
         reopened.send_task_front_message(other.id, DIRECT)
@@ -500,14 +511,17 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert first_direct["operator_guidance"][0]["source"]["work_id"] == front.id
         assert first_direct["operator_guidance"][0]["scope"] == "collaborator"
 
-        # Stage another native Work turn, but hold the outbox before first
-        # dispatch. A withdrawal now must prevent leaking the stale note.
-        reopened.send_task_front_message(other.id, DIRECT)
+        # Stage an invitation to the untouched Work, but hold the outbox
+        # before first dispatch. Withdrawal must block both the note and an
+        # implicit membership change in that receiving Work.
+        reopened.send_task_front_message(fresh_other.id, DIRECT)
         _tick(reopened, lambda: len(direct_requests()) == 2
               and any(item["status"] == "prepared" for item in direct_requests())
               and not reopened.harness._active, drain=False)
         staged = next(item for item in direct_requests() if item["status"] == "prepared")
+        assert staged["work_id"] == fresh_other.id
         assert staged["operator_guidance"][0]["source"]["record_id"] == records[1]
+        assert not fresh_has_collaborator()
 
         # Withdrawal changes only the next computation, not an already
         # delivered and source-audited historical selection.
@@ -534,12 +548,15 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert replayed["record_id"] == delivered_with_note["id"]
         assert next(item for item in direct_requests()
                     if item["request_id"] == staged["request_id"])["status"] == "blocked"
+        assert not fresh_has_collaborator(), (
+            "revoked consultation must not silently admit a collaborator")
         assert len([row for row in reopened.storage.list_delegations(caller_id=owner)
                     if row["task"].startswith(INSTRUCTION)
                     and "Current operator guidance" in row["task"]]) >= 1
-        # A *new* normal consultation after withdrawal still executes, but
-        # with its plain instruction; the old sourced note no longer travels.
-        reopened.send_task_front_message(other.id, DIRECT)
+        # A *new* normal consultation into the same previously untouched
+        # Work still executes, now without guidance, and only then admits the
+        # invited collaborator through its original native TUNNEL.
+        reopened.send_task_front_message(fresh_other.id, DIRECT)
         _tick(reopened, lambda: len(direct_requests()) == 3
               and any(item["status"] == "delivered"
                       and item["request_id"] != first_direct["request_id"]
@@ -550,6 +567,7 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
                      and item["request_id"] != first_direct["request_id"])
         assert "operator_guidance" not in plain
         assert reopened.storage.get_delegation(plain["record_id"])["task"] == INSTRUCTION
+        assert fresh_has_collaborator()
         assert reopened.storage.get_delegation(first_direct["record_id"])["task"] == delivered_with_note["task"]
         assert len(reopened.storage.list_engrams()) == 3
     finally:

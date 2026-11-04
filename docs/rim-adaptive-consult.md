@@ -52,9 +52,11 @@ Works' transcripts, change the requested collaborator, infer a new rating,
 invoke an extra model, or grant any physical action.
 
 A note changed or withdrawn **before its consultation is dispatched** blocks
-that pending request rather than delivering stale guidance. Already delivered
-questions and their original source do not change retroactively. With no
-eligible note, the ordinary consult keeps its original instruction unchanged.
+that pending request rather than delivering stale guidance or silently joining
+the consulted collaborator to a receiving Work. An untouched Work retains its
+membership until a valid consultation is actually admitted. Already delivered
+questions, their original memberships and sources do not change retroactively.
+With no eligible note, the ordinary consult keeps its original instruction unchanged.
 With the RIM flag off, all consult calls remain as before. The model must still
 choose to consult someone; this narrows the gap between a saved correction and
 the next *actual* collaborator task, but does not prove spontaneous model
