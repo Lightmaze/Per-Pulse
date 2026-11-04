@@ -187,6 +187,7 @@ jobs:
       - name: Verify materials, native files and draft continuity in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_MATERIAL_SCREENSHOTS="$RUNNER_TEMP/per-pulse-material-screenshots" node tests/browser/materials_flow.mjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_PDF_SCREENSHOTS="$RUNNER_TEMP/per-pulse-material-screenshots" node tests/browser/pdf_flow.mjs
       - name: Verify bounded table reading and source fidelity in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TABLE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-table-screenshots" node tests/browser/table_flow.mjs

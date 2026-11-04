@@ -49,7 +49,7 @@ try {
   await page.getByRole('button', { name: 'Materials', exact: true }).click();
   await wait(async () => !(await page.getByRole('button', { name: 'Refresh', exact: true }).isDisabled()), 'listing');
   const upload = async (name, text) => {
-    await page.getByLabel('Choose a text file', { exact: true }).setInputFiles({ name, mimeType: 'text/plain', buffer: Buffer.from(text) });
+    await page.getByLabel('Choose a file', { exact: true }).setInputFiles({ name, mimeType: 'text/plain', buffer: Buffer.from(text) });
     await page.getByRole('button', { name: 'Upload file', exact: true }).click();
     await page.getByRole('button', { name: 'Add to draft', exact: true }).waitFor();
   };
