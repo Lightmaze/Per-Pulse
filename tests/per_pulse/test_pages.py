@@ -393,13 +393,13 @@ def test_collaboration_choice_read_is_original_work_scoped_and_offline(tmp_path)
         first = new_page(client, title="Original decision")["page"]["id"]
         second = new_page(client, title="Unrelated Work")["page"]["id"]
         assert client.get("/api/pages/home/team/choices").json() == {
-            "workId": "home", "choices": [], "historyMayBeIncomplete": False,
+            "workId": "home", "choices": [], "guidedConsultations": [], "historyMayBeIncomplete": False,
         }
         for work in (first, second):
             response = client.get(f"/api/pages/{work}/team/choices")
             assert response.status_code == 200, response.text
             assert response.json() == {
-                "workId": work, "choices": [], "historyMayBeIncomplete": False,
+                "workId": work, "choices": [], "guidedConsultations": [], "historyMayBeIncomplete": False,
             }
         assert client.get("/api/pages/nonexistent-work/team/choices").status_code == 404
 
@@ -419,6 +419,19 @@ def test_collaboration_projection_rejects_cross_work_source_links(tmp_path, monk
         native = client.app.state.pages.runtime._native_team
         monkeypatch.setattr(native, "adaptive_choices_for_work", lambda subject, work_id: {
             "workId": work_id, "historyMayBeIncomplete": False,
+            "guidedConsultations": [{
+                "recordId": "delivered", "workId": work_id,
+                "selectedName": "Known collaborator",
+                "resultMessageId": foreign_message,
+                "guidance": [
+                    {"sourceWorkId": other, "sourceMessageId": own_message,
+                     "sourceRecordId": "foreign", "revision": 1,
+                     "content": "A historical note."},
+                    {"sourceWorkId": one, "sourceMessageId": own_message,
+                     "sourceRecordId": "same", "revision": 1,
+                     "content": "A valid original Work note."},
+                ],
+            }],
             "choices": [{
                 "recordId": "explicit-injected-projection", "workId": work_id,
                 "resultMessageId": foreign_message,
@@ -434,6 +447,10 @@ def test_collaboration_projection_rejects_cross_work_source_links(tmp_path, monk
         assert choice["resultMessageId"] is None
         assert choice["evidence"][0]["sourceMessageId"] is None
         assert choice["evidence"][1]["sourceMessageId"] == own_message
+        guided = response.json()["guidedConsultations"][0]
+        assert guided["resultMessageId"] is None
+        assert guided["guidance"][0]["sourceMessageId"] is None
+        assert guided["guidance"][1]["sourceMessageId"] == own_message
         assert "PRIVATE_OTHER_WORK_SOURCE" not in response.text
 
 
