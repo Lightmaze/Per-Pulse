@@ -1,6 +1,6 @@
 // Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 import type { DraftReference, Message } from './types';
-import { messageBody } from './messageBody';
+import { messageBody } from './messageBody.ts';
 
 export type RetryInput = { content: string; references: DraftReference[]; materials: string[] };
 
