@@ -72,6 +72,14 @@ class NewReference(ReferenceInput):
 class ExistingMaterial(Input):
     path: Annotated[str, StringConstraints(min_length=1, max_length=2048)]
     sha256: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
+    sourcePageId: Identifier | None = None
+    sourceArtifactId: Identifier | None = None
+
+    @model_validator(mode="after")
+    def paired_artifact_source(self):
+        if (self.sourcePageId is None) != (self.sourceArtifactId is None):
+            raise ValueError("Provide both the producing page and its original file action.")
+        return self
 
 
 class TransferToWork(Input):
@@ -488,6 +496,7 @@ def create_app(
             page_id, body.path, body.sha256,
             world_id=request.headers.get("x-per-pulse-world"),
             service_instance_id=request.headers.get("x-per-pulse-service-instance"),
+            source_page_id=body.sourcePageId, source_artifact_id=body.sourceArtifactId,
         ))
 
     @app.get("/api/pages/{page_id}/messages")
