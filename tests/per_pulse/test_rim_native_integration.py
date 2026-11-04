@@ -523,7 +523,15 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert after_withdrawal["evidence"] == []
         assert after_withdrawal["probabilities"] == after_withdrawal["prior"]
         assert page_projection.adaptive_choices(other.id)["choices"][0]["evidence"][0]["sourceWorkId"] == front.id
+        # Simulate a crash after first TUNNEL enqueue but before its local
+        # delivery receipt. Current withdrawal must NOT invalidate an
+        # already-published historical event on replay.
+        reopened._native_team._finish(first_direct, "prepared")
         reopened._native_team.drain()
+        replayed = next(item for item in direct_requests()
+                        if item["request_id"] == first_direct["request_id"])
+        assert replayed["status"] == "delivered"
+        assert replayed["record_id"] == delivered_with_note["id"]
         assert next(item for item in direct_requests()
                     if item["request_id"] == staged["request_id"])["status"] == "blocked"
         assert len([row for row in reopened.storage.list_delegations(caller_id=owner)
