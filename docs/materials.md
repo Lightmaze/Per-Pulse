@@ -31,3 +31,29 @@ your choices survive switching between Read and Source during that preview.
 A partial preview is labelled and omits an unfinished trailing
 row; irregular quotes, unequal rows or wider files fall back to source text.
 The **Add to draft** action stays visible while reading a long material.
+
+## Carry a file result from another Work
+
+Open a finished file result in its producing Work and choose **Add the full
+file to another page's draft** or **Add full file to Home draft**. This takes
+only the verified current UTF-8 file version and a source-page reference;
+it does not send the draft, copy private conversations or authorize an action.
+The resulting material now also keeps the **original successful native file
+action ID and producing Work**. Open its source chip to see the generating Work
+and return to that page. A matching file path, digest or copied text alone
+cannot assert which Work created an output. An ordinary file-browser selection
+has no generated-action origin unless its original action is explicitly verified.
+
+The backend checks the original settled file-write receipt, its ownership,
+exact path, digest and undo state alongside the existing World/file publication
+fence. Forged source IDs, a missing half of the source pair, a later file
+version or an undone output cannot be imported as a verified generated result.
+The existing file reference remains scoped to the receiving page and survives
+restart; source identity does not grant more file or execution permissions.
+Existing uploaded materials still use their separate original-upload origin.
+
+The native regression runs real World/Kernel/SQLite, file approvals and a
+successful workspace write with explicitly synthetic model transport. The
+Chromium journey also carries a genuine action receipt into an unsent Home
+draft and restores the producing Work's composer. These checks do not measure
+real-provider improvement or independent output quality.
