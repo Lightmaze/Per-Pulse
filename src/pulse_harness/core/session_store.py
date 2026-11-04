@@ -4836,22 +4836,50 @@ class HarnessStore:
                     content_digest=content_digest,
                 )
 
-    def transcript_rows(self, scope: HarnessScope) -> tuple[dict[str, Any], ...]:
+    def transcript_rows(
+        self, scope: HarnessScope, *, after_transcript_seq: int = 0,
+    ) -> tuple[dict[str, Any], ...]:
+        """Transcript rows in order; ``after_transcript_seq`` reads only newer ones.
+
+        Rows are append-only, so a caller that already holds rows up to a
+        sequence number can read just the rest.
+        """
+        if type(after_transcript_seq) is not int or after_transcript_seq < 0:
+            raise ValueError("after_transcript_seq must be a nonnegative integer")
         with self._lock:
             self._require_open()
             session = self._assert_session_scope(scope)
             self._validate_database_locked()
-            rows = self._db.execute(
-                "SELECT * FROM transcript_messages WHERE session_id = ? ORDER BY transcript_seq ASC",
-                (scope.session_id,),
-            ).fetchall()
+            query = "SELECT * FROM transcript_messages WHERE session_id = ? AND transcript_seq > ?"
+            parameters: list[object] = [scope.session_id, after_transcript_seq]
+            if scope.turn_id:
+                query += " AND turn_id = ?"
+                parameters.append(scope.turn_id)
+            rows = self._db.execute(query + " ORDER BY transcript_seq ASC", tuple(parameters)).fetchall()
             result = []
             for row in rows:
-                if scope.turn_id and row["turn_id"] != scope.turn_id:
-                    continue
                 self._assert_turn_row_scope(row, scope)
                 result.append(self._transcript_from_row(row))
             return tuple(result)
+
+    def transcript_snapshot(
+        self, scope: HarnessScope, *, after_transcript_seq: int = 0,
+    ) -> tuple[tuple[int, int, int] | None, tuple[dict[str, Any], ...]]:
+        """Transcript rows after a sequence number, with a version read in the same lock.
+
+        The version changes when another connection commits or the schema
+        changes, so a caller may keep append-only rows it already read while
+        the version stays the same. It is None inside a write transaction:
+        rows that could still be rolled back must not be kept.
+        """
+        with self._lock:
+            self._require_open()
+            version = None if self._db.in_transaction else (
+                id(self._db),
+                int(self._db.execute("PRAGMA main.data_version").fetchone()[0]),
+                int(self._db.execute("PRAGMA main.schema_version").fetchone()[0]),
+            )
+            return version, self.transcript_rows(scope, after_transcript_seq=after_transcript_seq)
 
     def search_transcript(
         self, scope: HarnessScope, query: str, *, after_seq: int = 0,
