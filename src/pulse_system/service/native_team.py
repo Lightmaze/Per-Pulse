@@ -201,6 +201,34 @@ class NativeTeam:
         from .collaborator_feedback import CollaboratorFeedback
         self.feedback = CollaboratorFeedback(runtime)
 
+    def _consultation_guidance(self, owner: str, work_id: str, expert_id: str) -> list[dict]:
+        """Retain only bounded, currently consented operator notes for this author.
+
+        A Work-only note stays in its Work; a collaborator-scoped note can
+        travel to a different Work of the same subject. Original transcripts
+        and private revision history never enter the consultation.
+        """
+        current = self.feedback.applicable(owner, work_id, expert_id)["feedback"]
+        return [
+            {
+                "source": item["source"], "revision": item["revision"],
+                "scope": item["scope"], "content": item["content"],
+            }
+            for item in current if item["content"].strip()
+        ][:4]
+
+    def _verify_consultation_guidance(self, record: dict) -> None:
+        """A revoked or edited note cannot be dispatched from a pending turn."""
+        saved = record.get("operator_guidance", [])
+        if not saved:
+            return
+        target = _target(record)
+        current = self._consultation_guidance(
+            record["subject"], record["work_id"], target,
+        )
+        if any(item not in current for item in saved):
+            raise ScopeConflict("operator guidance changed before consultation delivery")
+
     def _front(self, scope: HarnessScope, *, writable=False):
         if not scope.context_id.startswith('work:'):
             raise ScopeConflict('consult requires an owned Work, not Home')
@@ -520,6 +548,15 @@ class NativeTeam:
                 if a['op'] == 'consult_adaptive':
                     from .execution_preference import choose
                     rec['preference'] = choose(self, scope, front, a)
+                # A normal, explicitly selected consultation can carry current
+                # operator-consented guidance without a special model tool op.
+                # This remains opt-in to RIM and never changes the target.
+                if a['op'] == 'consult' and r.harness._rim_policy:
+                    guidance = self._consultation_guidance(
+                        scope.engram_id, front.id, a['expert_id'],
+                    )
+                    if guidance:
+                        rec['operator_guidance'] = guidance
                 if 'prior_record_id' in a:
                     from .prior_contribution import capture
                     rec['prior_contribution'] = capture(r, scope.engram_id,
@@ -569,6 +606,7 @@ class NativeTeam:
                             or action.tool_name != NAME or dict(action.arguments) != rec['arguments']):
                         self._finish(rec, 'cancelled', error='native_action_unsuccessful'); continue
                     target_id = _target(rec)
+                    self._verify_consultation_guidance(rec)
                     # Existing tunnel identity repairs enqueue-before-outbox-receipt crashes.
                     identity = r.delegation_tunnel.identity_for(r.world_id, rec['subject'], rec['center_id'], rec['request_id'])
                     prior = r.causal_ledger.get_event(identity.request_event_id)
