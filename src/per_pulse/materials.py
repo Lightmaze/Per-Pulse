@@ -18,6 +18,7 @@ from pulse_harness.adapters.resources import workspace_write_resource
 from pulse_harness.core.errors import HarnessError
 from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES, WorkspaceFiles
 from .artifacts import ArtifactError, clip_text
+from .execution import ExecutionError
 
 
 MAX_MATERIALS = 1024
@@ -150,7 +151,7 @@ class PageMaterials:
                     if source_page_id is not None:
                         try:
                             source, _ = pages.artifacts._resolve_action(source_page_id, source_artifact_id)
-                        except (ArtifactError, Exception) as error:
+                        except (ArtifactError, ExecutionError) as error:
                             # Never disclose foreign/unknown action records in
                             # an error response or persist a guessed source.
                             raise MaterialError("material_artifact_unavailable",
