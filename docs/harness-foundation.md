@@ -73,6 +73,14 @@ flowchart TD
 
 `PageExecution.snapshot` only observes existing records. It does not create a runner or wake a model. A page maps through its native center to `work:<center>`; Home uses the existing Home scope. Exact action/turn IDs are validated inside that scope. Per-action and per-turn control locks leave unrelated controls independent. A slow model continuation after approval cannot hold the Stop button hostage.
 
+While a turn works, `GET /api/pages/{pageId}/reply/stream` sends the reply the
+model is writing as server-sent events: the text so far, then the text added
+since. It reads the runner's in-memory view of the model round in progress
+(`TurnRunner.live_reply`); the round's durable text events are still recorded
+when the round ends, as before. The page shows this text until the saved reply
+replaces it. A reply that a response review sends back is replaced by the next
+round's text.
+
 `PageArtifacts` projects confirmed successful `mutate_file` receipts. A click verifies a regular UTF-8 file within the original workspace, with no-follow/identity checks, a 1 MiB file bound and 64 KiB preview bound. The recorded digest must match. A changed file produces a changed-state explanation, never the replacement content presented as the original version. The file is shown as it is. The list performs no file-content I/O. There is no second artifact database or implicit immutable blob store.
 
 `GET /api/pages/{pageId}/artifacts/{actionId}/download` resolves the same native

@@ -9,6 +9,7 @@ import { ReplayOrigin } from './ReplayOrigin';
 import { messageBody } from '../messageBody';
 import { initialWorkHandoffExcerpt } from '../workHandoffExcerpt';
 import { readTransferPresentation } from '../transferPresentation';
+import { useLiveReply } from '../liveReply';
 
 export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
   view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
@@ -18,6 +19,7 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
   const { t, pageTitle } = useLanguage();
   const pageMap = new Map(pages.map(page => [page.id, page]));
   const pageReferences = view.references.filter(reference => !reference.sourceMessageId);
+  const liveReply = useLiveReply(view.page.id, view.provider.configured && view.page.status === 'working' && !stale);
   return <div className="conversation" aria-label={t("conversation.label")}>
     {view.hasMore ? <p className="conversation-note">{view.earlierSourceMessageId ? t('conversation.earlierSource') : t('conversation.recentMessages')}</p> : null}
     {view.messages.length ? <div className="conversation-history">
@@ -77,6 +79,10 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
         </div>
       </div>
     </article>; })}
+    {liveReply?.text ? <article className="message message-live" aria-label={t('conversation.replyInProgress')} aria-busy="true">
+      <div className="message-label">Per Pulse</div>
+      <MessageContent content={liveReply.text} referenceKey="[]" pageId={view.page.id} messageId={`live-${liveReply.turnId}`} navigate={navigate} />
+    </article> : null}
     {pageReferences.length ? <div className="page-references">{pageReferences.map(reference => <SessionLink key={reference.id} pageId={reference.targetPageId} label={reference.label} referenceId={reference.id} origin={{ pageId: view.page.id, referenceId: reference.id }} navigate={navigate} />)}</div> : null}
     {!view.messages.length && !pageReferences.length ? <p className="empty-conversation">{view.page.kind === 'home' ? t('conversation.emptyHome') : t('conversation.emptyPage')}</p> : null}
   </div>;

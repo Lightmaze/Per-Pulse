@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 import threading
-from typing import Any
+from typing import Any, Callable
 
 from pulse_harness.core import ApprovalDecision, HarnessScope, ModelRoundStatus, TurnStatus
 from pulse_harness.core.contracts import ActionRecord, ActionStatus, ApprovalStatus
@@ -169,6 +169,23 @@ class PageExecution:
         if len(encoded.encode("utf-8")) > _MAX_ARGUMENT_BYTES:
             clean = {"preview": encoded[:8192], "_truncated": True}
         return clean, stored_redacted, truncated
+
+    def reply_reader(self, page_id: str) -> Callable[[], dict | None]:
+        """A reader for the reply the model is writing now on this page.
+
+        The page's scope is resolved once; each read is memory-only and never
+        creates a session, wakes a runner or calls the model.
+        """
+        scope = self._scope(page_id)
+        kernel = self._kernel
+
+        def read() -> dict | None:
+            reply = kernel.live_reply(scope)
+            if reply is None:
+                return None
+            return {"turnId": reply.turn_id, "roundId": reply.round_id, "text": reply.text}
+
+        return read
 
     def _can_supersede(self, turn) -> bool:
         if turn.status is not TurnStatus.BLOCKED:

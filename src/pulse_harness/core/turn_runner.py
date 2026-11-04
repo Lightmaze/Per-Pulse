@@ -7,7 +7,7 @@ typed model/tool ports, and opaque Harness scope.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from threading import Event, RLock
 from typing import Any, Mapping
@@ -101,6 +101,19 @@ class _RunContext:
     active_round_id: str | None = None
     active_action_id: str | None = None
     active_token: CancellationToken | None = None
+    # Text of the model round in progress, as it arrives. It is a live view
+    # only: the round's durable text events are still written when it ends.
+    live_round_id: str | None = None
+    live_parts: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class LiveReply:
+    """Reply text the model is writing now in an active turn."""
+
+    turn_id: str
+    round_id: str
+    text: str
 
 
 def _action_request_id(scope: HarnessScope, call: ToolCall) -> str:
@@ -397,6 +410,22 @@ class TurnRunner:
                 continuation_of=tuple(item.call for item in persisted),
                 tool_results=tuple(results),
             )
+
+    def live_reply(self, scope: HarnessScope) -> LiveReply | None:
+        """The text the model is writing now in this session's active turn.
+
+        A read-only view of the round in progress, for showing a reply as it
+        forms. It is not durable and is gone once the run ends; the round's
+        text events are recorded as before.
+        """
+
+        with self._lock:
+            for (session_id, turn_id), context in self._active.items():
+                if session_id == scope.session_id and context.live_round_id is not None:
+                    text = "".join(context.live_parts)
+                    context.live_parts = [text] if text else []
+                    return LiveReply(turn_id, context.live_round_id, text)
+        return None
 
     def abort(self, scope: HarnessScope, *, reason: str = "abort") -> TurnOutcome:
         """Abort a turn; a running effect is conservatively marked UNCERTAIN."""
@@ -828,6 +857,8 @@ class TurnRunner:
                 round_started = True
                 with self._lock:
                     context.active_round_id = round_id
+                    context.live_round_id = round_id
+                    context.live_parts = []
                 stream = self.model_adapter.stream(  # type: ignore[union-attr]
                     request, cancel_event=context.model_cancel
                 )
@@ -852,6 +883,9 @@ class TurnRunner:
                             "ModelAdapter exceeded the aggregate stream byte bound",
                             code="model_stream_too_large",
                         )
+                    if delta.kind is ModelDeltaKind.TEXT and delta.text:
+                        with self._lock:
+                            context.live_parts.append(delta.text)
                     # Providers usually stream one token per chunk. Join
                     # adjacent text (or reasoning) chunks so the delta bound
                     # limits stored events, not the length of a reply.

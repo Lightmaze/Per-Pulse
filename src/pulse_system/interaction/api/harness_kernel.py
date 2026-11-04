@@ -35,6 +35,7 @@ from pulse_harness.core import (
     HarnessEvent,
     HarnessScope,
     HarnessStore,
+    LiveReply,
     ModelRoundRecord,
     ModelRoundStatus,
     ProviderEvidence,
@@ -403,6 +404,18 @@ class HarnessKernelService:
             runtime = KernelSessionRuntime(session_scope, runner, provider)
             self._runtimes[session_scope.session_id] = runtime
             return runtime
+
+    def live_reply(self, scope: HarnessScope) -> LiveReply | None:
+        """Reply text being written now in the session's active turn, if any.
+
+        Reads memory only: no session, runner or model call is created.
+        """
+
+        with self._runtime_lock:
+            runtime = self._runtimes.get(scope.session_id)
+        if runtime is None or runtime.scope != scope.session_scope():
+            return None
+        return runtime.runner.live_reply(scope)
 
     def restore_checkpoint(self, scope: HarnessScope, checkpoint_id: str) -> Mapping[str, Any]:
         """Undo one applied file change from its sealed checkpoint.

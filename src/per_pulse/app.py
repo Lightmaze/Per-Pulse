@@ -5,6 +5,7 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 import re
@@ -14,7 +15,7 @@ from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from starlette.exceptions import HTTPException
@@ -180,6 +181,42 @@ class ExperienceFeedback(Input):
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
+
+
+_REPLY_POLL_SECONDS = 0.1
+_REPLY_IDLE_SECONDS = 10.0
+_REPLY_STREAM_SECONDS = 300.0
+
+
+async def _reply_events(read, request: Request):
+    """Yield live reply text as server-sent events (see ``reply_stream``)."""
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    shown: tuple[str, str] | None = None  # (turn id, round id) last sent
+    sent = ""
+    seen = False
+    yield "retry: 1500\n\n"
+    while loop.time() - started < _REPLY_STREAM_SECONDS:
+        if await request.is_disconnected():
+            return
+        reply = await run_in_threadpool(read)
+        if reply is None:
+            if shown is not None:
+                yield "data: " + json.dumps({"turnId": None}) + "\n\n"
+                shown, sent = None, ""
+            if seen or loop.time() - started > _REPLY_IDLE_SECONDS:
+                break
+        else:
+            seen = True
+            key, text = (reply["turnId"], reply["roundId"]), reply["text"]
+            if key != shown or not text.startswith(sent):
+                yield "data: " + json.dumps({**reply}, ensure_ascii=False) + "\n\n"
+            elif len(text) > len(sent):
+                yield "data: " + json.dumps({"turnId": key[0], "roundId": key[1], "append": text[len(sent):]},
+                                            ensure_ascii=False) + "\n\n"
+            shown, sent = key, text
+        await asyncio.sleep(_REPLY_POLL_SECONDS)
+    yield "event: end\ndata: {}\n\n"
 
 
 def _file_download(content: bytes, name: str, digest: str, *, headers: dict | None = None) -> Response:
@@ -532,6 +569,21 @@ def create_app(
     @app.get("/api/pages/{page_id}/execution")
     def execution(page_id: str, request: Request):
         return pages(request).execution.snapshot(page_id)
+
+    @app.get("/api/pages/{page_id}/reply/stream")
+    async def reply_stream(page_id: str, request: Request):
+        """Server-sent events with the reply text as the model writes it.
+
+        Each message is JSON: ``text`` (the whole reply so far) when a model
+        round starts or a client connects, ``append`` for text added since,
+        and ``turnId: null`` once no reply is being written. The stream ends
+        with an ``end`` event when the reply it showed is finished, or after a
+        short wait in which none started; the client reconnects while the page
+        is still working.
+        """
+        read = await run_in_threadpool(pages(request).execution.reply_reader, page_id)
+        return StreamingResponse(_reply_events(read, request), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.get("/api/pages/{page_id}/artifacts")
     def artifacts(page_id: str, request: Request):

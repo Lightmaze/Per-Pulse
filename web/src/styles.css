@@ -83,6 +83,9 @@ button, a, input, textarea { outline-offset: 4px; }
 .message-content p:last-child { margin-bottom: 0; }
 .message-content > :first-child { margin-top: 0; }
 .message-content > :last-child { margin-bottom: 0; }
+.message-live .message-content > p:last-child::after, .message-live .message-content > :is(ul, ol):last-child > li:last-child::after { content: ""; display: inline-block; width: .5em; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; background: currentColor; opacity: .35; animation: live-caret 1s steps(2, start) infinite; }
+@keyframes live-caret { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .message-live .message-content > p:last-child::after, .message-live .message-content > :is(ul, ol):last-child > li:last-child::after { animation: none; } }
 .message-content h2, .message-content h3, .message-content h4, .message-content h5, .message-content h6 { margin: 24px 0 12px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
 .message-content h2 { font-size: 23px; }
 .message-content h3 { font-size: 20px; }
