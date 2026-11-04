@@ -617,10 +617,6 @@ class NativeTeam:
                                 or prior.content != consultation_content(rec)):
                             raise ScopeConflict('existing consultation differs')
                         self._finish(rec, 'delivered', record_id=identity.record_id); continue
-                    # A withdrawal before first enqueue must stop publication.
-                    # Once the original event already exists, preserve that
-                    # immutable historical delivery even if guidance changed.
-                    self._verify_consultation_guidance(rec)
                     front = self._front(scope, writable=True)
                     if front.center_id != rec['center_id'] or front.id != rec['work_id']:
                         raise ScopeConflict('source Work changed')
@@ -645,9 +641,16 @@ class NativeTeam:
                     if not any(m.engram_id == target_id for m in
                                r.storage.list_center_memberships(center_id=front.center_id)):
                         r.storage.add_center_membership(front.center_id, target_id)
-                    record_id = r.delegate(consultation_content(rec),
-                        to=target_id, caller_id=rec['subject'],
-                        center_id=front.center_id, idempotency_key=rec['request_id'])
+                    # Serialize consent validation with the actual native
+                    # outbox enqueue. Feedback revisions use this same World
+                    # lock, so withdrawal cannot slip between a successful
+                    # read and the *first* durable TUNNEL event. Replays of an
+                    # already-enqueued event returned above remain historical.
+                    with r.storage._lock:
+                        self._verify_consultation_guidance(rec)
+                        record_id = r.delegate(consultation_content(rec),
+                            to=target_id, caller_id=rec['subject'],
+                            center_id=front.center_id, idempotency_key=rec['request_id'])
                     self._finish(rec, 'delivered', record_id=record_id)
                 except (ScopeConflict, ValueError, ServiceError) as exc:
                     self._finish(rec, 'blocked', error=getattr(exc, 'code', type(exc).__name__))
