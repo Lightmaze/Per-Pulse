@@ -3,10 +3,11 @@ import type { Draft, ProviderState } from '../types';
 import { Icon } from './Icon';
 import { useLanguage } from '../i18n';
 
-export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, inputRef, pageTitle, pageKind = 'home', provider, onSettings }: {
+export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, onInspectMaterial, inputRef, pageTitle, pageKind = 'home', provider, onSettings }: {
   draft: Draft; changeDraft: (draft: Draft) => void; send: () => void; busy: boolean; onLink: () => void; inputRef: RefObject<HTMLTextAreaElement | null>;
   pageTitle?: string; pageKind?: 'home' | 'work'; provider?: ProviderState; onSettings?: () => void;
   onMaterials?: () => void;
+  onInspectMaterial?: (materialId: string) => void;
 }) {
   const { t, pageTitle: localizedPageTitle } = useLanguage();
   const composing = useRef(false);
@@ -20,7 +21,7 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
   }, [draft.text, inputRef]);
   return <div className="composer-wrap">
     <form className="composer" onSubmit={event => { event.preventDefault(); if (canSend && !busy) send(); }}>
-      {draft.materials?.length ? <ul className="composer-materials" aria-label={t('materials.forMessage')}>{draft.materials.map(material => <li key={material.id}><span>{material.name}</span><button type="button" aria-label={t('materials.remove', { name: material.name })} onClick={() => changeDraft({ ...draft, materials: draft.materials?.filter(item => item.id !== material.id) })}><Icon name="close" size={14} /></button></li>)}</ul> : null}
+      {draft.materials?.length ? <ul className="composer-materials" aria-label={t('materials.forMessage')}>{draft.materials.map(material => <li key={material.id}>{onInspectMaterial ? <button type="button" className="composer-material-inspect" aria-label={t('materials.inspectDraft', { name: material.name })} onClick={() => onInspectMaterial(material.id)}>{material.name}</button> : <span>{material.name}</span>}<button type="button" className="composer-material-remove" aria-label={t('materials.remove', { name: material.name })} onClick={() => changeDraft({ ...draft, materials: draft.materials?.filter(item => item.id !== material.id) })}><Icon name="close" size={14} /></button></li>)}</ul> : null}
       <textarea ref={inputRef} value={draft.text} onChange={event => changeDraft({ ...draft, text: event.target.value })} placeholder={pageKind === 'work' ? t('composer.continueIn', { destination }) : t('composer.placeholder')} aria-label={t('composer.messageTo', { destination })} aria-describedby={disconnected ? connectionId : undefined} rows={1} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => {
         if (event.key === 'Enter' && !event.shiftKey && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); if (canSend && !busy) send(); }
       }} />
