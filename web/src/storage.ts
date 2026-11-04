@@ -15,6 +15,21 @@ export function readDraft(workspaceId: string, pageId: string): Draft {
   return { ...EMPTY_DRAFT, references: [] };
 }
 
+/** When attaching work into a different page, browser storage is the latest
+ * copy of that page's unsent draft, including edits or deletion in another tab.
+ * Retain the in-memory copy only when storage cannot be read (private mode,
+ * disabled storage, etc.). Do not mistake an intentionally cleared draft for
+ * unavailable storage.
+ */
+export function readCurrentDraft(workspaceId: string, pageId: string, inMemory: Draft): Draft {
+  try {
+    localStorage.getItem(storageKey(workspaceId, 'draft', pageId));
+    return readDraft(workspaceId, pageId);
+  } catch {
+    return inMemory;
+  }
+}
+
 export function saveDraft(workspaceId: string, pageId: string, draft: Draft) {
   try {
     if (!draft.text && !draft.references.length && !draft.materials?.length) localStorage.removeItem(storageKey(workspaceId, 'draft', pageId));

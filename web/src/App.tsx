@@ -6,7 +6,7 @@ import { parseTickCommand } from './tickCommand';
 import { useLanguage } from './i18n';
 import { useWorkspace } from './useWorkspace';
 import { getPageActivity } from './status';
-import { EMPTY_DRAFT, readDraft, readPosition, saveDraft, savePosition } from './storage';
+import { EMPTY_DRAFT, readCurrentDraft, readDraft, readPosition, saveDraft, savePosition } from './storage';
 import type { Artifact, Draft, Message, NavigationOrigin, PageSummary } from './types';
 import { Icon } from './components/Icon';
 import { Sidebar } from './components/Sidebar';
@@ -221,7 +221,7 @@ export default function App() {
         return;
       }
       const targetKey = `${workspaceId}/${page.id}`;
-      const before = draftsRef.current[targetKey] ?? readDraft(workspaceId, page.id);
+      const before = readCurrentDraft(workspaceId, page.id, draftsRef.current[targetKey] ?? EMPTY_DRAFT);
       if ((before.materials?.length ?? 0) >= 5) {
         setModalError(t('materials.selectionFull'));
         return;
@@ -241,7 +241,7 @@ export default function App() {
         }
         // A different tab or route may have edited the destination draft
         // during the native check. Never overwrite its later text/attachments.
-        const current = draftsRef.current[targetKey] ?? readDraft(workspaceId, page.id);
+        const current = readCurrentDraft(workspaceId, page.id, draftsRef.current[targetKey] ?? EMPTY_DRAFT);
         if ((current.materials?.length ?? 0) >= 5
             && !current.materials?.some(item => item.id === response.material.id)) {
           throw new Error(t('materials.selectionFull'));
@@ -322,7 +322,7 @@ export default function App() {
     const sourceSerial = route.serial;
     const sourceTitle = view.page.title;
     const homeKey = `${workspaceId}/home`;
-    const before = draftsRef.current[homeKey] ?? readDraft(workspaceId, 'home');
+    const before = readCurrentDraft(workspaceId, 'home', draftsRef.current[homeKey] ?? EMPTY_DRAFT);
     if ((before.materials?.length ?? 0) >= 5) throw new Error(t('materials.selectionFull'));
     // Existing native file version/reference contract: same World, no copy,
     // no model call, and no implicit message or action permission.
@@ -334,7 +334,7 @@ export default function App() {
     }
     // Read again after the native call: Home may have been edited in another
     // local route while the file version was being verified.
-    const current = draftsRef.current[homeKey] ?? readDraft(workspaceId, 'home');
+    const current = readCurrentDraft(workspaceId, 'home', draftsRef.current[homeKey] ?? EMPTY_DRAFT);
     if ((current.materials?.length ?? 0) >= 5 && !current.materials?.some(item => item.id === response.material.id)) {
       throw new Error(t('materials.selectionFull'));
     }
