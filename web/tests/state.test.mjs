@@ -91,6 +91,10 @@ test('a failed turn explains its cause from the Kernel error code', () => {
   assert.equal(failureReason('provider_http_503').key, 'status.failureService');
   assert.equal(failureReason('provider_http_400').key, 'status.failureRejected');
   assert.equal(failureReason('provider_timeout').key, 'status.failureUnreachable');
+  assert.equal(failureReason('provider_output_limit').key, 'status.failureOutputLimit');
+  assert.equal(failureReason('provider_content_filtered').key, 'status.failureFiltered');
+  assert.equal(failureReason('provider_stream_too_long').key, 'status.failureStreamTooLong');
+  assert.equal(failureReason('provider_generation_incomplete').key, 'status.failureIncomplete');
   assert.deepEqual(failureReason('something_new').params, { code: 'something_new' });
   const page = getPageActivity('error', true, false, 'provider_http_401');
   assert.equal(page.labelKey, 'status.interrupted');
