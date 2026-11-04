@@ -24,9 +24,13 @@ export function failureReason(code: string | null | undefined): { key: MessageKe
   if (status >= 500) return { key: 'status.failureService', text: 'The model service had an error. Send again in a moment.' };
   if (status >= 400) return { key: 'status.failureRejected', text: 'The model service rejected this request. A very long conversation may need a smaller P_PULSE_CONTEXT_TOKENS.' };
   if (code === 'provider_credential_missing') return { key: 'status.failureNoKey', text: 'No API key is set for the model service. Set P_PULSE_API_KEY and restart Per Pulse.' };
-  if (['provider_timeout', 'provider_transport_error', 'provider_closed', 'provider_stream_incomplete', 'provider_generation_incomplete'].includes(code)) {
+  if (['provider_timeout', 'provider_transport_error', 'provider_closed', 'provider_stream_incomplete'].includes(code)) {
     return { key: 'status.failureUnreachable', text: 'The model service stopped responding. Check the connection, then send again.' };
   }
+  if (code === 'provider_output_limit') return { key: 'status.failureOutputLimit', text: 'The reply reached its length limit in the middle of an action. Ask for a shorter step, or raise P_PULSE_MAX_OUTPUT_TOKENS.' };
+  if (code === 'provider_content_filtered') return { key: 'status.failureFiltered', text: "The model service's content filter stopped this reply." };
+  if (code === 'provider_stream_too_long') return { key: 'status.failureStreamTooLong', text: 'The reply kept streaming past the time limit (P_PULSE_CHAT_MAX_SECONDS).' };
+  if (code === 'provider_generation_incomplete') return { key: 'status.failureIncomplete', text: 'The model service ended the reply early. Send again.' };
   if (code === 'model_loop_limit') return { key: 'status.failureStepLimit', text: 'This turn reached its step limit. Send a message to continue.' };
   if (code === 'world_turn_timeout') return { key: 'status.failureTimeout', text: 'This turn ran out of time.' };
   return { key: 'status.failureOther', text: 'This turn stopped ({code}).', params: { code } };
