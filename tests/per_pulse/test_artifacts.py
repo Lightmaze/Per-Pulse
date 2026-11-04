@@ -721,3 +721,75 @@ def test_legacy_truncated_receipt_is_not_reconstructed_from_file_existence(tmp_p
         with pytest.raises(ArtifactError):
             artifacts.read(page_id, action_id)
         assert target.read_text(encoding="utf-8") == after
+
+
+def test_generated_file_handoff_retains_exact_native_action_source_across_works_and_restart(tmp_path, monkeypatch):
+    """A file's matching path and bytes do not by themselves prove its creator."""
+    content, requests = "The finished deliverable, not a model claim.\n", []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "deliverable.md", "expected_digest": None, "content": content}
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        producer = _page(client)
+        action_id = _approve(pages.execution, producer)
+        artifact, = pages.artifacts.snapshot(producer)["artifacts"]
+        assert artifact["id"] == action_id and artifact["sha256"] == _sha(content)
+        receiver = _page(client, "Continue editing the delivered result.")
+        identity = {
+            "X-Per-Pulse-World": pages.runtime.world_id,
+            "X-Per-Pulse-Service-Instance": pages.service_instance_id,
+        }
+
+        def attach(to, **overrides):
+            payload = {
+                "path": artifact["path"], "sha256": artifact["sha256"],
+                "sourcePageId": producer, "sourceArtifactId": action_id,
+                **overrides,
+            }
+            return client.post(f"/api/pages/{to}/materials/reference", json=payload, headers=identity)
+
+        generated = attach(receiver)
+        assert generated.status_code == 201, generated.text
+        received = generated.json()["material"]
+        assert (received["pageId"], received["originArtifactPageId"],
+                received["originArtifactId"]) == (receiver, producer, action_id)
+        assert received["source"] == "workspace_reference"
+        assert attach(receiver).json()["material"] == received
+        assert attach("home").json()["material"]["originArtifactId"] == action_id
+        assert client.get(f"/api/pages/{receiver}/materials/{received['id']}").json()["material"] == received
+        message = client.post(f"/api/pages/{receiver}/messages",
+                              json={"content": "Improve this finished work.", "materials": [received["id"]]})
+        assert message.status_code == 202
+        assert message.json()["view"]["messages"][-1]["materials"] == [received]
+        assert producer not in message.json()["view"]["messages"][-1]["content"]
+
+        # A page ID, an action ID, and the file digest must agree with the
+        # original succeeded native write; neither a different Work nor a
+        # matching naked pathname can assert that native provenance.
+        assert attach(receiver, sourcePageId=receiver).status_code == 409
+        assert attach(receiver, sourceArtifactId="no-such-action").status_code == 409
+        assert attach(receiver, sha256="0" * 64).status_code == 409
+        assert attach(receiver, path="not-deliverable.md").status_code == 409
+        assert client.post(f"/api/pages/{receiver}/materials/reference",
+            json={"path": artifact["path"], "sha256": artifact["sha256"],
+                  "sourcePageId": producer}, headers=identity).status_code == 422
+        assert client.post(f"/api/pages/{receiver}/materials/reference",
+            json={"path": artifact["path"], "sha256": artifact["sha256"],
+                  "sourceArtifactId": action_id}, headers=identity).status_code == 422
+        assert client.get(f"/api/pages/{producer}/materials/{received['id']}").status_code == 404
+
+        # A raw file-browsing reference remains valid but must not inherit
+        # the asserted producing action from another reference to these bytes.
+        plain = client.post(f"/api/pages/{receiver}/materials/reference",
+            json={"path": artifact["path"], "sha256": artifact["sha256"]}, headers=identity)
+        assert plain.status_code == 201
+        assert plain.json()["material"]["id"] != received["id"]
+        assert "originArtifactId" not in plain.json()["material"]
+        assert len(client.get(f"/api/pages/{receiver}/materials").json()["materials"]) == 2
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        record = client.get(f"/api/pages/{receiver}/materials/{received['id']}").json()["material"]
+        assert record == received
+        assert client.get(f"/api/pages/{producer}/artifacts/{action_id}").json()["state"] == "current"
+        assert client.app.state.pages.runtime.kernel_service._runtimes == {}
