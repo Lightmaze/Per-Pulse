@@ -90,7 +90,7 @@ try {
     return response.ok() && !['queued', 'working'].includes((await response.json()).page.status);
   }, 'source Work creation settled');
 
-  const bytes = Buffer.from('Original notes for the next Work.\\n', 'utf8');
+  const bytes = Buffer.from('Original notes for the next Work.\n', 'utf8');
   const uploadId = randomBytes(16).toString('hex');
   const digest = createHash('sha256').update(bytes).digest('hex');
   const upload = await page.request.post(base + '/api/pages/home/materials?name=source-notes.md', {
@@ -132,7 +132,7 @@ try {
   const attempts = finalView.messages.filter(message => message.role === 'user' && message.content.startsWith(content));
   assert.equal(attempts.length, 2);
   const repeated = attempts[1];
-  assert.equal((repeated.content.match(/\\[Attached workspace materials\\]/g) || []).length, 1,
+  assert.equal((repeated.content.match(/\[Attached workspace materials\]/g) || []).length, 1,
     'retry must not duplicate the native material footer');
   assert.ok(repeated.materialSuffixLength > 0, 'native material envelope remains verified');
   assert.deepEqual(repeated.references.map(ref => ({ targetPageId: ref.targetPageId, label: ref.label })),
