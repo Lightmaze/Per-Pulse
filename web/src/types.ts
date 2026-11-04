@@ -3,7 +3,7 @@ export type WorkspaceFileEntry = { name: string; path: string; kind: 'file' | 'd
 export type WorkspaceFileList = WorkspaceFileIdentity & {
   path: string; entries: WorkspaceFileEntry[]; truncated: boolean; limit_bytes: number; scope: 'shared_native_workspace';
 };
-export type WorkspaceFile = WorkspaceFileIdentity & { path: string; content: string; bytes: number; sha256: string; format?: 'pdf_text' };
+export type WorkspaceFile = WorkspaceFileIdentity & { path: string; content: string; bytes: number; sha256: string; format?: 'pdf_text'; complete?: boolean };
 export type WorkspaceUpload = WorkspaceFileIdentity & { path: string; name: string; bytes: number; sha256: string; source: 'user_upload' };
 
 export type PageSummary = {
@@ -98,7 +98,7 @@ export type Material = {
   originArtifactPageId?: string; originArtifactId?: string;
 };
 export type MaterialList = { pageId: string; materials: Material[]; truncated: boolean; limitBytes: number };
-export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number; downloadable: boolean; format?: 'pdf_text' };
+export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number; downloadable: boolean; format?: 'pdf_text'; complete?: boolean };
 
 export type CollaboratorOutcome = 'adopted' | 'revised' | 'discarded';
 

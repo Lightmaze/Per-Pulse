@@ -16,7 +16,7 @@ from typing import Iterator
 from uuid import uuid4
 
 from pulse_harness.adapters.document_text import (
-    MAX_PDF_BYTES, DocumentTextError, is_pdf_path, pdf_text,
+    MAX_PDF_BYTES, DocumentTextError, PdfText, is_pdf_path, read_pdf,
 )
 
 # POSIX opens each path component relative to an open directory descriptor.
@@ -59,9 +59,9 @@ def upload_limit(name: str) -> int:
     return MAX_PDF_BYTES if is_pdf_path(name) else MAX_FILE_BYTES
 
 
-def _pdf_text(data: bytes) -> str:
+def _pdf_text(data: bytes) -> PdfText:
     try:
-        return pdf_text(data)
+        return read_pdf(data)
     except DocumentTextError as error:
         raise FileAccessError(error.code, 415) from None
 
@@ -181,11 +181,13 @@ class WorkspaceFiles:
         return data
 
     def read(self, path: str) -> dict:
-        """A file's text; for a PDF, its text page by page."""
+        """A file's text; for a PDF, its text page by page (``complete`` is false if it stops early)."""
         data = self.read_bytes(path)
-        pdf = is_pdf_path(path)
-        return {"path": path, "content": _pdf_text(data) if pdf else _text(data), "bytes": len(data),
-                "sha256": hashlib.sha256(data).hexdigest(), **({"format": "pdf_text"} if pdf else {})}
+        result = {"path": path, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        if not is_pdf_path(path):
+            return {**result, "content": _text(data)}
+        pdf = _pdf_text(data)
+        return {**result, "content": pdf.text, "format": "pdf_text", "complete": pdf.complete}
 
     def upload(self, name: str, data: bytes) -> dict:
         parts = _parts(name)

@@ -233,7 +233,8 @@ class PageMaterials:
             content, truncated = clip_text(current["content"], MAX_PREVIEW_BYTES)
             return {"material": record, "content": content, "redacted": "[REDACTED]" in current["content"],
                     "truncated": truncated, "previewLimitBytes": MAX_PREVIEW_BYTES,
-                    "downloadable": True, **({"format": current["format"]} if "format" in current else {})}
+                    "downloadable": True,
+                    **{key: current[key] for key in ("format", "complete") if key in current}}
 
     def download(self, page_id, material_id):
         """Read one complete receipt-bound source, preserving its original bytes."""

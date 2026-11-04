@@ -4,7 +4,9 @@ Open **Materials**, choose a UTF-8 text file up to 1 MiB or a PDF up to 32 MiB,
 and select **Upload file**. A PDF is kept as the original file; its preview and
 what Per Pulse reads is its text, with a `[Page N]` line before each page. A
 password-protected PDF must be unlocked first, and a scanned PDF without
-selectable text shows no text. Inspect the preview, then **Add to draft**. Your existing text and page
+selectable text shows no text. A very long PDF is read up to 2,000 pages or 2 million
+characters; its text then ends with a line saying where it stops, and the
+preview says it is incomplete. Inspect the preview, then **Add to draft**. Your existing text and page
 links stay in place. Tell Per Pulse what you want to do with the material and
 send the message when it is ready. Existing files can be reopened from the
 same dialog without uploading them again.

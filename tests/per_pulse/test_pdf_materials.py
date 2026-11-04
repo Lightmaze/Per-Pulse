@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
+import time
 
 import httpx
 import pytest
@@ -17,8 +18,9 @@ from pypdf import PdfReader, PdfWriter
 
 from per_pulse.materials import material_footer
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
+from pulse_harness.adapters.document_text import MAX_PDF_TEXT_CHARS, read_pdf
 from pulse_system.product.files import MAX_FILE_BYTES
-from pdf_samples import synthetic_pdf
+from pdf_samples import amplifying_pdf, synthetic_pdf
 from test_material_downloads import download as download_material, identity
 from test_materials import upload
 from test_pages import client_for, send, wait_for
@@ -121,3 +123,33 @@ def test_the_footer_tells_the_model_to_use_the_reading_tool_for_any_material():
     footer = material_footer([{"id": "m", "name": "report.pdf", "path": "uploads/report.pdf",
                                "sha256": "0" * 64, "bytes": 10}])
     assert "reading.open(path, expected_digest=sha256)" in footer
+
+
+def test_a_small_pdf_that_expands_into_huge_text_is_read_only_up_to_a_bound(tmp_path):
+    bomb = amplifying_pdf(repeats=3000)  # about 8 KB that expands to about 3 million characters
+    assert len(bomb) < 16 * 1024
+    started = time.monotonic()
+    result = read_pdf(bomb)
+    assert time.monotonic() - started < 20
+    assert not result.complete and result.pages_read == 1
+    assert len(result.text) <= MAX_PDF_TEXT_CHARS + 200
+    assert result.text.endswith("Split the PDF to read the rest.]")
+    with client_for(tmp_path, model_factory=None) as client:
+        reply = upload(client, "home", "expanding.pdf", bomb)
+        assert reply.status_code == 201, reply.text
+        material = reply.json()["material"]
+        assert (tmp_path / "workspace" / material["path"]).read_bytes() == bomb
+        preview = client.get(f"/api/pages/home/materials/{material['id']}").json()
+        assert preview["format"] == "pdf_text" and preview["complete"] is False
+        assert preview["truncated"] is True
+        assert download_material(client, "home", material).content == bomb
+
+
+def test_reading_stops_at_the_page_bound_and_says_where():
+    result = read_pdf(synthetic_pdf([f"Page {n} text." for n in range(1, 6)]), max_pages=3)
+    assert not result.complete and (result.pages_read, result.pages) == (3, 5)
+    assert "[Page 3]\nPage 3 text." in result.text and "[Page 4]" not in result.text
+    assert result.text.endswith("[Text stops here, on page 3 of 5: the rest of this PDF is beyond "
+                                "the reading limit. Split the PDF to read the rest.]")
+    whole = read_pdf(synthetic_pdf(["Only page."]))
+    assert whole.complete and whole.text == "[Page 1]\nOnly page."
