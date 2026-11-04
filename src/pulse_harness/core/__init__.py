@@ -92,7 +92,7 @@ from .provider import (
     ToolProvider,
     validate_model_adapter,
 )
-from .turn_runner import TurnRunner
+from .turn_runner import LiveReply, TurnRunner
 from .usage_reconciliation import (
     ProviderUsageReconciler,
     ProviderUsageReconciliationManager,
@@ -187,6 +187,7 @@ __all__ = [
     "ToolProvider",
     "TurnOutcome",
     "TurnRunner",
+    "LiveReply",
     "TurnStatus",
     "UsageReconciliationBlocker",
     "UsageReconciliationReport",
