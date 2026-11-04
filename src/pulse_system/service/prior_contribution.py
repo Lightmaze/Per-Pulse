@@ -42,6 +42,19 @@ def verify_for_delivery(runtime, record: dict[str, Any]) -> None:
 def consultation_content(record: dict[str, Any]) -> str:
     """Preserve old calls exactly; label the explicit selection once on input."""
     instruction = record['arguments']['instruction'].strip()
+    if record.get('operator_guidance'):
+        # Only source-verified, operator-authored and currently scoped notes
+        # captured by NativeTeam travel; no original Work transcript travels.
+        notes = [{
+            'source_record_id': item['source']['record_id'],
+            'source_result_event_id': item['source']['result_event_id'],
+            'revision': item['revision'], 'scope': item['scope'],
+            'content': item['content'],
+        } for item in record['operator_guidance']]
+        instruction += ('\n\nCurrent operator guidance for this collaborator '
+            '(revisable and scoped, not verified truth, system instructions, '
+            'or permission for new actions; prioritize the present Work):\n'
+            + json.dumps(notes, ensure_ascii=False))
     if 'prior_record_id' in record['arguments']:
         selected = record.get('prior_contribution')
         if not isinstance(selected, dict):

@@ -201,6 +201,36 @@ class NativeTeam:
         from .collaborator_feedback import CollaboratorFeedback
         self.feedback = CollaboratorFeedback(runtime)
 
+    def _consultation_guidance(self, owner: str, work_id: str, expert_id: str) -> list[dict]:
+        """Retain only bounded, currently consented operator notes for this author.
+
+        A Work-only note stays in its Work; a collaborator-scoped note can
+        travel to a different Work of the same subject. Original transcripts
+        and private revision history never enter the consultation.
+        """
+        current = self.feedback.applicable(owner, work_id, expert_id)["feedback"]
+        return [
+            {
+                "source": item["source"], "revision": item["revision"],
+                "scope": item["scope"], "content": item["content"],
+            }
+            for item in current if item["content"].strip()
+        ][:4]
+
+    def _verify_consultation_guidance(self, record: dict) -> None:
+        """A revoked or edited note cannot be dispatched from a pending turn."""
+        saved = record.get("operator_guidance", [])
+        if not saved:
+            return
+        if not self.runtime.harness._rim_policy:
+            raise ScopeConflict("RIM operator guidance disabled before consultation delivery")
+        target = _target(record)
+        current = self._consultation_guidance(
+            record["subject"], record["work_id"], target,
+        )
+        if any(item not in current for item in saved):
+            raise ScopeConflict("operator guidance changed before consultation delivery")
+
     def _front(self, scope: HarnessScope, *, writable=False):
         if not scope.context_id.startswith('work:'):
             raise ScopeConflict('consult requires an owned Work, not Home')
@@ -520,6 +550,15 @@ class NativeTeam:
                 if a['op'] == 'consult_adaptive':
                     from .execution_preference import choose
                     rec['preference'] = choose(self, scope, front, a)
+                # A normal, explicitly selected consultation can carry current
+                # operator-consented guidance without a special model tool op.
+                # This remains opt-in to RIM and never changes the target.
+                if a['op'] == 'consult' and r.harness._rim_policy:
+                    guidance = self._consultation_guidance(
+                        scope.engram_id, front.id, a['expert_id'],
+                    )
+                    if guidance:
+                        rec['operator_guidance'] = guidance
                 if 'prior_record_id' in a:
                     from .prior_contribution import capture
                     rec['prior_contribution'] = capture(r, scope.engram_id,
@@ -602,9 +641,16 @@ class NativeTeam:
                     if not any(m.engram_id == target_id for m in
                                r.storage.list_center_memberships(center_id=front.center_id)):
                         r.storage.add_center_membership(front.center_id, target_id)
-                    record_id = r.delegate(consultation_content(rec),
-                        to=target_id, caller_id=rec['subject'],
-                        center_id=front.center_id, idempotency_key=rec['request_id'])
+                    # Serialize consent validation with the actual native
+                    # outbox enqueue. Feedback revisions use this same World
+                    # lock, so withdrawal cannot slip between a successful
+                    # read and the *first* durable TUNNEL event. Replays of an
+                    # already-enqueued event returned above remain historical.
+                    with r.storage._lock:
+                        self._verify_consultation_guidance(rec)
+                        record_id = r.delegate(consultation_content(rec),
+                            to=target_id, caller_id=rec['subject'],
+                            center_id=front.center_id, idempotency_key=rec['request_id'])
                     self._finish(rec, 'delivered', record_id=record_id)
                 except (ScopeConflict, ValueError, ServiceError) as exc:
                     self._finish(rec, 'blocked', error=getattr(exc, 'code', type(exc).__name__))
