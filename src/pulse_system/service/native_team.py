@@ -606,7 +606,6 @@ class NativeTeam:
                             or action.tool_name != NAME or dict(action.arguments) != rec['arguments']):
                         self._finish(rec, 'cancelled', error='native_action_unsuccessful'); continue
                     target_id = _target(rec)
-                    self._verify_consultation_guidance(rec)
                     # Existing tunnel identity repairs enqueue-before-outbox-receipt crashes.
                     identity = r.delegation_tunnel.identity_for(r.world_id, rec['subject'], rec['center_id'], rec['request_id'])
                     prior = r.causal_ledger.get_event(identity.request_event_id)
@@ -616,6 +615,10 @@ class NativeTeam:
                                 or prior.content != consultation_content(rec)):
                             raise ScopeConflict('existing consultation differs')
                         self._finish(rec, 'delivered', record_id=identity.record_id); continue
+                    # A withdrawal before first enqueue must stop publication.
+                    # Once the original event already exists, preserve that
+                    # immutable historical delivery even if guidance changed.
+                    self._verify_consultation_guidance(rec)
                     front = self._front(scope, writable=True)
                     if front.center_id != rec['center_id'] or front.id != rec['work_id']:
                         raise ScopeConflict('source Work changed')
