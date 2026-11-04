@@ -222,6 +222,8 @@ class NativeTeam:
         saved = record.get("operator_guidance", [])
         if not saved:
             return
+        if not self.runtime.harness._rim_policy:
+            raise ScopeConflict("RIM operator guidance disabled before consultation delivery")
         target = _target(record)
         current = self._consultation_guidance(
             record["subject"], record["work_id"], target,
