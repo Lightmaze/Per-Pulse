@@ -384,6 +384,7 @@ class NativeTeam:
                                 'recordId': record['id'], 'workId': work_id,
                                 'selectedName': (recipient.name or recipient.id) if recipient else record['target_id'],
                                 'resultMessageId': result.id,
+                                'outcome': record.get('outcome'),
                                 'guidance': sources,
                             })
                 if len(choices) >= 16:

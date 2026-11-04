@@ -48,6 +48,35 @@ export function CollaboratorChoices({ pageId, pages, navigate }: { pageId: strin
     }
   };
 
+  const renderAssessment = (entry: { recordId: string; resultMessageId: string | null; outcome: CollaboratorOutcome | null }) => (
+    <>{entry.outcome ? <p className="artifact-intro" role="status">{
+            t(entry.outcome === 'adopted' ? 'collaboration.ratedAdopted'
+              : entry.outcome === 'revised' ? 'collaboration.ratedRevised' : 'collaboration.ratedDiscarded')
+          }</p> : entry.resultMessageId ? <div className="collaborator-rating">
+            <p className="artifact-intro">{t('collaboration.ratingQuestion')}</p>
+            {proposal?.recordId === entry.recordId
+              ? <div>
+                <p className="artifact-intro">{t('collaboration.confirmImmutable')}</p>
+                <div className="collaborator-rating-actions">
+                  <button type="button" className="text-button" disabled={submitting !== null}
+                    onClick={() => void submit(entry.recordId, proposal.outcome)}>{t('collaboration.confirm')}</button>
+                  <button type="button" className="text-button" disabled={submitting !== null}
+                    onClick={() => setProposal(null)}>{t('collaboration.cancel')}</button>
+                </div>
+              </div>
+              : <div className="collaborator-rating-actions" role="group"
+                  aria-label={t('collaboration.ratingQuestion')}>
+                {(['adopted', 'revised', 'discarded'] as const).map(outcome =>
+                  <button type="button" className="text-button" key={outcome} disabled={submitting !== null}
+                    onClick={() => setProposal({ recordId: entry.recordId, outcome })}>
+                    {t(outcome === 'adopted' ? 'collaboration.rateAdopted'
+                      : outcome === 'revised' ? 'collaboration.rateRevised' : 'collaboration.rateDiscarded')}
+                  </button>)}
+              </div>}
+            {submitting === entry.recordId ? <p role="status">{t('collaboration.saving')}</p> : null}
+          </div> : null}</>
+  );
+
   return <section className="collaborator-choices">
     <button type="button" className="text-button" aria-expanded={expanded}
       onClick={() => {
@@ -67,6 +96,10 @@ export function CollaboratorChoices({ pageId, pages, navigate }: { pageId: strin
         {consultation.resultMessageId ? <SessionLink pageId={pageId}
           label={t('collaboration.result')} origin={{ pageId }} navigate={navigate}
           targetMessageId={consultation.resultMessageId} /> : null}
+        {renderAssessment(consultation)}
+        {consultation.resultMessageId ? <CollaboratorFeedbackEditor
+          key={`${pageId}/${consultation.recordId}`}
+          pageId={pageId} recordId={consultation.recordId} /> : null}
         <details><summary>{t('collaboration.guidedEvidence', { count: consultation.guidance.length })}</summary>
           <ul>{consultation.guidance.map((note, index) => {
             const originalWork = visibleRatedSourceWork(pages, note.sourceWorkId, note.sourceMessageId);
@@ -90,32 +123,8 @@ export function CollaboratorChoices({ pageId, pages, navigate }: { pageId: strin
           <p className="artifact-intro">{t(choice.changedFromReference ? 'collaboration.adjusted' : 'collaboration.unchanged')}</p>
           {choice.resultMessageId ? <SessionLink pageId={pageId} label={t('collaboration.result')}
             origin={{ pageId }} navigate={navigate} targetMessageId={choice.resultMessageId} /> : null}
-          {choice.outcome ? <p className="artifact-intro" role="status">{
-            t(choice.outcome === 'adopted' ? 'collaboration.ratedAdopted'
-              : choice.outcome === 'revised' ? 'collaboration.ratedRevised' : 'collaboration.ratedDiscarded')
-          }</p> : choice.resultMessageId ? <div className="collaborator-rating">
-            <p className="artifact-intro">{t('collaboration.ratingQuestion')}</p>
-            {proposal?.recordId === choice.recordId
-              ? <div>
-                <p className="artifact-intro">{t('collaboration.confirmImmutable')}</p>
-                <div className="collaborator-rating-actions">
-                  <button type="button" className="text-button" disabled={submitting !== null}
-                    onClick={() => void submit(choice.recordId, proposal.outcome)}>{t('collaboration.confirm')}</button>
-                  <button type="button" className="text-button" disabled={submitting !== null}
-                    onClick={() => setProposal(null)}>{t('collaboration.cancel')}</button>
-                </div>
-              </div>
-              : <div className="collaborator-rating-actions" role="group"
-                  aria-label={t('collaboration.ratingQuestion')}>
-                {(['adopted', 'revised', 'discarded'] as const).map(outcome =>
-                  <button type="button" className="text-button" key={outcome} disabled={submitting !== null}
-                    onClick={() => setProposal({ recordId: choice.recordId, outcome })}>
-                    {t(outcome === 'adopted' ? 'collaboration.rateAdopted'
-                      : outcome === 'revised' ? 'collaboration.rateRevised' : 'collaboration.rateDiscarded')}
-                  </button>)}
-              </div>}
-            {submitting === choice.recordId ? <p role="status">{t('collaboration.saving')}</p> : null}
-          </div> : null}
+          {renderAssessment(choice)}
+
           {choice.resultMessageId ? <CollaboratorFeedbackEditor key={`${pageId}/${choice.recordId}`}
             pageId={pageId} recordId={choice.recordId} /> : null}
           {choice.evidence.length ? <details>

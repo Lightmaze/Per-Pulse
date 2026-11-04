@@ -610,9 +610,18 @@ class PageService:
                     front.focal_engram_id, record, request, owned_front)
                 delivered = self.runtime.causal_ledger.find_delegation_result_by_record_id(
                     self.runtime.world_id, record_id)
-                if (owned_front.id != page_id or choice is None
+                # Ordinary consultations whose approved guidance was actually
+                # delivered are also a finished result a person can assess.
+                # Reuse the native source-verified read; no prepared or
+                # foreign-Work request can mint an outcome through this path.
+                guided = (choice is None and delivered is not None and any(
+                    row["recordId"] == record_id and row["resultMessageId"] == delivered.id
+                    for row in team.adaptive_choices_for_work(
+                        front.focal_engram_id, page_id)["guidedConsultations"]
+                ))
+                if (owned_front.id != page_id or (choice is None and not guided)
                         or record["result_summary"] is None or delivered is None):
-                    raise ScopeConflict("not a completed adaptive choice from this Work")
+                    raise ScopeConflict("not a completed eligible consultation from this Work")
                 self._check_message(page_id, delivered.id)
             except (ScopeConflict, PageError) as exc:
                 raise PageError(
