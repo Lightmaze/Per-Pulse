@@ -482,7 +482,7 @@ export default function App() {
                 .catch(problem => setSendErrors(previous => ({ ...previous, [draftKey]: errorText(problem) })));
             }}>{t('tick.stop')}</button>
           </div> : null}
-          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
+          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onInspectMaterial={materialId => openModal({ kind: 'materials', materialId, pageId: route.id })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
     </div>
