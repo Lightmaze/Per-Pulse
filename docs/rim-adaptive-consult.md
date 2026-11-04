@@ -38,6 +38,35 @@ operator feedback revision/withdrawal interface and the original native
 World/Kernel, not a global reward store. An explicit single-recipient
 `consult` still avoids probabilistic sharing.
 
+## Ordinary consultation carries current operator guidance
+
+With `P_PULSE_RIM_POLICY=1`, a normal `team.consult(expert_id,
+instruction)` also takes up to four active operator-authored feedback notes
+for that **selected** collaborator. A note kept to the current Work can inform
+that Work; only a note deliberately scoped to the collaborator can travel
+from another Work of the same owner. The runtime captures the exact source,
+revision, scope and note at the original action, then includes only bounded
+note text and native source references in the existing TUNNEL question. It
+does **not** copy the original conversation, private feedback history or other
+Works' transcripts, change the requested collaborator, infer a new rating,
+invoke an extra model, or grant any physical action.
+
+A note changed or withdrawn **before its consultation is dispatched** blocks
+that pending request rather than delivering stale guidance. Already delivered
+questions and their original source do not change retroactively. With no
+eligible note, the ordinary consult keeps its original instruction unchanged.
+With the RIM flag off, all consult calls remain as before. The model must still
+choose to consult someone; this narrows the gap between a saved correction and
+the next *actual* collaborator task, but does not prove spontaneous model
+learning or more effective work.
+
+The existing native World/Kernel/SQLite integration test now exercises a
+normal consultation from a different Work after explicit sharing, a Work-only
+negative case, withdrawal during a prepared but undelivered action, and a
+fresh ordinary consultation after withdrawal, using an explicitly scripted
+HTTP model transport. Real-provider finished artifacts and independent
+judgment remain the separate #51 acceptance.
+
 Candidate weights are the model's relative starting preferences, **not**
 provider-token probabilities or a learned optimal policy. The host reads at
 most 128 existing caller delegations, accepts only completed contributions
