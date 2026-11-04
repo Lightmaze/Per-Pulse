@@ -92,7 +92,7 @@ def test_native_approval_completed_provider_usage_blocks_extra_admission(
     monkeypatch.setattr(
         page_service_module, "RuntimeServiceConfig",
         lambda **kwargs: config(
-            **kwargs, pulse_worker_capacity=1, hourly_token_budget=100,
+            **{**kwargs, "pulse_worker_capacity": 1, "hourly_token_budget": 100},
         ),
     )
     with client_for(
