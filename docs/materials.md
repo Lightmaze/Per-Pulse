@@ -39,8 +39,11 @@ file to another page's draft** or **Add full file to Home draft**. This takes
 only the verified current UTF-8 file version and a source-page reference;
 it does not send the draft, copy private conversations or authorize an action.
 The resulting material now also keeps the **original successful native file
-action ID and producing Work**. Open its source chip to see the generating Work
-and return to that page. A matching file path, digest or copied text alone
+action ID and producing Work**. In the receiving Home or Work composer, select the attached file name **before
+sending** to inspect that exact version, the original generating action and the
+source Work. Close the preview to continue editing the same unsent draft, or
+open the producing Work and return without submitting the draft. The separate
+remove button still removes only that attachment. A matching file path, digest or copied text alone
 cannot assert which Work created an output. An ordinary file-browser selection
 has no generated-action origin unless its original action is explicitly verified.
 
