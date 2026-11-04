@@ -42,6 +42,8 @@ export const materialsEnglish = {
   'library.artifactToHomeAdded': 'The verified file is ready in your Home draft.',
   'materials.openOriginal': 'Open original material from its source page',
   'materials.originalWork': 'Original upload: {title}',
+  'materials.generatedWork': 'Produced in {title} · original file action {action}',
+  'materials.openGeneratingWork': 'Open the Work that produced this file',
 };
 
 export const materialsChinese: Record<keyof typeof materialsEnglish, string> = {
@@ -88,4 +90,6 @@ export const materialsChinese: Record<keyof typeof materialsEnglish, string> = {
   'library.artifactToHomeAdded': '文件已加入主页草稿，尚未发送。',
   'materials.openOriginal': '打开来源页面的原始材料',
   'materials.originalWork': '原始上传来自：{title}',
+  'materials.generatedWork': '由「{title}」生成 · 原始文件操作 {action}',
+  'materials.openGeneratingWork': '打开生成此文件的原工作',
 };

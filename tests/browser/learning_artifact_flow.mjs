@@ -148,6 +148,26 @@ try {
   await page.getByText('A playable first interaction.', { exact: true }).waitFor();
   assert.equal((await status()).files.includes('practice.txt'), true);
   checks.push('bilingual Pulse visit preserves approval, real file and unsent Work draft');
+
+  // Carry the actual successful native file action, not just its matching
+  // pathname, to Home. The reference is a verified unsent material, and Back
+  // must recover the Work draft and the original opened result.
+  const originalArtifact = (await (await fetch(base + '/api/pages/' + learnedId)).json())
+    .artifacts.find(item => item.path === 'practice.txt');
+  assert.ok(originalArtifact?.id);
+  await page.getByRole('button', { name: 'Add full file to Home draft', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  const attachedHome = (await (await fetch(base + '/api/pages/home/materials')).json()).materials;
+  const sourcedFile = attachedHome.find(item => item.originArtifactId === originalArtifact.id);
+  assert.ok(sourcedFile);
+  assert.equal(sourcedFile.originArtifactPageId, learnedId);
+  assert.equal(sourcedFile.sha256, originalArtifact.sha256);
+  assert.match(await page.locator('.composer textarea').inputValue(), /practice[.]txt/);
+  await page.goBack();
+  await page.getByRole('heading', { name: 'Informed delivery', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), draft);
+  checks.push('generated output reaches Home draft with native action provenance and Work focus restored');
+
   if (screenshots) {
     await mkdir(screenshots, { recursive: true });
     await page.screenshot({ path: join(screenshots, 'journey-approved-artifact.png') });

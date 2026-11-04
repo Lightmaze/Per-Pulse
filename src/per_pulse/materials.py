@@ -17,7 +17,8 @@ from uuid import uuid4
 from pulse_harness.adapters.resources import workspace_write_resource
 from pulse_harness.core.errors import HarnessError
 from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES, WorkspaceFiles
-from .artifacts import clip_text
+from .artifacts import ArtifactError, clip_text
+from .execution import ExecutionError
 
 
 MAX_MATERIALS = 1024
@@ -124,7 +125,8 @@ class PageMaterials:
             raise MaterialError("material_changed", "This source file changed. Upload the version you want to use.")
         return current
 
-    def reference_existing(self, page_id, path, expected_digest, *, world_id, service_instance_id):
+    def reference_existing(self, page_id, path, expected_digest, *, world_id, service_instance_id,
+                           source_page_id=None, source_artifact_id=None):
         """Attach an explicitly selected workspace version without copying bytes.
 
         Each Work retains its own native material receipt. Sharing a file does
@@ -135,17 +137,40 @@ class PageMaterials:
             pages.execution._scope(page_id)
             pages.require_file_identity(world_id, service_instance_id)
             pages.runtime._require_runtime_owner()
+            if (source_page_id is None) != (source_artifact_id is None):
+                raise MaterialError("material_artifact_source_invalid",
+                                    "Choose the original page and file result together.", 422)
             try:
                 with self.writer.write(timeout=5), pages.runtime._publication_permit.transaction_guard():
                     pages.require_file_identity(world_id, service_instance_id)
                     pages.runtime._require_runtime_owner()
+                    # A matching pathname and digest alone cannot identify the
+                    # Work that produced a file. Verify the original settled
+                    # Kernel action in its own committed native scope.
+                    generated = {}
+                    if source_page_id is not None:
+                        try:
+                            source, _ = pages.artifacts._resolve_action(source_page_id, source_artifact_id)
+                        except (ArtifactError, ExecutionError) as error:
+                            # Never disclose foreign/unknown action records in
+                            # an error response or persist a guessed source.
+                            raise MaterialError("material_artifact_unavailable",
+                                "The producing file result could not be verified.", 409) from error
+                        if (source["path"] != path or source["sha256"] != expected_digest
+                                or source["undone"]):
+                            raise MaterialError("material_artifact_unavailable",
+                                "The producing file result no longer matches this version.", 409)
+                        generated = {"originArtifactPageId": source_page_id,
+                                     "originArtifactId": source_artifact_id}
                     current = self.files.read(path)
                     if current["sha256"] != expected_digest:
                         raise MaterialError("material_changed", "This source file changed. Open the version you want to use.")
                     matching = [record for record in self._records().values()
                                 if record["path"] == path and record["sha256"] == expected_digest
                                 and record["bytes"] == current["bytes"]]
-                    existing = next((record for record in matching if record["pageId"] == page_id), None)
+                    existing = next((record for record in matching if record["pageId"] == page_id
+                        and record.get("originArtifactPageId") == generated.get("originArtifactPageId")
+                        and record.get("originArtifactId") == generated.get("originArtifactId")), None)
                     if existing:
                         return {"material": dict(existing), "repeated": True}
                     if len(self._records()) >= MAX_MATERIALS:
@@ -165,7 +190,7 @@ class PageMaterials:
                               "name": matching[0]["name"] if matching else PurePosixPath(path).name,
                               "sha256": expected_digest, "bytes": current["bytes"],
                               "source": "workspace_reference", "createdAt": datetime.now(timezone.utc).isoformat(),
-                              **source}
+                              **source, **generated}
                     state = deepcopy(pages._state)
                     state.setdefault("materials", {})[record["id"]] = record
                     try:

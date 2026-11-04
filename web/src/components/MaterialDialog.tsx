@@ -5,11 +5,12 @@ import { useLanguage } from '../i18n';
 import type { MaterialRead, PageSummary, WorkspaceFileIdentity } from '../types';
 import { Dialog } from './Dialog';
 import { TextDocument } from './TextDocument';
+import type { Navigate } from './SessionLink';
 
 /** Inspect exactly the version identified by a native message attachment. */
-export function MaterialDialog({ identity, pageId, materialId, close, browse, pages }: {
+export function MaterialDialog({ identity, pageId, materialId, close, browse, pages, navigate }: {
   identity: WorkspaceFileIdentity; pageId: string; materialId: string; close: () => void; browse: () => void;
-  pages: PageSummary[];
+  pages: PageSummary[]; navigate: Navigate;
 }) {
   const { t, locale, errorText } = useLanguage();
   // Keep one mounted native dialog while inspecting another verified source.
@@ -67,6 +68,12 @@ export function MaterialDialog({ identity, pageId, materialId, close, browse, pa
             ? <p className="material-hint">{t('materials.originalWork', {
                 title: pages.find(page => page.id === preview.material.originPageId)?.title ?? preview.material.originPageId,
               })}</p> : null}
+          {preview.material.originArtifactPageId && preview.material.originArtifactId
+            ? <p className="material-hint">{t('materials.generatedWork', {
+                title: pages.find(page => page.id === preview.material.originArtifactPageId)?.title
+                  ?? preview.material.originArtifactPageId,
+                action: preview.material.originArtifactId.slice(0, 12),
+              })}</p> : null}
           {preview.redacted ? <p>{t('materials.redacted')}</p> : null}
           {preview.truncated ? <p>{t('materials.truncated')}</p> : null}
           <div aria-label={t('materials.content')}><TextDocument key={`${preview.material.id}/${preview.material.sha256}`} path={preview.material.path} content={preview.content} truncated={preview.truncated} /></div>
@@ -81,6 +88,12 @@ export function MaterialDialog({ identity, pageId, materialId, close, browse, pa
         ? <button className="text-button" onClick={() => setTarget({ pageId: preview.material.originPageId!, materialId: preview.material.originMaterialId! })}>
             {t('materials.openOriginal')}
           </button> : null}
+      {preview?.material.originArtifactPageId && pages.some(page => page.id === preview.material.originArtifactPageId)
+        ? <button className="text-button" onClick={() => {
+            const origin = preview.material.originArtifactPageId!;
+            close();
+            navigate(origin, { pageId: target.pageId });
+          }}>{t('materials.openGeneratingWork')}</button> : null}
       <button className="text-button" onClick={browse}>{t('library.browse')}</button>
       {downloadStarted ? <span role="status">{t('artifacts.downloadStarted')}</span> : null}
     </div>
