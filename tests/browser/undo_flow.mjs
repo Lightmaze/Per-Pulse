@@ -64,18 +64,27 @@ try {
   const receiverId = (await json('/api/bootstrap')).pages.find(item => item.title === 'Review draft')?.id;
   assert.ok(receiverId, 'real receiving Work exists');
   const beforeReceiver = (await json('/api/pages/' + receiverId)).messages.map(message => message.id);
+  // The other Work was visited in this tab, so the UI has an older in-memory
+  // copy. A second tab edits its unsent text before this file handoff.
+  // Attaching a verified artifact must not silently resurrect the old draft.
+  const receiverEditor = await page.context().newPage();
+  await receiverEditor.goto(base + '/page/' + receiverId);
+  await receiverEditor.getByRole('textbox', { name: 'Message Review draft', exact: true })
+    .fill('Updated review draft from another tab.');
+  await receiverEditor.close();
   await files.getByRole('button', { name: /^plan\.md/ }).click();
   await files.getByRole('button', { name: 'Add the full file to another page’s draft', exact: true }).click();
   await page.getByRole('dialog', { name: 'Add the full file to another page’s draft' })
     .getByRole('option', { name: 'Review draft' }).click();
   await page.getByRole('heading', { name: 'Review draft', exact: true }).waitFor();
   const receivingDraft = await page.locator('.composer textarea').inputValue();
-  assert.match(receivingDraft, /Keep this review draft\./);
+  assert.match(receivingDraft, /Updated review draft from another tab\./);
+  assert.doesNotMatch(receivingDraft, /Keep this review draft\./);
   assert.match(receivingDraft, /Verified file from Launch plan: plan\.md/);
   await page.locator('.composer-materials').getByText('plan.md', { exact: true }).waitFor();
   assert.deepEqual((await json('/api/pages/' + receiverId)).messages.map(message => message.id), beforeReceiver,
     'attaching a verified file must not silently run the receiving Work');
-  checks.push('a completed file enters another Work as a sourced, unsent draft without replacing its existing text');
+  checks.push('a verified file enters another Work without replacing the newer unsent draft from another tab');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await wait(async () => (await json('/api/pages/' + receiverId)).messages.some(message =>
     message.role === 'user' && message.content.includes('Verified file from Launch plan: plan.md')
