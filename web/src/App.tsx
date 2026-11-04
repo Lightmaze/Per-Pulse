@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { messageBody } from './messageBody';
+import { retryMessageInput } from './retryMessage';
 import { parseTickCommand } from './tickCommand';
 import { useLanguage } from './i18n';
 import { useWorkspace } from './useWorkspace';
@@ -414,15 +415,16 @@ export default function App() {
   const failedMessage = view?.page.status === 'error'
     ? [...view.messages].reverse().find(message => message.role !== 'assistant') ?? null : null;
   const lastMessage = view?.messages[view.messages.length - 1];
-  const canSendAgain = Boolean(failedMessage && lastMessage?.id === failedMessage.id && failedMessage.role === 'user'
+  const retryInput = failedMessage ? retryMessageInput(failedMessage) : null;
+  const canSendAgain = Boolean(retryInput && lastMessage?.id === failedMessage?.id
     && !sendingPages[draftKey]);
   const sendAgain = async () => {
-    if (!failedMessage || !view || pendingSends.current.has(draftKey)) return;
+    if (!failedMessage || !retryInput || !view || pendingSends.current.has(draftKey)) return;
     const id = view.page.id;
     pendingSends.current.add(draftKey);
     setSendingPages(previous => ({ ...previous, [draftKey]: true }));
     try {
-      const response = await api.send(id, failedMessage.content, [], failedMessage.materials?.map(item => item.id));
+      const response = await api.send(id, retryInput.content, retryInput.references, retryInput.materials);
       applyView(response.view);
     } catch (problem) {
       setSendErrors(previous => ({ ...previous, [draftKey]: errorText(problem) }));
