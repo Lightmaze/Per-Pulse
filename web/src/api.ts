@@ -126,10 +126,12 @@ export const api = {
     }
     return result;
   },
-  referenceMaterial: (pageId: string, file: Pick<WorkspaceFile, 'path' | 'sha256'>, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
+  referenceMaterial: (pageId: string, file: Pick<WorkspaceFile, 'path' | 'sha256'> & { id?: string; pageId?: string }, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
     request<WorkspaceFileIdentity & { material: Material; repeated: boolean }>(`${pagePath(pageId)}/materials/reference`, {
       method: 'POST', headers: pulseWriteHeaders(identity), signal,
-      body: JSON.stringify({ path: file.path, sha256: file.sha256 }),
+      body: JSON.stringify({ path: file.path, sha256: file.sha256,
+        ...(file.id && file.pageId ? { sourcePageId: file.pageId, sourceArtifactId: file.id } : {}),
+      }),
     }),
   reference: (id: string, data: { targetPageId: string; label: string; sourceMessageId?: string | null }) =>
     request<{ reference: PageReference; view: PageView }>(`${pagePath(id)}/references`, { method: 'POST', body: JSON.stringify(data) }),
