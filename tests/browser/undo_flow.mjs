@@ -39,7 +39,10 @@ try {
   await wait(async () => (await fetch(base + '/api/health')).ok, 'service ready');
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
     args: process.env.PLAYWRIGHT_CHROMIUM_ARGS ? JSON.parse(process.env.PLAYWRIGHT_CHROMIUM_ARGS) : undefined });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  // A true browser context keeps both tabs in the same browser-local storage scope.
+  // browser.newPage() creates an owned context that forbids context.newPage().
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const create = async (title, instruction) => {
