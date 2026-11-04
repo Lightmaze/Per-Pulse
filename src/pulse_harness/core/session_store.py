@@ -1901,6 +1901,45 @@ class HarnessStore:
             rows = tuple(reversed(rows))
             return tuple(self._model_round_from_row(row) for row in rows)
 
+    def model_usage_for_session(
+        self,
+        scope: HarnessScope,
+        *,
+        turn_id: str | None = None,
+    ) -> dict[str, int]:
+        """Sum provider-reported token usage over a session's model rounds.
+
+        Only usage the provider reported is counted; nothing is estimated.
+        ``rounds`` counts every round and ``reported_rounds`` those with usage,
+        so a caller can tell when the totals are a lower bound. ``turn_id``
+        narrows the sum to one turn.
+        """
+
+        with self._lock:
+            self._require_open()
+            self._assert_session_scope(scope.session_scope())
+            self._validate_database_locked()
+
+            def total(key: str) -> str:
+                return (f"COALESCE(SUM(CASE WHEN provider_usage_json != '' "
+                        f"THEN json_extract(provider_usage_json, '$.{key}') END), 0) AS {key}")
+
+            query = (
+                "SELECT COUNT(*) AS rounds, "
+                "SUM(CASE WHEN provider_usage_json != '' THEN 1 ELSE 0 END) AS reported_rounds, "
+                + ", ".join(total(key) for key in (
+                    "input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens"))
+                + " FROM model_rounds WHERE session_id = ?"
+            )
+            parameters: list[object] = [scope.session_id]
+            if turn_id is not None:
+                query += " AND turn_id = ?"
+                parameters.append(turn_id)
+            row = self._db.execute(query, tuple(parameters)).fetchone()
+            return {key: int(row[key] or 0) for key in (
+                "rounds", "reported_rounds", "input_tokens", "output_tokens",
+                "cached_tokens", "cache_write_tokens")}
+
     def count_model_rounds_for_session(
         self,
         scope: HarnessScope,

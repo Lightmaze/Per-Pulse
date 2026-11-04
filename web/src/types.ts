@@ -1,3 +1,4 @@
+import type { PageUsage } from './pageUsage';
 export type WorkspaceFileIdentity = { workspaceId: string; serviceInstanceId: string };
 export type WorkspaceFileEntry = { name: string; path: string; kind: 'file' | 'directory'; bytes: number | null };
 export type WorkspaceFileList = WorkspaceFileIdentity & {
@@ -74,6 +75,7 @@ export type PageExecution = {
   uncertainActions: UncertainAction[];
   uncertainActionsTruncated: boolean;
   replay?: { sourceCount: number; focus?: string } | null;
+  usage?: PageUsage | null;
 };
 export type Artifact = {
   id: string; pageId: string; path: string; sha256: string;
