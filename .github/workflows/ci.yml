@@ -10,7 +10,9 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Full native, browser and installed-wheel checks are sequential in this job.
+    # Allow runner variability without masking a genuinely stalled check.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
