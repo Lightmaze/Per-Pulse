@@ -110,6 +110,17 @@ its collaborator, not their private source conversation or revision history.
 This is provenance of **input delivered**, not a claim that the collaborator
 adopted it or improved the final artifact.
 
+A person may now assess the **finished ordinary consultation itself** as used,
+reworked or not used, and save scoped, revisable operator guidance from its
+original result using the same controls as adaptive consultations. Only a
+completed, source-verified ordinary consultation that actually carried approved
+guidance can enter this read/write path. The assessment is an explicit, immutable
+native outcome (not a model-inferred reward), and its new guidance is not
+implicitly shared across Works. Prepared, blocked, source-inconsistent, Home
+and foreign-Work records cannot acquire a rating here; an old rating stays
+historical after consent withdrawal. This closes a practical correction cycle
+without adding an executor, training loop or new permissions.
+
 ## Work-visible choice and original sources
 
 The Work's quiet **How this Work chose collaborators** disclosure reads
