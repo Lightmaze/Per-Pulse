@@ -24,6 +24,7 @@ import { HistoryDialog } from './components/HistoryDialog';
 import { MessageSearchDialog } from './components/MessageSearchDialog';
 import { MaterialsDialog } from './components/MaterialsDialog';
 import { MaterialDialog } from './components/MaterialDialog';
+import { PageUsage } from './components/PageUsage';
 import { CreatePageDialog, PagePickerDialog, RenameDialog, ReturnDialog, TransferWorkDialog, SettingsDialog, type Modal } from './components/WorkspaceDialogs';
 
 export default function App() {
@@ -465,6 +466,7 @@ export default function App() {
             {bootstrap?.example ? <p className="mobile-workspace-status">{t('settings.exampleWorkspace')}</p> : null}
             {activity ? <div className="page-activity" role="status" aria-atomic="true"><span className={`activity-indicator tone-${activity.tone}`}><span className="activity-dot" aria-hidden="true" />{t(activity.labelKey)}</span>{['attention', 'error'].includes(activity.tone) ? <p className="page-activity-detail">{t(activity.detailKey, activity.detailParams)}</p> : null}{canSendAgain ? <button type="button" className="secondary-button send-again" onClick={() => void sendAgain()}>{t('status.sendAgain')}</button> : null}</div> : null}
             {sourceNotice ? <p className="conversation-note source-notice" role="status">{sourceNotice}</p> : null}
+            <PageUsage usage={view?.execution?.usage} />
           </section>
           {route.id === 'home' && bootstrap ? <HomeContinuations pages={pages} workspaceId={bootstrap.workspaceId} navigate={navigate} /> : null}
           {error ? <div className="error-notice" role="alert"><span>{error}</span><button disabled={isRefreshing} onClick={() => { setError(''); refreshWorkspace().catch(problem => setError(errorText(problem))); }}>{t('app.retry')}</button></div> : null}

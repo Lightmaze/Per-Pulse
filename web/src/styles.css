@@ -254,6 +254,13 @@ button, a, input, textarea { outline-offset: 4px; }
 .message-status[class*="tone-"], .message-status.status-neutral, .message-status.status-active, .message-status.status-attention, .message-status.status-error { color: var(--activity-color, var(--muted)); }
 .tick-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 8px; padding: 6px 2px; }
 .page-activity-detail { flex-basis: 100%; color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0; }
+.page-usage { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.page-usage summary { cursor: pointer; width: fit-content; }
+.page-usage dl { display: grid; grid-template-columns: max-content auto; gap: 2px 16px; margin: 8px 0 4px; }
+.page-usage dl > div { display: contents; }
+.page-usage dt { margin: 0; }
+.page-usage dd { margin: 0; color: var(--text, inherit); font-variant-numeric: tabular-nums; }
+.page-usage p { margin: 0; }
 .sync-notice { border-color: var(--border); color: var(--muted); }
 .sync-notice button { color: var(--accent); }
 .message:target { outline: 2px solid #b3c5ad; outline-offset: 10px; border-radius: 3px; background: #f7f9f4; }
