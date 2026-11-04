@@ -49,7 +49,7 @@ export function CollaboratorChoices({ pageId, pages, navigate }: { pageId: strin
   };
 
   const renderAssessment = (entry: { recordId: string; resultMessageId: string | null; outcome: CollaboratorOutcome | null }) => (
-    {entry.outcome ? <p className="artifact-intro" role="status">{
+    <>{entry.outcome ? <p className="artifact-intro" role="status">{
             t(entry.outcome === 'adopted' ? 'collaboration.ratedAdopted'
               : entry.outcome === 'revised' ? 'collaboration.ratedRevised' : 'collaboration.ratedDiscarded')
           }</p> : entry.resultMessageId ? <div className="collaborator-rating">
@@ -74,7 +74,7 @@ export function CollaboratorChoices({ pageId, pages, navigate }: { pageId: strin
                   </button>)}
               </div>}
             {submitting === entry.recordId ? <p role="status">{t('collaboration.saving')}</p> : null}
-          </div> : null}
+          </div> : null}</>
   );
 
   return <section className="collaborator-choices">
