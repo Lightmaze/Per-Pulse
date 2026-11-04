@@ -115,8 +115,8 @@ class PageExecution:
                 break
         return actions
 
-    def _uncertainty(self, scope: HarnessScope) -> dict:
-        scopes = self._history_scopes(scope)
+    def _uncertainty(self, scope: HarnessScope, scopes: tuple[HarnessScope, ...] | None = None) -> dict:
+        scopes = self._history_scopes(scope) if scopes is None else scopes
         records = self._historical_actions(scopes, status=ActionStatus.UNCERTAIN, limit=_MAX_ACTIONS + 1)
         historical = bool(records)
         if not historical:
@@ -204,6 +204,37 @@ class PageExecution:
                 code = event.payload.get("error_code")
                 return code if isinstance(code, str) and len(code) <= 128 else None
         return None
+    def _usage(self, scopes: tuple[HarnessScope, ...], turn) -> dict:
+        """Provider-reported tokens for this page and its latest turn.
+
+        Sums every model round in the page's verified session lineage, including
+        background work on the page. Rounds whose provider reported no usage
+        are counted in ``unreportedRounds`` and never estimated.
+        """
+        store = self._kernel.store
+        total = dict.fromkeys(("rounds", "reported_rounds", "input_tokens", "output_tokens",
+                               "cached_tokens", "cache_write_tokens"), 0)
+        for each in scopes:
+            try:
+                part = store.model_usage_for_session(each)
+            except ScopeConflict as error:
+                if str(error).startswith("unknown session:"):
+                    continue
+                raise
+            for key in total:
+                total[key] += part[key]
+
+        def view(values: dict) -> dict:
+            return {"inputTokens": values["input_tokens"], "outputTokens": values["output_tokens"],
+                    "cachedTokens": values["cached_tokens"],
+                    "unreportedRounds": values["rounds"] - values["reported_rounds"]}
+
+        last = None
+        if turn is not None:
+            values = store.model_usage_for_session(turn.scope, turn_id=turn.scope.turn_id)
+            last = view(values) if values["reported_rounds"] else None
+        return {**view(total), "lastTurn": last}
+
     def _steps(self, scope: HarnessScope) -> list[dict]:
         """The current turn's latest tool steps, oldest first, for live progress."""
         recent = self._kernel.store.actions_for_session(scope.session_scope(), limit=_MAX_STEPS * 2)
@@ -228,7 +259,8 @@ class PageExecution:
         scope = self._scope(page_id)
         kernel = self._kernel
         try:
-            history = self._uncertainty(scope)
+            scopes = self._history_scopes(scope)
+            history = self._uncertainty(scope, scopes)
             try:
                 session = kernel.store.get_session(scope)
             except ScopeConflict as error:
@@ -238,6 +270,7 @@ class PageExecution:
                         "status": "idle", "canCancel": False, "pendingActions": [],
                         "pendingActionsTruncated": False, "recoveryRequired": False,
                         "failureCode": None, "steps": [], "replay": None,
+                        "usage": self._usage(scopes, None),
                         **history,
                         "updatedAt": None,
                     }
@@ -310,6 +343,7 @@ class PageExecution:
                           if turn and turn.status not in _TERMINAL else []),
                 "replay": {"sourceCount": len(entry["message_ids"]),
                            **({"focus": entry["focus"]} if "focus" in entry else {})} if entry else None,
+                "usage": self._usage(scopes, turn),
                 **history,
                 "updatedAt": turn.updated_at if turn else session.updated_at,
             }
