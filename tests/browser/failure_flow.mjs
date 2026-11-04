@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,6 +73,72 @@ try {
   assert.ok(overflow <= 1, 'no horizontal scroll on a phone');
   if (screenshots) await zh.screenshot({ path: join(screenshots, 'failure-reason-zh.png') });
   checks.push('status text and the reason follow the Chinese interface on a phone');
+
+
+  // The retry is a *new* native user message, but it must keep the original
+  // Work link and attach each verified source file exactly once. A synthetic
+  // provider failure drives this browser journey; the World/Kernel/SQLite and
+  // material receipt are the real application services.
+  const bootstrap = await (await page.request.get(base + '/api/bootstrap')).json();
+  const createdResponse = await page.request.post(base + '/api/pages', {
+    data: { title: 'Source Work', instruction: 'Keep this source material.', sourcePageId: 'home' },
+  });
+  assert.equal(createdResponse.status(), 201, await createdResponse.text());
+  const sourceWorkId = (await createdResponse.json()).page.id;
+  await wait(async () => {
+    const response = await page.request.get(base + '/api/pages/' + sourceWorkId);
+    return response.ok() && !['queued', 'working'].includes((await response.json()).page.status);
+  }, 'source Work creation settled');
+
+  const bytes = Buffer.from('Original notes for the next Work.\\n', 'utf8');
+  const uploadId = randomBytes(16).toString('hex');
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  const upload = await page.request.post(base + '/api/pages/home/materials?name=source-notes.md', {
+    data: bytes, headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-Per-Pulse-World': bootstrap.workspaceId,
+      'X-Per-Pulse-Upload-Id': uploadId,
+      'X-Per-Pulse-File-SHA256': digest,
+    },
+  });
+  assert.equal(upload.status(), 201, await upload.text());
+  const content = 'Continue Source Work using the attached original notes.';
+  await fetch(base + '/__failure/next', { method: 'POST' });
+  const first = await page.request.post(base + '/api/pages/home/messages', {
+    data: { content, references: [{ targetPageId: sourceWorkId, label: 'Source Work' }], materials: [uploadId] },
+  });
+  assert.equal(first.status(), 202, await first.text());
+  await wait(async () => {
+    const response = await page.request.get(base + '/api/pages/home');
+    return response.ok() && (await response.json()).page.status === 'error';
+  }, 'linked material turn failed');
+  await page.reload();
+  await page.locator('.page-activity').getByRole('button', { name: 'Send again', exact: true }).waitFor();
+  const [retryRequest] = await Promise.all([
+    page.waitForRequest(request => request.method() === 'POST' && request.url() === base + '/api/pages/home/messages'),
+    page.locator('.page-activity').getByRole('button', { name: 'Send again', exact: true }).click(),
+  ]);
+  assert.deepEqual(retryRequest.postDataJSON(), {
+    content, references: [{ targetPageId: sourceWorkId, label: 'Source Work' }], materials: [uploadId],
+  }, 'the browser retries source-verified input, not flattened original text');
+  await wait(async () => {
+    const response = await page.request.get(base + '/api/pages/home');
+    if (!response.ok()) return false;
+    const view = await response.json();
+    return view.messages.filter(message => message.role === 'user' && message.content.startsWith(content)).length >= 2
+      && !['queued', 'working'].includes(view.page.status);
+  }, 'linked material retry finished');
+  const finalView = await (await page.request.get(base + '/api/pages/home')).json();
+  const attempts = finalView.messages.filter(message => message.role === 'user' && message.content.startsWith(content));
+  assert.equal(attempts.length, 2);
+  const repeated = attempts[1];
+  assert.equal((repeated.content.match(/\\[Attached workspace materials\\]/g) || []).length, 1,
+    'retry must not duplicate the native material footer');
+  assert.ok(repeated.materialSuffixLength > 0, 'native material envelope remains verified');
+  assert.deepEqual(repeated.references.map(ref => ({ targetPageId: ref.targetPageId, label: ref.label })),
+    [{ targetPageId: sourceWorkId, label: 'Source Work' }]);
+  assert.ok(repeated.materials.some(material => material.id === uploadId));
+  checks.push('failed Work source link and native file survive Send again exactly once');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks, provider: 'explicit synthetic HTTP fixture' }));
