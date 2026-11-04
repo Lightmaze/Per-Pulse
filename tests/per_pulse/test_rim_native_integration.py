@@ -536,7 +536,8 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         repeat_direct = page_projection.rate_adaptive_choice(
             other.id, first_direct["record_id"], "revised")
         assert not repeat_direct["changed"]
-        assert page_projection.adaptive_choices(other.id)["guidedConsultations"][0]["outcome"] == "revised"
+        rated_guidance_history = page_projection.adaptive_choices(other.id)["guidedConsultations"]
+        assert rated_guidance_history[0]["outcome"] == "revised"
         with pytest.raises(PageError) as conflicting_guided_rating:
             page_projection.rate_adaptive_choice(other.id, first_direct["record_id"], "discarded")
         assert conflicting_guided_rating.value.code == "collaboration_outcome_conflict"
@@ -566,12 +567,20 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
             "candidates": {state["bad"]: 0.6, state["good"]: 0.4},
             "instruction": INSTRUCTION,
         })
-        assert after_withdrawal["evidence"] == []
+        # Withdrawal removes Work A's shared evidence from *future* choices.
+        # The freshly rated ordinary consultation is independent, native Work B
+        # experience: its explicit "revised" outcome is neutral (value 0),
+        # but must remain visible as evidence instead of being erased.
+        assert {item["id"] for item in after_withdrawal["evidence"]} == {
+            first_direct["record_id"]
+        }
+        assert after_withdrawal["evidence"][0]["source_work_id"] == other.id
+        assert after_withdrawal["evidence"][0]["value"] == 0.0
         assert after_withdrawal["probabilities"] == after_withdrawal["prior"]
         assert page_projection.adaptive_choices(other.id)["choices"][0]["evidence"][0]["sourceWorkId"] == front.id
         # Withdrawal changes future eligibility, not the historical proof of
         # what was actually delivered in an already-completed consultation.
-        assert page_projection.adaptive_choices(other.id)["guidedConsultations"] == used
+        assert page_projection.adaptive_choices(other.id)["guidedConsultations"] == rated_guidance_history
         # Simulate a crash after first TUNNEL enqueue but before its local
         # delivery receipt. Current withdrawal must NOT invalidate an
         # already-published historical event on replay.
