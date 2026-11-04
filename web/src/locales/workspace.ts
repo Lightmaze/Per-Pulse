@@ -1,6 +1,6 @@
 /** Product copy only. User-authored titles, messages, and reference labels stay verbatim. */
 export const workspaceEnglish = {
-  'collaboration.title': 'Collaborator choices and guidance',
+  'collaboration.title': 'How this page chose collaborators',
   'collaboration.description': "Inspect completed choices and guidance actually sent to collaborators.",
   'collaboration.guidedTitle': 'Guidance delivered in ordinary consultations',
   'collaboration.guidedConsult': 'Guidance sent to {expert}',
@@ -270,7 +270,7 @@ export const workspaceEnglish = {
 } as const;
 
 export const workspaceChinese = {
-  'collaboration.title': '协作者选择与经验来源',
+  'collaboration.title': '查看这项工作的协作者选择',
   'collaboration.description': "查看已完成的协作者选择，以及实际交付给协作者的经验。",
   'collaboration.guidedTitle': '普通咨询已交付的经验',
   'collaboration.guidedConsult': '已向 {expert} 提供经验',
