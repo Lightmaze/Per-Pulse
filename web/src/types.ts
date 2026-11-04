@@ -94,6 +94,8 @@ export type Material = {
   createdAt: string; source: 'user_upload' | 'workspace_reference';
   /** Verified original upload, when this workspace reference is derived from one. */
   originPageId?: string; originMaterialId?: string;
+  /** Only present when a receiving reference was verified against a native file action. */
+  originArtifactPageId?: string; originArtifactId?: string;
 };
 export type MaterialList = { pageId: string; materials: Material[]; truncated: boolean; limitBytes: number };
 export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number; downloadable: boolean };
