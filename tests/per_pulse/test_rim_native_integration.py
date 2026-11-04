@@ -28,6 +28,7 @@ from pulse_harness.core.errors import ScopeConflict
 INSTRUCTION = "Inspect the cache warmup and identify the exact source of startup latency."
 START = "Select one collaborator with prior work outcomes"
 INSPECT = "Inspect the earlier selected consultation in this Work."
+DIRECT = "Consult this already-known collaborator on the new Work."
 
 
 def _stream(delta, finish="stop"):
@@ -65,6 +66,14 @@ def _model_factory(state, seen):
                     "index": 0, "id": "rim-inspect", "type": "function",
                     "function": {"name": "team", "arguments": json.dumps({
                         "op": "inspect", "record_id": state["inspect_record_id"],
+                    })},
+                }]}, finish="tool_calls")
+            if last.get("content") == DIRECT:
+                return _stream({"tool_calls": [{
+                    "index": 0, "id": "ordinary-consult", "type": "function",
+                    "function": {"name": "team", "arguments": json.dumps({
+                        "op": "consult", "expert_id": state["good"],
+                        "instruction": INSTRUCTION,
                     })},
                 }]}, finish="tool_calls")
             if last.get("content") == START:
@@ -469,6 +478,37 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert source["sourceMessageId"] == transferred["evidence"][0]["sources"][1]
         assert other_visible["choices"][0]["resultMessageId"]
 
+        # The ordinary (non-adaptive) native consult now actually delivers
+        # operator-consented guidance to the chosen collaborator. The host
+        # does not need the model to request a second special RIM tool.
+        def direct_requests():
+            return [row for row in reopened.storage.native_team_requests(limit=64)
+                    if row["work_id"] == other.id
+                    and row["arguments"]["op"] == "consult"]
+
+        reopened.send_task_front_message(other.id, DIRECT)
+        _tick(reopened, lambda: len(direct_requests()) == 1
+              and direct_requests()[0]["status"] == "delivered"
+              and reopened.storage.get_delegation(direct_requests()[0]["record_id"])["result_summary"] is not None
+              and not reopened.harness._active)
+        first_direct = direct_requests()[0]
+        delivered_with_note = reopened.storage.get_delegation(first_direct["record_id"])
+        assert "Current operator guidance for this collaborator" in delivered_with_note["task"]
+        assert "Use the proven startup evidence." in delivered_with_note["task"]
+        assert records[1] in delivered_with_note["task"]
+        assert records[0] not in delivered_with_note["task"]
+        assert first_direct["operator_guidance"][0]["source"]["work_id"] == front.id
+        assert first_direct["operator_guidance"][0]["scope"] == "collaborator"
+
+        # Stage another native Work turn, but hold the outbox before first
+        # dispatch. A withdrawal now must prevent leaking the stale note.
+        reopened.send_task_front_message(other.id, DIRECT)
+        _tick(reopened, lambda: len(direct_requests()) == 2
+              and any(item["status"] == "prepared" for item in direct_requests())
+              and not reopened.harness._active, drain=False)
+        staged = next(item for item in direct_requests() if item["status"] == "prepared")
+        assert staged["operator_guidance"][0]["source"]["record_id"] == records[1]
+
         # Withdrawal changes only the next computation, not an already
         # delivered and source-audited historical selection.
         revoked = page_projection.update_collaborator_feedback(front.id, records[1], {
@@ -483,6 +523,26 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert after_withdrawal["evidence"] == []
         assert after_withdrawal["probabilities"] == after_withdrawal["prior"]
         assert page_projection.adaptive_choices(other.id)["choices"][0]["evidence"][0]["sourceWorkId"] == front.id
+        reopened._native_team.drain()
+        assert next(item for item in direct_requests()
+                    if item["request_id"] == staged["request_id"])["status"] == "blocked"
+        assert len([row for row in reopened.storage.list_delegations(caller_id=owner)
+                    if row["task"].startswith(INSTRUCTION)
+                    and "Current operator guidance" in row["task"]]) >= 1
+        # A *new* normal consultation after withdrawal still executes, but
+        # with its plain instruction; the old sourced note no longer travels.
+        reopened.send_task_front_message(other.id, DIRECT)
+        _tick(reopened, lambda: len(direct_requests()) == 3
+              and any(item["status"] == "delivered"
+                      and item["request_id"] != first_direct["request_id"]
+                      for item in direct_requests())
+              and not reopened.harness._active)
+        plain = next(item for item in direct_requests()
+                     if item["status"] == "delivered"
+                     and item["request_id"] != first_direct["request_id"])
+        assert "operator_guidance" not in plain
+        assert reopened.storage.get_delegation(plain["record_id"])["task"] == INSTRUCTION
+        assert reopened.storage.get_delegation(first_direct["record_id"])["task"] == delivered_with_note["task"]
         assert len(reopened.storage.list_engrams()) == 3
     finally:
         reopened.close()
