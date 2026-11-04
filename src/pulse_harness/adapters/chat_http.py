@@ -112,13 +112,20 @@ def _provider_usage(value: Mapping[str, Any]) -> ProviderUsage:
         ) from exc
 
 
+OUTPUT_LIMIT_NOTE = "\n\n[Stopped at the reply length limit. Ask to continue for the rest.]"
+
+
 @dataclass(frozen=True)
 class ChatHTTPConfig:
     # Full operator-selected URL, not an untrusted model-generated destination.
     endpoint: str
     model: str
     credential_env: str = "P_PULSE_API_KEY"
-    timeout_seconds: float = 60.0
+    # Connect and idle timeout: the longest wait for the next bytes, not the
+    # whole reply. A long reply keeps streaming as long as bytes keep coming.
+    timeout_seconds: float = 120.0
+    # Upper bound on one streamed reply, however steadily it arrives.
+    max_stream_seconds: float = 1800.0
     max_output_tokens: int = 4096
     max_response_bytes: int = 2 * 1024 * 1024
     # Exact serialized HTTP JSON body bound; not a token or monetary budget.
@@ -144,8 +151,9 @@ class ChatHTTPConfig:
             raise ValueError("no_auth_local must be a boolean")
         if self.no_auth_local and (not local_http or self.provider_namespace is not None):
             raise ValueError("credential-free model calls require explicitly enabled loopback HTTP only")
-        if isinstance(self.timeout_seconds, bool) or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be finite and positive")
+        for seconds in (self.timeout_seconds, self.max_stream_seconds):
+            if isinstance(seconds, bool) or not math.isfinite(seconds) or seconds <= 0:
+                raise ValueError("timeout_seconds and max_stream_seconds must be finite and positive")
         for value in (self.max_output_tokens, self.max_response_bytes, self.max_request_bytes):
             if type(value) is not int or value <= 0:
                 raise ValueError("token and response bounds must be positive integers")
@@ -423,8 +431,10 @@ class _ChatStream:
         for chunk in response.iter_bytes():
             if self._cancelled():
                 return
-            if time.monotonic() - start > self.adapter.config.timeout_seconds:
-                raise ProviderUnavailable("model response deadline exceeded", code="provider_timeout")
+            # Waiting for bytes is bounded by the client's idle timeout; this
+            # bounds a reply that keeps streaming for too long.
+            if time.monotonic() - start > self.adapter.config.max_stream_seconds:
+                raise ProviderUnavailable("model reply exceeded the maximum stream time", code="provider_stream_too_long")
             count += len(chunk)
             if count > self.adapter.config.max_response_bytes:
                 raise ProviderProtocolError("model response exceeded configured byte bound", code="provider_response_too_large")
@@ -543,7 +553,17 @@ class _ChatStream:
                         call[key] += value
             reason = choice.get("finish_reason")
             if reason is not None:
-                if reason not in {"stop", "tool_calls"}:
+                if reason == "length" and not calls:
+                    # Keep a reply cut at the output limit, and say so, rather
+                    # than discard it. A cut tool call has incomplete arguments.
+                    yield ModelDelta(ModelDeltaKind.TEXT, text=OUTPUT_LIMIT_NOTE)
+                    reason = "stop"
+                elif reason == "length":
+                    raise ProviderProtocolError("model reached its output limit inside a tool call",
+                                                code="provider_output_limit")
+                elif reason == "content_filter":
+                    raise ProviderProtocolError("model service filtered the reply", code="provider_content_filtered")
+                elif reason not in {"stop", "tool_calls"}:
                     raise ProviderProtocolError("model generation did not complete", code="provider_generation_incomplete")
                 finish = reason
         if not self._cancelled():
@@ -575,7 +595,8 @@ def model_factory_from_env():
     config = ChatHTTPConfig(
         endpoint, model,
         credential_env=os.environ.get("P_PULSE_CREDENTIAL_ENV", "P_PULSE_API_KEY"),
-        timeout_seconds=float(os.environ.get("P_PULSE_CHAT_TIMEOUT", "60")),
+        timeout_seconds=float(os.environ.get("P_PULSE_CHAT_TIMEOUT", "120")),
+        max_stream_seconds=float(os.environ.get("P_PULSE_CHAT_MAX_SECONDS", "1800")),
         max_output_tokens=int(os.environ.get("P_PULSE_MAX_OUTPUT_TOKENS", "4096")),
         max_request_bytes=int(os.environ.get("P_PULSE_MAX_REQUEST_BYTES", "8388608")),
         reasoning_field=os.environ.get("P_PULSE_REASONING_FIELD") or None,
