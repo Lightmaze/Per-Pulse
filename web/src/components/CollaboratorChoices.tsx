@@ -58,7 +58,28 @@ export function CollaboratorChoices({ pageId, pages, navigate }: { pageId: strin
       <p className="artifact-intro">{t('collaboration.description')}</p>
       {reading ? <p role="status">{t('collaboration.loading')}</p> : null}
       {problem ? <p role="alert">{errorText(problem)}</p> : null}
-      {!reading && !problem && !choices?.choices.length ? <p>{t('collaboration.empty')}</p> : null}
+      {!reading && !problem && !choices?.choices.length && !choices?.guidedConsultations.length
+        ? <p>{t('collaboration.empty')}</p> : null}
+      {choices?.guidedConsultations.length ? <h4>{t('collaboration.guidedTitle')}</h4> : null}
+      {choices?.guidedConsultations.map(consultation => <article key={consultation.recordId}
+        className="collaborator-choice">
+        <p><strong>{t('collaboration.guidedConsult', { expert: consultation.selectedName })}</strong></p>
+        {consultation.resultMessageId ? <SessionLink pageId={pageId}
+          label={t('collaboration.result')} origin={{ pageId }} navigate={navigate}
+          targetMessageId={consultation.resultMessageId} /> : null}
+        <details><summary>{t('collaboration.guidedEvidence', { count: consultation.guidance.length })}</summary>
+          <ul>{consultation.guidance.map((note, index) => {
+            const originalWork = visibleRatedSourceWork(pages, note.sourceWorkId, note.sourceMessageId);
+            return <li key={note.sourceRecordId}>
+              {originalWork ? <SessionLink pageId={originalWork.id}
+                label={t('collaboration.guidedSource', { number: index + 1 }) + ` · ${pageTitle(originalWork)}`}
+                origin={{ pageId }} navigate={navigate} targetMessageId={note.sourceMessageId!} />
+                : t('collaboration.sourceUnavailable')}
+              <p className="artifact-intro">{note.content}</p>
+            </li>;
+          })}</ul>
+        </details>
+      </article>)}
       {choices?.choices.map(choice => {
         const selected = choice.candidates.find(candidate => candidate.expertId === choice.selectedExpertId);
         return <article key={choice.recordId} className="collaborator-choice">

@@ -1,7 +1,11 @@
 /** Product copy only. User-authored titles, messages, and reference labels stay verbatim. */
 export const workspaceEnglish = {
   'collaboration.title': 'How this page chose collaborators',
-  'collaboration.description': "How this page chose a collaborator, based on your rated results.",
+  'collaboration.description': "Inspect completed choices and guidance actually sent to collaborators.",
+  'collaboration.guidedTitle': 'Guidance delivered in ordinary consultations',
+  'collaboration.guidedConsult': 'Guidance sent to {expert}',
+  'collaboration.guidedEvidence': 'Original guidance ({count})',
+  'collaboration.guidedSource': 'Open source result {number}',
   'collaboration.loading': 'Reading original decisions…',
   'collaboration.empty': 'No completed adaptive collaborator choices on this page.',
   'collaboration.selected': 'Selected {expert}',
@@ -267,7 +271,11 @@ export const workspaceEnglish = {
 
 export const workspaceChinese = {
   'collaboration.title': '查看这项工作的协作者选择',
-  'collaboration.description': "这项工作如何根据你评价过的结果选择协作者。",
+  'collaboration.description': "查看已完成的协作者选择，以及实际交付给协作者的经验。",
+  'collaboration.guidedTitle': '普通咨询已交付的经验',
+  'collaboration.guidedConsult': '已向 {expert} 提供经验',
+  'collaboration.guidedEvidence': '原始经验（{count}）',
+  'collaboration.guidedSource': '打开来源成果 {number}',
   'collaboration.loading': '正在读取原始选择…',
   'collaboration.empty': '这项工作尚无已完成的自适应协作者选择。',
   'collaboration.selected': '选择了 {expert}',

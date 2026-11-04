@@ -325,6 +325,7 @@ class NativeTeam:
         with self._lock:
             rows = r.storage.native_team_requests(subject=subject, limit=128)
             choices = []
+            guided = []
             for saved in rows:
                 if (saved.get('world_id') != r.world_id
                         or saved.get('work_id') != work_id
@@ -336,6 +337,56 @@ class NativeTeam:
                 except ScopeConflict:
                     continue
                 if front.id != work_id:
+                    continue
+                # A delivered ordinary consultation may have carried an
+                # operator-approved note from a different Work. Show the
+                # original note used at dispatch, not its later revision or
+                # withdrawal. This read cannot schedule any further action.
+                if (len(guided) < 16 and saved.get('arguments', {}).get('op') == 'consult'
+                        and isinstance(saved.get('operator_guidance'), list)
+                        and request.content == consultation_content(saved)):
+                    result = r.causal_ledger.find_delegation_result_by_record_id(
+                        r.world_id, record['id'])
+                    if result is not None and record.get('result_summary') is not None:
+                        from .runtime import ServiceError
+                        sources = []
+                        for note in saved['operator_guidance'][:4]:
+                            if not isinstance(note, dict):
+                                continue
+                            source = note.get('source')
+                            if (not isinstance(source, dict)
+                                    or source.get('owner_id') != subject
+                                    or source.get('expert_id') != record['target_id']
+                                    or not isinstance(source.get('record_id'), str)
+                                    or not isinstance(source.get('work_id'), str)
+                                    or note.get('scope') not in {'work', 'collaborator'}
+                                    or (note['scope'] == 'work' and source['work_id'] != work_id)
+                                    or type(note.get('revision')) is not int
+                                    or not isinstance(note.get('content'), str)):
+                                continue
+                            try:
+                                if self.feedback._source(source['work_id'], source['record_id']) != source:
+                                    continue
+                            except ServiceError:
+                                continue
+                            original = r.causal_ledger.find_delegation_result_by_record_id(
+                                r.world_id, source['record_id'])
+                            sources.append({
+                                'sourceWorkId': source['work_id'],
+                                'sourceRecordId': source['record_id'],
+                                'sourceMessageId': original.id if original else None,
+                                'revision': note['revision'],
+                                'content': note['content'],
+                            })
+                        if sources:
+                            recipient = r.storage.get_engram(record['target_id'])
+                            guided.append({
+                                'recordId': record['id'], 'workId': work_id,
+                                'selectedName': (recipient.name or recipient.id) if recipient else record['target_id'],
+                                'resultMessageId': result.id,
+                                'guidance': sources,
+                            })
+                if len(choices) >= 16:
                     continue
                 preference = self._retained_adaptive_choice(subject, record, request, front)
                 if preference is None:
@@ -382,10 +433,9 @@ class NativeTeam:
                     'historyIncomplete': bool(preference.get('history_may_be_incomplete')),
                     'kind': 'operator_rated_outcome_proxy_not_quality_proof',
                 })
-                if len(choices) == 16:
-                    break
             return {
                 'workId': work_id, 'choices': choices,
+                'guidedConsultations': guided,
                 'historyMayBeIncomplete': len(rows) == 128,
             }
 

@@ -96,6 +96,20 @@ recovery reuses the saved target, never draws a second one. No new tool
 permission, budget, participant, identity, model invocation, or automatic
 approval is introduced. Direct `consult` remains unchanged.
 
+## Work-visible delivered guidance
+
+The same Work disclosure now also lists completed *ordinary* consultations
+that actually carried operator-authored guidance. It uses the original
+delivered native TUNNEL, result, saved note revision and source Work; it does
+not turn prepared/blocked consultations into completed evidence. An older
+note stays visible as historical input even when the operator later withdraws
+it. Source links are shown only when the original Work message is displayable
+and belong to the currently visible page directory; otherwise they remain
+unavailable. The receiving Work sees only the notes explicitly delivered to
+its collaborator, not their private source conversation or revision history.
+This is provenance of **input delivered**, not a claim that the collaborator
+adopted it or improved the final artifact.
+
 ## Work-visible choice and original sources
 
 The Work's quiet **How this Work chose collaborators** disclosure reads

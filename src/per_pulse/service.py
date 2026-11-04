@@ -548,7 +548,7 @@ class PageService:
         with self._lock:
             front = self._front(page_id)
             if front is None:
-                return {"workId": "home", "choices": [], "historyMayBeIncomplete": False}
+                return {"workId": "home", "choices": [], "guidedConsultations": [], "historyMayBeIncomplete": False}
             projection = self.runtime._native_team.adaptive_choices_for_work(
                 front.focal_engram_id, front.id)
             # Do not expose a navigable causal link merely because a persisted
@@ -573,6 +573,20 @@ class PageService:
                         self._check_message(source_work, source_id)
                     except PageError:
                         evidence["sourceMessageId"] = None
+            # The same displayable-message gate applies to historical
+            # operator guidance delivered in ordinary consultations.
+            for consultation in projection["guidedConsultations"]:
+                try:
+                    self._check_message(page_id, consultation["resultMessageId"])
+                except PageError:
+                    consultation["resultMessageId"] = None
+                for note in consultation["guidance"]:
+                    try:
+                        source_work = note["sourceWorkId"]
+                        self._front(source_work)
+                        self._check_message(source_work, note["sourceMessageId"])
+                    except (PageError, KeyError, TypeError):
+                        note["sourceMessageId"] = None
             return projection
 
     def rate_adaptive_choice(self, page_id: str, record_id: str, outcome: str) -> dict:

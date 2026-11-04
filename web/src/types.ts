@@ -115,6 +115,14 @@ export type CollaboratorFeedbackView = {
 
 export type AdaptiveWorkChoices = {
   workId: string; historyMayBeIncomplete: boolean;
+  guidedConsultations: {
+    recordId: string; workId: string; selectedName: string;
+    resultMessageId: string | null;
+    guidance: {
+      sourceWorkId: string; sourceRecordId: string; sourceMessageId: string | null;
+      revision: number; content: string;
+    }[];
+  }[];
   choices: {
     recordId: string; workId: string; selectedExpertId: string; selectedName: string;
     resultMessageId: string | null; outcome: CollaboratorOutcome | null;

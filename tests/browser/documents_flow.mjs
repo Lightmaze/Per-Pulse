@@ -215,7 +215,7 @@ try {
   assert.ok(originalChoiceSource?.id);
   await page.route('**/api/pages/' + firstId + '/team/choices', route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({
-      workId: firstId, historyMayBeIncomplete: false,
+      workId: firstId, historyMayBeIncomplete: false, guidedConsultations: [],
       choices: [{ recordId: 'explicit-ui-fixture', workId: firstId,
         selectedExpertId: 'fixture-expert', selectedName: 'Fixture collaborator',
         resultMessageId: originalChoiceSource.id, changedFromReference: true, historyIncomplete: false,

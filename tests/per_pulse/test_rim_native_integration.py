@@ -510,6 +510,21 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert records[0] not in delivered_with_note["task"]
         assert first_direct["operator_guidance"][0]["source"]["work_id"] == front.id
         assert first_direct["operator_guidance"][0]["scope"] == "collaborator"
+        # The product disclosure shows an actually delivered ordinary consult
+        # and a navigable original Work source, never a merely prepared note.
+        _tick(reopened, lambda: reopened.causal_ledger.find_delegation_result_by_record_id(
+            reopened.world_id, delivered_with_note["id"]) is not None)
+        used = page_projection.adaptive_choices(other.id)["guidedConsultations"]
+        assert len(used) == 1
+        assert used[0]["recordId"] == delivered_with_note["id"]
+        assert used[0]["resultMessageId"]
+        assert len(used[0]["guidance"]) == 1
+        assert used[0]["guidance"][0]["sourceWorkId"] == front.id
+        assert used[0]["guidance"][0]["sourceRecordId"] == records[1]
+        assert used[0]["guidance"][0]["sourceMessageId"]
+        assert used[0]["guidance"][0]["content"] == "Use the proven startup evidence."
+        assert page_projection.adaptive_choices("home")["guidedConsultations"] == []
+        assert page_projection.adaptive_choices(fresh_other.id)["guidedConsultations"] == []
 
         # Stage an invitation to the untouched Work, but hold the outbox
         # before first dispatch. Withdrawal must block both the note and an
@@ -537,6 +552,9 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert after_withdrawal["evidence"] == []
         assert after_withdrawal["probabilities"] == after_withdrawal["prior"]
         assert page_projection.adaptive_choices(other.id)["choices"][0]["evidence"][0]["sourceWorkId"] == front.id
+        # Withdrawal changes future eligibility, not the historical proof of
+        # what was actually delivered in an already-completed consultation.
+        assert page_projection.adaptive_choices(other.id)["guidedConsultations"] == used
         # Simulate a crash after first TUNNEL enqueue but before its local
         # delivery receipt. Current withdrawal must NOT invalidate an
         # already-published historical event on replay.
@@ -568,6 +586,7 @@ def test_real_rated_outcomes_change_native_team_choice_then_recovery_delivers_on
         assert "operator_guidance" not in plain
         assert reopened.storage.get_delegation(plain["record_id"])["task"] == INSTRUCTION
         assert fresh_has_collaborator()
+        assert page_projection.adaptive_choices(fresh_other.id)["guidedConsultations"] == []
         assert reopened.storage.get_delegation(first_direct["record_id"])["task"] == delivered_with_note["task"]
         assert len(reopened.storage.list_engrams()) == 3
     finally:
