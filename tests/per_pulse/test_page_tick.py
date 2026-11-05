@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from per_pulse.app import create_app
+from per_pulse.execution import PageExecution
 from per_pulse.service import PulseSettings
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 from pulse_system.core.causality import CausalTransitionError
@@ -286,7 +287,8 @@ def test_user_takeover_allows_an_already_running_step_to_finish(tmp_path, monkey
 
 
 @pytest.mark.parametrize("count", [1, 2])
-def test_takeover_counts_a_settled_step_before_controller_observation(tmp_path, monkeypatch, count):
+@pytest.mark.parametrize("reason", ["user_message", "operator"])
+def test_stopping_counts_a_settled_step_before_controller_observation(tmp_path, monkeypatch, count, reason):
     transport = Transport(monkeypatch)
     with client_for(tmp_path, model_factory=transport.factory) as client:
         page_id = new_work(client)
@@ -303,15 +305,83 @@ def test_takeover_counts_a_settled_step_before_controller_observation(tmp_path, 
         step, = runtime.causal_ledger.list_events(kind="spontaneous", limit=10)
         eventually(lambda: runtime.causal_ledger.get_event(step.id), lambda event: event.status.value == "settled")
         assert view(client, page_id)["tick"]["completed"] == 0
-        runtime.send_task_front_message(page_id, "Continue after that completed step.")
+        if reason == "user_message":
+            runtime.send_task_front_message(page_id, "Continue after that completed step.")
+        else:
+            assert client.post(f"/api/pages/{page_id}/tick/stop", json={}).status_code == 200
         run = view(client, page_id)["tick"]
         assert run["delivered"] == run["completed"] == 1
-        assert run["status"] == ("complete" if count == 1 else "stopped")
-        assert run["reason"] == (None if count == 1 else "user_message")
+        complete = reason == "user_message" and count == 1
+        assert run["status"] == ("complete" if complete else "stopped")
+        assert run["reason"] == (None if complete else reason)
         monkeypatch.setattr(controller, "_advance_tick", advance)
-        eventually(lambda: view(client, page_id), lambda v: len(replies(v)) == 3)
+        expected = 3 if reason == "user_message" else 2
+        eventually(lambda: view(client, page_id), lambda v: len(replies(v)) == expected)
         time.sleep(0.2)
-        assert len(transport.requests) == 3
+        assert len(transport.requests) == expected
+
+
+@pytest.mark.parametrize("outcome", ["settled", "failed", "cancelled"])
+@pytest.mark.parametrize("reconcile_after_restart", [False, True], ids=["live", "restart"])
+def test_operator_stop_counts_only_a_successful_running_step(tmp_path, monkeypatch, outcome, reconcile_after_restart):
+    transport = Transport(monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    with client_for(tmp_path, model_factory=transport.factory) as client:
+        page_id = new_work(client)
+        runtime = client.app.state.pages.runtime
+        execution = PageExecution(runtime)
+
+        def hold_reply():
+            entered.set()
+            assert release.wait(5), "The test must release its synthetic response."
+            if outcome == "failed":
+                raise httpx.ReadTimeout("Explicit synthetic provider failure.")
+
+        transport.before_reply = hold_reply
+        try:
+            assert client.post(f"/api/pages/{page_id}/tick", json={"count": 5}).status_code == 201
+            assert entered.wait(5)
+            step, = runtime.causal_ledger.list_events(kind="spontaneous", limit=10)
+            assert step.status.value == "running"
+            stopped = client.post(f"/api/pages/{page_id}/tick/stop", json={}).json()["tick"]
+            assert stopped["status"] == "stopped" and stopped["reason"] == "operator"
+            assert stopped["delivered"] == 1 and stopped["completed"] == 0
+            if reconcile_after_restart:
+                # Persist the stopped run before its late result is observed.
+                monkeypatch.setattr(runtime.context_pulse, "_count_tick_reply", lambda *args: None)
+            if outcome == "cancelled":
+                working = execution.snapshot(page_id)
+                assert execution.cancel(page_id, working["turnId"])["accepted"]
+        finally:
+            release.set()
+        eventually(lambda: runtime.causal_ledger.get_event(step.id),
+                   lambda event: event.status.value not in {"queued", "running"})
+        if outcome == "settled":
+            eventually(lambda: view(client, page_id), lambda v: len(replies(v)) == 2)
+            assert runtime.causal_ledger.get_event(step.id).status.value == "settled"
+        else:
+            expected = "error" if outcome == "failed" else "stopped"
+            eventually(lambda: execution.snapshot(page_id), lambda state: state["status"] == expected)
+            assert runtime.causal_ledger.get_event(step.id).status.value != "settled"
+            assert len(replies(view(client, page_id))) == 1
+        transport.before_reply = None
+        completed = int(outcome == "settled")
+        if not reconcile_after_restart:
+            finished = eventually(lambda: view(client, page_id), lambda v: v["tick"]["completed"] == completed)
+            assert finished["tick"]["status"] == "stopped" and finished["tick"]["reason"] == "operator"
+        else:
+            assert view(client, page_id)["tick"]["completed"] == 0
+
+    with client_for(tmp_path, model_factory=transport.factory) as client:
+        runtime = client.app.state.pages.runtime
+        run = eventually(lambda: view(client, page_id), lambda v: v["tick"]["completed"] == completed)["tick"]
+        assert run["delivered"] == 1
+        assert run["status"] == "stopped" and run["reason"] == "operator"
+        for _ in range(3):
+            runtime.context_pulse.tick()
+            repeated = client.post(f"/api/pages/{page_id}/tick/stop", json={}).json()["tick"]
+            assert repeated == run
+        assert [event.id for event in runtime.causal_ledger.list_events(kind="spontaneous", limit=10)] == [step.id]
 
 
 def test_user_admission_cancels_queued_tick_before_a_concurrent_claim(tmp_path, monkeypatch):
