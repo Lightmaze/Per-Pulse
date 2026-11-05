@@ -94,6 +94,17 @@ while new input arrives, an obsolete query response, phone layout, bilingual
 controls, Escape focus restoration, and Browser Back to another source within
 the same Work while a search is pending. Queries remain local and read-only.
 
+## Local Notice continuity
+
+Run `node tests/browser/notice_flow.mjs` with the same Playwright and Python
+environment to check local Notice registration through the real chat interface.
+Its explicit synthetic HTTP fixture records a Notice, reads a large source,
+checks the very next model round and a later clipped context, reads the original
+native registration, and rejects sibling Work access and a stale close revision.
+The browser finds the original instruction, preserves its draft, closes the
+Notice, and verifies pending then closed state across two process restarts.
+`PER_PULSE_NOTICE_SCREENSHOTS` optionally records desktop and phone source views.
+
 ## Source material to continued work
 
 ```sh
