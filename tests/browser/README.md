@@ -43,6 +43,22 @@ model continuation, exact action identity and draft retention after reload,
 and previews the same file on a phone viewport. The model is explicitly
 synthetic; approval, file replacement, receipt and digest verification are real.
 
+The saved-command flow uses the same dependency:
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  node tests/browser/command_output_flow.mjs
+```
+
+It approves commands through the actual World and Kernel, captures real OS pipe
+bytes, follows both streams in the model and browser, verifies downloads,
+rejects damaged responses, and cancels obsolete reads and pending saves. It also
+checks a later turn, Home isolation, capture limits, an explicit storage failure,
+and offline restart without a model or command executor. Docker control and
+model choices are explicitly synthetic. Set `PER_PULSE_COMMAND_SCREENSHOTS` for
+desktop and phone screenshots. The existing CI verify job runs this flow.
+
 A separate native attention-to-source flow uses the same Chromium dependency:
 ```sh
 PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \

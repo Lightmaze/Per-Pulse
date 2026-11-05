@@ -65,6 +65,18 @@ export type PendingAction = ActionDetails & {
   approvalId: string | null; expiresAt: string | null; canResolve: boolean; blockedReason: string | null;
 };
 export type ExecutionStep = { actionId: string; toolName: string; status: string; target: string | null };
+export type CommandOutputStream = 'stdout' | 'stderr';
+export type CommandOutputCapture = { sha256: string; savedBytes: number; observedBytes: number; complete: boolean };
+export type CommandOutput = {
+  actionId: string; turnId: string; createdAt: string; exitCode: number | null; commandLabel?: string;
+  streams: Partial<Record<CommandOutputStream, CommandOutputCapture>>; error?: string;
+};
+export type CommandOutputRead = {
+  kind: string; action_id: string; stream: CommandOutputStream; sha256: string;
+  saved_bytes: number; observed_bytes: number; capture_complete: boolean;
+  offset: number; next_offset: number | null; total_chars: number;
+  offset_unit: string; encoding: string; redacted: boolean; content: string;
+};
 export type PageExecution = {
   pageId: string; sessionId: string | null; turnId: string | null;
   status: 'idle' | 'working' | 'needs_attention' | 'error' | 'stopped';
@@ -72,6 +84,7 @@ export type PageExecution = {
   recoveryRequired: boolean; historicalUncertainty: boolean; updatedAt: string | null;
   failureCode?: string | null;
   steps?: ExecutionStep[];
+  commandOutputs?: { items: CommandOutput[]; truncated: boolean };
   uncertainActions: UncertainAction[];
   uncertainActionsTruncated: boolean;
   replay?: { sourceCount: number; focus?: string } | null;

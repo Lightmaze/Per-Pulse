@@ -23,6 +23,7 @@ import httpx
 
 from pulse_harness.life.tools import LIFE_SCHEMAS
 from pulse_harness.adapters.command import COMMAND_SCHEMA
+from pulse_harness.adapters.command_output import NAME as COMMAND_OUTPUT_NAME, SCHEMA as COMMAND_OUTPUT_SCHEMA
 from pulse_harness.adapters.history import HISTORY_SCHEMAS
 from pulse_harness.core.contracts import ToolCall
 from pulse_harness.core.errors import ProviderProtocolError, ProviderUnavailable
@@ -229,6 +230,7 @@ WORKSPACE_SCHEMAS: dict[str, dict[str, Any]] = {
     **HISTORY_SCHEMAS,
     **LIFE_SCHEMAS,
     "run_command": COMMAND_SCHEMA,
+    COMMAND_OUTPUT_NAME: COMMAND_OUTPUT_SCHEMA,
     "read_file": {
         "type": "object", "properties": {"path": {"type": "string"}},
         "required": ["path"], "additionalProperties": False,
