@@ -1,5 +1,6 @@
 import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, TickRun, WorkspaceSettings } from './types';
 import type { AdaptiveWorkChoices, CollaboratorOutcome, CollaboratorFeedbackScope, CollaboratorFeedbackView, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
+import type { CommandOutput, CommandOutputRead, CommandOutputStream } from './types';
 
 import { uploadLimit } from './uploadLimits';
 
@@ -167,6 +168,12 @@ export const api = {
   stop: (id: string, turnId: string) => request<{ accepted: boolean; repeated: boolean; view: PageView }>(`${pagePath(id)}/execution/stop`, { method: 'POST', body: JSON.stringify({ turnId }) }),
   decide: (id: string, actionId: string, decision: 'allow_once' | 'deny' | 'cancel') => request<ActionReceipt>(`${pagePath(id)}/execution/actions/${encodeURIComponent(actionId)}`, { method: 'POST', body: JSON.stringify({ decision }) }),
   artifact: (id: string, artifactId: string) => request<ArtifactRead>(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}`),
+  commandOutput: (id: string, actionId: string, stream: CommandOutputStream, offset: number, signal: AbortSignal) =>
+    request<CommandOutputRead>(`${pagePath(id)}/execution/commands/${encodeURIComponent(actionId)}/${stream}?offset=${offset}&limit=4000`, { signal }),
+  downloadCommandOutput: async (id: string, output: CommandOutput, stream: CommandOutputStream, signal: AbortSignal) => {
+    const response = await fetchResponse(`${pagePath(id)}/execution/commands/${encodeURIComponent(output.actionId)}/${stream}/download`, { signal });
+    return verifiedDownload(response, output.streams[stream]!.sha256, 'command_output_unverified');
+  },
   undoArtifact: (id: string, artifactId: string) => request<{ pageId: string; artifact: Artifact }>(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}/undo`, { method: 'POST', body: JSON.stringify({}) }),
   downloadArtifact: async (id: string, artifact: Artifact, signal: AbortSignal) => {
     const response = await fetchResponse(`${pagePath(id)}/artifacts/${encodeURIComponent(artifact.id)}/download`, { signal });

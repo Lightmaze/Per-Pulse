@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal
 import unicodedata
 from urllib.parse import quote, urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -582,6 +582,16 @@ def create_app(
     @app.get("/api/pages/{page_id}/execution")
     def execution(page_id: str, request: Request):
         return pages(request).execution.snapshot(page_id)
+
+    @app.get('/api/pages/{page_id}/execution/commands/{action_id}/{stream}')
+    def command_output(page_id: str, action_id: Identifier, stream: Literal['stdout', 'stderr'],
+                       request: Request, offset: int = Query(0, ge=0), limit: int = Query(4000, ge=1, le=8000)):
+        return pages(request).execution.command_output(page_id, action_id, stream, offset=offset, limit=limit)
+
+    @app.get('/api/pages/{page_id}/execution/commands/{action_id}/{stream}/download', response_class=Response)
+    def download_command_output(page_id: str, action_id: Identifier, stream: Literal['stdout', 'stderr'], request: Request):
+        data, digest = pages(request).execution.download_command_output(page_id, action_id, stream)
+        return _file_download(data, f'command-{action_id}-{stream}.bin', digest)
 
     @app.get("/api/pages/{page_id}/reply/stream")
     async def reply_stream(page_id: str, request: Request):

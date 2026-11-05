@@ -43,6 +43,22 @@ model continuation, exact action identity and draft retention after reload,
 and previews the same file on a phone viewport. The model is explicitly
 synthetic; approval, file replacement, receipt and digest verification are real.
 
+The saved-command flow uses the same dependency:
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  node tests/browser/command_output_flow.mjs
+```
+
+It approves commands through the actual World and Kernel, captures real OS pipe
+bytes, follows both streams in the model and browser, verifies downloads,
+rejects damaged responses, and cancels obsolete reads and pending saves. It also
+checks a later turn, Home isolation, capture limits, an explicit storage failure,
+and offline restart without a model or command executor. Docker control and
+model choices are explicitly synthetic. Set `PER_PULSE_COMMAND_SCREENSHOTS` for
+desktop and phone screenshots. The existing CI verify job runs this flow.
+
 A separate native attention-to-source flow uses the same Chromium dependency:
 ```sh
 PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
@@ -93,6 +109,25 @@ retry, old-source focus and reload, private-context isolation, stable ranges
 while new input arrives, an obsolete query response, phone layout, bilingual
 controls, Escape focus restoration, and Browser Back to another source within
 the same Work while a search is pending. Queries remain local and read-only.
+
+## Recall an original saved tool result
+
+Run `node tests/browser/tool_history_flow.mjs` with the same Playwright and
+Python environment. `PER_PULSE_TOOL_HISTORY_SCREENSHOTS` optionally records
+desktop and phone views. The explicit synthetic HTTP fixture chooses tools;
+the World, Kernel, file read, saved transcript and history reads are real.
+
+The browser reads a file once, replaces its physical bytes, sends multiple
+long turns and verifies that the original result has actually left the model
+request. The private old marker appears only in the original tool result,
+with no earlier discussion summary supplying it. `search_history(role="tool")`
+and paginated `read_history(role="tool")` then recover the exact saved JSON,
+including Unicode text and the original action, call, message and status.
+The file stays changed, the original transcript row stays unchanged, and the
+original file action still has exactly one execution. The flow repeats recall
+after a process restart, rejects another Work's search and direct read, checks
+that default discussion search excludes tool records, and opens the original
+instruction on a phone while preserving the draft and source across reload.
 
 ## Local Notice continuity
 
