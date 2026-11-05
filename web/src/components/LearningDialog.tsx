@@ -114,6 +114,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     <div className="lesson-heading"><h3>{experience.title}</h3><span>{t(experience.active ? 'learning.active' : 'learning.paused')} · v{experience.revision}</span></div>
     {experience.sourceRegime === 'replay' ? <p className="lesson-note replay-saved">{t('replay.saved')}</p> : null}
     {experience.sourceKind === 'reading' ? <p className="lesson-note">{t('learning.readingExample')}</p> : null}
+    {experience.commandSource ? <p className="lesson-note">{t('learning.commandExample')} {t('learning.commandExit', { code: experience.commandSource.exitCode })}{!experience.commandSource.captureComplete ? ` ${t('learning.commandIncomplete')}` : ''}</p> : null}
     {example ? <div className="saved-example">
       <p className="lesson-scope">{t('learning.example')}</p>
       <pre tabIndex={0} aria-label={t('learning.excerpt')}><code>{example.excerpt}</code></pre>
@@ -136,7 +137,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       </div> : null}
       {experience.encounter ? <SourceEncounter experience={experience} pageId={pageId} navigate={navigate} /> : <p className="lesson-scope">{t('learning.sourcePrivate')}</p>}
       {experience.sourcePageId ? <div className="lesson-actions">
-        {originalId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, originalId)}>{t(experience.sourceKind === 'reading' ? 'learning.readingTurn' : 'learning.original')}</button> : null}
+        {originalId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, originalId)}>{t(experience.sourceKind === 'command' ? 'learning.commandTurn' : experience.sourceKind === 'reading' ? 'learning.readingTurn' : 'learning.original')}</button> : null}
         {correctionId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, correctionId)}>{t('learning.correction')}</button> : null}
       </div> : null}
     </details> : null}

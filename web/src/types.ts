@@ -215,7 +215,8 @@ type ExperienceBase = {
   canReport: boolean;
   sourcePageId: string | null;
   sourceRegime?: 'replay' | null;
-  sourceKind?: 'reading';
+  sourceKind?: 'reading' | 'command';
+  commandSource?: { stream: 'stdout' | 'stderr'; exitCode: number; captureComplete: boolean };
   readingSource?: { path: string; digest: string; receiptId: string; observedAt: string };
   sourceAnchor?: { resultMessageId: string; feedbackMessageId?: string };
   record_type: 'observed_episode' | 'constructed_fixture';

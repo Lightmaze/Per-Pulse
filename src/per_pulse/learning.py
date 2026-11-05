@@ -138,6 +138,7 @@ class PageLearning:
         # reader can inspect their provenance without copying the raw episode.
         source = record.get("source", {})
         reading = source.get("kind") == "native_reading_example"
+        command = source.get("kind") == "native_command_example"
         if reading:
             result["sourceKind"] = "reading"
             if local:
@@ -147,6 +148,12 @@ class PageLearning:
                     "receiptId": source["reading_receipt_id"],
                     "observedAt": source["observed_at"],
                 }
+        if command:
+            result["sourceKind"] = "command"
+            observed = source["command_observation"]
+            result["commandSource"] = {"stream": observed["stream"], "exitCode": observed["exit_code"],
+                                       "captureComplete": observed["capture_complete"]}
+        if reading or command:
             # Navigation points to the actual reading turn's final reply. It
             # does not claim that the selected material came from that reply.
             turn = self.pages.runtime.causal_ledger.get_turn_for_world(

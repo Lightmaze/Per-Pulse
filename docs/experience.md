@@ -16,6 +16,14 @@ internal activation and its original identity. User feedback is attached only
 when an actual follow-up is selected. Saved examples are available when later
 foreground or background work chooses its approach, including after restart.
 
+After reading saved command output, the model can use
+`posture.remember_command(receipt_id, title, excerpt, note?)` to keep an exact
+passage. Use the `receipt_id` returned by `read_command_output`.
+The example retains the original command's exit code,
+output range and capture completeness; selecting it never runs the command
+again. The selected passage and note can inform later work, while the full
+command and surrounding output stay in their source page.
+
 When that experience began with an attached file, **Source experience** shows
 the readable message and an **Open source message** link to its original file
 references. The stored encounter retains its exact input. Shared experiences

@@ -466,6 +466,10 @@ class PostureMemory:
             if record["source"].get("kind") == "native_reading_example":
                 item["source"]["kind"] = "native_reading_example"
                 item["source"]["meaning"] = "retained_reading_observation_not_verified_source_or_outcome"
+            if record["source"].get("kind") == "native_command_example":
+                item["source"].update(kind="native_command_example",
+                                      meaning="retained_command_observation_not_quality_rating",
+                                      command_observation=deepcopy(record["source"]["command_observation"]))
             if record["source"].get("execution_regime") == "replay":
                 # Share the meaning, not the original page's selected sources.
                 item["source"]["execution_regime"] = "replay"

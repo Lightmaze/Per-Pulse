@@ -189,7 +189,8 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
             for candidate in self._command_history_scopes(scope):
                 cancellation.raise_if_cancelled()
                 try:
-                    return command_output.read(self.checkpoint_root, self.store, candidate, call.arguments)
+                    output = command_output.read(self.checkpoint_root, self.store, candidate, call.arguments)
+                    return {**output, "receipt_id": action_request_id}
                 except ScopeConflict:
                     continue
             raise ScopeConflict('This command output does not belong to this Work history.')

@@ -45,7 +45,7 @@ _NATIVE_VERDICTS = {"not_useful", "harmful", "withdrawn"}
 SCHEMA = {
     "type": "object",
     "properties": {
-        "op": {"type": "string", "enum": ["list", "find", "get", "remember", "remember_example", "remember_reading", "feedback", "revise"]},
+        "op": {"type": "string", "enum": ["list", "find", "get", "remember", "remember_example", "remember_reading", "remember_command", "feedback", "revise"]},
         "receipt_id": {"type": "string", "minLength": 1, "maxLength": 256},
         "query": {"type": "string", "minLength": 2, "maxLength": 160},
         "after_experience_id": {"type": "string", "maxLength": 160},
@@ -98,7 +98,10 @@ def descriptor() -> ToolDescriptor:
         "keeps an exact passage from an earlier assistant reply; without "
         "feedback_message_id it is unreviewed. remember_reading(receipt_id, title, excerpt,"
         " note?) keeps an exact passage shown by reading open, continue, resume or follow "
-        "(a find match is not enough); it records what the file said then. When a later "
+        "(a find match is not enough); it records what the file said then. "
+        "remember_command(receipt_id, title, excerpt, note?) keeps an exact passage "
+        "already shown by read_command_output; use its returned receipt_id. "
+        "The command's exit code and capture completeness stay attached. When a later "
         "user correction shows a lesson was wrong, feedback(experience_id, "
         "expected_revision, verdict, feedback_message_id) marks it not_useful, harmful or "
         "withdrawn; harmful and withdrawn turn it off. When a correction refines a lesson "
@@ -180,12 +183,12 @@ def validate(arguments: Mapping[str, Any]) -> dict:
                 }, source={"kind": "validation_only"}, **content,
             )
         return values
-    reading_example = values.get("op") == "remember_reading"
-    example = reading_example or values.get("op") == "remember_example"
-    if reading_example:
+    observation_example = values.get("op") in {"remember_reading", "remember_command"}
+    example = observation_example or values.get("op") == "remember_example"
+    if observation_example:
         if (not _READING_EXAMPLE_FIELDS <= set(values)
                 or set(values) - (_READING_EXAMPLE_FIELDS | {"op", "note"})):
-            raise ValueError("incorrect reading example fields")
+            raise ValueError("incorrect observation example fields")
         receipt = values["receipt_id"]
         if (not isinstance(receipt, str) or not receipt.strip() or len(receipt) > 256
                 or any(ord(char) < 32 for char in receipt)):
@@ -496,10 +499,16 @@ class NativePosture:
 
     def _capture(self, scope, values, turn, request_id, action_id) -> dict:
         reading_example = values["op"] == "remember_reading"
-        example = reading_example or values["op"] == "remember_example"
-        if reading_example:
-            from .reading_experience import capture_reading_example
-            capture = capture_reading_example(self.runtime, scope, values["receipt_id"], values["excerpt"])
+        command_example = values["op"] == "remember_command"
+        example = reading_example or command_example or values["op"] == "remember_example"
+        if reading_example or command_example:
+            if command_example:
+                from .command_experience import capture_command_example
+                capture = capture_command_example(self.runtime, scope, values["receipt_id"],
+                                                  values["excerpt"], selecting_action_id=action_id)
+            else:
+                from .reading_experience import capture_reading_example
+                capture = capture_reading_example(self.runtime, scope, values["receipt_id"], values["excerpt"])
             content = {"representation": "example", "title": values["title"],
                        "excerpt": values["excerpt"], "note": values.get("note", "")}
         elif example:
@@ -678,7 +687,7 @@ class NativePosture:
                 return self._receipt(prior)
             if len(self._requests(pending=True, limit=MAX_PENDING + 1)) >= MAX_PENDING:
                 raise ScopeConflict("pending posture capacity reached; finish current turns")
-            if values["op"] in {"remember", "remember_example", "remember_reading"}:
+            if values["op"] in {"remember", "remember_example", "remember_reading", "remember_command"}:
                 experience = self._capture(scope, values, turn, key, action_request_id)
                 memory.validate_experience(**experience)
                 payload = {"experience": experience, "experience_id": experience["experience_id"]}
@@ -830,7 +839,7 @@ class NativePosture:
                         self._finish(record, "feedback_recorded", revision=saved["revision"])
                     else:
                         experience = deepcopy(record["experience"])
-                        if record["arguments"]["op"] == "remember_reading":
+                        if record["arguments"]["op"] in {"remember_reading", "remember_command"}:
                             # The passage was a real tool observation; separately
                             # retain whether its selector used a test provider.
                             result = r.causal_ledger.get_event(source.result_event_id)
