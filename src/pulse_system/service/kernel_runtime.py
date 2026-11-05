@@ -105,7 +105,7 @@ class _GuardedModel:
 
 
 class _WorldWorkspace(CommandWorkspaceToolProvider):
-    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, local=None, posture=None, attention=None, replay_authorize=None, background_main_round_limit=None, rim_policy=False, **kwargs):
+    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, local=None, posture=None, attention=None, notice=None, replay_authorize=None, background_main_round_limit=None, rim_policy=False, **kwargs):
         self._guard, self._mutation_guard = guard, mutation_guard
         self._allow_mutations = allow_mutations
         self._background_main_round_limit = background_main_round_limit
@@ -116,6 +116,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         self._team = team
         self._local = local
         self._attention = attention
+        self._notice = notice
         self._posture = posture
         self._replay_authorize = replay_authorize
         self._cognition = cognition
@@ -124,7 +125,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
 
     def descriptors(self):
         return tuple(d for d in super().descriptors()
-                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),)) + (() if self._attention is None else (self._attention_descriptor(),)) + (() if self._posture is None else (self._posture_descriptor(),))
+                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),)) + (() if self._attention is None else (self._attention_descriptor(),)) + (() if self._posture is None else (self._posture_descriptor(),)) + (() if self._notice is None else (self._notice_descriptor(),))
 
     def descriptors_for_scope(self, scope):
         return ((native_replay.descriptor(),) if native_replay.mode(self.store, scope)
@@ -132,6 +133,11 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
 
     def project_model_messages(self, scope, messages):
         return native_replay.project_model_messages(self.store, scope, messages)
+
+    def model_context_messages(self, scope, max_tokens):
+        if self._notice is None or native_replay.mode(self.store, scope):
+            return ()
+        return self._notice.model_context_messages(scope, max_tokens)
 
     def model_round_limit_for_scope(self, scope, configured):
         entry = native_replay.mode(self.store, scope)
@@ -150,6 +156,10 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
 
     def _attention_descriptor(self):
         from .native_attention import descriptor
+        return descriptor()
+
+    def _notice_descriptor(self):
+        from .native_notice import descriptor
         return descriptor()
 
     def _team_descriptor(self):
@@ -190,6 +200,10 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
             if self._attention is None:
                 raise ScopeConflict("native Pulse attention is unavailable")
             return self._attention.execute(scope, call, cancellation, action_request_id=action_request_id)
+        if call.name == "notice":
+            if self._notice is None:
+                raise ScopeConflict("native notices are unavailable")
+            return self._notice.execute(scope, call, cancellation, action_request_id=action_request_id)
         if call.name == "team":
             if self._team is None:
                 raise ScopeConflict("native team is unavailable")
@@ -314,6 +328,7 @@ class KernelHarnessRuntime:
         self.team = None
         self.local = None
         self.attention = None
+        self.notice = None
         self.cognition = None
         self.coverme = None
         self.expert = None
@@ -508,7 +523,7 @@ class KernelHarnessRuntime:
     def bind_world(self, world_id: str, guard: Callable[[], Any], publication,
                    *, history_lineage: Callable[[str], tuple[str, ...]] | None = None,
                    context_for_turn: Callable[[str, str], str] | None = None, work=None, team=None, local=None,
-                   attention=None, input_for_turn: Callable[[str, str], str | None] | None = None,
+                   attention=None, notice=None, input_for_turn: Callable[[str, str], str | None] | None = None,
                    world_storage=None, posture=None,
                    background_main_round_limit_for_turn=None) -> None:
         """Called by RuntimeService after it owns/reconciles the durable world."""
@@ -522,6 +537,7 @@ class KernelHarnessRuntime:
         self.team = team
         self.local = local
         self.attention = attention
+        self.notice = notice
         self.posture = posture
         path = Path(self.db_path)
         if self.db_path != ":memory:":
@@ -568,7 +584,7 @@ class KernelHarnessRuntime:
                     store, root, checkpoints, guard=self._check,
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
                     command_executor=self._command_executor, history_scopes=self._history_scopes, life_hub=self.life,
-                    cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, posture=self.posture, replay_authorize=self.authorize_replay,
+                    cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, posture=self.posture, notice=self.notice, replay_authorize=self.authorize_replay,
                     background_main_round_limit=background_main_round_limit_for_turn,
                     rim_policy=self._rim_policy),
             )
@@ -686,6 +702,9 @@ class KernelHarnessRuntime:
         if self.attention is not None:
             from .native_attention import SCHEMA, NAME
             adapter.extend_tool_schemas({NAME: SCHEMA})
+        if self.notice is not None:
+            from .native_notice import SCHEMA, NAME
+            adapter.extend_tool_schemas({NAME: SCHEMA})
         adapter.life_image_resolver = self.life.resolve_image
         return _GuardedModel(adapter, self._check)
 
@@ -750,6 +769,21 @@ class KernelHarnessRuntime:
         action = self.kernel.store.get_action(scope, action_request_id)
         if action.tool_name != "posture" or dict(action.arguments) != dict(call.arguments) or action.terminal:
             raise ScopeConflict("posture does not match its native action")
+
+    def authorize_notice(self, scope, action_request_id, call):
+        self._check()
+        if (self.notice is None
+                or scope.session_scope() != self.scope_for(scope.engram_id, scope.context_id)):
+            raise ScopeConflict("notice requires its original owned context")
+        if self.kernel.store.get_session(scope.session_scope()).status not in {
+                SessionStatus.CREATED, SessionStatus.ACTIVE}:
+            raise LeaseFenced("notice source context is no longer active")
+        with self._lock:
+            if self._active.get((scope.engram_id, scope.context_id)) != scope or not action_request_id:
+                raise ScopeConflict("notice requires the exact active context turn")
+        action = self.kernel.store.get_action(scope, action_request_id)
+        if action.tool_name != "notice" or dict(action.arguments) != dict(call.arguments) or action.terminal:
+            raise ScopeConflict("notice does not match its source Kernel action")
 
     def authorize_attention(self, scope, action_request_id, call):
         self._check()

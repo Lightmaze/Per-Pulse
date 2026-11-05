@@ -45,7 +45,7 @@ from .errors import (
 )
 from .events import EventDraft
 from .hooks import HookContext, HookDecision, HookRejected, HookSet, HookStage
-from .context_window import fit_context
+from .context_window import estimate_tokens, fit_context
 from .provider import (
     CancellationRequested,
     CancellationToken,
@@ -1866,8 +1866,31 @@ class TurnRunner:
                        and message.get("role") in {"system", "user", "assistant", "tool", "reasoning"}
                        and isinstance(message.get("content"), str) for message in messages):
                 raise ProviderProtocolError("invalid scoped model input projection")
+        # Auxiliary memory has its own bounded allowance, outside the durable
+        # transcript. Reserve it before fitting history, then append it after
+        # the complete exchange, so neither a call/result pair nor the memory
+        # is silently split by the context window.
+        context_messages = ()
+        context_provider = getattr(self.tool_provider, "model_context_messages", None)
+        context_budget = min(1024, self.max_context_tokens // 2) if self.max_context_tokens else 1024
+        if callable(context_provider) and context_budget:
+            try:
+                context_messages = tuple(context_provider(scope, context_budget))
+            except HarnessError:
+                raise
+            except Exception as exc:
+                raise ProviderProtocolError("scoped auxiliary context failed") from exc
+            if (not all(isinstance(message, Mapping)
+                        and message.get("role") in {"system", "assistant"}
+                        and isinstance(message.get("content"), str)
+                        and isinstance(message.get("item_id"), str)
+                        and message["item_id"].startswith("auxiliary-context:") for message in context_messages)
+                    or sum(estimate_tokens(message) for message in context_messages) > context_budget):
+                raise ProviderProtocolError("invalid or oversized auxiliary context")
+        reserved = sum(estimate_tokens(message) for message in context_messages)
         if self.max_context_tokens is not None:
-            messages = fit_context(messages, self.max_context_tokens)
+            messages = fit_context(messages, self.max_context_tokens - reserved)
+        messages = (*messages, *context_messages)
         cursor = self.store.get_session(scope.session_scope()).cursor
         return ModelRequest(
             scope=scope,
