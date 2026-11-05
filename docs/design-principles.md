@@ -92,13 +92,14 @@ visible note.
   - the full history was resent until it overflowed the model's context;
   - turns had a 16-round limit, and approvals a 5-minute expiry;
   - a busy (429) or failing (5xx) service ended the turn without a retry
-    (#150).
+    (#150);
+  - command output was kept only as a 4 KiB preview; up to 1 MiB per
+    stream is now saved and can be read later (#160).
 - **Open:**
   - images cannot be sent to the model;
   - old turns are dropped rather than summarized;
   - `read_file` has no offset;
-  - commands need a Docker image, and each needs its own Allow once;
-  - command output keeps only 4 KiB.
+  - commands need a Docker image, and each needs its own Allow once.
 
 **Principle.** Match current practice by default:
 
@@ -498,7 +499,7 @@ and characters.
 | Item | Pattern | State |
 |---|---|---|
 | A single item over 64 KiB fails the round, so the model cannot rewrite a file over about 64 KB in one call | Over-defense | Open |
-| Command output keeps the first 4 KiB, each command needs its own Allow once, and commands need a Docker image | Over-defense, off by default | Open |
+| Each command needs its own Allow once, and commands need a Docker image (output itself is now kept, #160) | Over-defense, off by default | Open |
 | Dotfiles such as `.env` and `.gitignore` cannot be listed, previewed or uploaded, and are left out without a note | Over-defense, silent failure | Open |
 | Model servers elsewhere on the local network, and endpoints with a query string (Azure), are refused | Over-defense | Open |
 | Images cannot be sent to the model; old turns are dropped, not summarized; `read_file` has no offset | Outdated practice | Open |
