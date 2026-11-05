@@ -14,7 +14,12 @@ preview says it is incomplete, and the model's reading tools report it
 not taken for a search of the whole PDF. Inspect the preview, then **Add to draft**. Your existing text and page
 links stay in place. Tell Per Pulse what you want to do with the material and
 send the message when it is ready. Existing files can be reopened from the
-same dialog without uploading them again.
+same dialog without uploading them again. Ordinary workspace dotfiles, such as
+`.env` and `.gitignore`, appear in Materials and can be previewed; the owner's
+file contents are shown unchanged. Internal `.pulse` and `.git` directories
+and in-progress tool temporary files stay out of the file browser. Uploading
+a dotfile keeps its original display name and creates a separately named
+copy under `uploads/`, rather than replacing the existing file.
 
 Files belong to the shared native workspace and can be read from any page;
 conversation histories remain separate. Each Work keeps its own attachment
