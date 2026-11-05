@@ -27,7 +27,8 @@ SCOPE = HarnessScope("world", "subject", "session", 0, "owner", turn_id="turn")
 def clean_env(monkeypatch):
     for name in ("P_PULSE_CHAT_ENDPOINT", "P_PULSE_CHAT_MODEL",
                  "P_PULSE_ALLOW_LOCAL_HTTP", "P_PULSE_LOCAL_NO_AUTH",
-                 "P_PULSE_API_KEY", "P_PULSE_PROVIDER_NAMESPACE"):
+                 "P_PULSE_API_KEY", "P_PULSE_PROVIDER_NAMESPACE",
+                 "P_PULSE_CHAT_AUTH_STYLE"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -129,3 +130,59 @@ def test_factory_requires_both_explicit_flags_and_a_loopback_endpoint(monkeypatc
     monkeypatch.delenv("P_PULSE_ALLOW_LOCAL_HTTP")
     with pytest.raises(ValueError, match="loopback"):
         model_factory_from_env()
+
+
+@pytest.mark.parametrize("bad_url", [
+    "https://sample.openai.azure.com/openai/v1/chat/completions?api-key=secret",
+    "https://sample.openai.azure.com/openai/v1/chat/completions?api-version=v1&api-key=secret",
+    "https://sample.openai.azure.com/openai/v1/chat/completions?api-version=",
+    "https://sample.openai.azure.com/openai/v1/chat/completions?api-version=v1&api-version=v2",
+])
+def test_versioned_endpoint_rejects_unapproved_or_secret_query_parameters(bad_url):
+    with pytest.raises(ValueError, match="query"):
+        ChatHTTPConfig(bad_url, "model")
+
+
+@pytest.mark.parametrize("bad_style", ["authorization", "api_key", "none", "API-KEY"])
+def test_unknown_auth_style_is_not_silently_accepted(bad_style):
+    with pytest.raises(ValueError, match="authentication style"):
+        ChatHTTPConfig("https://provider.example/v1/chat/completions", "model",
+                       auth_style=bad_style)
+
+
+def test_api_key_authentication_preserves_versioned_endpoint_and_never_sends_bearer(monkeypatch):
+    endpoint = ("https://sample.openai.azure.com/openai/deployments/choice/chat/completions"
+                "?api-version=2024-10-21")
+    secret = "transport-only-secret"
+    monkeypatch.setenv("P_PULSE_API_KEY", secret)
+    observed = []
+
+    def respond(request):
+        observed.append((str(request.url), request.headers.get("api-key"),
+                         request.headers.get("Authorization"), json.loads(request.content)))
+        payload = ('data: {"choices":[{"index":0,"delta":{"content":"Answer"},'
+                   '"finish_reason":null}]}\n\n'
+                   'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+                   'data: [DONE]\n\n')
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              content=payload)
+
+    adapter = ChatHTTPModelAdapter(
+        ChatHTTPConfig(endpoint, "choice", auth_style="api-key"),
+        transport=httpx.MockTransport(respond),
+    )
+    request = ModelRequest(scope=SCOPE, messages=({"role": "user", "content": "Hello"},),
+                           tools=(), cursor=0)
+    try:
+        adapter.preflight_stream()
+        events = list(adapter.stream(request))
+        assert events[-1].kind is ModelDeltaKind.DONE
+        assert observed == [(endpoint, secret, None, adapter.request_body(request))]
+    finally:
+        adapter.close()
+
+
+def test_api_key_auth_style_must_not_disable_loopback_security():
+    with pytest.raises(ValueError, match="loopback"):
+        ChatHTTPConfig(LOOPBACK, "model", allow_local_http=True,
+                       no_auth_local=True, auth_style="api-key")
