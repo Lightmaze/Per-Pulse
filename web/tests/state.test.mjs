@@ -92,6 +92,9 @@ test('a failed turn explains its cause from the Kernel error code', () => {
   assert.equal(failureReason('provider_http_400').key, 'status.failureRejected');
   assert.equal(failureReason('provider_timeout').key, 'status.failureUnreachable');
   assert.equal(failureReason('provider_output_limit').key, 'status.failureOutputLimit');
+  assert.equal(failureReason('payload_too_large').key, 'status.failurePayloadTooLarge');
+  assert.match(failureReason('payload_too_large').text, /Review completed work/);
+  assert.equal(getPageActivity('error', true, false, 'payload_too_large').detailKey, 'status.failurePayloadTooLarge');
   assert.equal(failureReason('provider_content_filtered').key, 'status.failureFiltered');
   assert.equal(failureReason('provider_stream_too_long').key, 'status.failureStreamTooLong');
   assert.equal(failureReason('provider_generation_incomplete').key, 'status.failureIncomplete');
