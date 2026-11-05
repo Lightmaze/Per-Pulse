@@ -20,6 +20,7 @@ from pulse_harness.core.contracts import ActionStatus, ToolDescriptor, TurnStatu
 from pulse_harness.core.errors import RedactionRequired, ScopeConflict
 from pulse_harness.core.replay import bound_text
 from pulse_harness.core.scope import HarnessScope
+from pulse_system.core.causality.ledger import CausalTransitionError
 from pulse_system.core.types import (
     CausalEventDomain, CausalEventKind, CausalEventSource, CausalEventStatus,
     EngramStatus, HarnessTurnState,
@@ -282,16 +283,18 @@ def _input_situation(runtime, subject_id: str, context_id: str, event_id: str, *
             or event.source is not CausalEventSource.SELF):
         raise ScopeConflict("posture source is not a message or native quiet activation")
     if turn is None:
-        with runtime.storage._lock:
-            rows = runtime.storage._conn.execute(
-                "SELECT id FROM harness_turns WHERE event_id=? AND engram_id=? AND state='running'",
-                (event.id, event.engram_id),
-            ).fetchall()
-        if len(rows) != 1:
+        try:
+            turn = runtime.causal_ledger.get_running_turn_for_event(
+                event.id, world_id=runtime.world_id, engram_id=event.engram_id,
+            )
+        except CausalTransitionError as exc:
+            raise ScopeConflict("quiet activation has no unique native turn") from exc
+        if turn is None:
             raise ScopeConflict("quiet activation has no unique native turn")
-        turn = runtime.causal_ledger.get_turn_for_world(rows[0][0], runtime.world_id)
+    else:
+        turn = runtime.causal_ledger.get_turn_for_world(turn.id, runtime.world_id)
     if (turn is None or turn.event_id != event.id or turn.engram_id != event.engram_id
-            or runtime._native_kernel_context_for_turn(event.engram_id, turn.id) != context_id):
+            or runtime.native_kernel_context_for_turn(event.engram_id, turn.id) != context_id):
         raise ScopeConflict("quiet activation does not match its native turn")
     if turn.state is HarnessTurnState.SETTLED:
         if turn.prompt_accepted is not True or event.status is not CausalEventStatus.SETTLED:

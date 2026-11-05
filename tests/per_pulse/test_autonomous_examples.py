@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -15,7 +16,7 @@ from material_fixture import MaterialFixture
 from per_pulse.service import PageService, PulseSettings
 from pulse_harness.core.errors import ScopeConflict
 from pulse_system.agent.harness.base import HarnessError
-from pulse_system.service.native_posture import capture_example
+from pulse_system.service.native_posture import _input_situation, capture_example
 
 
 class ExampleFixture(MaterialFixture):
@@ -30,6 +31,7 @@ class ExampleFixture(MaterialFixture):
         self.primary_requests = []
         self.finish = "succeed"
         self.cancel = None
+        self.probe = None
 
     def handler(self, request):
         body = json.loads(request.content)
@@ -47,6 +49,9 @@ class ExampleFixture(MaterialFixture):
             return self.response("PASS")
         if "UNTRUSTED_REVIEW_DATA_JSON" in material:
             return self.response('{"mode":"none"}')
+        if self.probe is not None:
+            probe, self.probe = self.probe, None
+            probe()
         current = max(i for i, item in enumerate(messages) if item["role"] == "user")
         results = [json.loads(item["content"]) for item in messages[current + 1:] if item["role"] == "tool"]
         if self.mode == "remember":
@@ -156,6 +161,38 @@ def test_operator_can_save_an_actual_autonomous_result(local):
     assert record["sourceAnchor"] == {"resultMessageId": source.id}
     assert record["source"]["feedback_evidence_class"] == "not_attached"
     assert "outcome" not in record["encounter"]
+
+
+def test_quiet_source_lookup_uses_public_interfaces_for_active_and_historical_turns(local):
+    pages, fixture = local
+    user_result(pages)
+    runtime = pages.runtime
+    subject = runtime.continuity_engram_id
+    trigger = next_quiet(pages)
+    public_runtime = SimpleNamespace(
+        world_id=runtime.world_id, causal_ledger=runtime.causal_ledger,
+        harness=runtime.harness, kernel_service=runtime.kernel_service,
+        native_kernel_context_for_turn=runtime.native_kernel_context_for_turn,
+    )
+    observed = []
+    fixture.probe = lambda: observed.append(_input_situation(public_runtime, subject, "", trigger.id))
+    run_event(pages, trigger)
+    active_event, active_text, active_source = observed[0]
+    assert active_event.id == trigger.id and active_source["event_id"] == trigger.id
+    prior = runtime.causal_ledger.get_turn_for_world(active_source["turn_id"], runtime.world_id)
+    assert prior.execution_context == "home"
+    assert runtime.native_kernel_context_for_turn(subject, prior.id) == ""
+    historical_event, historical_text, historical_source = _input_situation(
+        public_runtime, subject, "", trigger.id, turn=prior,
+    )
+    assert historical_event.id == active_event.id
+    assert (historical_text, historical_source) == (active_text, active_source)
+
+    # A retained object cannot override the current admission on historical reread.
+    with runtime.storage._lock:
+        runtime.storage._conn.execute("UPDATE harness_turns SET prompt_accepted=0 WHERE id=?", (prior.id,))
+    with pytest.raises(ScopeConflict, match="accepted settled turn"):
+        _input_situation(public_runtime, subject, "", trigger.id, turn=prior)
 
 
 def test_autonomous_example_survives_restart_and_enters_the_next_pulses_first_decision(local, tmp_path):
