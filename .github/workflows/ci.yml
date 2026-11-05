@@ -120,6 +120,9 @@ jobs:
       - name: Verify Work completion remains visible from idle Home
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_STATUS_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/workspace_status_flow.mjs
+      - name: Verify native Work discovery through existing Home observations
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_WORK_DISCOVERY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots/work-discovery" node tests/browser/work_discovery_flow.mjs
       - name: Verify /tick continuation and Stop in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TICK_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/tick_flow.mjs

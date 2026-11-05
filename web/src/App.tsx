@@ -469,7 +469,7 @@ export default function App() {
             {sourceNotice ? <p className="conversation-note source-notice" role="status">{sourceNotice}</p> : null}
             <PageUsage usage={view?.execution?.usage} />
           </section>
-          {route.id === 'home' && bootstrap ? <HomeContinuations pages={pages} workspaceId={bootstrap.workspaceId} navigate={navigate} /> : null}
+          {route.id === 'home' && bootstrap ? <HomeContinuations pages={pages} workspaceId={bootstrap.workspaceId} serviceInstanceId={bootstrap.serviceInstanceId} readWorkspace={workspace.refreshBootstrap} navigate={navigate} /> : null}
           {error ? <div className="error-notice" role="alert"><span>{error}</span><button disabled={isRefreshing} onClick={() => { setError(''); refreshWorkspace().catch(problem => setError(errorText(problem))); }}>{t('app.retry')}</button></div> : null}
           {sendError && !error ? <div className="error-notice" role="alert"><span>{sendError}</span><button disabled={isRefreshing} onClick={() => { setSendErrors(previous => ({ ...previous, [draftKey]: '' })); refreshWorkspace().catch(problem => setError(errorText(problem))); }}>{t('app.retry')}</button></div> : null}
           {syncError && !error && !sendError ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}

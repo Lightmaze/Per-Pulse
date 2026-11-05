@@ -4,7 +4,7 @@
  * cross-Work transcript copies or automatic Home results.
  * Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { homeContinuations, homeWorkNeedsAttention, verifiedHomePulse } from '../homeContinuations';
 import { useLanguage } from '../i18n';
@@ -13,12 +13,18 @@ import { pulseActivityLabel } from '../pulseActivityLabels';
 import type { Bootstrap, PageSummary, PulseObservation } from '../types';
 import type { Navigate } from './SessionLink';
 
-export function HomeContinuations({ pages, navigate, workspaceId }: {
+export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanceId, readWorkspace }: {
   pages: PageSummary[];
   navigate: Navigate;
   workspaceId: string;
+  serviceInstanceId: string;
+  readWorkspace: (signal: AbortSignal, expected: Pick<Bootstrap, 'workspaceId' | 'serviceInstanceId'>) => Promise<Bootstrap>;
 }) {
   const { t, pageTitle } = useLanguage();
+  // An explicit reconnect updates the next scheduled read without starting
+  // another observation or replacing the existing interval.
+  const serviceInstance = useRef(serviceInstanceId);
+  serviceInstance.current = serviceInstanceId;
   const [showAllPending, setShowAllPending] = useState(false);
   const [showAllResults, setShowAllResults] = useState(false);
   const [visited, setVisited] = useState<{ workspaceId: string; eventIds: string[] }>(() => ({
@@ -32,6 +38,7 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
   } | null>(null);
   const currentSnapshot = snapshot?.workspaceId === workspaceId ? snapshot : null;
   const freshBootstrap = currentSnapshot?.bootstrap?.workspaceId === workspaceId
+    && currentSnapshot.bootstrap.serviceInstanceId === serviceInstanceId
     ? currentSnapshot.bootstrap : null;
   const pulse = verifiedHomePulse(workspaceId, freshBootstrap, currentSnapshot?.observation ?? null);
   const freshPages = freshBootstrap?.pages ?? null;
@@ -64,7 +71,9 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
       if (readingWorkspace || controller.signal.aborted) return;
       readingWorkspace = true;
       try {
-        const latest = await api.bootstrap(controller.signal);
+        // The existing Home observation also updates shared page summaries.
+        // Its reader preserves newer local views and fences service changes.
+        const latest = await readWorkspace(controller.signal, { workspaceId, serviceInstanceId: serviceInstance.current });
         if (!controller.signal.aborted) setSnapshot(previous => ({
           workspaceId, observation: previous?.workspaceId === workspaceId ? previous.observation : null,
           bootstrap: latest.workspaceId === workspaceId ? latest : null,
@@ -85,7 +94,7 @@ export function HomeContinuations({ pages, navigate, workspaceId }: {
       void refreshWorkspace();
     }, 12000);
     return () => { controller.abort(); window.clearInterval(interval); };
-  }, [workspaceId]);
+  }, [workspaceId, readWorkspace]);
 
   // Verify page ownership against the fresh native World before producing
   // exact-source Pulse links or actionable Work status.

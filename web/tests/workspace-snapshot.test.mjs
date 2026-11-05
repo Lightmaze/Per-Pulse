@@ -23,6 +23,20 @@ test('creating a page while a workspace read is pending does not lose its sideba
   assert.deepEqual(next.pages, [home, created]);
 });
 
+test('Home discovery adds an already idle Work without rolling back newer local page views', () => {
+  const home = { id: 'home', title: 'Home', status: 'working' };
+  const renamed = { id: 'existing', title: 'Revised name', status: 'idle' };
+  const discovered = { id: 'native-created', title: 'A fast finished Work', status: 'idle' };
+  const current = snapshot([home, renamed]);
+  const observed = snapshot([
+    { ...home, status: 'idle' }, { ...renamed, title: 'Old name', status: 'working' }, discovered,
+  ]);
+  const merged = mergeWorkspaceSnapshot(current, observed,
+    { home: 1, existing: 1 }, { home: 2, existing: 2 });
+  assert.deepEqual(merged.pages, [home, renamed, discovered]);
+  assert.deepEqual(current.pages, [home, renamed]);
+});
+
 test('explicit observations from a new World or service never merge old page summaries', () => {
   const current = snapshot([{ id: 'home', title: 'Private old context' }]);
   for (const identity of [{ workspaceId: 'another-world' }, { serviceInstanceId: 'restarted' }]) {

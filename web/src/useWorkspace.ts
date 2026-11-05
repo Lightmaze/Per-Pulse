@@ -60,10 +60,12 @@ export function useWorkspace() {
     const request = ++bootstrapRequests.current;
     const before = { ...versions.current };
     const next = await api.bootstrap(signal);
+    // Shared readers also consume the returned snapshot. Validate its origin
+    // even when a newer workspace request already won the state update.
+    if (!signal?.aborted && expected && !pageBelongsToWorkspace(next, expected)) {
+      throw new Error('The workspace restarted or changed. Refresh updates to reconnect.');
+    }
     if (!signal?.aborted && bootstrapRequests.current === request) {
-      if (expected && (next.workspaceId !== expected.workspaceId || next.serviceInstanceId !== expected.serviceInstanceId)) {
-        throw new Error('The workspace restarted or changed. Refresh updates to reconnect.');
-      }
       setBootstrap(previous => mergeWorkspaceSnapshot(previous, next, before, versions.current));
     }
     return next;
