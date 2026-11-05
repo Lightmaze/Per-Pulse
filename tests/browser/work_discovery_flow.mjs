@@ -175,12 +175,14 @@ try {
   assert.equal(await page.locator('.provider-indicator').innerText(), 'AI connected');
   const reconnectedRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/bootstrap');
   releaseReconnect(); await reconnectedRead;
-  await page.unroute('**/api/bootstrap', reconnectRoute);
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
   await page.getByText('The held Home reply finished. [Explicit synthetic fixture]', { exact: true }).waitFor();
   await wait(async () => (await page.locator('.provider-indicator').innerText()) === 'AI disconnected', 'explicit reconnect adopts the restarted service');
   await wait(async () => await page.locator('.sync-notice').count() === 0, 'reconnect recovers the current page view and clears the notice');
   assert.equal(await composer.inputValue(), homeDraft);
+  // Removing the final interceptor can stall an unrelated request starting
+  // in Chromium. Keep it installed until reconnect's fresh page has recovered.
+  await page.unroute('**/api/bootstrap', reconnectRoute);
   checks.push('A scheduled Home observation overlapping explicit reconnect cannot suppress adoption of the new service or leave the current page unavailable.');
   await page.setViewportSize({ width: 390, height: 844 });
   await navigate(title);
