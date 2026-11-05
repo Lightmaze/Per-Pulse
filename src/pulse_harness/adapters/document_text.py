@@ -51,6 +51,7 @@ class PdfText:
     pages: int
     pages_read: int
     complete: bool
+    pages_without_selectable_text: bool = False
 
 
 def is_pdf_path(path: str | PurePath) -> bool:
@@ -108,16 +109,20 @@ def _read(data: bytes, should_stop, max_pages: int, max_chars: int) -> PdfText:
             total = len(reader.pages)
             pages: list[str] = []
             used = 0
+            missing_text = False
             for number in range(1, total + 1):
                 if should_stop is not None and should_stop():
                     raise DocumentTextError("pdf_read_stopped", "Reading the PDF was stopped.")
                 if number > max_pages:
-                    return _stopped(pages, number - 1, total)
+                    return _stopped(pages, number - 1, total, missing_text)
                 text = (reader.pages[number - 1].extract_text() or "").strip()
-                entry = f"[Page {number}]\n{text}" if text else f"[Page {number}]"
+                if not text:
+                    missing_text = True
+                entry = (f"[Page {number}]\n{text}" if text else
+                         f"[Page {number}]\n[No selectable text on this page; images or scans are not read.]")
                 if used + len(entry) > max_chars:
                     pages.append(entry[:max(0, max_chars - used)])
-                    return _stopped(pages, number, total)
+                    return _stopped(pages, number, total, missing_text)
                 pages.append(entry)
                 used += len(entry) + 2
     except DocumentTextError:
@@ -125,10 +130,10 @@ def _read(data: bytes, should_stop, max_pages: int, max_chars: int) -> PdfText:
     except (PdfReadError, ValueError, KeyError, TypeError, AttributeError, IndexError,
             RecursionError, NotImplementedError, MemoryError) as error:
         raise DocumentTextError("pdf_unreadable", "This PDF could not be read.") from error
-    return PdfText("\n\n".join(pages), total, total, True)
+    return PdfText("\n\n".join(pages), total, total, True, missing_text)
 
 
-def _stopped(pages: list[str], page: int, total: int) -> PdfText:
+def _stopped(pages: list[str], page: int, total: int, missing_text: bool) -> PdfText:
     note = (f"[Text stops here, on page {page} of {total}: the rest of this PDF is beyond "
             "the reading limit. Split the PDF to read the rest.]")
-    return PdfText("\n\n".join([*pages, note]), total, page, False)
+    return PdfText("\n\n".join([*pages, note]), total, page, False, missing_text)
