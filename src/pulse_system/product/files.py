@@ -47,7 +47,8 @@ def _parts(path: str, *, root_ok: bool = False) -> list[str]:
     if not isinstance(path, str) or len(path) > 2048:
         raise FileAccessError("invalid_path")
     parts = path.split("/")
-    if any(not p or p in {".", ".."} or p.startswith(".") or len(p) > 240
+    if any(not p or p in {".", "..", ".pulse", ".git"}
+           or p.startswith((".pulse-harness-", ".upload-")) or len(p) > 240
            or any(ord(c) < 32 for c in p) or any(c in p for c in '\\:*?"<>|')
            or p.casefold().endswith(_SECRET_SUFFIXES) or p.casefold().startswith("secrets.") for p in parts):
         raise FileAccessError("protected_or_invalid_path")
