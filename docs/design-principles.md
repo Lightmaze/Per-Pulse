@@ -94,11 +94,11 @@ visible note.
   - a busy (429) or failing (5xx) service ended the turn without a retry
     (#150);
   - command output was kept only as a 4 KiB preview; up to 1 MiB per
-    stream is now saved and can be read later (#160).
+    stream is now saved and can be read later (#160);
+  - `read_file` had no offset; it now continues from source offsets (#154).
 - **Open:**
   - images cannot be sent to the model;
   - old turns are dropped rather than summarized;
-  - `read_file` has no offset;
   - commands need a Docker image, and each needs its own Allow once.
 
 **Principle.** Match current practice by default:
@@ -502,7 +502,7 @@ and characters.
 | Each command needs its own Allow once, and commands need a Docker image (output itself is now kept, #160) | Over-defense, off by default | Open |
 | Dotfiles such as `.env` and `.gitignore` cannot be listed, previewed or uploaded, and are left out without a note | Over-defense, silent failure | Open |
 | Model servers elsewhere on the local network, and endpoints with a query string (Azure), are refused | Over-defense | Open |
-| Images cannot be sent to the model; old turns are dropped, not summarized; `read_file` has no offset | Outdated practice | Open |
+| Images cannot be sent to the model; old turns are dropped, not summarized | Outdated practice | Open |
 | Library defaults differ from the CLI's (ask before edits), so many tests exercise an unshipped flow | Tests pinning old behavior | Open |
 | Tool descriptions add about 17,000 characters to every request | Disclaimer text | In review (#151): about 8,900, keeping each source-authority sentence |
 | About 30 internal terms in the Activity panel | Internal concepts | Open |
