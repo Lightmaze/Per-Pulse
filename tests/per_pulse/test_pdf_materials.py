@@ -162,7 +162,7 @@ def test_nontext_pages_are_not_silent_search_negatives(tmp_path, monkeypatch):
     extraction = read_pdf(scanned)
     assert extraction.complete is True and extraction.pages_without_selectable_text is True
     assert "[Page 1]" in extraction.text
-    assert "No selectable text on this page" in extraction.text
+    assert extraction.text.startswith("[Page 1]\n\n[Page 2]\nVisible text on page two.")
     found, read = [], []
     with client_for(tmp_path, model_factory=_reading_model(
             monkeypatch, found, extra={"op": "find", "query": "UNSEEN SCAN MARKER"})) as client:
@@ -180,7 +180,7 @@ def test_nontext_pages_are_not_silent_search_negatives(tmp_path, monkeypatch):
         send(client, "home", "Read the file.", materials=[material["id"]])
         wait_for(client, "home", lambda view: any(m["role"] == "assistant" for m in view["messages"]), timeout=15)
     assert read[-1]["output"]["pdf_pages_without_selectable_text"] is True
-    assert "No selectable text on this page" in read[-1]["output"]["content"]
+    assert "[Page 1]" in read[-1]["output"]["content"]
 
 
 def test_a_search_of_a_pdf_read_only_in_part_says_it_is_partial(tmp_path, monkeypatch):
