@@ -42,6 +42,7 @@ jobs:
         with:
           script: |
             const {execFileSync} = require('node:child_process');
+            const {existsSync} = require('node:fs');
             const version = execFileSync('python3', ['-c',
               "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
             ], {encoding: 'utf8'}).trim();
@@ -50,6 +51,11 @@ jobs:
             core.setOutput('sha', context.payload.workflow_run?.head_sha || context.sha);
             if (context.eventName === 'pull_request') {
               core.setOutput('build', 'true');
+              return;
+            }
+            if (!existsSync('scripts/verify_distribution.py') || !existsSync(`docs/releases/${tag}.md`)) {
+              core.info('This verified commit predates the release candidate.');
+              core.setOutput('build', 'false');
               return;
             }
             try {

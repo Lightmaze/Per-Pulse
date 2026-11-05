@@ -72,7 +72,8 @@ def verify(directory: Path, version: str) -> list[Path]:
             assert handle is not None, name
             return handle.read()
         for name in ("pyproject.toml", "README.md", "LICENSE", "NOTICE", "SECURITY.md",
-                     "CHANGELOG.md", "CONTRIBUTING.md", f"docs/releases/v{version}.md"):
+                     "CHANGELOG.md", "CONTRIBUTING.md", "scripts/verify_distribution.py",
+                     f"docs/releases/v{version}.md"):
             assert prefix + name in names, f"Missing source documentation: {name}"
         source_config = tomllib.loads(read(prefix + "pyproject.toml").decode("utf-8"))
         assert source_config["project"]["version"] == version

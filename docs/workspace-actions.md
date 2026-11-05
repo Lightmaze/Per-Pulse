@@ -55,6 +55,18 @@ show the file as it is. The workspace library previews up to 64,000 characters.
 Files are shared native workspace material, not isolated
 per-page filesystem permissions.
 
+Ordinary `read_file(path, offset=0, max_chars?, expected_digest?)` also returns a
+bounded passage. Its `position` reports the start, end and total Unicode
+character counts; `eof` means the passage reached the end of the available text.
+Pass the returned `next` arguments to `read_file` to continue the same source
+version. If that version changed, restart at zero without `expected_digest` to
+inspect the current file. An offset without a digest can read any position in
+the current file. Omitted `max_chars` uses the session's payload allowance;
+the complete tool result, including its continuation, stays within that bound.
+For PDFs, `eof` concerns the extracted text: `pdf_complete` and
+`pdf_pages_without_selectable_text` separately describe extraction limits and
+pages with no selectable text.
+
 To locate a specific phrase in a long source, the native `reading.find` operation
 searches literal text in the source and returns up to eight short excerpts
 with exact source coordinates and digests. It checks an optional expected file
