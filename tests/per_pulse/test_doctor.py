@@ -14,7 +14,7 @@ PROVIDER_ENV = (
     "P_PULSE_CREDENTIAL_ENV", "P_PULSE_CHAT_TIMEOUT", "P_PULSE_MAX_OUTPUT_TOKENS",
     "P_PULSE_MAX_REQUEST_BYTES", "P_PULSE_REASONING_FIELD",
     "P_PULSE_PROVIDER_NAMESPACE", "P_PULSE_ALLOW_LOCAL_HTTP",
-    "P_PULSE_LOCAL_NO_AUTH",
+    "P_PULSE_LOCAL_NO_AUTH", "P_PULSE_CHAT_AUTH_STYLE",
 )
 
 
@@ -124,3 +124,36 @@ def test_no_auth_flag_with_remote_endpoint_fails_local_preflight(monkeypatch, ca
     report = read_report(capsys)
     assert report["state"] == "invalid_config"
     assert report["credentialless_loopback"] is False
+
+
+def test_versioned_endpoint_with_api_key_style_is_locally_configured(monkeypatch, capsys):
+    import httpx
+
+    def forbid_network(*_args, **_kwargs):
+        raise AssertionError("doctor must remain local")
+
+    monkeypatch.setattr(httpx.Client, "send", forbid_network)
+    monkeypatch.setenv("P_PULSE_CHAT_ENDPOINT",
+        "https://sample.openai.azure.com/openai/deployments/choice/chat/completions?api-version=2024-10-21")
+    monkeypatch.setenv("P_PULSE_CHAT_MODEL", "choice")
+    monkeypatch.setenv("P_PULSE_CHAT_AUTH_STYLE", "api-key")
+    monkeypatch.setenv("P_PULSE_API_KEY", "azure-doctor-should-not-print")
+    cli.main(["doctor", "--json"])
+    report = read_report(capsys)
+    assert report["state"] == "locally_configured"
+    assert "azure-doctor-should-not-print" not in json.dumps(report)
+
+
+def test_doctor_rejects_credentials_inside_query_even_in_api_key_mode(monkeypatch, capsys):
+    secret = "query-key-should-not-print"
+    monkeypatch.setenv("P_PULSE_CHAT_ENDPOINT",
+        "https://sample.openai.azure.com/openai/v1/chat/completions?api-version=v1&api-key=" + secret)
+    monkeypatch.setenv("P_PULSE_CHAT_MODEL", "choice")
+    monkeypatch.setenv("P_PULSE_CHAT_AUTH_STYLE", "api-key")
+    monkeypatch.setenv("P_PULSE_API_KEY", "azure-doctor-should-not-print")
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["doctor", "--json"])
+    assert exc.value.code == 2
+    report = read_report(capsys)
+    assert report["state"] == "invalid_config"
+    assert secret not in json.dumps(report)
