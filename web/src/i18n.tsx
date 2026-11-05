@@ -6,14 +6,17 @@ import { continuityEnglish, continuityChinese } from './locales/continuity';
 import { learningEnglish, learningChinese } from './locales/learning';
 import { materialsEnglish, materialsChinese } from './locales/materials';
 import { documentsEnglish, documentsChinese } from './locales/documents';
+import { commandsEnglish, commandsChinese } from './locales/commands';
 import { interpolate, LANGUAGE_STORAGE_KEY, languagePreference, readLanguagePreference, resolveLocale, saveLanguagePreference, type LanguagePreference, type Locale } from './language';
 
-const english = { ...commonEnglish, ...workspaceEnglish, ...continuityEnglish, ...learningEnglish, ...materialsEnglish, ...documentsEnglish };
-const chinese: Record<keyof typeof english, string> = { ...commonChinese, ...workspaceChinese, ...continuityChinese, ...learningChinese, ...materialsChinese, ...documentsChinese };
+const english = { ...commonEnglish, ...workspaceEnglish, ...continuityEnglish, ...learningEnglish, ...materialsEnglish, ...documentsEnglish, ...commandsEnglish };
+const chinese: Record<keyof typeof english, string> = { ...commonChinese, ...workspaceChinese, ...continuityChinese, ...learningChinese, ...materialsChinese, ...documentsChinese, ...commandsChinese };
 export type MessageKey = keyof typeof english;
 export type Translate = (key: MessageKey, values?: Record<string, string | number>) => string;
 
 const errorKeys: Record<string, MessageKey> = {
+  command_output_unavailable: 'commands.unavailable', command_output_not_found: 'commands.unavailable',
+  command_output_arguments_invalid: 'error.invalidRequest', command_output_unverified: 'commands.unverified',
   material_too_large: 'materials.tooLarge', material_file_too_large: 'materials.tooLarge',
   material_changed: 'materials.changed', material_unavailable: 'materials.unavailable',
   material_not_found: 'materials.wrongPage', material_workspace_changed: 'materials.workspaceChanged',

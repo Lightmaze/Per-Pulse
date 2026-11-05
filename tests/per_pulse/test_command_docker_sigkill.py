@@ -107,6 +107,22 @@ def test_actual_container_exit_receipt_and_cleanup(tmp_path, code, deadline):
         executor.close()
 
 
+def test_actual_container_retains_long_both_streams_before_cleanup(tmp_path):
+    executor = DockerCommandExecutor(tmp_path, IMAGE)
+    script = "import sys;sys.stdout.write('o'*12000+'STDOUT_FINAL_DIAGNOSIS\\n');sys.stderr.write('e'*14000+'STDERR_FINAL_DIAGNOSIS\\n');sys.exit(7)"
+    name = 'p-pulse-command-' + os.urandom(16).hex()
+    try:
+        result = executor.execute({'argv': ['python3', '-c', script]}, CancellationToken(),
+            guard=lambda: None, start_guard=nullcontext, invocation_name=name)
+        assert result['exit_code'] == 7 and result['truncated']
+        assert len(result['stdout'].encode()) <= 4096 and len(result['stderr'].encode()) <= 4096
+        assert result['_captured_output']['stdout'].endswith(b'STDOUT_FINAL_DIAGNOSIS\n')
+        assert result['_captured_output']['stderr'].endswith(b'STDERR_FINAL_DIAGNOSIS\n')
+        assert not container_id(name)
+    finally:
+        executor.close()
+
+
 def test_name_collision_does_not_remove_an_unrelated_container(tmp_path):
     name = "p-pulse-command-" + os.urandom(16).hex()
     created = docker("create", "--name", name, "--network", "none", IMAGE, "python3", "-c", "pass")
