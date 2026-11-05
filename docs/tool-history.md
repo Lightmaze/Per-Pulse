@@ -25,6 +25,9 @@ role. Continue a passage with `next_offset`, the same message identity and
 `role: "tool"`. Offsets count characters in the original stored text. A result
 can be a JSON envelope, a redacted passage or a previous truncation marker;
 history never reconstructs text that was not saved.
+Tool-result message identities follow the configured persisted payload bound,
+including longer original provider call IDs. Discussion identities retain their
+256-character limit.
 
 Omitting `role` reads saved user messages and final assistant discussion as
 before. `role: "user"` and `role: "assistant"` narrow that discussion. Assistant

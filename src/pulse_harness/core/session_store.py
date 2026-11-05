@@ -4922,7 +4922,8 @@ class HarnessStore:
         role: str | None = None, excluded_tool_names: tuple[str, ...] = (),
     ) -> dict[str, Any] | None:
         """Return one saved conversation record without changing its history."""
-        if not isinstance(message_id, str) or not 1 <= len(message_id) <= 256:
+        maximum = self.max_payload_bytes if role == "tool" else 256
+        if not isinstance(message_id, str) or not 1 <= len(message_id) <= maximum:
             raise ValueError("history message_id must be nonempty bounded text")
         join, selection, selected = self._history_selection(role, excluded_tool_names)
         with self._lock:

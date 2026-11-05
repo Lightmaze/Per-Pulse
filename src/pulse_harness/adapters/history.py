@@ -35,8 +35,8 @@ HISTORY_SCHEMAS = {
     },
     "read_history": {
         "type": "object", "properties": {
-            "message_id": {"type": "string", "maxLength": 256,
-                           "description": "Source message_id returned by search_history."},
+            "message_id": {"type": "string",
+                           "description": "Exact source message_id returned by search_history. Discussion IDs are limited to 256 characters; role=tool accepts IDs within the configured persisted payload bound."},
             "offset": {"type": "integer", "minimum": 0,
                        "description": "Character offset in the saved text, not a byte offset."},
             "max_chars": {"type": "integer", "minimum": 1, "maximum": 4096},
@@ -185,7 +185,8 @@ class ConversationHistoryTools:
 
     def _read(self, scope, scopes, args, cancellation):
         message_id = args.get("message_id")
-        if not isinstance(message_id, str) or not 1 <= len(message_id) <= 256:
+        maximum = self.store.max_payload_bytes if args.get("role") == "tool" else 256
+        if not isinstance(message_id, str) or not 1 <= len(message_id) <= maximum:
             raise ProviderProtocolError("history message_id must be bounded text", code="history_request_invalid")
         offset = _integer(args.get("offset", 0), 0, 2**31 - 1)
         count = _integer(args.get("max_chars", 4000), 1, 4096)

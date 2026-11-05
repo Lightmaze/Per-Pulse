@@ -25,6 +25,7 @@ from pulse_harness.core.context_window import OMITTED_NOTE
 OLD = "ARCHIVED_TOOL_ONLY_C82"
 NEW = "CURRENT_FILE_ONLY_D97"
 FILENAME = "observations.txt"
+ORIGINAL_CALL_ID = "original-file-read-" + "r" * 180
 LABEL = " [Explicit synthetic HTTP fixture]"
 ORIGINAL = OLD + "\n" + "\n".join(
     f"Archived field passage {index:02d}: 山川湖海，原始记录保留当时文字，不以当前文件替换。"
@@ -33,7 +34,7 @@ ORIGINAL = OLD + "\n" + "\n".join(
 
 def streamed(text=None, *, tool=None, arguments=None, sequence=0):
     delta = {"content": text} if tool is None else {"tool_calls": [{
-        "index": 0, "id": f"tool-history-fixture-{sequence}", "type": "function",
+        "index": 0, "id": ORIGINAL_CALL_ID if tool == "read_file" else f"tool-history-fixture-{sequence}", "type": "function",
         "function": {"name": tool, "arguments": json.dumps(arguments)},
     }]}
     chunks = [
@@ -124,6 +125,7 @@ class ToolHistoryFixture:
             assert row
             stored = json.loads(row["content"])
             assert {key: stored.get(key) for key in ("status", "output", "error_code")} == results[0]
+            assert stored["tool_call_id"] == ORIGINAL_CALL_ID and len(row["message_id"]) > 256
             assert self.evidence()["read_file_actions"] == 1
             assert self.saved["read_file_invocations"] == 1
             self.save(original_row=row)
@@ -153,6 +155,7 @@ class ToolHistoryFixture:
             assert found["coverage"]["roles"] == ["tool"] and found["next_cursor"] is None
             assert len(found["matches"]) == 1, "prior history-read copies do not multiply the original result"
             source = found["matches"][0]["source"]
+            assert len(source["message_id"]) > 256, "a long legal provider call ID still has a readable original source"
             row, original = self.saved["original_row"], json.loads(self.saved["original_row"]["content"])
             for key in ("session_id", "engram_id", "message_id", "event_id", "turn_id", "transcript_seq", "content_digest"):
                 assert source[key] == row[key], (key, source, row)

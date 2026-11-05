@@ -25,9 +25,10 @@ ORIGINAL = "ORIGINAL_TOOL_ONLY: café 🌍 " * 45
 
 
 class HistoryFixture:
-    def __init__(self, monkeypatch):
+    def __init__(self, monkeypatch, *, call_id_prefix="original-call-"):
         monkeypatch.setenv("TOOL_HISTORY_FIXTURE_KEY", "explicit-synthetic-credential")
         self.requests = []
+        self.call_id_prefix = call_id_prefix
 
     def factory(self, scope):
         def respond(request):
@@ -40,7 +41,7 @@ class HistoryFixture:
             count = sum(row["role"] == "tool" for row in messages[current + 1:])
             if count < len(operations):
                 name, arguments = operations[count]
-                delta = {"tool_calls": [{"index": 0, "id": f"original-call-{count}", "type": "function",
+                delta = {"tool_calls": [{"index": 0, "id": f"{self.call_id_prefix}{count}", "type": "function",
                     "function": {"name": name, "arguments": json.dumps(arguments)}}]}
             else:
                 delta = {"content": "Completed the explicit synthetic fixture."}
@@ -222,6 +223,39 @@ def test_failed_tool_result_keeps_its_original_action_outcome(tmp_path, monkeypa
         action = pages.runtime.kernel_service.store.actions_for_turn(original)[0]
         assert raw["status"] == action.status.value == "failed"
         assert raw["error_code"] == action.error_code
+    finally:
+        pages.runtime.close()
+
+
+def test_native_long_provider_call_id_returns_a_readable_tool_source(tmp_path, monkeypatch):
+    fixture = HistoryFixture(monkeypatch, call_id_prefix="L" * 179)
+    pages = PageService(tmp_path, model_factory=fixture.factory)
+    try:
+        (tmp_path / "workspace" / "source.txt").write_text(ORIGINAL)
+        page_id, original, _ = create(pages, operations=[("read_file", {"path": "source.txt"})])
+        current, _ = activate(pages, page_id)
+        history = reader(pages)
+        found = recall(history, current, query="ORIGINAL_TOOL_ONLY", role="tool")["matches"][0]
+        identity = found["source"]
+        assert identity["tool_call_id"] == "L" * 179 + "0"
+        assert len(identity["message_id"]) > 256
+        saved = next(row for row in pages.runtime.kernel_service.store.transcript_rows(original)
+                     if row["role"] == "tool")
+        passage = recall(history, current, "read_history", message_id=identity["message_id"], role="tool")
+        assert passage["source"] == identity
+        assert passage["content"] == saved["content"]
+        # Discussion and selected replay retain their established id bound.
+        for role in (None, "user", "assistant"):
+            args = {"message_id": identity["message_id"]}
+            if role is not None:
+                args["role"] = role
+            with pytest.raises(ProviderProtocolError):
+                recall(history, current, "read_history", **args)
+        with pytest.raises(ValueError):
+            pages.runtime.kernel_service.store.read_transcript_message(current.session_scope(), identity["message_id"])
+        from pulse_system.service import native_replay
+        with pytest.raises(ValueError):
+            native_replay.validate({"op": "enter", "message_ids": [identity["message_id"]]})
     finally:
         pages.runtime.close()
 

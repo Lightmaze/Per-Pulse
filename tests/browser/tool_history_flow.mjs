@@ -121,6 +121,7 @@ try {
   const original = (await view(owner)).messages.find(message => message.content === instruction);
   const captured = await evidence();
   assert.ok(original?.id && captured.original_row?.message_id);
+  assert.ok(captured.original_row.message_id.length > 256, 'a long legal provider call ID is present in the actual saved source');
   assert.equal(captured.original_event_id, original.id, 'the saved tool turn belongs to this exact original user instruction');
   assert.equal(captured.original_unchanged, true);
   assert.equal(captured.read_file_actions, 1);
@@ -205,6 +206,7 @@ try {
   await checkpoint();
   console.log(JSON.stringify({ passed: checks.length, checks, httpModelRequests: requests, httpFixtureChecks: httpChecks,
     readFileActions: final.read_file_actions, readFileInvocations: final.read_file_invocations,
+    sourceMessageIdChars: final.last_source.message_id.length,
     expectedRestartNetworkErrors: restartNetworkErrors.length,
     provider: 'explicit synthetic HTTP fixture', viewports: ['1280x900', '390x844'] }));
 } catch (error) {
