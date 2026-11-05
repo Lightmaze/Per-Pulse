@@ -31,22 +31,16 @@ def schema(*, allow_mutations: bool) -> dict[str, Any]:
 
 def descriptor(*, allow_mutations: bool) -> ToolDescriptor:
     description = (
-        "Inspect this local context's actual activity, incoming/outgoing connections, "
-        "inhibition and shared pulse cap. Its own original history remains available "
-        "through the history tools. No other context or subject can be selected, "
-        "and Work contexts cannot use it."
+        "Inspect this Home page's activity: its incoming and outgoing connections, "
+        "inhibition and the shared background limit. Not available in a Work."
     )
     if allow_mutations:
         description += (
-            " In the local Home context, set_excitability(value) "
-            "adjusts only its existing spontaneous-activation tendency, from 0 to 1. "
-            "Zero becomes quiet for future spontaneous checks; incoming user or propagated "
-            "material can still activate the context. This does not archive a context, "
-            "cancel admitted inputs, change connection weights, or grant more resources. "
-            "The ordinary Engine, inhibition, rhythm and shared budget still govern activity. "
-            "A successful adjustment is an immediate durable numeric effect: a later turn "
-            "cancellation does not roll it back. Make a change only when warranted by the "
-            "current experience; no adjustment or particular value is required."
+            " set_excitability(value) sets how readily this Home page starts background "
+            "turns on its own, from 0 to 1; 0 keeps it quiet, though messages and connected"
+            " pages can still start turns. The change takes effect at once and stays even "
+            "if this turn is stopped. Change it only when the current experience calls for "
+            "it."
         )
     return ToolDescriptor(NAME, description,
         capability="local.internal", source="pulse.native-local")

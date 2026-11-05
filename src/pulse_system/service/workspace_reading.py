@@ -59,34 +59,18 @@ SCHEMA = {
 def descriptor() -> ToolDescriptor:
     return ToolDescriptor(
         NAME,
-        "Read a text material in manageable passages. open(path, max_chars?) starts "
-        "at its beginning; pass expected_digest when an input specifies a file version. "
-        "continue(receipt_id, max_chars?) reads after that actual "
-        "saved passage, refusing changed source content or workspace root. "
-        "After moving a workspace, resume(receipt_id, max_chars?) explicitly "
-        "reads from that saved position in the CURRENT workspace, only when the "
-        "same path, full file bytes and redacted text view match. It creates a "
-        "fresh receipt linked to the old one; it cannot rebind write approvals "
-        "or cross logical sessions. "
-        "find(path, query, expected_digest?, max_matches?) locates exact literal "
-        "phrases with bounded excerpts and source coordinates in the redacted view; "
-        "it is not a semantic search or proof of reading the whole file. "
-        "The default keeps Python regex case-insensitive matching. For Unicode "
-        "expansions such as Straße/STRASSE, explicitly set casefold=true; matches "
-        "must cover whole original characters and still return original view "
-        "coordinates. This adds no normalization or locale rules and cannot be "
-        "combined with case_sensitive=true. "
-        "follow(receipt_id, match_index, max_chars?) reads from one of those "
-        "observed matches, checking the full source and workspace again. Use the "
-        "find receipt and its zero-based match_index, never an invented offset. "
-        "The new passage can then be continued normally. After moving a workspace, "
-        "run find again before following a match. "
-        "recent(limit?) finds the "
-        "latest exposed positions in THIS logical session, including after reopen, "
-        "without opening files. Use an older receipt to reread its following page; "
-        "use open to deliberately start a changed version. "
-        "No automatic next step, summary, file write, or task is created. "
-        "Reads bounded UTF-8 files and the text of PDFs in the configured shared workspace.",
+        "Read a text file, or the text of a PDF, in the workspace in passages. open(path, "
+        "expected_digest?, max_chars?) starts at the beginning; pass expected_digest when "
+        "you were given a file version. continue(receipt_id, max_chars?) reads the passage "
+        "after a receipt; it refuses if the file changed (use open to start the new "
+        "version). find(path, query, expected_digest?, max_matches?) finds exact phrases, "
+        "case-insensitive by default, with excerpts and positions; set case_sensitive=true,"
+        " or casefold=true for matches such as Straße/STRASSE (not both). "
+        "follow(receipt_id, match_index, max_chars?) reads from one match, using the find "
+        "receipt and its zero-based match_index. recent(limit?) lists the latest positions "
+        "read in this conversation. After the workspace moves, resume(receipt_id, "
+        "max_chars?) continues from a saved position if the file is unchanged; run find "
+        "again before following a match.",
         mutable=False, requires_approval=False, capability="workspace.read",
         source="pulse.native-reading",
     )

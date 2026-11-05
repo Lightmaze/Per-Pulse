@@ -32,14 +32,10 @@ MAX_RESULT_BYTES = 16000
 def descriptor() -> ToolDescriptor:
     return ToolDescriptor(
         NAME,
-        "Discover files and directories in the configured shared native workspace, "
-        "including materials not named in this conversation. Supply path='' to see "
-        "the root or a returned directory path to look inside it. This bounded index "
-        "contains names and sizes, NOT file contents; do not infer what an unread file "
-        "says. Use read_file on a selected file for its actual content and digest. "
-        "A listing is not a reading plan, a task assignment, or evidence of learning; "
-        "nothing must be read or produced. It may be partial and may change before "
-        "the next read. No shell, network, file mutation or background run is started.",
+        "List files and directories in the workspace, including ones not mentioned in this "
+        "conversation. path='' lists the root; pass a returned directory path to look "
+        "inside it. Shows names and sizes only: read a file with read_file or reading to "
+        "see what it says. The listing may be partial and can change.",
         mutable=False, requires_approval=False, capability="workspace.read",
         source="pulse.native-workspace-index",
     )
