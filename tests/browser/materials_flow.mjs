@@ -89,7 +89,7 @@ try {
   const source = '# Field notes\n\nA useful source stays available in the next Work.\n\n<script>window.materialExecuted = true</script>\n';
   const filename = 'A deliberately long field-note title about sources and continued work ' + 'long-name-'.repeat(8) + '.md';
   await open();
-  await page.getByLabel('Choose a text file', { exact: true }).setInputFiles({ name: filename, mimeType: 'text/markdown', buffer: Buffer.from(source) });
+  await page.getByLabel('Choose a file', { exact: true }).setInputFiles({ name: filename, mimeType: 'text/markdown', buffer: Buffer.from(source) });
   assert.equal((await files()).length, 0, 'Selecting a file must not upload it');
   await page.getByRole('button', { name: 'Upload file', exact: true }).click();
   await page.getByRole('button', { name: 'Add to draft', exact: true }).waitFor();
@@ -158,13 +158,13 @@ try {
   checks.push('A second Work reuses the native file, then opens the verified original upload without crossing into its private conversation');
 
   await open();
-  const picker = page.getByLabel('Choose a text file', { exact: true });
+  const picker = page.getByLabel('Choose a file', { exact: true });
   await picker.setInputFiles({ name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) });
   await page.getByRole('button', { name: 'Upload file', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'This file is empty.' }).waitFor();
   await picker.setInputFiles({ name: 'large.txt', mimeType: 'text/plain', buffer: Buffer.alloc(1024 * 1024 + 1, 97) });
   await page.getByRole('button', { name: 'Upload file', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: 'no larger than 1 MiB' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'at most 1 MiB or a PDF of at most 32 MiB' }).waitFor();
   await picker.setInputFiles({ name: 'binary.txt', mimeType: 'text/plain', buffer: Buffer.from([97, 0, 98]) });
   await page.getByRole('button', { name: 'Upload file', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'UTF-8 text file' }).waitFor();
