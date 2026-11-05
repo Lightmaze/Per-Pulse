@@ -53,8 +53,9 @@ class TranscriptStore:
         )
         return self._message(row)
 
-    def messages(self, scope: HarnessScope) -> tuple[TranscriptMessage, ...]:
-        return tuple(self._message(row) for row in self.store.transcript_rows(scope))
+    def messages(self, scope: HarnessScope, *, after_transcript_seq: int = 0) -> tuple[TranscriptMessage, ...]:
+        return tuple(self._message(row) for row in self.store.transcript_rows(
+            scope, after_transcript_seq=after_transcript_seq))
 
     @staticmethod
     def _message(row: dict[str, Any]) -> TranscriptMessage:
