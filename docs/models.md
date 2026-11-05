@@ -11,6 +11,27 @@ per-pulse
 
 Replace the placeholders with your provider's values. The endpoint is a complete URL, not a base URL. Credentials stay in the server environment; the browser never receives them. You can use `P_PULSE_CREDENTIAL_ENV` to name a different environment variable containing the key.
 
+For Azure OpenAI Chat Completions API-key endpoints, select the complete
+versioned HTTPS endpoint, keep the key in the environment and choose the
+provider's `api-key` header:
+
+```sh
+export P_PULSE_CHAT_ENDPOINT='https://your-resource.openai.azure.com/openai/deployments/your-deployment/chat/completions?api-version=2024-10-21'
+export P_PULSE_CHAT_MODEL='your-deployment'
+export P_PULSE_API_KEY='your-azure-api-key'
+export P_PULSE_CHAT_AUTH_STYLE='api-key'
+per-pulse doctor
+per-pulse
+```
+
+Use the version supported by your deployment. The current Azure OpenAI v1
+Chat Completions URL can also be used without a version query. The optional
+query permits only a non-secret `api-version` parameter; do not put keys in
+URLs. Authentication defaults to `Authorization: Bearer ...` for ordinary
+providers, and `P_PULSE_CHAT_AUTH_STYLE=api-key` switches to `api-key: ...`
+without changing the stored credential location. This is transport support;
+actual remote model compatibility is determined by the service you connect.
+
 For Windows PowerShell, use `$env:P_PULSE_CHAT_ENDPOINT = '...'`, `$env:P_PULSE_CHAT_MODEL = '...'`, and `$env:P_PULSE_API_KEY = '...'` in the **same PowerShell session** before running `per-pulse doctor` and `per-pulse`. When disconnected, **Settings → How to connect a model** now provides a POSIX or PowerShell terminal template and a copy control. It contains only placeholders; never enter your real API key into the browser. The local `doctor` preflight sends no provider request and cannot verify remote connectivity, model behavior, or spending limits.
 
 An **optional credential-free local model** can use the same real Kernel/World path with an explicitly operator-configured loopback HTTP Chat Completions server. Start a model server on your own computer first; no model is installed by Per Pulse. For a compatible server exposing the example port (change the port/model to match your server):
