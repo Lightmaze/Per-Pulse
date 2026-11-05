@@ -29,6 +29,15 @@ synthetic HTTP model transport.
 `PER_PULSE_SCREENSHOTS` selects an optional output directory for desktop and
 mobile screenshots. Test data and images should stay outside the repository.
 
+## Native report source navigation
+
+Run `node tests/browser/report_source_flow.mjs` with `PLAYWRIGHT_MODULE` and
+`PER_PULSE_PYTHON` as above. A synthetic HTTP model calls the real native Work
+report tool; Home opens that report's exact settled Work result and returns to
+the original report position and focus while preserving both drafts. The flow
+also checks ordinary report-shaped human text, offline restart, and a phone
+viewport. `PER_PULSE_REPORT_SOURCE_SCREENSHOTS` selects optional screenshots.
+
 ## Native approvals and file results
 
 ```sh

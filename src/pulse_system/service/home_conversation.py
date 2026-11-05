@@ -40,7 +40,8 @@ def home_conversation(runtime: RuntimeService, engram_id: str, *,
     # succeeds. It can be read while Home awaits its normal execution slot.
     # Select candidates before LIMIT so pagination keeps the original event
     # sequence. report_origin below must still verify their exact provenance.
-    # Do not bring a predecessor's unprocessed queue into the new Home.
+    # Only a report actually handed into the current Home may remain queued;
+    # do not bring a predecessor's unprocessed queue into the new Home.
     queued_report = (
         "e.engram_id = ? AND e.kind='stimulus' AND e.source='self' "
         "AND e.center_id IS NULL AND e.idempotency_key GLOB 'native-work-v1:*' "
@@ -48,7 +49,11 @@ def home_conversation(runtime: RuntimeService, engram_id: str, *,
         "WHERE r.component=e.idempotency_key "
         "AND json_extract(r.state,'$.arguments.op')='report' "
         "AND json_extract(r.state,'$.world_id')=e.world_id "
-        "AND json_extract(r.state,'$.subject')=e.engram_id "
+        # A committed handoff moves queued event ownership, while the report's
+        # source scope stays with the original Work turn. This is only a
+        # candidate filter; report_origin verifies the exact delivery below.
+        "AND json_extract(r.state,'$.subject') IN ("
+        + ",".join("?" for _ in lineage) + ") "
         "AND json_extract(r.state,'$.source_turn_id')="
         "json_extract(e.metadata,'$.stimulus_source_turn_id'))"
     )
@@ -68,7 +73,7 @@ def home_conversation(runtime: RuntimeService, engram_id: str, *,
         "AND parent.world_id=e.world_id AND parent.domain='generation')",
         f"(e.status <> 'queued' OR {has_home_input} OR ({queued_report}))",
     ]
-    params: list[Any] = [runtime.world_id, *lineage, engram_id]
+    params: list[Any] = [runtime.world_id, *lineage, engram_id, *lineage]
     if before_seq is not None:
         clauses.append("e.seq < ?")
         params.append(before_seq)
@@ -84,7 +89,7 @@ def home_conversation(runtime: RuntimeService, engram_id: str, *,
     # The lookahead row must also be verified before it can justify a cursor.
     for row in rows:
         awaiting_input = row[6] == "queued" and not row[11]
-        report = runtime._native_work.report_origin(
+        report = runtime.work_report_origin(
             row[1], row[10], row[2], row[7], require_settled_source=awaiting_input,
         )
         if awaiting_input and report is None:

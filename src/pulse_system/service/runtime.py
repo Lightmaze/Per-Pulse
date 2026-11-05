@@ -9319,6 +9319,18 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             "recent_kind": latest[2] if latest is not None else None,
         }
 
+    def work_report_origin(
+        self, event_id: str, request_id: str | None, subject: str, content: str, *,
+        require_settled_source: bool = False,
+    ) -> dict[str, Any] | None:
+        """Read verified provenance for one admitted native Work report."""
+        if self.kernel_service is None:
+            return None
+        return self._native_work.report_origin(
+            event_id, request_id, subject, content,
+            require_settled_source=require_settled_source,
+        )
+
     def _causal_message_projection(
         self,
         *,

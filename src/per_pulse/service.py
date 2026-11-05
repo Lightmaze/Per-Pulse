@@ -757,11 +757,55 @@ class PageService:
                 "postureEnabled": self.learning.enabled,
             }
 
+    def _native_report_origin(self, row: dict) -> dict | None:
+        """Resolve an admitted Home report to its original settled Work result."""
+        if row["center_id"] is not None or row["kind"] != "stimulus" or row["source"] != "self":
+            return None
+        ledger = self.runtime.causal_ledger
+        event = ledger.get_event(row["event_id"])
+        if event is None:
+            return None
+        # Raw message metadata cannot mint attribution. Reuse the native
+        # outbox/event/content verification and the source turn's settlement.
+        # Its exact Kernel action was checked when the report was admitted.
+        report = self.runtime.work_report_origin(
+            event.id, event.idempotency_key, event.engram_id, row["content"],
+            require_settled_source=True,
+        )
+        if report is None:
+            return None
+        # Verify against the original subject, then authorize today's reader
+        # through committed succession. An old report retains its old scope.
+        lineage = ledger.committed_history_lineage(
+            self.runtime.world_id, self.runtime.continuity_engram_id)
+        front = self.runtime.world.get_task_front(report["work_id"])
+        source = ledger.get_turn_for_world(report["source_turn_id"], self.runtime.world_id)
+        if (event.engram_id not in lineage or front is None
+                or front.focal_engram_id not in lineage or source is None
+                or source.execution_context != "work:" + front.center_id):
+            return None
+        result = ledger.get_event(source.result_event_id)
+        if (result is None or result.kind.value != "assistant_result"
+                or result.parent_event_id != source.event_id
+                or result.engram_id != source.engram_id or result.center_id != front.center_id):
+            return None
+        try:
+            # Full durable scope keeps an older selected result navigable even
+            # when it is outside the current page's bounded message window.
+            self._check_message(front.id, result.id)
+        except PageError:
+            return None
+        return {"pageId": front.id, "messageId": result.id}
+
     def _messages(self, page_id: str, rows: list[dict], refs: list[dict]) -> list[dict]:
         messages = []
         center_pages = {front["center_id"]: front["id"] for front in self.runtime.list_task_fronts()}
         for row in rows:
             origin = self._state["messageOrigins"].get(row["event_id"], {})
+            if page_id == "home":
+                report_origin = self._native_report_origin(row)
+                if report_origin is not None:
+                    origin = report_origin
             activation = None
             if row["kind"] == "propagation" and row["metadata"].get("context_connection_id"):
                 # A propagation's reported source center is metadata, not
