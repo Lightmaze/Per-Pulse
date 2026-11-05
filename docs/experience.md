@@ -10,6 +10,12 @@ can stand on its own without a rule or evaluation. You can save one from a
 previous reply even while the model is disconnected. The source passage stays
 intact when you later edit its note.
 
+**Save example** and `posture.remember_example` can also retain completed
+background replies. When there was no new input text, the source records the
+internal activation and its original identity. User feedback is attached only
+when an actual follow-up is selected. Saved examples are available when later
+foreground or background work chooses its approach, including after restart.
+
 When that experience began with an attached file, **Source experience** shows
 the readable message and an **Open source message** link to its original file
 references. The stored encounter retains its exact input. Shared experiences

@@ -20,6 +20,7 @@ from pulse_harness.core.contracts import ActionStatus, ToolDescriptor, TurnStatu
 from pulse_harness.core.errors import RedactionRequired, ScopeConflict
 from pulse_harness.core.replay import bound_text
 from pulse_harness.core.scope import HarnessScope
+from pulse_system.core.causality.ledger import CausalTransitionError
 from pulse_system.core.types import (
     CausalEventDomain, CausalEventKind, CausalEventSource, CausalEventStatus,
     EngramStatus, HarnessTurnState,
@@ -229,14 +230,62 @@ def _source_text(value: str, limit: int):
         raise ScopeConflict("the selected source contains a credential and cannot enter experience memory") from error
 
 
-def _context_message(runtime, subject_id: str, context_id: str, event_id: str):
-    """Resolve a message in this World, context and committed subject lineage."""
+def _context_event(runtime, subject_id: str, context_id: str, event_id: str):
+    """Resolve an event in this World, context and committed subject lineage."""
     event = runtime.causal_ledger.get_event(event_id)
     lineage = runtime.causal_ledger.committed_history_lineage(runtime.world_id, subject_id)
     if (event is None or event.world_id != runtime.world_id or event.engram_id not in lineage
-            or event.center_id != _context_center(context_id) or not event.content):
+            or event.center_id != _context_center(context_id)):
         raise ScopeConflict("posture source is not a message in this context")
     return event
+
+
+def _context_message(runtime, subject_id: str, context_id: str, event_id: str):
+    event = _context_event(runtime, subject_id, context_id, event_id)
+    if not event.content:
+        raise ScopeConflict("posture source is not a message in this context")
+    return event
+
+
+def _input_situation(runtime, subject_id: str, context_id: str, event_id: str, *, turn=None):
+    """A real input message or a proven native quiet activation, kept distinct."""
+    event = _context_event(runtime, subject_id, context_id, event_id)
+    if event.content:
+        return event, event.content, {}
+    if (event.content is not None or event.domain is not CausalEventDomain.PULSE
+            or event.kind is not CausalEventKind.SPONTANEOUS
+            or event.source is not CausalEventSource.SELF):
+        raise ScopeConflict("posture source is not a message or native quiet activation")
+    if turn is None:
+        try:
+            turn = runtime.causal_ledger.get_running_turn_for_event(
+                event.id, world_id=runtime.world_id, engram_id=event.engram_id,
+            )
+        except CausalTransitionError as exc:
+            raise ScopeConflict("quiet activation has no unique native turn") from exc
+        if turn is None:
+            raise ScopeConflict("quiet activation has no unique native turn")
+    else:
+        turn = runtime.causal_ledger.get_turn_for_world(turn.id, runtime.world_id)
+    if (turn is None or turn.event_id != event.id or turn.engram_id != event.engram_id
+            or runtime.native_kernel_context_for_turn(event.engram_id, turn.id) != context_id):
+        raise ScopeConflict("quiet activation does not match its native turn")
+    if turn.state is HarnessTurnState.SETTLED:
+        if turn.prompt_accepted is not True or event.status is not CausalEventStatus.SETTLED:
+            raise ScopeConflict("quiet activation lacks its accepted settled turn")
+    elif turn.state is HarnessTurnState.RUNNING and event.status is CausalEventStatus.RUNNING:
+        scope = runtime.harness.scope_for(event.engram_id, context_id).for_turn(turn.id)
+        if runtime.kernel_service.store.get_turn(scope).status is not TurnStatus.MODEL_STREAMING:
+            raise ScopeConflict("quiet activation has no active native model turn")
+    else:
+        raise ScopeConflict("quiet activation is not an active or settled native turn")
+    source = {
+        "representation": "native_activation", "event_id": event.id, "turn_id": turn.id,
+        "kind": event.kind.value, "source": event.source.value, "domain": event.domain.value,
+        "parent_event_id": event.parent_event_id, "context_pulse": event.metadata.get("context_pulse"),
+        "input_text": None,
+    }
+    return event, "Internal continuation without new input text.", source
 
 
 def _settled_result(runtime, subject_id: str, context_id: str, event_id: str):
@@ -315,7 +364,8 @@ def capture_encounter(runtime, subject_id: str, context_id: str,
                 or latest.center_id != _context_center(context_id)
                 or latest.seq is None or feedback.seq > latest.seq):
             raise ScopeConflict("feedback was not available to the originating turn")
-    situation = _context_message(r, subject_id, context_id, original.parent_event_id)
+    situation, situation_text, situation_source = _input_situation(
+        r, subject_id, context_id, original.parent_event_id, turn=prior_turn)
     evidence_class = str(original.metadata.get("evidence_class", "UNKNOWN"))
     synthetic = evidence_class in {"TEST_DOUBLE", "EXPLICIT_MOCK"}
     source = {
@@ -327,12 +377,14 @@ def capture_encounter(runtime, subject_id: str, context_id: str,
         "source_subject_id": original.engram_id, "feedback_subject_id": feedback.engram_id,
         "source_message_id": original.id, "feedback_message_id": feedback.id,
         "original_turn_id": prior_turn.id,
-        "content_digests": {"situation": _digest(situation.content),
+        "content_digests": {"situation": _digest(situation_text),
                             "action": _digest(original.content), "outcome": _digest(feedback.content)},
     }
+    if situation_source:
+        source["situation_source"] = situation_source
     source.update(_result_regime(runtime, original))
     encounter, shortened = {}, []
-    for key, content in (("situation", situation.content), ("action", original.content),
+    for key, content in (("situation", situation_text), ("action", original.content),
                          ("outcome", feedback.content)):
         clean, redacted, truncated = _source_text(content, 12000)
         encounter[key] = clean
@@ -353,8 +405,9 @@ def capture_example(runtime, subject_id: str, context_id: str, source_message_id
     clean, redacted, truncated = _source_text(excerpt, 8000)
     if redacted or truncated or clean != excerpt:
         raise ScopeConflict("select a shorter example passage without credentials")
+    learning_trigger = {}
     if latest_input_id is not None:
-        latest = _context_message(runtime, subject_id, context_id, latest_input_id)
+        latest, _, learning_trigger = _input_situation(runtime, subject_id, context_id, latest_input_id)
         if (latest.engram_id != subject_id or latest.seq is None
                 or not original.seq < latest.seq):
             raise ScopeConflict("the example source was not available to the originating turn")
@@ -363,11 +416,12 @@ def capture_example(runtime, subject_id: str, context_id: str, source_message_id
                                      source_message_id, feedback_message_id,
                                      latest_input_id=latest_input_id)
     else:
-        situation = _context_message(runtime, subject_id, context_id, original.parent_event_id)
+        situation, situation_text, situation_source = _input_situation(
+            runtime, subject_id, context_id, original.parent_event_id, turn=prior_turn)
         evidence_class = str(original.metadata.get("evidence_class", "UNKNOWN"))
         synthetic = evidence_class in {"TEST_DOUBLE", "EXPLICIT_MOCK"}
         encounter, shortened = {}, []
-        for key, content in (("situation", situation.content), ("action", original.content)):
+        for key, content in (("situation", situation_text), ("action", original.content)):
             clean, redacted, truncated = _source_text(content, 12000)
             encounter[key] = clean
             if redacted or truncated:
@@ -381,9 +435,13 @@ def capture_example(runtime, subject_id: str, context_id: str, source_message_id
                         "world_id": runtime.world_id, "subject_id": subject_id, "context_id": context_id,
                         "source_subject_id": original.engram_id, "source_message_id": original.id,
                         "original_turn_id": prior_turn.id,
-                        "content_digests": {"situation": _digest(situation.content), "action": _digest(original.content)},
+                        "content_digests": {"situation": _digest(situation_text), "action": _digest(original.content)},
                         "bounded_encounter_fields": shortened,
                     }}
+        if situation_source:
+            captured["source"]["situation_source"] = situation_source
+    if learning_trigger:
+        captured["source"]["learning_trigger"] = learning_trigger
     offset = original.content.index(excerpt)
     captured["source"].update(_result_regime(runtime, original))
     captured["source"]["selected_excerpt"] = {

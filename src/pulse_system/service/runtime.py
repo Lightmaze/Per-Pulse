@@ -8407,7 +8407,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
 
         return self._native_kernel_context_for_center(event.center_id) or "home"
 
-    def _native_kernel_context_for_turn(
+    def native_kernel_context_for_turn(
         self,
         engram_id: str,
         turn_id: str,
@@ -8435,6 +8435,14 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 "native Kernel turn references a foreign or missing causal event"
             )
         return self._native_kernel_context_for_center(event.center_id)
+
+    def _native_kernel_context_for_turn(
+        self,
+        engram_id: str,
+        turn_id: str,
+    ) -> str:
+        """Compatibility entry point for existing native runtime callbacks."""
+        return self.native_kernel_context_for_turn(engram_id, turn_id)
 
     def _native_kernel_background_main_round_limit_for_turn(
         self, engram_id: str, turn_id: str,

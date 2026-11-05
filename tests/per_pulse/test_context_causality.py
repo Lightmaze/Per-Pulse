@@ -86,6 +86,55 @@ def test_canonical_null_flow_reentry_is_claimable(body):
     assert ledger.get_event(reentry.id).status is CausalEventStatus.RUNNING
 
 
+def test_running_event_lookup_keeps_world_and_subject_in_its_public_boundary(body):
+    storage, ledger, subject, first, _second = body
+    root = ledger.enqueue(
+        "world", CausalEventFlow.CONTENT, CausalEventDomain.PULSE,
+        CausalEventKind.STIMULUS, CausalEventSource.USER,
+        "A source with one admitted turn.", engram_id=subject, center_id=first,
+    )
+    turn = ledger.begin_turn(root.id, subject, root.content, execution_context=first)
+    assert ledger.get_running_turn_for_event(root.id).id == turn.id
+    assert ledger.get_running_turn_for_event(root.id, world_id="world", engram_id=subject).id == turn.id
+    assert ledger.get_running_turn_for_event(root.id, world_id="another-world", engram_id=subject) is None
+    assert ledger.get_running_turn_for_event(root.id, world_id="world", engram_id="another-subject") is None
+
+    other = storage.create_engram("another-subject")
+    with storage._lock:
+        storage._conn.execute("UPDATE causal_events SET engram_id=? WHERE id=?", (other.id, root.id))
+    assert ledger.get_running_turn_for_event(root.id, world_id="world", engram_id=subject) is None
+
+
+def test_running_event_lookup_ignores_terminal_history_and_rejects_ambiguous_running_rows(body):
+    storage, ledger, subject, first, second = body
+    root = ledger.enqueue(
+        "world", CausalEventFlow.CONTENT, CausalEventDomain.PULSE,
+        CausalEventKind.STIMULUS, CausalEventSource.USER,
+        "A source with retained attempt history.", engram_id=subject, center_id=first,
+    )
+    turn = ledger.begin_turn(root.id, subject, root.content, execution_context=first)
+    with storage._lock:
+        columns = [row[1] for row in storage._conn.execute("PRAGMA table_info(harness_turns)")]
+        values = list(storage._conn.execute("SELECT * FROM harness_turns WHERE id=?", (turn.id,)).fetchone())
+        values[columns.index("id")] = "retained-failed-attempt"
+        values[columns.index("state")] = "failed"
+        values[columns.index("execution_context")] = second
+        storage._conn.execute(
+            "INSERT INTO harness_turns (" + ",".join(columns) + ") VALUES (" + ",".join("?" for _ in columns) + ")",
+            values,
+        )
+    assert ledger.get_running_turn_for_event(root.id, world_id="world", engram_id=subject).id == turn.id
+
+    # A damaged or legacy database must not make first-row order choose authority.
+    with storage._lock:
+        storage._conn.execute("DROP INDEX idx_harness_turns_one_running")
+        storage._conn.execute("UPDATE harness_turns SET state='running' WHERE id='retained-failed-attempt'")
+    with pytest.raises(CausalTransitionError, match="multiple running turns"):
+        ledger.get_running_turn_for_event(root.id, world_id="world", engram_id=subject)
+    with pytest.raises(CausalTransitionError, match="multiple running turns"):
+        ledger.get_running_turn_for_event(root.id)
+
+
 def test_context_paused_after_enqueue_is_rechecked_at_claim(body):
     storage, ledger, subject, first, second = body
     _root, result = settled_result(ledger, subject, first)

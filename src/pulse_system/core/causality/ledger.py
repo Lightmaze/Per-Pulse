@@ -3254,17 +3254,44 @@ class CausalLedger:
     def get_running_turn_for_event(
         self,
         event_id: str,
+        *,
+        world_id: str | None = None,
+        engram_id: str | None = None,
     ) -> HarnessTurn | None:
-        """Return the running turn bound to exactly one causal root event."""
+        """Return the sole running turn for an event, rejecting ambiguity.
+
+        Optional World and subject filters keep source lookup in the ledger.
+        A World-scoped lookup also verifies the event's subject in the same
+        statement, as ``get_turn_for_world`` does. Historical terminal turns
+        for the event do not count as running matches.
+        """
 
         event_id = _require_id(event_id, "event_id")
+        clauses = ["event_id = ?", "state = 'running'"]
+        params: list[Any] = [event_id]
+        if engram_id is not None:
+            clauses.append("engram_id = ?")
+            params.append(_require_id(engram_id, "engram_id"))
+        if world_id is not None:
+            world_id = _require_id(world_id, "world_id")
+            clauses.append(
+                "EXISTS (SELECT 1 FROM causal_events "
+                "WHERE causal_events.id = harness_turns.event_id "
+                "AND causal_events.world_id = ? "
+                "AND causal_events.engram_id = harness_turns.engram_id)"
+            )
+            params.append(world_id)
         with self._storage._lock:
-            row = self._storage._conn.execute(
-                f"SELECT {_TURN_COLUMNS} FROM harness_turns "
-                "WHERE event_id = ? AND state = 'running'",
-                (event_id,),
-            ).fetchone()
-            return self._row_to_turn(row) if row is not None else None
+            rows = self._storage._conn.execute(
+                f"SELECT {_TURN_COLUMNS} FROM harness_turns WHERE "
+                + " AND ".join(clauses) + " LIMIT 2",
+                params,
+            ).fetchall()
+            if len(rows) > 1:
+                raise CausalTransitionError(
+                    f"causal event {event_id} has multiple running turns"
+                )
+            return self._row_to_turn(rows[0]) if rows else None
 
     def get_running_turn_for_context(
         self,
