@@ -759,7 +759,8 @@ class ContextPulseController:
                 raise
             return deepcopy(self._state["tick_runs"][key])
 
-    def stop_ticks(self, center_id: str | None, *, now: datetime | None = None) -> dict | None:
+    def stop_ticks(self, center_id: str | None, *, reason: str = "operator",
+                   now: datetime | None = None) -> dict | None:
         """Stop before the next time step; a turn already running may finish.
 
         A step that is queued but has not started is cancelled.
@@ -770,12 +771,24 @@ class ContextPulseController:
             if run is None:
                 return None
             if run["status"] == "running":
+                if reason == "user_message" and self.storage._conn.execute(
+                    "SELECT 1 FROM causal_events WHERE world_id = ? AND engram_id = ? "
+                    "AND center_id IS ? AND kind = 'stimulus' AND source = 'user' "
+                    "AND seq > ? LIMIT 1",
+                    (self.world_id, self.subject(), center_id, run["after_seq"]),
+                ).fetchone() is None:
+                    return deepcopy(run)
                 before = deepcopy(self._state)
-                self._finish_tick(run, "stopped", "operator", now)
                 try:
-                    if run["last_event_id"] is not None and self.ledger.cancel_context_tick(
-                            run["last_event_id"], world_id=self.world_id, runtime_fence=self.fence()):
-                        run["delivered"] = run["completed"]
+                    if reason == "user_message":
+                        self._count_tick_reply(run, now)
+                    if reason == "user_message" and run["completed"] >= run["target"]:
+                        self._finish_tick(run, "complete", None, now)
+                    else:
+                        self._finish_tick(run, "stopped", reason, now)
+                        if run["last_event_id"] is not None and self.ledger.cancel_context_tick(
+                                run["last_event_id"], world_id=self.world_id, runtime_fence=self.fence()):
+                            run["delivered"] = run["completed"]
                     self._save(now)
                 except BaseException:
                     self._state = before
@@ -791,12 +804,28 @@ class ContextPulseController:
     def _finish_tick(run: dict, status: str, reason: str | None, now: datetime) -> None:
         run["status"], run["reason"], run["updated_at"] = status, reason, now.isoformat()
 
+    def _count_tick_reply(self, run: dict, now: datetime) -> None:
+        """Count an original settled step once, even after human takeover."""
+        if run["completed"] < run["delivered"] and self.storage._conn.execute(
+            "SELECT 1 FROM causal_events step JOIN causal_events reply "
+            "ON reply.parent_event_id = step.id WHERE step.id = ? "
+            "AND step.status = 'settled' AND reply.kind = 'assistant_result' "
+            "AND reply.status = 'settled' LIMIT 1",
+            (run["last_event_id"],),
+        ).fetchone() is not None:
+            run["completed"] += 1
+            run["updated_at"] = now.isoformat()
+
     def _advance_ticks(self, now: datetime) -> bool:
         changed = False
         for key, run in self._state["tick_runs"].items():
-            if run["status"] == "running":
+            if run["status"] == "running" or (run["status"] == "stopped"
+                    and run["reason"] == "user_message" and run["completed"] < run["delivered"]):
                 before = deepcopy(run)
-                self._advance_tick(key, now)
+                if run["status"] == "running":
+                    self._advance_tick(key, now)
+                else:
+                    self._count_tick_reply(run, now)
                 changed = changed or run != before
         return changed
 
@@ -805,6 +834,11 @@ class ContextPulseController:
         center_id = run["center_id"]
         if not self._current_context(center_id):
             self._finish_tick(run, "stopped", "context_unavailable", now)
+            return
+        # Reconcile accepted input before an unstarted step can be dispatched,
+        # including a restart between the input commit and its cancellation.
+        self.stop_ticks(center_id, reason="user_message", now=now)
+        if run["status"] != "running":
             return
         if run["last_event_id"] is not None:
             event = self.ledger.get_event(run["last_event_id"])
@@ -816,28 +850,13 @@ class ContextPulseController:
             if event.status is not CausalEventStatus.SETTLED:
                 self._finish_tick(run, "stopped", event.status.value, now)
                 return
+            self._count_tick_reply(run, now)
             if run["completed"] < run["delivered"]:
-                settled_reply = self.storage._conn.execute(
-                    "SELECT 1 FROM causal_events WHERE parent_event_id = ? "
-                    "AND kind = 'assistant_result' AND status = 'settled' LIMIT 1",
-                    (event.id,),
-                ).fetchone()
-                if settled_reply is None:
-                    self._finish_tick(run, "stopped", "no_reply", now)
-                    return
-                run["completed"] += 1
-                run["updated_at"] = now.isoformat()
+                self._finish_tick(run, "stopped", "no_reply", now)
+                return
             if run["completed"] >= run["target"]:
                 self._finish_tick(run, "complete", None, now)
                 return
-        # A person writing in this context takes over from the time steps.
-        if self.storage._conn.execute(
-            "SELECT 1 FROM causal_events WHERE world_id = ? AND center_id IS ? "
-            "AND kind = 'stimulus' AND source = 'user' AND seq > ? LIMIT 1",
-            (self.world_id, center_id, run["after_seq"]),
-        ).fetchone() is not None:
-            self._finish_tick(run, "stopped", "user_message", now)
-            return
         if self._open(center_id):
             return
         latest = self._latest_ordinary_result(center_id)

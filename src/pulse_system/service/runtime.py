@@ -10883,36 +10883,45 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                     if _admission_guard is not None:
                         _admission_guard(conn)
 
-                event = self._causal_ledger.enqueue(
-                    world_id=self._world_id,
-                    flow=flow_value,
-                    domain=CausalEventDomain.PULSE,
-                    kind=kind,
-                    source=source_value,
-                    content=content,
-                    causal_id=causal_id,
-                    parent_event_id=parent_event_id,
-                    engram_id=engram_id,
-                    center_id=center_id,
-                    metadata={
-                        "priority": priority_value,
-                        "stimulus_class": envelope.stimulus_class.value,
-                        "stimulus_evidence_class": envelope.evidence_class.value,
-                        "stimulus_provenance_digest": envelope.provenance.digest,
-                        **({"stimulus_source_turn_id": envelope.provenance.tip.source_turn_id}
-                           if envelope.provenance.tip.source_turn_id is not None else {}),
-                        **(
-                            {
-                                "external_effect_digest": effect_digest,
-                            }
-                            if envelope.external_effect_id is not None
-                            else {}
-                        ),
-                    },
-                    idempotency_key=effect_idempotency_key,
-                    admission_guard=_live_subject_admission_guard,
-                    runtime_fence=self._current_runtime_fence(),
-                )
+                # Keep accepted input and queued-step cancellation on the same
+                # side of a worker claim. Enqueue commits first; startup can
+                # finish takeover if the process exits before its checkpoint.
+                with self._storage._lock:
+                    event = self._causal_ledger.enqueue(
+                        world_id=self._world_id,
+                        flow=flow_value,
+                        domain=CausalEventDomain.PULSE,
+                        kind=kind,
+                        source=source_value,
+                        content=content,
+                        causal_id=causal_id,
+                        parent_event_id=parent_event_id,
+                        engram_id=engram_id,
+                        center_id=center_id,
+                        metadata={
+                            "priority": priority_value,
+                            "stimulus_class": envelope.stimulus_class.value,
+                            "stimulus_evidence_class": envelope.evidence_class.value,
+                            "stimulus_provenance_digest": envelope.provenance.digest,
+                            **({"stimulus_source_turn_id": envelope.provenance.tip.source_turn_id}
+                               if envelope.provenance.tip.source_turn_id is not None else {}),
+                            **(
+                                {
+                                    "external_effect_digest": effect_digest,
+                                }
+                                if envelope.external_effect_id is not None
+                                else {}
+                            ),
+                        },
+                        idempotency_key=effect_idempotency_key,
+                        admission_guard=_live_subject_admission_guard,
+                        runtime_fence=self._current_runtime_fence(),
+                    )
+                    if (self._context_pulse is not None
+                            and event.source is CausalEventSource.USER
+                            and event.kind is CausalEventKind.STIMULUS
+                            and event.engram_id == self._front_id):
+                        self._context_pulse.stop_ticks(event.center_id, reason="user_message")
                 # Naming is a derived convenience, not an input truth. Do it
                 # only after the accepted stimulus is durable so a rejected
                 # event cannot leave identity state behind.
