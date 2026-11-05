@@ -43,6 +43,7 @@ from pulse_harness.adapters.workspace import StructuredWorkspaceToolProvider
 
 home, evidence = map(Path, sys.argv[1:3])
 mode = sys.argv[3]
+effect_mode = mode in {"effect", "effect_before_waiting"}
 service.RuntimeServiceConfig = partial(service.RuntimeServiceConfig,
     runtime_lease_ttl_sec=5, runtime_lease_renew_interval_sec=1)
 os.environ["PER_PULSE_IMAGE_FIXTURE_KEY"] = "synthetic-local-only"
@@ -74,22 +75,40 @@ def stop_after_effect(self, plan):
     (evidence / "effect-started").write_text("native file replacement happened\n")
     threading.Event().wait(120)
     raise AssertionError("The parent must kill this process before its effect receipt.")
-if mode == "effect":
+if effect_mode:
     StructuredWorkspaceToolProvider._replace = stop_after_effect
+
+if mode == "effect_before_waiting":
+    from pulse_harness.core.contracts import TurnStatus
+    from pulse_harness.core.turn_runner import TurnRunner
+    original_transition = TurnRunner._transition_turn
+    def wait_before_approval_turn(self, scope, status):
+        if status is TurnStatus.WAITING_APPROVAL:
+            # Publish the real pending action, then let the parent release this
+            # transition after the child has observed it and kept waiting.
+            deadline = time.monotonic() + 10
+            while not (evidence / "release-approval-turn").exists():
+                assert time.monotonic() < deadline, "The child did not wait for a resolvable approval."
+                time.sleep(0.01)
+        return original_transition(self, scope, status)
+    TurnRunner._transition_turn = wait_before_approval_turn
 
 with TestClient(create_app(home, model_factory=factory, allow_workspace_actions=True), base_url="http://localhost") as client:
     result = client.post("/api/pages", json={
         "title": "Interrupted work", "instruction": "Keep the original question and its history."})
     assert result.status_code == 201, result.text
     (evidence / "page.json").write_text(json.dumps(result.json()))
-    if mode == "effect":
+    if effect_mode:
         page = result.json()["page"]["id"]
         while True:
             execution = client.app.state.pages.execution
-            actions = execution.snapshot(page)["pendingActions"]
+            pending = execution.snapshot(page)["pendingActions"]
+            actions = [action for action in pending if action["canResolve"]]
             if actions:
                 execution.resolve_approval(page, actions[0]["actionId"], "allow_once")
                 raise AssertionError("The parent must stop the approved effect.")
+            if mode == "effect_before_waiting" and pending:
+                (evidence / "approval-observed-unready").write_text("the child kept waiting\n")
             time.sleep(0.05)
     while True:
         time.sleep(1)
@@ -108,6 +127,7 @@ def recovered_home(tmp_path, request):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2] / "src")
     mode = getattr(request, "param", "approval")
+    effect_mode = mode in {"effect", "effect_before_waiting"}
     with (evidence / "child.log").open("w") as log:
         process = subprocess.Popen([sys.executable, "-u", "-c", _CHILD, str(home), str(evidence), mode],
                                    env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -115,16 +135,20 @@ def recovered_home(tmp_path, request):
             deadline = time.monotonic() + 20
             while not all((evidence / name).exists() for name in ("request-started", "page.json")):
                 assert process.poll() is None, (evidence / "child.log").read_text()
-                assert time.monotonic() < deadline, "The native model request never started."
+                assert time.monotonic() < deadline, "The native model request never started.\n" + (evidence / "child.log").read_text()
                 time.sleep(0.05)
             page = json.loads((evidence / "page.json").read_text())["page"]["id"]
-            if mode == "effect":
+            if effect_mode:
                 while not (evidence / "effect-started").exists():
-                    assert time.monotonic() < deadline, "The native file effect never started."
+                    assert process.poll() is None, (evidence / "child.log").read_text()
+                    assert time.monotonic() < deadline, "The native file effect never started.\n" + (evidence / "child.log").read_text()
+                    if mode == "effect_before_waiting" and (evidence / "approval-observed-unready").exists():
+                        (evidence / "release-approval-turn").touch()
                     time.sleep(0.05)
             elif mode == "approval":
                 while not _rows(home, "kernel.db", "SELECT 1 FROM actions WHERE status='approval_pending'"):
-                    assert time.monotonic() < deadline, "The native approval never became pending."
+                    assert process.poll() is None, (evidence / "child.log").read_text()
+                    assert time.monotonic() < deadline, "The native approval never became pending.\n" + (evidence / "child.log").read_text()
                     time.sleep(0.05)
             # An opt-in archive still cannot acquire a live or unreleased body.
             with pytest.raises(image.ImageError, match="stop the source cleanly"):
@@ -145,18 +169,18 @@ def recovered_home(tmp_path, request):
         view = client.get(f"/api/pages/{page}").json()
         execution = view["execution"]
         turn = execution["turnId"]
-        if mode in {"approval", "effect"}:
+        if mode == "approval" or effect_mode:
             assert execution["recoveryRequired"] and execution["canCancel"]
         else:
             assert execution["status"] == "stopped"
             assert not execution["recoveryRequired"]
-    if mode in {"approval", "effect"}:
+    if mode == "approval" or effect_mode:
         with pytest.raises(image.ImageError, match="Kernel has unfinished turns"):
             image.save(home, tmp_path / "unfinished.zip", include_recovered_history=True)
         with client_for(home, model_factory=None) as client:
             cancelled = client.app.state.pages.execution.cancel(page, turn)
             assert cancelled["accepted"]
-    assert (home / "workspace/fixture-effect.txt").exists() == (mode == "effect")
+    assert (home / "workspace/fixture-effect.txt").exists() == effect_mode
     return home, page, turn
 
 
@@ -220,7 +244,7 @@ def test_restore_checks_recovery_manifest_against_native_history(recovered_home,
     assert (destination / image.INCOMPLETE).exists()
 
 
-@pytest.mark.parametrize("recovered_home", ["effect"], indirect=True)
+@pytest.mark.parametrize("recovered_home", ["effect", "effect_before_waiting"], indirect=True)
 def test_opt_in_still_refuses_an_actual_unconfirmed_file_effect(recovered_home, tmp_path):
     home, _, turn = recovered_home
     assert _rows(home, "kernel.db", "SELECT status FROM actions WHERE turn_id = ?", (turn,)) == [("uncertain",)]
