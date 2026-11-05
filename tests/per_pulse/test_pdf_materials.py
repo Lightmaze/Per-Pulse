@@ -156,6 +156,33 @@ def test_reading_stops_at_the_page_bound_and_says_where():
     assert whole.complete and whole.text == "[Page 1]\nOnly page."
 
 
+def test_nontext_pages_are_not_silent_search_negatives(tmp_path, monkeypatch):
+    """A complete text-layer extraction is not a search of an unreadable image page."""
+    scanned = synthetic_pdf(["", "Visible text on page two."])
+    extraction = read_pdf(scanned)
+    assert extraction.complete is True and extraction.pages_without_selectable_text is True
+    assert "[Page 1]" in extraction.text
+    assert "No selectable text on this page" in extraction.text
+    found, read = [], []
+    with client_for(tmp_path, model_factory=_reading_model(
+            monkeypatch, found, extra={"op": "find", "query": "UNSEEN SCAN MARKER"})) as client:
+        material = upload(client, "home", "scanned.pdf", scanned).json()["material"]
+        send(client, "home", "Find the marker.", materials=[material["id"]])
+        wait_for(client, "home", lambda view: any(m["role"] == "assistant" for m in view["messages"]), timeout=15)
+    result = found[-1]["output"]
+    assert result["source"]["source_complete"] is True
+    assert result["source"]["pages_without_selectable_text"] is True
+    assert result["searched_entire_source"] is False
+    assert result["matches"] == []
+    with client_for(tmp_path / "read", model_factory=_reading_model(
+            monkeypatch, read, tool="read_file")) as client:
+        material = upload(client, "home", "scanned.pdf", scanned).json()["material"]
+        send(client, "home", "Read the file.", materials=[material["id"]])
+        wait_for(client, "home", lambda view: any(m["role"] == "assistant" for m in view["messages"]), timeout=15)
+    assert read[-1]["output"]["pdf_pages_without_selectable_text"] is True
+    assert "No selectable text on this page" in read[-1]["output"]["content"]
+
+
 def test_a_search_of_a_pdf_read_only_in_part_says_it_is_partial(tmp_path, monkeypatch):
     """A miss in the first part of a long PDF is not presented as a whole-document negative."""
     bomb = amplifying_pdf(repeats=3000, later_page="LATER PAGE MARKER")
