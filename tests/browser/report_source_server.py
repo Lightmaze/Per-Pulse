@@ -57,7 +57,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     os.environ["PER_PULSE_REPORT_SOURCE_KEY"] = "explicit-synthetic-browser-credential"
     app = create_app(args.data_dir, model_factory=None if args.offline else factory,
-                     posture=False, pulse=PulseSettings(enabled=False), allow_workspace_actions=True)
+                     posture=True, pulse=PulseSettings(enabled=False), allow_workspace_actions=True)
 
     @app.get("/__report-source/status")
     def status():

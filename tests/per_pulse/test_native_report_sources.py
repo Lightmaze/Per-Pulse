@@ -88,10 +88,12 @@ def test_admitted_report_links_the_exact_work_result_without_rewriting_or_refere
         before = json.loads(json.dumps(pages._state))
         request_count = len(fixture.requests)
         report = message(pages, record["event_id"])
+        assert report["role"] == "system" and report["activation"] == "work_report"
         assert report["sourcePageId"] == work_id
         assert report["sourceMessageId"] == result.result_event_id
         assert report["content"] == pages.runtime._native_work.report_content(record)
         assert report["references"] == [] and pages._state == before
+        assert next(row for row in pages._rows("home") if row["event_id"] == report["id"])["role"] == "user"
         assert len(fixture.requests) == request_count
         assert native_report(pages, record)["source_action_id"] == record["source_action_id"]
         source = pages.view(work_id, source_message_id=report["sourceMessageId"])
@@ -100,6 +102,7 @@ def test_admitted_report_links_the_exact_work_result_without_rewriting_or_refere
         # same source. Reading either state never synthesizes another message.
         activate(pages, "home", record["event_id"])
         assert message(pages, record["event_id"])["sourceMessageId"] == result.result_event_id
+        assert message(pages, record["event_id"])["role"] == "system"
         assert native_report(pages, record)["source_turn_id"] == result.turn_id
     finally:
         pages.runtime.close()
@@ -120,12 +123,14 @@ def test_report_source_survives_old_windows_history_search_and_offline_restart(t
         for projection in (pages.history("home", before_message_id=later),
                            pages.search_messages("home", "selected finding")):
             selected = next(row for row in projection["messages"] if row["id"] == record["event_id"])
+            assert selected["role"] == "system"
             assert (selected["sourcePageId"], selected["sourceMessageId"]) == (work_id, result.result_event_id)
         pages.runtime.close()
         requests = len(fixture.requests)
         pages = PageService(tmp_path, model_factory=None)
         assert (message(pages, record["event_id"])["sourcePageId"],
                 message(pages, record["event_id"])["sourceMessageId"]) == (work_id, result.result_event_id)
+        assert message(pages, record["event_id"])["role"] == "system"
         assert pages.view(work_id, source_message_id=result.result_event_id)["messages"][0]["content"] == RESULT
         assert len(fixture.requests) == requests
     finally:
@@ -175,6 +180,7 @@ def test_report_source_uses_original_subject_after_committed_succession_and_rest
         pages = PageService(tmp_path, model_factory=None)
         assert pages.runtime.continuity_engram_id == successor
         report = message(pages, record["event_id"])
+        assert report["role"] == "system"
         assert (report["sourcePageId"], report["sourceMessageId"]) == (work_id, result.result_event_id)
         assert native_report(pages, record)["source_action_id"] == record["source_action_id"]
         assert next(row for row in pages.view(work_id, source_message_id=result.result_event_id)["messages"]
@@ -236,11 +242,27 @@ def test_raw_metadata_text_and_unreported_work_cannot_mint_a_report_source(tmp_p
                 (json.dumps(metadata), forged))
             runtime.storage._conn.commit()
         false_report = message(pages, forged)
+        assert false_report["role"] == "user" and false_report["activation"] is None
         assert false_report["sourcePageId"] is None and false_report["sourceMessageId"] is None
         assert false_report["content"] == runtime._native_work.report_content(record)
         assert false_report["references"] == []
         assert len(runtime.storage.native_work_requests(limit=32)) == 1
         assert message(pages, record["event_id"])["sourcePageId"] == work_id
+    finally:
+        pages.runtime.close()
+
+
+def test_user_selected_home_return_keeps_its_real_user_speaker(tmp_path, monkeypatch):
+    fixture = ReportFixture(monkeypatch)
+    pages = PageService(tmp_path, model_factory=fixture.factory, allow_workspace_actions=True)
+    try:
+        work_id, result, record = reported_work(pages)
+        returned = pages.return_home(work_id, "I chose this Work finding for Home.", result.result_event_id)
+        selected = message(pages, returned["messageId"])
+        assert selected["role"] == "user" and selected["activation"] is None
+        assert (selected["sourcePageId"], selected["sourceMessageId"]) == (work_id, result.result_event_id)
+        assert pages.runtime.causal_ledger.get_event(selected["id"]).source.value == "user"
+        assert message(pages, record["event_id"])["role"] == "system"
     finally:
         pages.runtime.close()
 

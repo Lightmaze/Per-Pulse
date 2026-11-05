@@ -802,11 +802,12 @@ class PageService:
         center_pages = {front["center_id"]: front["id"] for front in self.runtime.list_task_fronts()}
         for row in rows:
             origin = self._state["messageOrigins"].get(row["event_id"], {})
+            activation = None
             if page_id == "home":
                 report_origin = self._native_report_origin(row)
                 if report_origin is not None:
                     origin = report_origin
-            activation = None
+                    activation = "work_report"
             if row["kind"] == "propagation" and row["metadata"].get("context_connection_id"):
                 # A propagation's reported source center is metadata, not
                 # proof that its parent can be opened from that Work.

@@ -106,6 +106,8 @@ try {
   await sendHome(impersonation);
   const human = (await view('home')).messages.find(row => row.content === impersonation);
   assert.equal(human.sourcePageId, null);
+  assert.equal(human.role, 'user');
+  assert.equal(await page.locator(`#message-${human.id} .message-label`).innerText(), 'You');
   assert.equal(await page.locator(`#message-${human.id} .source-line`).count(), 0);
   for (let i = 0; i < 3; i++) await sendHome(`Later Home discussion ${i}.\n\n` +
     'Keep the original source available while the conversation continues. '.repeat(35));
@@ -116,6 +118,9 @@ try {
   await sourceLink.scrollIntoViewIfNeeded();
   assert.equal(await sourceLink.getAttribute('href'), `/page/${report.workId}#message-${report.sourceResultMessageId}`);
   const projected = (await view('home')).messages.find(row => row.id === report.eventId);
+  assert.equal(projected.role, 'system');
+  assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
+  assert.equal(await homeArticle.getByRole('button', { name: 'Save example', exact: true }).count(), 0);
   assert.equal(projected.sourceMessageId, report.sourceResultMessageId);
   assert.equal(projected.references.length, 0);
   const originalReportContent = projected.content;
@@ -124,6 +129,7 @@ try {
   await sourceLink.click();
   const sourceArticle = page.locator(`#message-${report.sourceResultMessageId}`);
   await sourceArticle.getByText(resultText, { exact: true }).waitFor();
+  assert.equal(await sourceArticle.getByRole('button', { name: 'Save example', exact: true }).count(), 1);
   assert.equal(new URL(page.url()).hash, '#message-' + report.sourceResultMessageId);
   assert.equal(await workComposer.inputValue(), workDraft);
   await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
@@ -156,7 +162,25 @@ try {
   assert.equal(await homeComposer.inputValue(), homeDraft);
   assert.equal((await status()).requests, 0);
   assert.equal((await status()).reports[0].origin.source_action_id, report.origin.source_action_id);
+  assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('offline process restart retains exact native provenance and source navigation on a phone viewport');
+
+  // A person bringing a selected result Home remains the speaker of that new
+  // input, even though it links the same Work as the native automatic report.
+  await sourceLink.scrollIntoViewIfNeeded();
+  await sourceLink.click();
+  await sourceArticle.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  const selectedText = 'I selected this original Work result for Home.';
+  const dialog = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
+  await dialog.getByRole('textbox', { name: 'What would you like to bring back?', exact: true }).fill(selectedText);
+  await dialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  await homeComposer.waitFor();
+  const selected = (await view('home')).messages.find(row => row.content === selectedText);
+  assert.equal(selected.role, 'user');
+  assert.equal(selected.sourceMessageId, report.sourceResultMessageId);
+  assert.equal(await page.locator(`#message-${selected.id} .message-label`).innerText(), 'You');
+  assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
+  checks.push('verified automatic reports are Workspace messages; human prefix text and selected Home returns stay You');
   assert.deepEqual(errors, []);
   assert.deepEqual(externalRequests, []);
   console.log(JSON.stringify({ checks, errors, externalRequests, restartNetworkErrors,
