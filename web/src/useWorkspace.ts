@@ -22,6 +22,7 @@ export function useWorkspace() {
   const versions = useRef<Record<string, number>>({});
   const requests = useRef<Record<string, number>>({});
   const bootstrapRequests = useRef(0);
+  const bootstrapRefresh = useRef<number | null>(null);
   const routeRef = useRef(route);
   routeRef.current = route;
 
@@ -57,16 +58,28 @@ export function useWorkspace() {
   }, [applyView]);
 
   const refreshBootstrap = useCallback(async (signal?: AbortSignal, expected?: Pick<Bootstrap, 'workspaceId' | 'serviceInstanceId'>) => {
-    const request = ++bootstrapRequests.current;
+    // A scheduled observation keeps its cadence while an explicit reconnect
+    // is pending, but cannot supersede that reconnect's shared state update.
+    const request = expected && bootstrapRefresh.current !== null ? null : ++bootstrapRequests.current;
+    if (!expected) bootstrapRefresh.current = request;
     const before = { ...versions.current };
-    const next = await api.bootstrap(signal);
-    if (!signal?.aborted && bootstrapRequests.current === request) {
-      if (expected && (next.workspaceId !== expected.workspaceId || next.serviceInstanceId !== expected.serviceInstanceId)) {
+    try {
+      const next = await api.bootstrap(signal);
+      // Shared readers also consume the returned snapshot. Validate its origin
+      // even when a newer workspace request already won the state update.
+      if (!signal?.aborted && expected && !pageBelongsToWorkspace(next, expected)) {
         throw new Error('The workspace restarted or changed. Refresh updates to reconnect.');
       }
-      setBootstrap(previous => mergeWorkspaceSnapshot(previous, next, before, versions.current));
+      if (!signal?.aborted && request !== null && bootstrapRequests.current === request) {
+        // A late observation from the previous identity must also be fenced
+        // after reconnect, including before refs catch up to the next render.
+        setBootstrap(previous => expected && !pageBelongsToWorkspace(previous, expected)
+          ? previous : mergeWorkspaceSnapshot(previous, next, before, versions.current));
+      }
+      return next;
+    } finally {
+      if (!expected && bootstrapRefresh.current === request) bootstrapRefresh.current = null;
     }
-    return next;
   }, []);
 
   const refreshWorkspace = useCallback(() => {

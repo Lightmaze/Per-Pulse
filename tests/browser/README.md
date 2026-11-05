@@ -29,6 +29,15 @@ synthetic HTTP model transport.
 `PER_PULSE_SCREENSHOTS` selects an optional output directory for desktop and
 mobile screenshots. Test data and images should stay outside the repository.
 
+Run `node tests/browser/work_discovery_flow.mjs` with the same environment to
+check that a fast native `work.create` appears in the sidebar through Home's
+existing workspace read, without manual refresh or another model call. It
+preserves the draft and focus, holds a stale read across a newer Home turn,
+checks failed-read recovery and fences a real service restart before explicit
+refresh. An overlapping Home observation also preserves an explicit reconnect.
+`PER_PULSE_WORK_DISCOVERY_SCREENSHOTS` records desktop and phone views.
+Only the HTTP model choices are synthetic; native Work and persistence are real.
+
 ## Native report source navigation
 
 Run `node tests/browser/report_source_flow.mjs` with `PLAYWRIGHT_MODULE` and
