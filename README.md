@@ -36,6 +36,24 @@ Kernel implementation.
 When no model is configured, the interface says **AI disconnected** and keeps
 your messages as queued input. It never substitutes a scripted reply for a model.
 
+## Install the local alpha
+
+Requires Python 3.12 or later. Download
+[`per_pulse-0.1.0a1-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a1)
+from the release, then install it in a virtual environment:
+
+```sh
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install ./per_pulse-0.1.0a1-py3-none-any.whl
+per-pulse --example
+```
+
+Open **http://127.0.0.1:8000**. The wheel includes the compiled interface;
+Node.js is needed only for source development. Stop with Ctrl+C, then run
+`per-pulse` without `--example` for your own workspace.
+See [installation](docs/install.md) for Windows commands, model setup and updates.
+
 ## Run from source
 
 Requirements: Python 3.12 or later and Node.js 20.19 or later.
