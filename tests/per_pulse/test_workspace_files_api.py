@@ -191,7 +191,8 @@ def test_materials_browser_keeps_ordinary_dotfiles_visible_and_internal_paths_cl
             assert result.json()["content"] == expected
         nested = client.get("/api/workspace/files", params={"path": ".config"}, headers=identity)
         assert [row["name"] for row in nested.json()["entries"]] == ["notes.txt"]
-        for path in (".pulse", ".git/config", ".pulse-harness-transaction", "../outside.txt"):
+        for path in (".pulse", ".PULSE", ".git/config", ".GIT/config",
+                     ".pulse-harness-transaction", ".PULSE-HARNESS-transaction", "../outside.txt"):
             assert client.get("/api/workspace/files/content", params={"path": path}, headers=identity).status_code == 400
 
         uploaded = _upload(client, b"LOCAL=example\n", name=".env")
