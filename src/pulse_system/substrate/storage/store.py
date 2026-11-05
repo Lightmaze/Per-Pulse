@@ -58,6 +58,7 @@ _STORAGE_BOOTSTRAP_TABLES = (
     "harness_turns",
     "living_concerns",
     "living_orientations",
+    "local_notices",
     "messages",
     "projects",
     "runtime_leases",
@@ -1989,6 +1990,28 @@ class Storage:
             self._conn.execute(
                 "ALTER TABLE harness_operations ADD COLUMN recovery_epoch INTEGER"
             )
+        execute_sql_script(self._conn, """
+            CREATE TABLE IF NOT EXISTS local_notices (
+                id TEXT PRIMARY KEY,
+                world_id TEXT NOT NULL,
+                engram_id TEXT NOT NULL REFERENCES engrams(id),
+                context_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'closed')),
+                revision INTEGER NOT NULL CHECK(revision >= 1),
+                source_turn_id TEXT NOT NULL REFERENCES harness_turns(id),
+                source_event_id TEXT NOT NULL REFERENCES causal_events(id),
+                source TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                closed_at TEXT,
+                close_source TEXT,
+                CHECK((status = 'pending' AND closed_at IS NULL AND close_source IS NULL)
+                   OR (status = 'closed' AND closed_at IS NOT NULL AND close_source IS NOT NULL))
+            );
+            CREATE INDEX IF NOT EXISTS idx_local_notices_context
+                ON local_notices(world_id, context_id, engram_id, status, created_at, id);
+        """)
         if commit:
             self._conn.commit()
 
@@ -7120,6 +7143,107 @@ class Storage:
         return [json.loads(row[0]) for row in self._conn.execute(
             "SELECT state FROM component_state WHERE " + " AND ".join(clauses) +
             " ORDER BY updated_at " + ("ASC" if pending else "DESC") + ", component LIMIT ?", args)]
+
+    @staticmethod
+    def _notice_row(row) -> dict:
+        keys = ("id", "world_id", "engram_id", "context_id", "content", "status", "revision",
+                "source_turn_id", "source_event_id", "source", "created_at", "updated_at",
+                "closed_at", "close_source")
+        item = dict(zip(keys, row))
+        item["source"] = json.loads(item["source"])
+        item["close_source"] = json.loads(item["close_source"]) if item["close_source"] else None
+        return item
+
+    @_locked
+    def local_notice(self, world_id: str, context_id: str, subjects: Sequence[str], notice_id: str) -> dict | None:
+        if not subjects:
+            return None
+        marks = ",".join("?" for _ in subjects)
+        row = self._conn.execute(
+            f"SELECT * FROM local_notices WHERE world_id=? AND context_id=? AND engram_id IN ({marks}) AND id=?",
+            (world_id, context_id, *subjects, notice_id)).fetchone()
+        return self._notice_row(row) if row else None
+
+    @_locked
+    def local_notices(self, world_id: str, context_id: str, subjects: Sequence[str], *,
+                      status: str = "pending", after: tuple[str, str] | None = None,
+                      limit: int = 9, newest: bool = False) -> tuple[list[dict], int]:
+        if not subjects or status not in {"pending", "closed", "all"} or type(limit) is not int or not 1 <= limit <= 129:
+            raise ValueError("invalid local notice query")
+        marks = ",".join("?" for _ in subjects)
+        where = f"world_id=? AND context_id=? AND engram_id IN ({marks})"
+        parameters: tuple = (world_id, context_id, *subjects)
+        if status != "all":
+            where += " AND status=?"
+            parameters += (status,)
+        total = self._conn.execute("SELECT COUNT(*) FROM local_notices WHERE " + where, parameters).fetchone()[0]
+        if after is not None:
+            where += " AND (created_at, id) > (?, ?)"
+            parameters += tuple(after)
+        order = "created_at DESC, id DESC" if newest else "created_at, id"
+        rows = self._conn.execute("SELECT * FROM local_notices WHERE " + where +
+                                  " ORDER BY " + order + " LIMIT ?", (*parameters, limit)).fetchall()
+        return [self._notice_row(row) for row in rows], total
+
+    @_locked
+    def apply_local_notice(self, record: dict, subjects: Sequence[str], *, runtime_owner_id: str,
+                           runtime_lease_epoch: int, now: datetime) -> dict:
+        """Commit a local memory effect and its action identity atomically.
+
+        This is immediate durable memory. A later failed/cancelled source turn
+        does not undo it, and an uncertain tool receipt must not reapply it.
+        """
+        import hashlib
+        canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                            ensure_ascii=False, allow_nan=False)
+        scope, values = record["scope"], record["arguments"]
+        identity = {"scope": scope, "action_id": record["action_id"]}
+        key = "native-notice-effect-v1:" + hashlib.sha256(canonical(identity).encode()).hexdigest()
+        if record["request_id"] != key or scope["engram_id"] not in subjects:
+            raise ValueError("invalid local notice effect identity")
+        with self._immediate_transaction() as conn:
+            self._assert_runtime_publication()
+            self._assert_runtime_lease_uncommitted(runtime_owner_id, runtime_lease_epoch, now, conn)
+            prior = conn.execute("SELECT state FROM component_state WHERE component=?", (key,)).fetchone()
+            if prior:
+                saved = json.loads(prior[0])
+                if any(saved[field] != record[field] for field in ("scope", "action_id", "arguments")):
+                    raise ValueError("local notice replay differs from its original action")
+                return saved
+            source = conn.execute(
+                "SELECT t.state, t.engram_id, t.execution_context, e.world_id, e.center_id, g.status "
+                "FROM harness_turns t JOIN causal_events e ON e.id=t.event_id "
+                "JOIN engrams g ON g.id=t.engram_id WHERE t.id=? AND t.event_id=?",
+                (scope["turn_id"], record["source"]["event_id"])).fetchone()
+            center = None if not scope["context_id"] else scope["context_id"].removeprefix("work:")
+            if (source is None or source[0] != "running" or source[1] != scope["engram_id"]
+                    or source[2] != (scope["context_id"] or "home") or source[3] != scope["world_id"]
+                    or source[4] != center or source[5] != EngramStatus.ACTIVE.value):
+                raise ValueError("local notice requires its live original context turn")
+            stamp = _ts(now)
+            if values["op"] == "record":
+                notice_id = "notice-" + key.split(":")[-1][:32]
+                conn.execute(
+                    "INSERT INTO local_notices VALUES (?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?, ?, NULL, NULL)",
+                    (notice_id, scope["world_id"], scope["engram_id"], scope["context_id"], values["content"],
+                     scope["turn_id"], record["source"]["event_id"], canonical(record["source"]), stamp, stamp))
+                effect = "recorded"
+            elif values["op"] == "close":
+                notice_id = values["id"]
+                item = self.local_notice(scope["world_id"], scope["context_id"], subjects, notice_id)
+                if item is None:
+                    raise ValueError("notice is unavailable in this context")
+                if item["status"] != "pending" or item["revision"] != values["expected_revision"]:
+                    raise ValueError("notice revision or pending state changed; read it again")
+                conn.execute("UPDATE local_notices SET status='closed', revision=revision+1, updated_at=?, "
+                             "closed_at=?, close_source=? WHERE id=?", (stamp, stamp, canonical(record["source"]), notice_id))
+                effect = "closed"
+            else:
+                raise ValueError("invalid local notice mutation")
+            saved = {**record, "notice_id": notice_id, "effect": effect, "applied_at": stamp}
+            conn.execute("INSERT INTO component_state (component, state, updated_at) VALUES (?, ?, ?)",
+                         (key, canonical(saved), stamp))
+            return saved
 
     @_locked
     def apply_local_excitability(self, record: dict, *, runtime_owner_id: str,

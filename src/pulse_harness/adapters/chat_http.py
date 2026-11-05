@@ -265,6 +265,7 @@ class ChatHTTPModelAdapter:
 
     def request_body(self, request: ModelRequest) -> dict[str, Any]:
         messages: list[dict[str, Any]] = []
+        transcript_messages: list[dict[str, Any]] = []
         reasoning = ""
         for record in request.messages:
             role, content = record.get("role"), record.get("content")
@@ -305,6 +306,8 @@ class ChatHTTPModelAdapter:
             elif role not in {"system", "user"}:
                 raise ProviderProtocolError("unsupported transcript role")
             messages.append(message)
+            if not str(record.get("item_id", "")).startswith("auxiliary-context:"):
+                transcript_messages.append(message)
         body: dict[str, Any] = {"model": self.config.model, "messages": messages,
             "stream": True, "max_tokens": self.config.max_output_tokens,
             "stream_options": {"include_usage": True}}
@@ -321,12 +324,12 @@ class ChatHTTPModelAdapter:
             # images do not get replayed at every later user turn. Pixels stay out
             # of the durable transcript; the reference, hash and source time stay.
             names = {}
-            if messages and messages[-1]['role'] == 'tool':
-                boundary = max((i for i,m in enumerate(messages) if m['role']=='assistant'), default=-1)
-                for item in messages[max(0,boundary):]:
+            if transcript_messages and transcript_messages[-1]['role'] == 'tool':
+                boundary = max((i for i,m in enumerate(transcript_messages) if m['role']=='assistant'), default=-1)
+                for item in transcript_messages[max(0,boundary):]:
                     for call in item.get('tool_calls', []): names[call['id']] = call['function']['name']
                 visual = []
-                for item in messages[boundary+1:]:
+                for item in transcript_messages[boundary+1:]:
                     if item['role'] != 'tool' or names.get(item.get('tool_call_id')) != 'life_frame': continue
                     result = _decode(item['content'])
                     output = result.get('output')

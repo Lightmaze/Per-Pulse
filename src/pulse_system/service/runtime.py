@@ -6114,6 +6114,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             self._native_local = NativeLocal(self)
             from .native_attention import NativeAttention
             self._native_attention = NativeAttention(self)
+            from .native_notice import NativeNotice
+            self._native_notice = NativeNotice(self)
             from .native_cognition_return import NativeCognitionReturn
             self._native_cognition_return = NativeCognitionReturn(self)
             from .native_posture import NativePosture
@@ -6124,6 +6126,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                     self._world_id, engram_id),
                 context_for_turn=self._native_kernel_context_for_turn,
                 work=self._native_work, team=self._native_team, local=self._native_local,
+                notice=self._native_notice,
                 attention=(self._native_attention if c.context_pulse is not None
                            and c.context_pulse.enabled else None),
                 input_for_turn=self._native_cognition_return.input_for_turn,
