@@ -1,5 +1,9 @@
 /** Interface copy only. Original lessons, encounters, feedback and source IDs are never translated. */
 export const learningEnglish = {
+  'learning.commandExample': "Saved from command output.",
+  'learning.commandExit': "Command exit code: {code}.",
+  'learning.commandIncomplete': "Only part of the emitted output was saved.",
+  'learning.commandTurn': "Open output reading conversation",
   'learning.readingExample': "Saved from a reading passage. The note is an interpretation; the passage has not been rated as a successful result.",
   'learning.readingSource': "Source read",
   'learning.readingVersion': "This is the version observed then. Saving the example did not check the file again.",
@@ -118,6 +122,10 @@ export const learningEnglish = {
   'learning.hurt': "It hurt · pause",
 } as const;
 export const learningChinese: Record<keyof typeof learningEnglish, string> = {
+  'learning.commandExample': "Saved from command output.",
+  'learning.commandExit': "Command exit code: {code}.",
+  'learning.commandIncomplete': "Only part of the emitted output was saved.",
+  'learning.commandTurn': "Open output reading conversation",
   'learning.readingExample': "来自实际读到的材料片段。备注是解释，片段尚未被评为成功结果。",
   'learning.readingSource': "当时读取的来源",
   'learning.readingVersion': "这里保留当时观察到的版本；保存实例时没有再次检查文件。",

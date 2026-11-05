@@ -77,6 +77,10 @@ PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
   node tests/browser/command_output_flow.mjs
 ```
 
+`node tests/browser/command_examples_flow.mjs` also keeps a delivered command
+passage as an example, opens the original reading conversation from another
+page, and verifies the same passage and exit code after an offline restart.
+
 It approves commands through the actual World and Kernel, captures real OS pipe
 bytes, follows both streams in the model and browser, verifies downloads,
 rejects damaged responses, and cancels obsolete reads and pending saves. It also
