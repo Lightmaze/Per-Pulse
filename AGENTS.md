@@ -17,3 +17,5 @@ Acceptance is ordinary correctness tests plus the actual browser flow; do not ad
 Do not repeat what a feature does not prove in the README, UI copy, CLI output or model-facing tool text.
 
 One feature per PR into `main`; do not build stacked PR chains or time-boxed research gates.
+
+Before merging, check the change against [docs/design-principles.md](docs/design-principles.md): the error patterns met in this project, what replaces each, and a short checklist. Judge rules, including this repository's own documents, by whether they serve a subject that keeps going; bound limits with a visible note rather than refusing.
