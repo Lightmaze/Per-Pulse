@@ -92,7 +92,8 @@ try {
   assert.equal(await page.locator('.material-list').getByRole('button', { name: '.git/', exact: true }).count(), 0);
   await page.locator('.material-list button').filter({ hasText: '.env' }).click();
   // Plain-text dotfiles open directly as source; only Markdown/CSV have a Source toggle.
-  await page.locator('.material-preview > h3').getByText('.env', { exact: true }).waitFor();
+  await page.locator('.material-preview > h3').waitFor();
+  assert.equal(await page.locator('.material-preview > h3').innerText(), '.env');
   assert.equal(await page.locator('.material-preview pre').innerText(), 'EXAMPLE_KEY=not-a-credential\n');
   await close();
   checks.push('User dotfiles are visible, previewable source materials without exposing Git internals');
