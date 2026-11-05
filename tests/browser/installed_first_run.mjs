@@ -80,6 +80,15 @@ try {
   assert.ok(windowsCommand.includes("$env:P_PULSE_CHAT_ENDPOINT = '"), 'PowerShell environment syntax is usable on Windows');
   assert.ok(windowsCommand.includes('per-pulse doctor'), 'Windows setup includes a local preflight');
   assert.ok(!windowsCommand.includes('export P_PULSE_CHAT_'), 'Windows must not show POSIX shell commands');
+  await page.locator('#provider-connection-mode').selectOption('azure');
+  const azureWindows = await setup.locator('code').innerText();
+  assert.ok(azureWindows.includes('openai.azure.com/openai/deployments/'));
+  assert.ok(azureWindows.includes('api-version=2024-10-21'));
+  assert.ok(azureWindows.includes("$env:P_PULSE_CHAT_AUTH_STYLE = 'api-key'"));
+  await page.locator('#provider-terminal-shell').selectOption('posix');
+  const azurePosix = await setup.locator('code').innerText();
+  assert.ok(azurePosix.includes("export P_PULSE_CHAT_AUTH_STYLE='api-key'"));
+  await page.locator('#provider-terminal-shell').selectOption('powershell');
   await page.locator('#provider-connection-mode').selectOption('loopback');
   const localWindows = await setup.locator('code').innerText();
   assert.ok(localWindows.includes('127.0.0.1:11434/v1/chat/completions'));
@@ -93,9 +102,12 @@ try {
   await page.locator('#interface-language').selectOption('zh-CN');
   assert.equal(await page.locator('#provider-connection-mode option:checked').innerText(),
     '本机模型服务（无需 API 密钥）');
+  await page.locator('#provider-connection-mode').selectOption('azure');
+  assert.equal(await page.locator('#provider-connection-mode option:checked').innerText(), 'Azure OpenAI（api-key 请求头）');
   await page.locator('#provider-connection-mode').selectOption('keyed');
   await page.locator('#provider-terminal-shell').selectOption('posix');
   assert.ok((await setup.locator('code').innerText()).startsWith('export P_PULSE_CHAT_ENDPOINT='));
+  assert.ok((await setup.locator('code').innerText()).includes("export P_PULSE_CHAT_AUTH_STYLE='bearer'"));
   await page.locator('#provider-terminal-shell').selectOption('powershell');
   assert.ok((await setup.locator('code').innerText()).startsWith('$env:P_PULSE_CHAT_ENDPOINT'));
   assert.equal(await page.getByRole('button', { name: '复制终端配置命令' }).count(), 1);
