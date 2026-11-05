@@ -207,7 +207,7 @@ try {
   const feedbackBytes = Buffer.from('# Later observation\r\n\r\nThe update time changed. 🌍\r\n');
   await page.getByRole('button', { name: 'Materials', exact: true }).click();
   const materials = page.getByRole('dialog', { name: 'Materials', exact: true });
-  await materials.getByLabel('Choose a text file', { exact: true }).setInputFiles({ name: feedbackFile, mimeType: 'text/markdown', buffer: feedbackBytes });
+  await materials.getByLabel('Choose a file', { exact: true }).setInputFiles({ name: feedbackFile, mimeType: 'text/markdown', buffer: feedbackBytes });
   await materials.getByRole('button', { name: 'Upload file', exact: true }).click();
   await materials.getByRole('button', { name: 'Add to draft', exact: true }).click();
   await materials.waitFor({ state: 'hidden' });

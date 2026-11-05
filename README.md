@@ -21,8 +21,9 @@ Kernel implementation.
   where you were with your unsent draft and reading position intact.
 - Bring selected text Home with a link to its source message, or pass a
   selected result from one Work to another.
-- Attach text materials (Markdown, CSV, JSON or code, up to 1 MiB) and read
-  structured replies with headings, tables and code blocks.
+- Attach text materials (Markdown, CSV, JSON or code, up to 1 MiB) or PDFs
+  (up to 32 MiB, read as their text) and read structured replies with
+  headings, tables and code blocks.
 - Let pages continue: background pulses within an hourly budget, or type
   `/tick 3` to give a page three more steps.
 - Keep examples and lessons from your corrections. They are available across

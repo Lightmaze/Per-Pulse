@@ -15,6 +15,10 @@ import stat
 from typing import Iterator
 from uuid import uuid4
 
+from pulse_harness.adapters.document_text import (
+    MAX_PDF_BYTES, DocumentTextError, PdfText, is_pdf_path, read_pdf,
+)
+
 # POSIX opens each path component relative to an open directory descriptor.
 # Windows has no dir_fd; it opens each component relative to an open
 # directory handle instead (see winfiles). Elsewhere workspace files are
@@ -48,6 +52,18 @@ def _parts(path: str, *, root_ok: bool = False) -> list[str]:
            or p.casefold().endswith(_SECRET_SUFFIXES) or p.casefold().startswith("secrets.") for p in parts):
         raise FileAccessError("protected_or_invalid_path")
     return parts
+
+
+def upload_limit(name: str) -> int:
+    """Largest accepted upload: text files are small; PDFs are usually larger."""
+    return MAX_PDF_BYTES if is_pdf_path(name) else MAX_FILE_BYTES
+
+
+def _pdf_text(data: bytes) -> PdfText:
+    try:
+        return read_pdf(data)
+    except DocumentTextError as error:
+        raise FileAccessError(error.code, 415) from None
 
 
 def _text(data: bytes) -> str:
@@ -140,8 +156,10 @@ class WorkspaceFiles:
         return {"path": path, "entries": rows, "truncated": truncated,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
-    def read(self, path: str) -> dict:
+    def read_bytes(self, path: str) -> bytes:
+        """The file's original bytes, bounded by ``upload_limit``."""
         parts = _parts(path)
+        limit = upload_limit(path)
         with self.directory("/".join(parts[:-1])) as parent:
             try:
                 if _WINDOWS:
@@ -152,24 +170,35 @@ class WorkspaceFiles:
                     info = os.fstat(stream.fileno())
                     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                         raise FileAccessError("not_a_single_regular_file", 403)
-                    data = stream.read(MAX_FILE_BYTES + 1)
+                    data = stream.read(limit + 1)
                     after = os.fstat(stream.fileno())
                     if (info.st_size, info.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
                         raise FileAccessError("file_changed_retry", 409)
             except OSError:
                 raise FileAccessError("file_unavailable", 404) from None
-        if len(data) > MAX_FILE_BYTES:
+        if len(data) > limit:
             raise FileAccessError("file_too_large", 413)
-        return {"path": path, "content": _text(data), "bytes": len(data),
-                "sha256": hashlib.sha256(data).hexdigest()}
+        return data
+
+    def read(self, path: str) -> dict:
+        """A file's text; for a PDF, its text page by page (``complete`` is false if it stops early)."""
+        data = self.read_bytes(path)
+        result = {"path": path, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        if not is_pdf_path(path):
+            return {**result, "content": _text(data)}
+        pdf = _pdf_text(data)
+        return {**result, "content": pdf.text, "format": "pdf_text", "complete": pdf.complete}
 
     def upload(self, name: str, data: bytes) -> dict:
         parts = _parts(name)
         if len(parts) != 1:
             raise FileAccessError("filename_only")
-        if len(data) > MAX_FILE_BYTES:
+        if len(data) > upload_limit(name):
             raise FileAccessError("file_too_large", 413)
-        _text(data)
+        if is_pdf_path(name):
+            _pdf_text(data)
+        else:
+            _text(data)
         safe_name = re.sub(r"[^\w. -]", "_", name, flags=re.UNICODE)
         # The filesystem limits bytes, not characters. Leave room for the
         # unique prefix even when the original name contains multibyte text,

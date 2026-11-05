@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from pulse_harness.adapters.resources import workspace_write_resource
 from pulse_harness.core.errors import HarnessError
-from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES, WorkspaceFiles
+from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES, WorkspaceFiles, upload_limit
 from .artifacts import ArtifactError, clip_text
 from .execution import ExecutionError
 
@@ -30,6 +30,14 @@ class MaterialError(Exception):
     def __init__(self, code, message, status=409):
         super().__init__(message)
         self.code, self.message, self.status = code, message, status
+
+
+TOO_LARGE = "Choose a text file of at most 1 MiB or a PDF of at most 32 MiB."
+UPLOAD_PROBLEMS = {
+    "text_files_only": "Choose a UTF-8 text file, such as Markdown, plain text or CSV, or a PDF.",
+    "pdf_unreadable": "This PDF could not be read. Try saving it as a PDF again.",
+    "pdf_encrypted": "This PDF is password-protected. Remove the password and try again.",
+}
 
 
 def material_footer(records):
@@ -78,8 +86,8 @@ class PageMaterials:
                 raise MaterialError("material_workspace_changed", "The workspace changed. Refresh before uploading.")
             if not isinstance(upload_id, str) or re.fullmatch(r"[a-f0-9]{32}", upload_id) is None:
                 raise MaterialError("material_upload_id_invalid", "The upload identity is invalid.", 422)
-            if len(data) > MAX_FILE_BYTES:
-                raise MaterialError("material_too_large", "Choose a text file of at most 1 MiB.", 413)
+            if len(data) > upload_limit(name):
+                raise MaterialError("material_too_large", TOO_LARGE, 413)
             digest = hashlib.sha256(data).hexdigest()
             if expected_digest != digest:
                 raise MaterialError("material_upload_changed", "The uploaded bytes do not match the selected file.", 422)
@@ -87,7 +95,7 @@ class PageMaterials:
             if old is not None:
                 if (old["pageId"], old["name"], old["sha256"], old["bytes"]) != (page_id, name, digest, len(data)):
                     raise MaterialError("material_upload_conflict", "This upload identity belongs to another file.")
-                self._current(old)
+                self._verify(old)
                 return {"material": dict(old), "repeated": True}
             if len(self._records()) >= MAX_MATERIALS:
                 raise MaterialError("material_capacity", "This workspace has reached its source-file limit.")
@@ -111,10 +119,21 @@ class PageMaterials:
                             "The upload receipt was not saved. Check source files before trying again.", 503) from error
                     pages._state = state
             except FileAccessError as error:
-                raise MaterialError("material_" + error.code, "The source file could not be uploaded.", error.status) from error
+                raise MaterialError("material_" + error.code,
+                    UPLOAD_PROBLEMS.get(error.code, "The source file could not be uploaded."), error.status) from error
             except HarnessError as error:
                 raise pages.execution._translate(error) from error
             return {"material": dict(record), "repeated": False}
+
+    def _verify(self, record):
+        """Check the file still has its recorded bytes, without reading it as text."""
+        try:
+            data = self.files.read_bytes(record["path"])
+        except FileAccessError as error:
+            raise MaterialError("material_unavailable", "The source file is no longer available.", 409) from error
+        if hashlib.sha256(data).hexdigest() != record["sha256"] or len(data) != record["bytes"]:
+            raise MaterialError("material_changed", "This source file changed. Upload the version you want to use.")
+        return data
 
     def _current(self, record):
         try:
@@ -200,7 +219,8 @@ class PageMaterials:
                             "The file reference was not confirmed. Reopen the material before trying again.", 503) from error
                     pages._state = state
             except FileAccessError as error:
-                raise MaterialError("material_" + error.code, "The source file could not be attached.", error.status) from error
+                raise MaterialError("material_" + error.code,
+                    UPLOAD_PROBLEMS.get(error.code, "The source file could not be attached."), error.status) from error
             except HarnessError as error:
                 raise pages.execution._translate(error) from error
             return {"material": dict(record), "repeated": False}
@@ -213,24 +233,22 @@ class PageMaterials:
             content, truncated = clip_text(current["content"], MAX_PREVIEW_BYTES)
             return {"material": record, "content": content, "redacted": "[REDACTED]" in current["content"],
                     "truncated": truncated, "previewLimitBytes": MAX_PREVIEW_BYTES,
-                    "downloadable": True}
+                    "downloadable": True,
+                    **{key: current[key] for key in ("format", "complete") if key in current}}
 
     def download(self, page_id, material_id):
         """Read one complete receipt-bound source, preserving its original bytes."""
         with self.pages._lock:
             record = self._record(page_id, material_id)
-            current = self._current(record)
-            # An already-hidden marker may be literal user-supplied text. The
-            # native upload digest identifies those exact original bytes; it
-            # does not claim to recover any text omitted before the upload.
-            return {"material": record, "content": current["content"].encode("utf-8")}
+            # The original bytes, so a PDF downloads as the PDF that was uploaded.
+            return {"material": record, "content": self._verify(record)}
 
     def selected(self, page_id, identities):
         if len(identities) > 5 or len(set(identities)) != len(identities):
             raise MaterialError("material_selection_invalid", "Select up to five distinct source files.", 422)
         records = [self._record(page_id, identity) for identity in identities]
         for record in records:
-            self._current(record)
+            self._verify(record)
         return records
 
     def message(self, page_id, row):

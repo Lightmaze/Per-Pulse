@@ -43,6 +43,7 @@ import tempfile
 from typing import Any, Mapping, Sequence
 from weakref import ref
 
+from .document_text import MAX_PDF_BYTES, DocumentTextError, is_pdf_path, read_pdf
 from .resources import workspace_write_resource
 from ..core.changes import ChangePreview
 from ..core.contracts import (
@@ -697,7 +698,8 @@ class StructuredWorkspaceToolProvider:
         return (
             ToolDescriptor(
                 name="read_file",
-                description="Read one bounded UTF-8 file relative to the configured workspace.",
+                description=("Read one file relative to the configured workspace: a UTF-8 text file, "
+                             "or the text of a PDF with a [Page N] line before each page."),
                 mutable=False,
                 requires_approval=False,
                 capability="workspace.read",
@@ -1295,17 +1297,20 @@ class StructuredWorkspaceToolProvider:
         relative_path = _normalize_relative_path(arguments["path"])
         target = self._safe_target(relative_path, allow_missing=False)
         cancellation.raise_if_cancelled()
-        snapshot = self._snapshot(target)
+        snapshot, text, is_pdf, complete, missing_text = self._snapshot_text(target, cancellation)
         output = {
             "path": relative_path,
             "digest": snapshot.digest,
+            # pdf_complete is false when the text stops before the PDF's end.
+            **({"format": "pdf_text", "pdf_complete": complete,
+                "pdf_pages_without_selectable_text": missing_text} if is_pdf else {}),
             "workspace_provenance": {
                 "adapter": "pulse_harness.workspace.v1",
                 "workspace_digest": self._workspace_provenance,
             },
         }
         return self._bounded_text_output(
-            output, snapshot.text, text_key="content", redacted_key="redacted",
+            output, text, text_key="content", redacted_key="redacted",
             truncated_key="truncated", tool_call_id=call.tool_call_id,
             action_request_id=action_request_id, status="succeeded",
         )
@@ -1807,7 +1812,36 @@ class StructuredWorkspaceToolProvider:
             raise WorkspaceValidationError("workspace path escapes the configured root", code="workspace_boundary_lost")
         return target
 
-    def _snapshot(self, target: Path) -> _FileSnapshot:
+    def _snapshot_text(
+        self,
+        target: Path,
+        cancellation: CancellationToken | None = None,
+    ) -> tuple[_FileSnapshot, str, bool, bool, bool]:
+        """A file's bytes and its text; a PDF's text is read page by page.
+
+        Returns ``(snapshot, text, is_pdf, complete, missing_text)``. ``complete`` is false
+        when a PDF's text stopped at the reading bounds, so the text covers
+        only the start of the original. A PDF may be larger than a text file
+        (``MAX_PDF_BYTES``). Only its text is read; it is never edited.
+        """
+
+        if not is_pdf_path(target):
+            snapshot = self._snapshot(target)
+            return snapshot, snapshot.text, False, True, False
+        snapshot = self._snapshot(target, max_bytes=max(self._max_file_bytes, MAX_PDF_BYTES))
+        if not snapshot.exists:
+            return snapshot, "", True, True, False
+        try:
+            pdf = read_pdf(
+                snapshot.data,
+                should_stop=(lambda: cancellation.cancelled) if cancellation is not None else None,
+            )
+        except DocumentTextError as error:
+            raise WorkspaceValidationError(str(error), code=error.code) from error
+        return snapshot, pdf.text, True, pdf.complete, pdf.pages_without_selectable_text
+
+    def _snapshot(self, target: Path, *, max_bytes: int | None = None) -> _FileSnapshot:
+        limit = self._max_file_bytes if max_bytes is None else max_bytes
         if not target.exists() and not os.path.lexists(target):
             return _FileSnapshot(False, b"", None)
         if _is_reparse(target) or target.is_dir():
@@ -1815,7 +1849,7 @@ class StructuredWorkspaceToolProvider:
         try:
             before_info = os.stat(target, follow_symlinks=False)
             before_identity = _path_identity(target, directory=False)
-            if int(before_info.st_size) > self._max_file_bytes:
+            if int(before_info.st_size) > limit:
                 raise WorkspaceValidationError(
                     "workspace file exceeds the adapter size bound",
                     code="workspace_file_too_large",
@@ -1829,7 +1863,7 @@ class StructuredWorkspaceToolProvider:
                     if not chunk:
                         break
                     total += len(chunk)
-                    if total > self._max_file_bytes:
+                    if total > limit:
                         raise WorkspaceValidationError(
                             "workspace file exceeds the adapter size bound",
                             code="workspace_file_too_large",

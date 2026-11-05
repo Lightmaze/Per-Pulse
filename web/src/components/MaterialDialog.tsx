@@ -5,6 +5,7 @@ import { useLanguage } from '../i18n';
 import type { MaterialRead, PageSummary, WorkspaceFileIdentity } from '../types';
 import { Dialog } from './Dialog';
 import { TextDocument } from './TextDocument';
+import { pdfHasText } from '../uploadLimits';
 import type { Navigate } from './SessionLink';
 
 /** Inspect exactly the version identified by a native message attachment. */
@@ -75,6 +76,8 @@ export function MaterialDialog({ identity, pageId, materialId, close, browse, pa
                 action: preview.material.originArtifactId.slice(0, 12),
               })}</p> : null}
           {preview.redacted ? <p>{t('materials.redacted')}</p> : null}
+          {preview.format === 'pdf_text' ? <p className="material-hint">{t(pdfHasText(preview.content) ? 'materials.pdfText' : 'materials.pdfNoText')}</p> : null}
+          {preview.format === 'pdf_text' && preview.complete === false ? <p className="material-hint">{t('materials.pdfPartial')}</p> : null}
           {preview.truncated ? <p>{t('materials.truncated')}</p> : null}
           <div aria-label={t('materials.content')}><TextDocument key={`${preview.material.id}/${preview.material.sha256}`} path={preview.material.path} content={preview.content} truncated={preview.truncated} /></div>
           <details><summary>{t('library.details')}</summary><p>{preview.material.path}</p><p>SHA-256: {preview.material.sha256}</p></details>
