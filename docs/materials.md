@@ -4,9 +4,10 @@ Open **Materials**, choose a UTF-8 text file up to 1 MiB or a PDF up to 32 MiB,
 and select **Upload file**. A PDF is kept as the original file; its preview and
 what Per Pulse reads is its text, with a `[Page N]` line before each page. A
 password-protected PDF must be unlocked first. A page with no selectable
-text shows an explicit warning rather than silently appearing empty; this does
-not read images or perform OCR. A search miss on such a PDF is not reported
-as a search of all its visual contents. A very long PDF is read up to 2,000 pages or 2 million
+text has only its page marker in the text view; the model-reading tools
+explicitly report that some pages had no selectable text. This does not
+read images or perform OCR, and a search miss is not reported as a search
+of all the PDF's visual contents. A very long PDF is read up to 2,000 pages or 2 million
 characters; its text then ends with a line saying where it stops, the
 preview says it is incomplete, and the model's reading tools report it
 (`pdf_complete` / `source_complete: false`), so a search of the part read is
