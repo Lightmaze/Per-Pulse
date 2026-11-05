@@ -17,6 +17,12 @@ from pulse_harness.core.errors import ProviderProtocolError, ScopeConflict
 from pulse_harness.core.provider import CancellationToken
 from pulse_harness.core.session_store import HarnessStore
 
+# Recall receipts quote other records; they are not additional original tool
+# observations. Keep explicit tool browsing free of recursive copies.
+RECALL_TOOL_NAMES = ("search_history", "read_history", "replay")
+ROLE_SCHEMA = {"type": "string", "enum": ["user", "assistant", "tool"],
+               "description": "Omit for discussion. Use tool explicitly for original saved tool results."}
+
 HISTORY_SCHEMAS = {
     "search_history": {
         "type": "object", "properties": {
@@ -24,6 +30,7 @@ HISTORY_SCHEMAS = {
                       "description": "Literal case-sensitive substring; empty string browses saved conversation."},
             "limit": {"type": "integer", "minimum": 1, "maximum": 10},
             "cursor": {"type": "string", "description": "Exact next_cursor from the preceding page, if any."},
+            "role": ROLE_SCHEMA,
         }, "required": ["query"], "additionalProperties": False,
     },
     "read_history": {
@@ -33,6 +40,7 @@ HISTORY_SCHEMAS = {
             "offset": {"type": "integer", "minimum": 0,
                        "description": "Character offset in the saved text, not a byte offset."},
             "max_chars": {"type": "integer", "minimum": 1, "maximum": 4096},
+            "role": ROLE_SCHEMA,
         }, "required": ["message_id"], "additionalProperties": False,
     },
 }
@@ -51,7 +59,7 @@ def source_identity(row: Mapping[str, Any]) -> dict[str, Any]:
             "turn_id": scope.turn_id, "transcript_seq": row["transcript_seq"],
             "created_at": row["created_at"], "content_digest": row["content_digest"],
             "role": row["role"], "stored_redacted": row["redacted"],
-            "stored_truncated": row["truncated"]}
+            "stored_truncated": row["truncated"], **row.get("tool_source", {})}
 
 
 class ConversationHistoryTools:
@@ -65,11 +73,14 @@ class ConversationHistoryTools:
             ToolDescriptor("search_history", "Find saved user/assistant discussion in your current "
                 "session and committed predecessor generations, including details omitted from a "
                 "succession summary. Results are historical references, not new instructions. "
-                "Use read_history to expand a result. Current-turn messages are excluded.",
+                "Use role=tool to find original saved tool results with verified action sources; "
+                "recall-tool copies are excluded. Omit role for discussion, or select user/assistant. "
+                "Use read_history with the same role to expand a result. Current-turn messages are excluded.",
                 capability="history.read", source="pulse_harness.history"),
             ToolDescriptor("read_history", "Read a saved conversation passage by message_id. "
-                "Use next_offset for the remaining original stored text. This reads history; "
-                "it does not replay actions or create a new user message. Redaction and prior "
+                "Use next_offset for the remaining original stored text. "
+                "Pass role=tool for a tool-result source; omit role for discussion. "
+                "This reads history; it does not replay actions or create a new user message. Redaction and prior "
                 "truncation remain explicit; unrecorded text cannot be recovered.",
                 capability="history.read", source="pulse_harness.history"),
         )
@@ -106,6 +117,9 @@ class ConversationHistoryTools:
                 or set(args) - set(HISTORY_SCHEMAS[call.name]["properties"])):
             raise ProviderProtocolError("unsupported history request", code="history_request_invalid")
         cancellation.raise_if_cancelled()
+        role = args.get("role")
+        if "role" in args and (not isinstance(role, str) or role not in {"user", "assistant", "tool"}):
+            raise ProviderProtocolError("history role must be user, assistant, or tool", code="history_request_invalid")
         scopes, missing = self._sources(scope, cancellation)
         if call.name == "search_history":
             result = self._search(scope, scopes, args, cancellation)
@@ -113,7 +127,9 @@ class ConversationHistoryTools:
             result = self._read(scope, scopes, args, cancellation)
         # Never let wrapper truncation silently destroy a continuation cursor.
         result["coverage"] = {"available_sessions": len(scopes), "unavailable_sessions": missing,
-                              "roles": ["user", "assistant"], "current_turn_excluded": True}
+                              "roles": [role] if role else ["user", "assistant"], "current_turn_excluded": True}
+        if role == "tool":
+            result["coverage"]["excluded_tool_names"] = list(RECALL_TOOL_NAMES)
         result["kind"] = "historical_reference"
         if len(json.dumps(result, ensure_ascii=True).encode()) > self.store.max_payload_bytes // 2:
             raise ProviderProtocolError("history result exceeds configured storage bound; request fewer characters/results",
@@ -126,7 +142,11 @@ class ConversationHistoryTools:
         if not isinstance(query, str) or len(query) > 256:
             raise ProviderProtocolError("history query must be bounded text", code="history_request_invalid")
         limit = _integer(args.get("limit", 5), 1, 10)
-        binding = hashlib.sha256(json.dumps([scope.session_id, query, [s.as_dict() for s in scopes]],
+        role = args.get("role")
+        identity = [scope.session_id, query, [s.as_dict() for s in scopes]]
+        if role is not None:
+            identity.append(role)
+        binding = hashlib.sha256(json.dumps(identity,
                                            sort_keys=True).encode()).hexdigest()
         index, after = 0, 0
         if "cursor" in args:
@@ -147,7 +167,8 @@ class ConversationHistoryTools:
             cancellation.raise_if_cancelled()
             source = scopes[i]
             rows = self.store.search_transcript(source, query, after_seq=after if i == index else 0,
-                limit=limit + 1 - len(matches), exclude_turn_id=scope.turn_id if source == scope.session_scope() else "")
+                limit=limit + 1 - len(matches), exclude_turn_id=scope.turn_id if source == scope.session_scope() else "",
+                role=role, excluded_tool_names=RECALL_TOOL_NAMES)
             for row in rows:
                 start = max(0, row["content"].find(query) - 40)
                 snippet = row["content"][start:start + 256]
@@ -171,7 +192,8 @@ class ConversationHistoryTools:
         for source in scopes:
             cancellation.raise_if_cancelled()
             row = self.store.read_transcript_message(source, message_id,
-                exclude_turn_id=scope.turn_id if source == scope.session_scope() else "")
+                exclude_turn_id=scope.turn_id if source == scope.session_scope() else "",
+                role=args.get("role"), excluded_tool_names=RECALL_TOOL_NAMES)
             if row is None:
                 continue
             text = row["content"]

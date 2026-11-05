@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -4883,9 +4884,10 @@ class HarnessStore:
 
     def search_transcript(
         self, scope: HarnessScope, query: str, *, after_seq: int = 0,
-        limit: int = 6, exclude_turn_id: str = "",
+        limit: int = 6, exclude_turn_id: str = "", role: str | None = None,
+        excluded_tool_names: tuple[str, ...] = (),
     ) -> tuple[dict[str, Any], ...]:
-        """Read saved user/assistant records, not the lossy observer ring.
+        """Read saved discussion or explicitly selected tool results.
 
         Literal, case-sensitive substring search. The caller authorizes each
         source session; this method never performs a global/cross-scope search.
@@ -4897,49 +4899,130 @@ class HarnessStore:
             raise ValueError("history after_seq must be a nonnegative integer")
         if type(limit) is not int or not 1 <= limit <= 11:
             raise ValueError("history limit must be between 1 and 11")
+        join, selection, selected = self._history_selection(role, excluded_tool_names)
         with self._lock:
             self._require_open()
             self._assert_session_scope(scope)
             self._validate_database_locked()
             rows = self._db.execute(
-                "SELECT * FROM transcript_messages WHERE session_id = ? "
-                "AND role IN ('user', 'assistant') AND transcript_seq > ? "
-                "AND turn_id != ? AND instr(content, ?) > 0 "
-                "AND NOT EXISTS (SELECT 1 FROM model_rounds r WHERE r.session_id = transcript_messages.session_id "
-                "AND r.assistant_item_id = transcript_messages.item_id AND r.tool_call_count > 0) "
-                "ORDER BY transcript_seq LIMIT ?",
-                (scope.session_id, after_seq, exclude_turn_id, query, limit),
+                "SELECT m.* FROM transcript_messages m " + join +
+                " WHERE m.session_id = ? AND " + selection +
+                " AND m.transcript_seq > ? AND m.turn_id != ? AND instr(m.content, ?) > 0 "
+                "ORDER BY m.transcript_seq LIMIT ?",
+                (scope.session_id, *selected, after_seq, exclude_turn_id, query, limit),
             ).fetchall()
             result = []
             for row in rows:
                 self._assert_turn_row_scope(row, scope)
-                result.append({**self._transcript_from_row(row),
-                               "content_digest": row["content_digest"],
-                               "created_at": row["created_at"]})
+                result.append(self._history_record_locked(row))
             return tuple(result)
 
     def read_transcript_message(
         self, scope: HarnessScope, message_id: str, *, exclude_turn_id: str = "",
+        role: str | None = None, excluded_tool_names: tuple[str, ...] = (),
     ) -> dict[str, Any] | None:
         """Return one saved conversation record without changing its history."""
         if not isinstance(message_id, str) or not 1 <= len(message_id) <= 256:
             raise ValueError("history message_id must be nonempty bounded text")
+        join, selection, selected = self._history_selection(role, excluded_tool_names)
         with self._lock:
             self._require_open()
             self._assert_session_scope(scope)
             self._validate_database_locked()
             row = self._db.execute(
-                "SELECT * FROM transcript_messages WHERE session_id = ? "
-                "AND message_id = ? AND role IN ('user', 'assistant') AND turn_id != ? "
-                "AND NOT EXISTS (SELECT 1 FROM model_rounds r WHERE r.session_id = transcript_messages.session_id "
-                "AND r.assistant_item_id = transcript_messages.item_id AND r.tool_call_count > 0)",
-                (scope.session_id, message_id, exclude_turn_id),
+                "SELECT m.* FROM transcript_messages m " + join +
+                " WHERE m.session_id = ? AND " + selection +
+                " AND m.message_id = ? AND m.turn_id != ?",
+                (scope.session_id, *selected, message_id, exclude_turn_id),
             ).fetchone()
             if row is None:
                 return None
             self._assert_turn_row_scope(row, scope)
-            return {**self._transcript_from_row(row),
-                    "content_digest": row["content_digest"], "created_at": row["created_at"]}
+            return self._history_record_locked(row)
+
+    @staticmethod
+    def _history_selection(role: str | None, excluded_tool_names: tuple[str, ...]):
+        if role not in (None, "user", "assistant", "tool"):
+            raise ValueError("history role must be user, assistant, or tool")
+        if (not isinstance(excluded_tool_names, tuple) or len(excluded_tool_names) > 32
+                or any(not isinstance(name, str) or not 1 <= len(name) <= 256
+                       for name in excluded_tool_names)):
+            raise ValueError("history tool exclusions must be bounded tool names")
+        selection = "m.role IN ('user', 'assistant')" if role is None else "m.role = ?"
+        parameters = () if role is None else (role,)
+        if role != "tool":
+            return "", selection + (
+                " AND NOT EXISTS (SELECT 1 FROM model_rounds r WHERE r.session_id = m.session_id"
+                " AND r.assistant_item_id = m.item_id AND r.tool_call_count > 0)"
+            ), parameters
+        join = ("JOIN actions a ON m.item_id = 'tool-result:' || a.action_request_id"
+                " AND m.session_id = a.session_id AND m.turn_id = a.turn_id")
+        if excluded_tool_names:
+            selection += " AND a.tool_name NOT IN (" + ",".join("?" for _ in excluded_tool_names) + ")"
+            parameters += excluded_tool_names
+        return join, selection, parameters
+
+    def _history_record_locked(self, row: sqlite3.Row) -> dict[str, Any]:
+        record = {**self._transcript_from_row(row), "content_digest": row["content_digest"],
+                  "created_at": row["created_at"]}
+        if row["role"] != "tool":
+            return record
+        # The stored result may be redacted or truncated text rather than JSON.
+        # Resolve its identity through original action and model-round authority,
+        # never through fields claimed inside the tool output.
+        action = self._action_row(row["item_id"][len("tool-result:"):])
+        self._assert_action_scope(action, record["scope"])
+        if not ActionStatus(action["status"]).terminal:
+            raise StoreUnavailable("historical tool result has no terminal action")
+        candidates = self._db.execute(
+            "SELECT t.content FROM model_rounds r JOIN transcript_messages t "
+            "ON t.session_id = r.session_id AND t.item_id = r.assistant_item_id "
+            "WHERE r.session_id = ? AND r.turn_id = ? AND r.status = ? "
+            "AND r.tool_call_count > 0 AND t.transcript_seq < ?",
+            (row["session_id"], row["turn_id"], ModelRoundStatus.COMPLETED.value, row["transcript_seq"]),
+        ).fetchall()
+        calls = [call for candidate in candidates
+                 for call in json.loads(candidate["content"])["tool_calls"]
+                 if call["action_request_id"] == action["action_request_id"]]
+        if (len(calls) != 1 or calls[0]["name"] != action["tool_name"]
+                or calls[0]["arguments"] != decode_payload(action["arguments_json"])
+                or action["action_request_id"] != f"{record['scope'].digest}:{calls[0]['tool_call_id']}"):
+            raise StoreUnavailable("historical tool result differs from its original model call")
+        result = decode_payload(action["result_json"]) if action["result_json"] is not None else {}
+        output = result.get("output", result) if isinstance(result, Mapping) else {}
+        if not isinstance(output, Mapping):
+            output = {"value": output}
+        expected = json.dumps({
+            "tool_call_id": calls[0]["tool_call_id"],
+            "action_request_id": action["action_request_id"], "status": action["status"],
+            "output": dict(output), "error_code": action["error_code"],
+        }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        redacted, _ = stored_text_flags(expected)
+        matches = row["content"] == expected and not row["truncated"]
+        if row["truncated"]:
+            # A previous process may have used a smaller payload bound. Check
+            # its saved marker against the original projection, without
+            # regenerating or expanding the saved passage under today's bound.
+            marker = re.fullmatch(r"\[TRUNCATED sha256=([0-9a-f]{64}) redacted=([01]) preview=(.*)\]",
+                                  row["content"], re.DOTALL)
+            matches = bool(marker and marker[1] == hashlib.sha256(expected.encode()).hexdigest()
+                           and bool(int(marker[2])) == redacted)
+            if matches:
+                # UTF-8 replacement followed by bound_text's eight-character
+                # clipping can leave at most 31 unused bytes in the old bound.
+                size = len(row["content"].encode())
+                matches = any(bound_text(expected, bound)[0] == row["content"]
+                              for bound in range(max(128, size), size + 33))
+        if not matches or bool(row["redacted"]) != redacted:
+            raise StoreUnavailable("historical tool result differs from its original action result")
+        record["tool_source"] = {
+            "tool_name": action["tool_name"], "action_request_id": action["action_request_id"],
+            "tool_call_id": calls[0]["tool_call_id"], "action_status": action["status"],
+            "result_delivered": bool(action["result_delivered"]),
+            "action_result_redacted": bool(action["result_redacted"]),
+            "action_result_truncated": bool(action["result_truncated"]),
+        }
+        return record
 
     def append_event(self, draft: EventDraft) -> HarnessEvent:
         with self._lock:

@@ -91,6 +91,9 @@ jobs:
       - name: Verify earlier conversation browsing in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-history-screenshots" node tests/browser/history_flow.mjs
+      - name: Verify clipped original tool-result recall, restart and Work isolation in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TOOL_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-history-screenshots/tool-results" node tests/browser/tool_history_flow.mjs
       - name: Keep conversation history browser evidence
         if: always()
         uses: actions/upload-artifact@v4

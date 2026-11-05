@@ -94,6 +94,25 @@ while new input arrives, an obsolete query response, phone layout, bilingual
 controls, Escape focus restoration, and Browser Back to another source within
 the same Work while a search is pending. Queries remain local and read-only.
 
+## Recall an original saved tool result
+
+Run `node tests/browser/tool_history_flow.mjs` with the same Playwright and
+Python environment. `PER_PULSE_TOOL_HISTORY_SCREENSHOTS` optionally records
+desktop and phone views. The explicit synthetic HTTP fixture chooses tools;
+the World, Kernel, file read, saved transcript and history reads are real.
+
+The browser reads a file once, replaces its physical bytes, sends multiple
+long turns and verifies that the original result has actually left the model
+request. The private old marker appears only in the original tool result,
+with no earlier discussion summary supplying it. `search_history(role="tool")`
+and paginated `read_history(role="tool")` then recover the exact saved JSON,
+including Unicode text and the original action, call, message and status.
+The file stays changed, the original transcript row stays unchanged, and the
+original file action still has exactly one execution. The flow repeats recall
+after a process restart, rejects another Work's search and direct read, checks
+that default discussion search excludes tool records, and opens the original
+instruction on a phone while preserving the draft and source across reload.
+
 ## Local Notice continuity
 
 Run `node tests/browser/notice_flow.mjs` with the same Playwright and Python
