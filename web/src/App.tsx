@@ -115,7 +115,7 @@ export default function App() {
       const origin = route.restoreFocus;
       const originContainer = origin?.messageId ? document.getElementById(`message-${origin.messageId}`) : main.current;
       const originLink = origin?.referenceId ? originContainer?.querySelector<HTMLElement>(`[data-reference-id="${CSS.escape(origin.referenceId)}"]`) : null;
-      const focusTarget = originLink ?? target ?? main.current?.querySelector<HTMLElement>('h1');
+      const focusTarget = originLink ?? (origin?.messageId ? originContainer : null) ?? target ?? main.current?.querySelector<HTMLElement>('h1');
       focusTarget?.focus({ preventScroll: true });
       restored.current = key;
     });

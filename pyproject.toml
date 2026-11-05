@@ -46,7 +46,8 @@ packages = ["src/per_pulse", "src/pulse_system", "src/pulse_harness"]
 "src/pulse_harness/core/secrets.py" = "pulse_harness/core/secrets.py"
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/web", "/tests", "/docs", "/examples", "/AGENTS.md"]
+include = ["/src", "/web", "/tests", "/docs", "/examples", "/scripts", "/AGENTS.md",
+           "/CHANGELOG.md", "/CONTRIBUTING.md", "/SECURITY.md"]
 exclude = [
   "/.venv", "/.git", "**/node_modules", "**/__pycache__", "**/.pytest_cache",
   "*.pyc", "*.tsbuildinfo", "*.db", "*.db-wal", "*.db-shm", "*.jsonl", ".env*",

@@ -8407,7 +8407,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
 
         return self._native_kernel_context_for_center(event.center_id) or "home"
 
-    def _native_kernel_context_for_turn(
+    def native_kernel_context_for_turn(
         self,
         engram_id: str,
         turn_id: str,
@@ -8435,6 +8435,14 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 "native Kernel turn references a foreign or missing causal event"
             )
         return self._native_kernel_context_for_center(event.center_id)
+
+    def _native_kernel_context_for_turn(
+        self,
+        engram_id: str,
+        turn_id: str,
+    ) -> str:
+        """Compatibility entry point for existing native runtime callbacks."""
+        return self.native_kernel_context_for_turn(engram_id, turn_id)
 
     def _native_kernel_background_main_round_limit_for_turn(
         self, engram_id: str, turn_id: str,
@@ -9318,6 +9326,18 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             "recent_source": latest[1] if latest is not None else None,
             "recent_kind": latest[2] if latest is not None else None,
         }
+
+    def work_report_origin(
+        self, event_id: str, request_id: str | None, subject: str, content: str, *,
+        require_settled_source: bool = False,
+    ) -> dict[str, Any] | None:
+        """Read verified provenance for one admitted native Work report."""
+        if self.kernel_service is None:
+            return None
+        return self._native_work.report_origin(
+            event_id, request_id, subject, content,
+            require_settled_source=require_settled_source,
+        )
 
     def _causal_message_projection(
         self,

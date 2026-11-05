@@ -34,10 +34,37 @@ check that a fast native `work.create` appears in the sidebar through Home's
 existing workspace read, without manual refresh or another model call. It
 preserves the draft and focus, holds a stale read across a newer Home turn,
 checks failed-read recovery and fences a real service restart before explicit
-refresh. `PER_PULSE_WORK_DISCOVERY_SCREENSHOTS` records desktop and phone views.
+refresh. An overlapping Home observation also preserves an explicit reconnect.
+`PER_PULSE_WORK_DISCOVERY_SCREENSHOTS` records desktop and phone views.
 Only the HTTP model choices are synthetic; native Work and persistence are real.
 
+## Native report source navigation
+
+Run `node tests/browser/report_source_flow.mjs` with `PLAYWRIGHT_MODULE` and
+`PER_PULSE_PYTHON` as above. A synthetic HTTP model calls the real native Work
+report tool; Home opens that report's exact settled Work result and returns to
+the original report position and focus while preserving both drafts. The flow
+also checks ordinary report-shaped human text, offline restart, and a phone
+viewport. `PER_PULSE_REPORT_SOURCE_SCREENSHOTS` selects optional screenshots.
+
 ## Native approvals and file results
+
+To check ordinary Home conversation organizing Work while file actions remain
+disabled, run:
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  node tests/browser/work_organization_flow.mjs
+```
+
+The explicit synthetic HTTP transport selects real native `work` create,
+list/send and report calls. The browser stays in Home, refreshes the workspace
+through Settings, opens the same Work through the existing navigation, and
+checks its reports against the actual persisted outbox and source turns.
+Offline restart retains both pages, results and drafts on desktop and phone. Set
+`PER_PULSE_WORK_ORGANIZATION_SCREENSHOTS` for screenshots. The existing CI
+verify job runs this flow with workspace file actions disabled.
 
 ```sh
 PER_PULSE_PLAYWRIGHT_PATH=/tmp/per-pulse-browser-tools/node_modules/playwright \

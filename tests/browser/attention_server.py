@@ -19,19 +19,26 @@ from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapte
 
 def handler(request):
     messages = json.loads(request.content)["messages"]
-    last_user = max(index for index, message in enumerate(messages)
-                    if message["role"] == "user")
-    prompt = json.dumps(messages[last_user]["content"])
-    has_result = any(message["role"] == "tool" for message in messages[last_user + 1:])
     tool_arguments = None
-    if not has_result and "RETAIN_ATTENTION_GOAL" in prompt:
-        tool_arguments = {
-            "op": "hold",
-            "note": "Check that a visitor can actually try the experience.",
-            "drive": 0.72,
-        }
-    elif not has_result and "RELEASE_LOCAL_THOUGHT" in prompt:
-        tool_arguments = {"op": "release"}
+    material = json.dumps(messages)
+    if "WORK_MATERIAL_JSON" in material:
+        content = "PASS"
+    elif "UNTRUSTED_REVIEW_DATA_JSON" in material:
+        content = '{"mode":"none"}'
+    else:
+        last_user = max(index for index, message in enumerate(messages)
+                        if message["role"] == "user")
+        prompt = json.dumps(messages[last_user]["content"])
+        has_result = any(message["role"] == "tool" for message in messages[last_user + 1:])
+        if not has_result and "RETAIN_ATTENTION_GOAL" in prompt:
+            tool_arguments = {
+                "op": "hold",
+                "note": "Check that a visitor can actually try the experience.",
+                "drive": 0.72,
+            }
+        elif not has_result and "RELEASE_LOCAL_THOUGHT" in prompt:
+            tool_arguments = {"op": "release"}
+        content = "Synthetic fixture response. The local turn completed."
     if tool_arguments is not None:
         delta = {"tool_calls": [{
             "index": 0, "id": "fixture-attention", "type": "function",
@@ -39,7 +46,7 @@ def handler(request):
         }]}
         reason = "tool_calls"
     else:
-        delta = {"content": "Synthetic fixture response. The local turn completed."}
+        delta = {"content": content}
         reason = "stop"
     chunks = [
         {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
@@ -66,6 +73,8 @@ if __name__ == "__main__":
                         help="Exercise one real contentless background input.")
     parser.add_argument("--no-pulse", action="store_true",
                         help="Reopen a persisted World without new autonomous activity.")
+    parser.add_argument("--posture", action="store_true",
+                        help="Enable the native experience journal for explicit browser capture.")
     args = parser.parse_args()
     os.environ["PER_PULSE_ATTENTION_BROWSER_KEY"] = "explicit-synthetic-browser-credential"
     uvicorn.run(
@@ -75,6 +84,6 @@ if __name__ == "__main__":
             check_interval_seconds=0.01, refractory_seconds=.05 if args.spontaneous else 0,
             max_background_provider_tokens_per_hour=128,
             background_provider_token_reservation=64,
-        ), model_factory=factory),
+        ), posture=True if args.posture else None, model_factory=factory),
         host="127.0.0.1", port=args.port, log_level="warning",
     )

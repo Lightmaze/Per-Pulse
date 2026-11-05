@@ -23,7 +23,7 @@ await new Promise(done => socket.close(done));
 const base = `http://127.0.0.1:${port}`;
 const title = 'A discovered source check';
 const checks = [], errors = [];
-let server, serverLog = '', browser, page, releaseRead = () => {};
+let server, serverLog = '', browser, page, releaseRead = () => {}, releaseReconnect = () => {};
 const start = (offline = false) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/work_discovery_server.py'), '--data-dir', directory,
@@ -151,10 +151,37 @@ try {
   assert.equal((await (await restartRead).json()).serviceInstanceId, restarted.serviceInstanceId);
   await page.locator('.sync-notice').waitFor();
   assert.equal(await page.locator('.provider-indicator').innerText(), 'AI connected', 'background reads cannot silently adopt another process');
+  let reconnectCaptured;
+  const reconnectCapturedRead = new Promise(done => { reconnectCaptured = done; });
+  const reconnectHeld = new Promise(done => { releaseReconnect = done; });
+  let reconnectReads = 0;
+  const reconnectRoute = async route => {
+    const response = await route.fetch();
+    if (++reconnectReads === 1) {
+      reconnectCaptured(); await reconnectHeld;
+    }
+    await route.fulfill({ response }).catch(() => {});
+  };
+  await page.route('**/api/bootstrap', reconnectRoute);
   await page.getByRole('button', { name: 'Refresh updates', exact: true }).click();
+  await reconnectCapturedRead;
+  // Remounting Home uses its existing immediate observation while the explicit
+  // reconnect remains pending. Its old expected identity rejects the new one.
+  await navigate(title);
+  const overlappingRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/bootstrap');
+  await navigate('Home');
+  assert.equal((await (await overlappingRead).json()).serviceInstanceId, restarted.serviceInstanceId);
+  await page.waitForTimeout(100);
+  assert.equal(await page.locator('.provider-indicator').innerText(), 'AI connected');
+  const reconnectedRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/bootstrap');
+  releaseReconnect(); await reconnectedRead;
+  await page.unroute('**/api/bootstrap', reconnectRoute);
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  await page.getByText('The held Home reply finished. [Explicit synthetic fixture]', { exact: true }).waitFor();
   await wait(async () => (await page.locator('.provider-indicator').innerText()) === 'AI disconnected', 'explicit reconnect adopts the restarted service');
+  await wait(async () => await page.locator('.sync-notice').count() === 0, 'reconnect recovers the current page view and clears the notice');
   assert.equal(await composer.inputValue(), homeDraft);
+  checks.push('A scheduled Home observation overlapping explicit reconnect cannot suppress adoption of the new service or leave the current page unavailable.');
   await page.setViewportSize({ width: 390, height: 844 });
   await navigate(title);
   await page.getByText('The focused check finished. [Explicit synthetic fixture]', { exact: true }).waitFor();
@@ -170,7 +197,7 @@ try {
   if (screenshots && page) await page.screenshot({ path: join(screenshots, 'work-discovery-failure.png') }).catch(() => {});
   throw error;
 } finally {
-  releaseRead();
+  releaseRead(); releaseReconnect();
   await browser?.close(); await stop(server);
   await rm(directory, { recursive: true, force: true });
 }
