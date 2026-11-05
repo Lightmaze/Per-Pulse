@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -82,6 +82,19 @@ try {
     if (screenshots) { await mkdir(screenshots, { recursive: true }); await page.screenshot({ path: join(screenshots, name + '.png'), fullPage: true }); }
   };
   const firstId = await create('Field notes');
+  // Ordinary dotfiles are user materials. The UI should not silently hide
+  // them or offer internal Git metadata as source files.
+  await writeFile(join(directory, 'workspace', '.env'), 'EXAMPLE_KEY=not-a-credential\\n');
+  await writeFile(join(directory, 'workspace', '.gitignore'), 'dist/\\n');
+  await mkdir(join(directory, 'workspace', '.git'), { recursive: true });
+  await open();
+  assert.equal(await page.locator('.material-list button').filter({ hasText: '.gitignore' }).count(), 1);
+  assert.equal(await page.locator('.material-list').getByRole('button', { name: '.git/', exact: true }).count(), 0);
+  await page.locator('.material-list button').filter({ hasText: '.env' }).click();
+  await page.getByRole('button', { name: 'Source', exact: true }).click();
+  assert.equal(await page.locator('.material-preview pre').innerText(), 'EXAMPLE_KEY=not-a-credential\\n');
+  await close();
+  checks.push('User dotfiles are visible, previewable source materials without exposing Git internals');
   await page.locator('.composer textarea').fill('Keep my question and its page link.');
   await page.getByRole('button', { name: 'Link a page', exact: true }).click();
   await page.getByRole('option', { name: /^Home\b/ }).click();
