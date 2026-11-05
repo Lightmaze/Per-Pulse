@@ -118,8 +118,7 @@ def _read(data: bytes, should_stop, max_pages: int, max_chars: int) -> PdfText:
                 text = (reader.pages[number - 1].extract_text() or "").strip()
                 if not text:
                     missing_text = True
-                entry = (f"[Page {number}]\n{text}" if text else
-                         f"[Page {number}]\n[No selectable text on this page; images or scans are not read.]")
+                entry = f"[Page {number}]\n{text}" if text else f"[Page {number}]"
                 if used + len(entry) > max_chars:
                     pages.append(entry[:max(0, max_chars - used)])
                     return _stopped(pages, number, total, missing_text)
