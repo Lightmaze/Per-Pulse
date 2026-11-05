@@ -180,9 +180,11 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
         <select id="provider-connection-mode" value={setupMode}
           onChange={event => setSetupMode(event.target.value as ProviderMode)}>
           <option value="keyed">{t('settings.modeKeyed')}</option>
+          <option value="azure">{t('settings.modeAzure')}</option>
           <option value="loopback">{t('settings.modeLoopback')}</option>
         </select>
         {setupMode === 'loopback' ? <p className="settings-detail">{t('settings.localModelHint')}</p> : null}
+        {setupMode === 'azure' ? <p className="settings-detail">{t('settings.azureModelHint')}</p> : null}
         <label className="field-label" htmlFor="provider-terminal-shell">{t('settings.terminalShell')}</label>
         <select id="provider-terminal-shell" value={setupShell}
           onChange={event => setSetupShell(event.target.value as ProviderShell)}>
