@@ -69,7 +69,7 @@ from .response_review import (
 )
 from .session_store import HarnessStore
 from .scope import HarnessScope
-from .transcript import TranscriptStore
+from .transcript import TranscriptMessage, TranscriptStore
 from .turn_advice import TURN_ADVICE_PREFIX, TurnAdvice, TurnAdvisor, decode_advice, encode_advice
 
 
@@ -114,6 +114,16 @@ class LiveReply:
     turn_id: str
     round_id: str
     text: str
+
+
+@dataclass(slots=True)
+class _TranscriptCache:
+    """A session's transcript read so far. Rows are append-only."""
+
+    version: tuple[int, int, int]
+    upto: int = 0
+    messages: list[TranscriptMessage] = field(default_factory=list)
+    validated_upto: int = 0
 
 
 def _action_request_id(scope: HarnessScope, call: ToolCall) -> str:
@@ -192,6 +202,10 @@ class TurnRunner:
         )
         self._lock = RLock()
         self._active: dict[tuple[str, str], _RunContext] = {}
+        # Each model round reads the session transcript several times. Keep the
+        # rows already read so a long page does not reread its whole history.
+        self._transcripts: dict[str, _TranscriptCache] = {}
+        self._transcript_lock = RLock()
 
     def run(self, scope: HarnessScope, *, prompt: str | None = None) -> TurnOutcome:
         """Create/reuse a durable turn and drive it until settle or pause."""
@@ -1699,14 +1713,61 @@ class TurnRunner:
             calls.append(_PersistedToolCall(call, action_id))
         return text, tuple(calls)
 
+    def _session_messages(self, scope: HarnessScope) -> tuple[TranscriptMessage, ...]:
+        """The session's transcript, reading only rows added since the last call.
+
+        Starts over whenever another connection may have changed the database,
+        and never keeps rows read inside a write transaction.
+        """
+        session = scope.session_scope()
+        with self._transcript_lock:
+            cache = self._transcripts.get(session.session_id)
+            version, rows = self.store.transcript_snapshot(
+                session, after_transcript_seq=cache.upto if cache is not None else 0,
+            )
+            if version is not None and cache is not None and cache.version != version:
+                cache = None
+                version, rows = self.store.transcript_snapshot(session)
+            if version is None:
+                self._transcripts.pop(session.session_id, None)
+                return tuple(TranscriptStore._message(row) for row in self.store.transcript_rows(session))
+            if cache is None:
+                cache = _TranscriptCache(version)
+                self._transcripts[session.session_id] = cache
+            for row in rows:
+                cache.messages.append(TranscriptStore._message(row))
+            if cache.messages:
+                cache.upto = cache.messages[-1].transcript_seq
+            return tuple(cache.messages)
+
     def _validate_assistant_transcript_authority(self, scope: HarnessScope) -> None:
+        """Every assistant message must match its completed model round.
+
+        Each message is checked once: transcript rows and completed rounds do
+        not change, and the cache starts over if the database changes outside
+        this store.
+        """
+        session = scope.session_scope()
+        messages = self._session_messages(session)
+        with self._transcript_lock:
+            cache = self._transcripts.get(session.session_id)
+            validated = cache.validated_upto if cache is not None else 0
+        pending = [m for m in messages if m.role == "assistant" and m.transcript_seq > validated]
+        if pending:
+            self._validate_assistant_messages(session, pending)
+        with self._transcript_lock:
+            if cache is not None and self._transcripts.get(session.session_id) is cache and messages:
+                cache.validated_upto = max(cache.validated_upto, messages[-1].transcript_seq)
+
+    def _validate_assistant_messages(
+        self, scope: HarnessScope, messages: list[TranscriptMessage],
+    ) -> None:
         rounds = self.store.model_rounds_for_session(scope)
         by_item = {
             round_record.assistant_item_id: round_record
             for round_record in rounds
             if round_record.assistant_item_id
         }
-        messages = TranscriptStore(self.store).messages(scope)
         for message in messages:
             if message.role != "assistant":
                 continue
@@ -1737,8 +1798,8 @@ class TurnRunner:
     def _known_tool_call_ids(self, scope: HarnessScope) -> set[str]:
         self._validate_assistant_transcript_authority(scope.session_scope())
         known: set[str] = set()
-        for message in TranscriptStore(self.store).messages(scope):
-            if message.role != "assistant":
+        for message in self._session_messages(scope):
+            if message.role != "assistant" or (scope.turn_id and message.scope.turn_id != scope.turn_id):
                 continue
             _, calls = self._parse_assistant_message(message.scope, message.content)
             for persisted in calls:
@@ -1760,7 +1821,7 @@ class TurnRunner:
     ) -> ModelRequest:
         self._validate_assistant_transcript_authority(scope.session_scope())
         messages_list: list[dict[str, Any]] = []
-        for message in TranscriptStore(self.store).messages(scope.session_scope()):
+        for message in self._session_messages(scope):
             content = message.content
             if message.item_id.startswith(TURN_ADVICE_PREFIX):
                 # Retain provenance in history without replaying obsolete advice
