@@ -1,0 +1,202 @@
+name: Package Per Pulse
+
+on:
+  workflow_run:
+    workflows: ['Verify Per Pulse']
+    branches: ['main']
+    types: [completed]
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/verify_distribution.py'
+      - 'pyproject.toml'
+      - 'docs/releases/**'
+      - 'tests/release/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-per-pulse-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.release.outputs.build }}
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Select the verified version, skipping existing releases
+        id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {execFileSync} = require('node:child_process');
+            const version = execFileSync('python3', ['-c',
+              "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
+            ], {encoding: 'utf8'}).trim();
+            const tag = `v${version}`;
+            core.setOutput('tag', tag);
+            core.setOutput('sha', context.payload.workflow_run?.head_sha || context.sha);
+            if (context.eventName === 'pull_request') {
+              core.setOutput('build', 'true');
+              return;
+            }
+            try {
+              await github.rest.repos.getReleaseByTag({...context.repo, tag});
+              core.info(`${tag} already has a release; nothing to publish.`);
+              core.setOutput('build', 'false');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.setOutput('build', 'true');
+            }
+
+  package:
+    needs: candidate
+    if: needs.candidate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.candidate.outputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require the candidate to be on main
+        if: github.event_name == 'workflow_run'
+        run: |
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Build the bundled client and both distributions
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+          python -m pip install 'build>=1,<2' 'hatchling>=1.27'
+          python -m build --no-isolation
+          python scripts/verify_distribution.py
+      - name: Rebuild a wheel from the source distribution without Node
+        run: |
+          mkdir "$RUNNER_TEMP/per-pulse-sdist"
+          tar -xzf dist/*.tar.gz -C "$RUNNER_TEMP/per-pulse-sdist"
+          python -m build --wheel --no-isolation --outdir "$RUNNER_TEMP/rebuilt-wheel" "$RUNNER_TEMP"/per-pulse-sdist/per_pulse-*
+          python - <<'PY'
+          import os, zipfile
+          from pathlib import Path
+          original, = Path('dist').glob('*.whl')
+          rebuilt, = (Path(os.environ['RUNNER_TEMP']) / 'rebuilt-wheel').glob('*.whl')
+          with zipfile.ZipFile(original) as a, zipfile.ZipFile(rebuilt) as b:
+              assert set(a.namelist()) == set(b.namelist()), 'Rebuilt wheel files differ'
+              for name in a.namelist():
+                  assert a.read(name) == b.read(name), f'Rebuilt content differs: {name}'
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  installed:
+    needs: [candidate, package]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+      - name: Install the wheel into an empty virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/per-pulse-installed"
+          if [ "$RUNNER_OS" = Windows ]; then
+            installed_python="$RUNNER_TEMP/per-pulse-installed/Scripts/python.exe"
+          else
+            installed_python="$RUNNER_TEMP/per-pulse-installed/bin/python"
+          fi
+          "$installed_python" -m pip install --disable-pip-version-check dist/*.whl
+          "$installed_python" -m pip check
+          "$installed_python" tests/release/installed_wheel_smoke.py
+          echo "PER_PULSE_INSTALLED_PYTHON=$installed_python" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '22'
+      - name: Use the installed application in Chromium
+        if: runner.os == 'Linux'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser-tools" playwright@1.62.1 --no-audit --no-fund
+          node "$RUNNER_TEMP/browser-tools/node_modules/playwright/cli.js" install --with-deps chromium
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" node tests/browser/installed_first_run.mjs
+
+  publish:
+    if: github.event_name == 'workflow_run'
+    needs: [candidate, package, installed]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.candidate.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+      - name: Require successful full CI on the exact tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.candidate.outputs.sha }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$CANDIDATE_SHA&event=push&per_page=100" > "$RUNNER_TEMP/ci-runs.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          runs = json.loads((Path(os.environ['RUNNER_TEMP']) / 'ci-runs.json').read_text())['workflow_runs']
+          assert any(r['head_sha'] == os.environ['CANDIDATE_SHA'] and r['head_branch'] == 'main'
+                     and r['status'] == 'completed' and r['conclusion'] == 'success'
+                     for r in runs), 'Wait for successful main CI on the release commit, then rerun this job'
+          PY
+      - name: Publish the verified alpha assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.candidate.outputs.tag }}
+          CANDIDATE_SHA: ${{ needs.candidate.outputs.sha }}
+        run: |
+          if git rev-parse --verify "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$CANDIDATE_SHA"
+          fi
+          gh release create "$RELEASE_TAG" dist/*.whl dist/*.tar.gz dist/SHA256SUMS \
+            --target "$CANDIDATE_SHA" --prerelease --title "Per Pulse $RELEASE_TAG" \
+            --notes-file "docs/releases/$RELEASE_TAG.md"
