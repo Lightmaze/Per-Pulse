@@ -88,7 +88,12 @@ try {
   await writeFile(join(directory, 'workspace', '.gitignore'), 'dist/\n');
   await mkdir(join(directory, 'workspace', '.git'), { recursive: true });
   await open();
-  assert.equal(await page.locator('.material-list button').filter({ hasText: '.gitignore' }).count(), 1);
+  // The Refresh control can be enabled before the asynchronous directory
+  // response has populated the list. Observe the actual file rather than
+  // sampling a transient empty render.
+  const gitignore = page.locator('.material-list button').filter({ hasText: '.gitignore' });
+  await gitignore.waitFor({ state: 'visible' });
+  assert.equal(await gitignore.count(), 1);
   assert.equal(await page.locator('.material-list').getByRole('button', { name: '.git/', exact: true }).count(), 0);
   await page.locator('.material-list button').filter({ hasText: '.env' }).click();
   // Plain-text dotfiles open directly as source; only Markdown/CSV have a Source toggle.
