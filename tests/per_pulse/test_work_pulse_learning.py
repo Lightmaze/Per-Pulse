@@ -141,6 +141,94 @@ def test_paused_context_does_not_form_new_associations(coordinator, hold):
     assert controller.connections.snapshot()["connections"] == []
 
 
+@pytest.mark.parametrize("excluded", ["paused", "held"])
+@pytest.mark.parametrize("observation", ["same_batch", "separate_batches", "restart"])
+def test_excluded_result_preserves_other_works_learning_traces(coordinator, monkeypatch, excluded, observation):
+    _storage, ledger, world, (a, b, c), build = coordinator
+    controller = build(spectrum_enabled=False)
+    if excluded == "paused":
+        world.update_activity_center(c, status="paused")
+    else:
+        controller.set_context_paused(c, True)
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr("pulse_system.core.causality.ledger._now", lambda: now)
+    first = result_for(ledger, a)
+    if observation != "same_batch":
+        controller.tick(now=now)
+    now += timedelta(seconds=5)
+    ignored = result_for(ledger, c)
+    if observation != "same_batch":
+        controller.tick(now=now)
+    if observation == "restart":
+        controller = build(spectrum_enabled=False)
+    now += timedelta(seconds=5)
+    second = result_for(ledger, b)
+    controller.tick(now=now)
+    learned = edge(controller, a, b)
+    assert learned is not None, "An excluded Work must not erase another Work's eligible activity."
+    assert learned.learning_source_ids == [first.id, second.id]
+    graph = controller.connections.snapshot()
+    assert not any(c in (item["source_center_id"], item["target_center_id"])
+                   for item in graph["connections"])
+    # Re-observing the same accepted receipts is not another learning step.
+    controller.connections.observe_activities([first, ignored, second],
+        eligible=controller._learning_context)
+    assert controller.connections.snapshot() == graph
+
+    # A pair without an interposed result learns the same numeric change.
+    control_a, control_b = [world.create_task_bundle_for_existing_engram(title, "subject").center.id
+                            for title in ("Control source", "Control target")]
+    now += timedelta(seconds=100)
+    result_for(ledger, control_a)
+    controller.tick(now=now)
+    now += timedelta(seconds=10)
+    result_for(ledger, control_b)
+    controller.tick(now=now)
+    assert learned.weight == pytest.approx(edge(controller, control_a, control_b).weight)
+
+
+@pytest.mark.parametrize("excluded", ["paused", "held"])
+def test_excluded_result_still_expires_old_learning_traces(coordinator, monkeypatch, excluded):
+    _storage, ledger, world, (a, b, c), build = coordinator
+    controller = build(spectrum_enabled=False)
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr("pulse_system.core.causality.ledger._now", lambda: now)
+    result_for(ledger, a)
+    controller.tick(now=now)
+    if excluded == "paused":
+        world.update_activity_center(c, status="paused")
+    else:
+        controller.set_context_paused(c, True)
+    now += timedelta(seconds=40)
+    result_for(ledger, c)
+    controller.tick(now=now)
+    assert controller.connections.snapshot()["learning"]["eligibleTraces"] == 0
+    now += timedelta(seconds=1)
+    result_for(ledger, b)
+    controller.tick(now=now)
+    assert controller.connections.snapshot()["connections"] == []
+
+
+def test_disabling_learning_clears_prior_traces_before_reenable(coordinator, monkeypatch):
+    _storage, ledger, _world, (a, b, c), build = coordinator
+    controller = build(spectrum_enabled=False)
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr("pulse_system.core.causality.ledger._now", lambda: now)
+    result_for(ledger, a)
+    controller.tick(now=now)
+    assert controller.connections.snapshot()["learning"]["eligibleTraces"] == 1
+    disabled = build(spectrum_enabled=False, adaptive_connections=False)
+    now += timedelta(seconds=5)
+    result_for(ledger, c)
+    disabled.tick(now=now)
+    assert disabled.connections.snapshot()["learning"]["eligibleTraces"] == 0
+    restored = build(spectrum_enabled=False)
+    now += timedelta(seconds=5)
+    result_for(ledger, b)
+    restored.tick(now=now)
+    assert restored.connections.snapshot()["connections"] == []
+
+
 def test_replayed_result_and_other_participants_history_do_not_train_work_edges(coordinator):
     storage, ledger, world, (a, b, _), build = coordinator
     controller = build(spectrum_enabled=False)
