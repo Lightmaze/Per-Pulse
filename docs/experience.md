@@ -16,6 +16,13 @@ internal activation and its original identity. User feedback is attached only
 when an actual follow-up is selected. Saved examples are available when later
 foreground or background work chooses its approach, including after restart.
 
+The model can refine its own example's title or note with
+`posture.revise(experience_id, expected_revision, changes)`, including during a
+quiet step. **Source experience** identifies Pulse's refinement and opens the
+conversation where it happened. The original passage and source stay intact.
+Revising a lesson or recording outcome feedback still uses a later user message
+through `feedback_message_id`.
+
 After reading saved command output, the model can use
 `posture.remember_command(receipt_id, title, excerpt, note?)` to keep an exact
 passage. Use the `receipt_id` returned by `read_command_output`.

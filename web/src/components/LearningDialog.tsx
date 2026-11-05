@@ -136,6 +136,10 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
         </details>
       </div> : null}
       {experience.encounter ? <SourceEncounter experience={experience} pageId={pageId} navigate={navigate} /> : <p className="lesson-scope">{t('learning.sourcePrivate')}</p>}
+      {experience.revisionSource?.kind === 'model_reinterpreted_example' ? <div className="lesson-note">
+        <p>{t('learning.pulseRefinement')}{['TEST_DOUBLE', 'EXPLICIT_MOCK'].includes(experience.revisionSource.selector_evidence_class ?? '') ? ` ${t('learning.testInterpretation')}` : ''}</p>
+        {experience.sourcePageId && experience.revisionSource.resultMessageId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, experience.revisionSource!.resultMessageId!)}>{t('learning.openRefinement')}</button> : null}
+      </div> : null}
       {experience.sourcePageId ? <div className="lesson-actions">
         {originalId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, originalId)}>{t(experience.sourceKind === 'command' ? 'learning.commandTurn' : experience.sourceKind === 'reading' ? 'learning.readingTurn' : 'learning.original')}</button> : null}
         {correctionId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, correctionId)}>{t('learning.correction')}</button> : null}

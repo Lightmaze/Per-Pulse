@@ -1,5 +1,8 @@
 /** Interface copy only. Original lessons, encounters, feedback and source IDs are never translated. */
 export const learningEnglish = {
+  'learning.pulseRefinement': "Pulse refined this interpretation.",
+  'learning.testInterpretation': "Test interpretation.",
+  'learning.openRefinement': "Open refinement conversation",
   'learning.commandExample': "Saved from command output.",
   'learning.commandExit': "Command exit code: {code}.",
   'learning.commandIncomplete': "Only part of the emitted output was saved.",
@@ -122,6 +125,9 @@ export const learningEnglish = {
   'learning.hurt': "It hurt · pause",
 } as const;
 export const learningChinese: Record<keyof typeof learningEnglish, string> = {
+  'learning.pulseRefinement': "Pulse refined this interpretation.",
+  'learning.testInterpretation': "Test interpretation.",
+  'learning.openRefinement': "Open refinement conversation",
   'learning.commandExample': "Saved from command output.",
   'learning.commandExit': "Command exit code: {code}.",
   'learning.commandIncomplete': "Only part of the emitted output was saved.",

@@ -179,6 +179,13 @@ class PageLearning:
         if local:
             result["encounter"] = deepcopy(record["encounter"])
             result["source"] = deepcopy(record["source"])
+            if "revision_source" in record:
+                actor = record["revision_source"]
+                result["revisionSource"] = deepcopy(actor)
+                turn = self.pages.runtime.causal_ledger.get_turn_for_world(
+                    actor.get("learning_turn_id", ""), self.pages.runtime.world_id)
+                if turn and turn.result_event_id:
+                    result["revisionSource"]["resultMessageId"] = turn.result_event_id
             result["feedback"] = deepcopy(record["feedback"])
             for entry in result["feedback"]:
                 evidence_source = self._feedback_source(entry, source_page)
