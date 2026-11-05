@@ -502,7 +502,7 @@ and characters.
 
 | Item | Pattern | State |
 |---|---|---|
-| A single item over 64 KiB fails the round, so the model cannot rewrite a file over about 64 KB in one call | Over-defense | Open |
+| A single item over 64 KiB failed the round, preventing ordinary document rewrites | Over-defense | Per Pulse now uses a 1 MiB durable envelope including metadata; file passages and result previews stay compact |
 | Each command needs its own Allow once, and commands need a Docker image (output itself is now kept, #160) | Over-defense, off by default | Open |
 | Dotfiles such as `.env` and `.gitignore` cannot be listed, previewed or uploaded, and are left out without a note | Over-defense, silent failure | Open |
 | Model servers elsewhere on the local network, and endpoints with a query string (Azure), are refused | Over-defense | Open |

@@ -29,7 +29,8 @@ def _sha(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _factory(monkeypatch, plans, requests, *, tool_name="mutate_file", tool_call_id="synthetic-file-request"):
+def _factory(monkeypatch, plans, requests, *, tool_name="mutate_file", tool_call_id="synthetic-file-request",
+             argument_chunk_chars=None):
     monkeypatch.setenv("PER_PULSE_ARTIFACT_TEST_KEY", "synthetic-test-credential")
 
     def handler(request):
@@ -53,6 +54,14 @@ def _factory(monkeypatch, plans, requests, *, tool_name="mutate_file", tool_call
             {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
             {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
         ]
+        if argument_chunk_chars and finish == "tool_calls":
+            arguments = json.dumps(selected)
+            chunks = [{"choices": [{"index": 0, "delta": {"tool_calls": [{
+                "index": 0, **({"id": tool_call_id, "type": "function"} if start == 0 else {}),
+                "function": {**({"name": tool_name} if start == 0 else {}),
+                             "arguments": arguments[start:start + argument_chunk_chars]},
+            }]}, "finish_reason": None}]} for start in range(0, len(arguments), argument_chunk_chars)]
+            chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]})
         data = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + "data: [DONE]\n\n"
         return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=data)
 
@@ -490,8 +499,7 @@ def test_download_keeps_complete_utf8_bytes_and_filename_after_restart(tmp_path,
     import per_pulse.artifacts as artifact_module
 
     # Exercise preview clipping independently of the native write ceiling.
-    # The real adapter currently admits file writes up to its 64 KiB payload
-    # bound; increasing that is a separate file-lifecycle decision.
+    # The preview bound is independent of the native write envelope.
     monkeypatch.setattr(artifact_module, "MAX_PREVIEW_BYTES", 4096)
     before = "\ufeffDRAFT\r\n" + "Café and 文本 retain  two spaces.\r\n" * 1200
     after = before.replace("DRAFT", "FINAL", 1)
@@ -665,6 +673,7 @@ def test_large_native_read_reaches_continuation_with_bounded_text_and_exact_dige
 
 
 def test_unrepresentable_receipt_metadata_rejects_before_the_file_effect(tmp_path, monkeypatch):
+    monkeypatch.setattr("per_pulse.service.NATIVE_PAYLOAD_BYTES", 64 * 1024, raising=False)
     requests = []
     factory = _factory(monkeypatch, {"WRITE_REPORT": {
         "path": "report.txt", "expected_digest": None, "content": "A short report.\n",
@@ -686,8 +695,69 @@ def test_unrepresentable_receipt_metadata_rejects_before_the_file_effect(tmp_pat
         assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
 
 
+@pytest.mark.parametrize("line", ['Quoted: "text" with slash \\\tand tab.\r\n',
+                                  'Multibyte: café and 文本 💡.\n'], ids=["escaped", "multibyte"])
+@pytest.mark.parametrize("automatic", [True, False], ids=["auto-apply", "approval"])
+def test_large_native_rewrite_continues_downloads_and_undoes_after_restart(tmp_path, monkeypatch, line, automatic):
+    before = "Original report.\n"
+    after = line * 4_000
+    assert len(after.encode("utf-8")) > 64 * 1024
+    requests = []
+    factory = _factory(monkeypatch, {"LARGE_REWRITE": {
+        "path": "report.txt", "expected_digest": _sha(before), "content": after,
+    }}, requests, argument_chunk_chars=257)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True,
+                 auto_apply_edits=automatic) as client:
+        target = tmp_path / "workspace" / "report.txt"
+        target.write_bytes(before.encode())
+        page_id = _page(client, "LARGE_REWRITE")
+        execution = client.app.state.pages.execution
+        if not automatic:
+            waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+            pending, = waiting["pendingActions"]
+            assert pending["arguments"]["content"] == after and not pending["argumentsTruncated"]
+            execution.resolve_approval(page_id, pending["actionId"], "allow_once")
+        _wait(execution, page_id, lambda view: len(requests) >= 2 and view["status"] == "idle")
+        item, = client.app.state.pages.artifacts.snapshot(page_id)["artifacts"]
+        action_id = item["actionId"]
+        assert target.read_bytes() == after.encode()
+        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").content == after.encode()
+        tool, = [message for message in requests[-1]["messages"] if message["role"] == "tool"]
+        assert json.loads(tool["content"])["status"] == "succeeded"
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True,
+                 auto_apply_edits=True) as client:
+        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").content == after.encode()
+        response = client.post(f"/api/pages/{page_id}/artifacts/{action_id}/undo", json={})
+        assert response.status_code == 200, response.text
+        assert target.read_bytes() == before.encode()
+
+
+def test_native_rewrite_over_envelope_stops_before_changing_the_file(tmp_path, monkeypatch):
+    from per_pulse.service import NATIVE_PAYLOAD_BYTES
+
+    before = "Keep the existing report.\n"
+    requests = []
+    factory = _factory(monkeypatch, {"OVER_ENVELOPE": {
+        "path": "report.txt", "expected_digest": _sha(before),
+        "content": "x" * NATIVE_PAYLOAD_BYTES,
+    }}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True,
+                 auto_apply_edits=True) as client:
+        target = tmp_path / "workspace" / "report.txt"
+        target.write_bytes(before.encode())
+        page_id = _page(client, "OVER_ENVELOPE")
+        execution = client.app.state.pages.execution
+        view = _wait(execution, page_id, lambda view: view["status"] == "error")
+        assert view["failureCode"] == "payload_too_large"
+        assert target.read_bytes() == before.encode()
+        assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
+
+
 def test_legacy_truncated_receipt_is_not_reconstructed_from_file_existence(tmp_path, monkeypatch):
     from pulse_harness.adapters.workspace import StructuredWorkspaceToolProvider, _safe_observer_text
+
+    monkeypatch.setattr("per_pulse.service.NATIVE_PAYLOAD_BYTES", 64 * 1024, raising=False)
 
     before = "DRAFT " + "x" * 50_000 + "\n"
     after = before.replace("DRAFT", "FINAL")

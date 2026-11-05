@@ -33,8 +33,10 @@ non-ASCII names. Previews and downloads show your file as it is, including any
 keys or passwords in it; only a result holding a stored `[REDACTED]` or
 truncation marker from a model reply is not offered as an original file.
 This works for existing results while disconnected and after restart. File
-access remains limited to text up to 1 MiB; the native write path currently
-has a separate 64 KiB output bound. It does not restore older overwritten bytes.
+access remains limited to text up to 1 MiB. The native write path uses a 1 MiB
+durable envelope including the tool arguments and metadata, so the content must
+leave room for that envelope. File passages and result previews remain compact.
+It does not restore older overwritten bytes.
 
 The **Materials** flow accepts UTF-8 text, Markdown, CSV, JSON or code, and
 PDFs (read as their text), in Home or Work. **Upload file** saves the original bytes; **Add to draft** selects
@@ -63,8 +65,9 @@ character counts; `eof` means the passage reached the end of the available text.
 Pass the returned `next` arguments to `read_file` to continue the same source
 version. If that version changed, restart at zero without `expected_digest` to
 inspect the current file. An offset without a digest can read any position in
-the current file. Omitted `max_chars` uses the session's payload allowance;
-the complete tool result, including its continuation, stays within that bound.
+the current file. Omitted `max_chars` requests up to 65,536 characters;
+the complete tool result, including its continuation, fits within 64 KiB or the
+session's smaller payload allowance.
 For PDFs, `eof` concerns the extracted text: `pdf_complete` and
 `pdf_pages_without_selectable_text` separately describe extraction limits and
 pages with no selectable text.

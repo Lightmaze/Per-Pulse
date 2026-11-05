@@ -21,6 +21,8 @@ entered = threading.Event()
 requests = []
 before = 'Draft heading.\npassword=abc\nOrdinary report content.\n'
 large_before = 'DRAFT ' + 'An explicitly synthetic long report. ' * 1_400 + '\n'
+rewrite_before = 'Original report.\n'
+rewrite_after = 'A complete rewritten line: "quoted", café and source text.\r\n' * 4_000
 document_name = 'field-note-\u6e90.md'
 document = '''# A field note
 
@@ -51,7 +53,8 @@ This **confirmed file** keeps its source available for later work.
 '''
 document_revision = '# A later version\n\nPRIVATE_LATER_WORK_RESULT belongs to its own original receipt.\n'
 (state / 'workspace').mkdir(exist_ok=True)
-for filename, content in [('redacted.txt', before), ('large-report.txt', large_before)]:
+for filename, content in [('redacted.txt', before), ('large-report.txt', large_before),
+                          ('rewritten-report.txt', rewrite_before)]:
     if not (state / 'workspace' / filename).exists():
         (state / 'workspace' / filename).write_text(content)
 download_name = 'Café 100% 文本.txt'
@@ -83,6 +86,8 @@ def handler(request):
             arguments = {'path': 'redacted.txt', 'expected_digest': hashlib.sha256(before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'Draft heading.', 'new': 'Final heading.'}]}}
         if 'WRITE_LARGE' in text:
             arguments = {'path': 'large-report.txt', 'expected_digest': hashlib.sha256(large_before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'DRAFT', 'new': 'FINAL'}]}}
+        if 'WRITE_REWRITE' in text:
+            arguments = {'path': 'rewritten-report.txt', 'expected_digest': hashlib.sha256(rewrite_before.encode()).hexdigest(), 'content': rewrite_after}
         if 'WRITE_DOCUMENT' in text:
             arguments = {'path': document_name, 'expected_digest': None, 'content': document}
         if 'WRITE_DOCUMENT_REVISION' in text:

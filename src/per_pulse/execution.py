@@ -27,7 +27,6 @@ from pulse_system.service import native_replay
 _TERMINAL = {TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED}
 _MAX_STEPS = 8
 _MAX_ACTIONS = 32
-_MAX_ARGUMENT_BYTES = 32 * 1024
 
 
 class ExecutionError(Exception):
@@ -159,15 +158,17 @@ class PageExecution:
         with harness._lock:
             return harness._active.get((scope.engram_id, scope.context_id)) == scope
 
-    @staticmethod
-    def _arguments(arguments: Any) -> tuple[dict, bool, bool]:
+    def _arguments(self, arguments: Any) -> tuple[dict, bool, bool]:
         # Show the action exactly as the model asked for it, keys included:
         # this is the person's own local approval screen.
         clean = dict(arguments) if isinstance(arguments, dict) else {"value": arguments}
         stored_redacted, stored_truncated = stored_payload_flags(clean)
-        encoded = json.dumps(clean, ensure_ascii=False, sort_keys=True)
-        truncated = stored_truncated or len(encoded.encode("utf-8")) > _MAX_ARGUMENT_BYTES
-        if len(encoded.encode("utf-8")) > _MAX_ARGUMENT_BYTES:
+        encoded = json.dumps(clean, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        # Use the same envelope as durable action admission. A separate small
+        # preview limit must not strand an otherwise complete pending edit.
+        limit = self._kernel.store.max_payload_bytes
+        truncated = stored_truncated or len(encoded.encode("utf-8")) > limit
+        if len(encoded.encode("utf-8")) > limit:
             clean = {"preview": encoded[:8192], "_truncated": True}
         return clean, stored_redacted, truncated
 
