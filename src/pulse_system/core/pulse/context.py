@@ -780,8 +780,7 @@ class ContextPulseController:
                     return deepcopy(run)
                 before = deepcopy(self._state)
                 try:
-                    if reason == "user_message":
-                        self._count_tick_reply(run, now)
+                    self._count_tick_reply(run, now)
                     if reason == "user_message" and run["completed"] >= run["target"]:
                         self._finish_tick(run, "complete", None, now)
                     else:
@@ -805,7 +804,7 @@ class ContextPulseController:
         run["status"], run["reason"], run["updated_at"] = status, reason, now.isoformat()
 
     def _count_tick_reply(self, run: dict, now: datetime) -> None:
-        """Count an original settled step once, even after human takeover."""
+        """Count an original settled step once, including after Stop or takeover."""
         if run["completed"] < run["delivered"] and self.storage._conn.execute(
             "SELECT 1 FROM causal_events step JOIN causal_events reply "
             "ON reply.parent_event_id = step.id WHERE step.id = ? "
@@ -820,7 +819,8 @@ class ContextPulseController:
         changed = False
         for key, run in self._state["tick_runs"].items():
             if run["status"] == "running" or (run["status"] == "stopped"
-                    and run["reason"] == "user_message" and run["completed"] < run["delivered"]):
+                    and run["reason"] in {"operator", "user_message"}
+                    and run["completed"] < run["delivered"]):
                 before = deepcopy(run)
                 if run["status"] == "running":
                     self._advance_tick(key, now)
