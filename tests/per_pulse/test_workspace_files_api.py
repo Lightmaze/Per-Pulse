@@ -168,14 +168,14 @@ def test_materials_browser_keeps_ordinary_dotfiles_visible_and_internal_paths_cl
     root = tmp_path / "workspace"
     with _client(tmp_path) as client:
         identity = _identity(client)
-        (root / ".env").write_text("API_KEY=synthetic-only\\n", encoding="utf-8")
-        (root / ".gitignore").write_text("build/\\n", encoding="utf-8")
+        (root / ".env").write_text("API_KEY=synthetic-only\n", encoding="utf-8")
+        (root / ".gitignore").write_text("build/\n", encoding="utf-8")
         (root / ".config").mkdir()
-        (root / ".config" / "notes.txt").write_text("Nested source.\\n", encoding="utf-8")
+        (root / ".config" / "notes.txt").write_text("Nested source.\n", encoding="utf-8")
         (root / ".git").mkdir(exist_ok=True)
-        (root / ".git" / "config").write_text("Internal metadata.\\n", encoding="utf-8")
+        (root / ".git" / "config").write_text("Internal metadata.\n", encoding="utf-8")
         (root / ".pulse").mkdir(exist_ok=True)
-        (root / ".pulse-harness-transaction").write_text("Transient.\\n", encoding="utf-8")
+        (root / ".pulse-harness-transaction").write_text("Transient.\n", encoding="utf-8")
 
         listing = client.get("/api/workspace/files", headers=identity)
         assert listing.status_code == 200, listing.text
@@ -183,9 +183,9 @@ def test_materials_browser_keeps_ordinary_dotfiles_visible_and_internal_paths_cl
         assert {".env", ".gitignore", ".config"} <= names
         assert not {".git", ".pulse", ".pulse-harness-transaction"} & names
 
-        for path, expected in ((".env", "API_KEY=synthetic-only\\n"),
-                               (".gitignore", "build/\\n"),
-                               (".config/notes.txt", "Nested source.\\n")):
+        for path, expected in ((".env", "API_KEY=synthetic-only\n"),
+                               (".gitignore", "build/\n"),
+                               (".config/notes.txt", "Nested source.\n")):
             result = client.get("/api/workspace/files/content", params={"path": path}, headers=identity)
             assert result.status_code == 200, result.text
             assert result.json()["content"] == expected
@@ -194,11 +194,11 @@ def test_materials_browser_keeps_ordinary_dotfiles_visible_and_internal_paths_cl
         for path in (".pulse", ".git/config", ".pulse-harness-transaction", "../outside.txt"):
             assert client.get("/api/workspace/files/content", params={"path": path}, headers=identity).status_code == 400
 
-        uploaded = _upload(client, b"LOCAL=example\\n", name=".env")
+        uploaded = _upload(client, b"LOCAL=example\n", name=".env")
         assert uploaded.status_code == 201, uploaded.text
         assert uploaded.json()["name"] == ".env"
         assert client.get("/api/workspace/files/content",
-                          params={"path": uploaded.json()["path"]}, headers=identity).json()["content"] == "LOCAL=example\\n"
+                          params={"path": uploaded.json()["path"]}, headers=identity).json()["content"] == "LOCAL=example\n"
 
     # Reopening must not turn an existing dotfile or the imported copy invisible.
     with _client(tmp_path) as client:
@@ -206,7 +206,7 @@ def test_materials_browser_keeps_ordinary_dotfiles_visible_and_internal_paths_cl
         listing = client.get("/api/workspace/files", headers=identity).json()
         assert ".env" in {entry["name"] for entry in listing["entries"]}
         assert client.get("/api/workspace/files/content", params={"path": ".env"},
-                          headers=identity).json()["content"] == "API_KEY=synthetic-only\\n"
+                          headers=identity).json()["content"] == "API_KEY=synthetic-only\n"
 
 
 @pytest.mark.parametrize("tool_name", ["read_file", "reading"])
