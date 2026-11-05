@@ -230,7 +230,15 @@ WORKSPACE_SCHEMAS: dict[str, dict[str, Any]] = {
     **LIFE_SCHEMAS,
     "run_command": COMMAND_SCHEMA,
     "read_file": {
-        "type": "object", "properties": {"path": {"type": "string"}},
+        "type": "object", "properties": {
+            "path": {"type": "string"},
+            "offset": {"type": "integer", "minimum": 0, "default": 0,
+                       "description": "Start in Unicode characters. Without expected_digest, reads the current file at this position."},
+            "max_chars": {"type": "integer", "minimum": 1,
+                          "description": "Maximum source characters to return; the payload allowance may shorten the passage."},
+            "expected_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$",
+                                "description": "Optional source SHA-256. Use the returned next arguments to continue the same file version. On workspace_digest_conflict, restart with offset=0 and omit expected_digest."},
+        },
         "required": ["path"], "additionalProperties": False,
     },
     "mutate_file": {

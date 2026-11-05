@@ -655,7 +655,10 @@ def test_large_native_read_reaches_continuation_with_bounded_text_and_exact_dige
         output = result["output"]
         assert output["path"] == "large.txt" and output["digest"] == _sha(body)
         assert output["truncated"] and not output["redacted"]
-        assert output["content"].startswith("[TRUNCATED sha256=")
+        assert output["content"] == body[:output["position"]["end_char"]]
+        assert output["position"]["start_char"] == 0 and not output["eof"]
+        assert output["next"]["offset"] == output["position"]["end_char"]
+        assert output["next"]["expected_digest"] == _sha(body)
         assert output["workspace_provenance"]["adapter"] == "pulse_harness.workspace.v1"
         assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
         assert target.read_text(encoding="utf-8") == body
