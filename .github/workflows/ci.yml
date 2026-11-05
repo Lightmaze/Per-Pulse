@@ -52,6 +52,9 @@ jobs:
       - name: Verify native Harness approvals and artifacts in Chromium
         run: |
           PER_PULSE_PLAYWRIGHT_PATH="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_TEST_PYTHON=python PER_PULSE_QA_OUTPUT="$RUNNER_TEMP/per-pulse-harness-screenshots" node tests/browser/harness_smoke.mjs
+      - name: Verify saved command output and offline reading in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_COMMAND_SCREENSHOTS="$RUNNER_TEMP/per-pulse-harness-screenshots" node tests/browser/command_output_flow.mjs
       - name: Keep Harness browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -91,6 +94,9 @@ jobs:
       - name: Verify earlier conversation browsing in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-history-screenshots" node tests/browser/history_flow.mjs
+      - name: Verify clipped original tool-result recall, restart and Work isolation in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TOOL_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-history-screenshots/tool-results" node tests/browser/tool_history_flow.mjs
       - name: Keep conversation history browser evidence
         if: always()
         uses: actions/upload-artifact@v4

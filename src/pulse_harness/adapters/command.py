@@ -26,6 +26,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from .workspace import StructuredWorkspaceToolProvider
+from . import command_output
 from .resources import workspace_write_resource
 from ..core.contracts import ActionStatus, ToolDescriptor
 from ..core.errors import EffectUnknown, IdempotencyConflict, ProviderProtocolError, ProviderUnavailable, ScopeConflict
@@ -265,7 +266,7 @@ class DockerCommandExecutor(_DockerControl):
                             continue
                         label = key.data
                         counts[label] += len(chunk)
-                        room = max(0, output_limit - len(streams[label]))
+                        room = max(0, command_output.MAX_CAPTURE_BYTES - len(streams[label]))
                         streams[label].extend(chunk[:room])
             if not forced:
                 process.wait(timeout=2)
@@ -274,10 +275,13 @@ class DockerCommandExecutor(_DockerControl):
                         or type(state.get("ExitCode")) is not int):
                     raise EffectUnknown("command daemon result unavailable", code="command_effect_unknown")
                 code = state["ExitCode"]
-                output = {label: redact_text(bytes(data).decode('utf-8', errors='replace'))[0]
-                          for label, data in streams.items()}
+                views = {label: redact_text(bytes(data).decode('utf-8', errors='replace'))[0]
+                         .encode('utf-8') for label, data in streams.items()}
+                output = {label: data[:output_limit].decode('utf-8', errors='ignore')
+                          for label, data in views.items()}
                 return {"execution_status": "exited", "exit_code": code, **output,
-                        "output_bytes": counts, "truncated": any(counts[k] > len(v) for k, v in streams.items()),
+                        "output_bytes": counts, "truncated": any(max(counts[k], len(views[k])) > output_limit for k in streams),
+                        "_captured_output": {label: bytes(data) for label, data in streams.items()},
                         "image_id": self.image_id, "timeout_seconds": timeout,
                         "workspace_changes": "possible; not checkpointed or automatically rolled back",
                         "exit_124": "deadline exceeded or program exit 124" if code == 124 else None}
@@ -421,17 +425,19 @@ class CommandWorkspaceToolProvider(StructuredWorkspaceToolProvider):
         self._command_lock = threading.Lock()
 
     def descriptors(self):
-        tools = super().descriptors()
+        tools = super().descriptors() + (command_output.descriptor(),)
         if self.command_executor is None:
             return tools
         return tools + (ToolDescriptor(name="run_command", mutable=True, requires_approval=True,
             capability="workspace.command", source="pulse_harness.command",
             description="Run an approved, bounded command in a disposable network-disabled container. "
-                        "Only /workspace persists. May modify/delete workspace files; no automatic rollback. "
-                        "Result includes exit_code; nonzero is not success. Not an interactive terminal."),)
+                        "Workspace changes persist; files may be modified or deleted, with no automatic rollback. "
+                        "Result includes exit_code; nonzero is not success. Read saved stdout/stderr with "
+                        "read_command_output using output_action_id. Not an interactive terminal."),)
 
     def preflight(self):
         return {**super().preflight(), "run_command": self.command_executor is not None,
+                "read_command_output": True,
                 "command_environment": "docker-network-none" if self.command_executor else None}
 
     def action_authority_identity(self, scope, call, *, action_request_id):
@@ -465,6 +471,9 @@ class CommandWorkspaceToolProvider(StructuredWorkspaceToolProvider):
                 self._command_bindings[action_request_id] = action.args_digest
 
     def execute_for_scope(self, scope, call, cancellation, *, action_request_id=None):
+        if call.name == command_output.NAME:
+            cancellation.raise_if_cancelled()
+            return command_output.read(self.checkpoint_root, self.store, scope, call.arguments)
         if call.name != "run_command":
             return super().execute_for_scope(scope, call, cancellation, action_request_id=action_request_id)
         # Commands can mutate any workspace path. Share the file/restore lane
@@ -487,8 +496,36 @@ class CommandWorkspaceToolProvider(StructuredWorkspaceToolProvider):
                 raise IdempotencyConflict("command execution cannot be replayed")
             self._command_consumed.add(action_request_id)
         limit = max(128, min(4096, (self.store.max_payload_bytes - 2048) // 12))
-        return self.command_executor.execute(call.arguments, cancellation, guard=self.command_guard,
+        result = dict(self.command_executor.execute(call.arguments, cancellation, guard=self.command_guard,
             start_guard=self.command_start_guard, output_limit=limit,
             invocation_name=command_container_name(scope, action_request_id),
             on_created=lambda container_id: self.store.create_operation(
-                scope, action_request_id, operation_id=_OPERATION_PREFIX + container_id))
+                scope, action_request_id, operation_id=_OPERATION_PREFIX + container_id)))
+        captured = result.pop('_captured_output', None)
+        if captured is not None:
+            try:
+                result.update(output_kind=command_output.KIND, output_action_id=action_request_id,
+                    output_capture=command_output.save(self.checkpoint_root, scope, action_request_id,
+                                                       captured, result['output_bytes']))
+            except (OSError, command_output.CommandOutputError):
+                result['output_capture_error'] = 'The command exited, but its output could not be saved. Only the preview is available.'
+        # Captured bytes stay outside SQLite. Size the complete receipt and
+        # transcript envelope, including metadata and escaped preview text.
+        def result_size():
+            return len(json.dumps({'tool_call_id': call.tool_call_id,
+                'action_request_id': action_request_id, 'status': 'succeeded',
+                'output': result, 'error_code': None}, ensure_ascii=True).encode())
+        while result_size() > self.store.max_payload_bytes:
+            if not result.get('stdout') and not result.get('stderr'):
+                # Exceptionally small configured stores can still retain the
+                # command's exit rather than lose it to a payload failure.
+                for field in ('output_capture', 'output_kind', 'output_action_id',
+                              'image_id', 'workspace_changes', 'timeout_seconds', 'exit_124'):
+                    result.pop(field, None)
+                result['output_capture_error'] = 'Saved output metadata exceeds the result allowance.'
+                break
+            for stream in command_output.STREAMS:
+                text = result.get(stream, '')
+                result[stream] = text[:len(text) // 2]
+            result['truncated'] = True
+        return result

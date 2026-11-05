@@ -18,7 +18,8 @@ from typing import Any, Callable
 from pulse_harness.core import ApprovalDecision, HarnessScope, ModelRoundStatus, TurnStatus
 from pulse_harness.core.contracts import ActionRecord, ActionStatus, ApprovalStatus
 from pulse_harness.core.errors import HarnessError, ScopeConflict, StoreUnavailable
-from pulse_harness.core.replay import stored_payload_flags
+from pulse_harness.core.replay import redact_text, stored_payload_flags
+from pulse_harness.adapters import command_output
 from pulse_system.core.causality import CausalTransitionError
 from pulse_system.service import native_replay
 
@@ -254,6 +255,61 @@ class PageExecution:
                 break
         return list(reversed(steps))
 
+    def command_outputs(self, page_id: str, scopes=None) -> dict:
+        """Recent command receipts; polling does not open retained output files."""
+        scope = self._scope(page_id)
+        scopes = self._history_scopes(scope) if scopes is None else scopes
+        actions = self._historical_actions(scopes, status=ActionStatus.SUCCEEDED, limit=129)
+        items = []
+        for action in actions[:128]:
+            streams = command_output.capture(action)
+            output = (action.result or {}).get('output', {})
+            error = output.get('output_capture_error') if action.tool_name == 'run_command' else None
+            if streams is None and not error:
+                continue
+            items.append({
+                'actionId': action.action_request_id, 'turnId': action.scope.turn_id,
+                'commandLabel': redact_text(' '.join(str(part) for part in
+                    action.arguments.get('argv', []) if isinstance(part, str)))[0][:160],
+                'createdAt': action.terminal_at or action.updated_at,
+                'exitCode': output.get('exit_code'),
+                'streams': {name: {'sha256': value['sha256'], 'savedBytes': value['saved_bytes'],
+                    'observedBytes': value['observed_bytes'], 'complete': value['complete']}
+                    for name, value in (streams or {}).items()},
+                **({'error': error} if error else {}),
+            })
+            if len(items) == 8:
+                break
+        return {'items': items, 'truncated': len(actions) > 128 or len(items) == 8}
+
+    def _command_action(self, page_id: str, action_id: str):
+        scope = self._scope(page_id)
+        for previous in self._history_scopes(scope):
+            try:
+                action_scope = self._kernel.store.action_scope_for_session(previous, action_id)
+                action = self._kernel.store.get_action(action_scope, action_id)
+            except ScopeConflict:
+                continue
+            if command_output.capture(action) is not None:
+                return action
+        raise ExecutionError('command_output_not_found', 'This command has no saved output in this page.', 404)
+
+    def command_output(self, page_id: str, action_id: str, stream: str, *, offset=0, limit=4000):
+        action = self._command_action(page_id, action_id)
+        try:
+            return command_output.passage(self._kernel.checkpoint_root, action, stream, offset, limit,
+                                           self._kernel.store.max_payload_bytes)
+        except HarnessError as error:
+            raise ExecutionError(error.code, str(error), 409) from error
+
+    def download_command_output(self, page_id: str, action_id: str, stream: str):
+        action = self._command_action(page_id, action_id)
+        try:
+            data = command_output.read_bytes(self._kernel.checkpoint_root, action, stream)
+        except HarnessError as error:
+            raise ExecutionError(error.code, str(error), 409) from error
+        return data, command_output.capture(action)[stream]['sha256']
+
     def snapshot(self, page_id: str) -> dict:
         """Observe without creating a session, waking a runner or making a call."""
         scope = self._scope(page_id)
@@ -261,6 +317,7 @@ class PageExecution:
         try:
             scopes = self._history_scopes(scope)
             history = self._uncertainty(scope, scopes)
+            outputs = self.command_outputs(page_id, scopes)
             try:
                 session = kernel.store.get_session(scope)
             except ScopeConflict as error:
@@ -271,6 +328,7 @@ class PageExecution:
                         "pendingActionsTruncated": False, "recoveryRequired": False,
                         "failureCode": None, "steps": [], "replay": None,
                         "usage": self._usage(scopes, None),
+                        "commandOutputs": outputs,
                         **history,
                         "updatedAt": None,
                     }
@@ -344,6 +402,7 @@ class PageExecution:
                 "replay": {"sourceCount": len(entry["message_ids"]),
                            **({"focus": entry["focus"]} if "focus" in entry else {})} if entry else None,
                 "usage": self._usage(scopes, turn),
+                "commandOutputs": outputs,
                 **history,
                 "updatedAt": turn.updated_at if turn else session.updated_at,
             }

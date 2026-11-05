@@ -420,6 +420,26 @@ button, a, input, textarea { outline-offset: 4px; }
 .execution-status .execution-identity { font-size: 11px; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .execution-heading { flex-direction: column; gap: 10px; } .execution-status button { min-height: 44px; } }
 .page-artifacts { margin-top: 25px; border-bottom: 1px solid var(--border); padding-bottom: 18px; }
+.command-outputs { margin-top: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.command-outputs > summary { cursor: pointer; font-weight: 550; padding: 6px 0; }
+.command-outputs > summary small { margin-left: 8px; color: var(--muted); font-weight: 400; }
+.command-outputs ul { list-style: none; margin: 0; padding: 0; }
+.command-outputs li + li { margin-top: 6px; }
+.command-output-open { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; width: 100%; padding: 9px 12px; border-radius: 6px; background: #f6f8f3; text-align: left; color: var(--accent); }
+.command-output-open span { min-width: 0; overflow-wrap: anywhere; }
+.command-output-open time { display: block; font-size: 10px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+.command-output-open small { flex: none; color: var(--muted); }
+.command-output-reader { min-width: 0; padding: 12px; line-height: 1.7; }
+.command-output-streams, .command-output-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.command-output-streams button { border: 1px solid var(--border); padding: 5px 10px; border-radius: 5px; }
+.command-output-streams button[aria-pressed="true"] { background: #eef2e8; border-color: var(--accent); color: var(--accent); }
+.command-output-note, .command-output-range { color: var(--muted); font-size: 12px; margin: 8px 0; }
+.command-output-reader pre { margin: 10px 0; padding: 12px; background: #f5f6f2; border-radius: 6px; max-height: 320px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.command-output-source { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; margin: 12px 0 0; }
+.command-output-details { margin-top: 12px; }
+.command-output-details > summary { cursor: pointer; color: var(--muted); }
+.command-output-incomplete { padding: 8px 10px; background: #fff4db; color: #795b1e; border-radius: 5px; }
+.command-output-error { color: var(--error); }
 .page-artifacts h2 { font-size: 13px; font-weight: 550; margin: 0; }
 .artifact-intro { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 7px 0 12px; }
 .page-artifacts ul { list-style: none; padding: 0; margin: 0; }

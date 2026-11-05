@@ -105,7 +105,7 @@ class _GuardedModel:
 
 
 class _WorldWorkspace(CommandWorkspaceToolProvider):
-    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, local=None, posture=None, attention=None, notice=None, replay_authorize=None, background_main_round_limit=None, rim_policy=False, **kwargs):
+    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, command_history_scopes=None, local=None, posture=None, attention=None, notice=None, replay_authorize=None, background_main_round_limit=None, rim_policy=False, **kwargs):
         self._guard, self._mutation_guard = guard, mutation_guard
         self._allow_mutations = allow_mutations
         self._background_main_round_limit = background_main_round_limit
@@ -122,6 +122,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         self._cognition = cognition
         self._cognition_authorize = cognition_authorize
         self._history = ConversationHistoryTools(self.store, history_scopes)
+        self._command_history_scopes = command_history_scopes
 
     def descriptors(self):
         return tuple(d for d in super().descriptors()
@@ -181,6 +182,17 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
     def execute_for_scope(self, scope, call, cancellation, *, action_request_id=None):
         self._guard()
         native_replay.check_tool(self.store, scope, call.name)
+        if call.name == 'read_command_output' and self._command_history_scopes is not None:
+            from pulse_harness.adapters import command_output
+            # The World supplies committed predecessors for this exact local
+            # context. General history may also contain team references.
+            for candidate in self._command_history_scopes(scope):
+                cancellation.raise_if_cancelled()
+                try:
+                    return command_output.read(self.checkpoint_root, self.store, candidate, call.arguments)
+                except ScopeConflict:
+                    continue
+            raise ScopeConflict('This command output does not belong to this Work history.')
         if call.name == native_replay.NAME:
             with self._mutation_guard():
                 return native_replay.execute(self, scope, call, cancellation,
@@ -226,7 +238,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         if call.name in HISTORY_SCHEMAS:
             result = self._history.execute_for_scope(scope, call, cancellation)
             return native_replay.annotate_history(self, scope, result)
-        if call.name != "read_file" and not self._allow_mutations:
+        if call.name not in {"read_file", "read_command_output"} and not self._allow_mutations:
             raise ScopeConflict("the selected world profile is read-only")
         if call.name == "run_command":
             # Admit briefly under the publication guard, then release it while
@@ -583,7 +595,8 @@ class KernelHarnessRuntime:
                 tool_provider_factory=lambda store, root, checkpoints: _WorldWorkspace(
                     store, root, checkpoints, guard=self._check,
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
-                    command_executor=self._command_executor, history_scopes=self._history_scopes, life_hub=self.life,
+                    command_executor=self._command_executor, history_scopes=self._history_scopes,
+                    command_history_scopes=self._own_history_scopes, life_hub=self.life,
                     cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, posture=self.posture, notice=self.notice, replay_authorize=self.authorize_replay,
                     background_main_round_limit=background_main_round_limit_for_turn,
                     rim_policy=self._rim_policy),
@@ -895,13 +908,16 @@ class KernelHarnessRuntime:
             capability_digest="pulse-world-kernel.v1",
         )
 
-    def _history_scopes(self, scope: HarnessScope) -> tuple[HarnessScope, ...]:
+    def _own_history_scopes(self, scope: HarnessScope) -> tuple[HarnessScope, ...]:
         self._check()
         if scope.session_scope() != self.scope_for(scope.engram_id, scope.context_id):
             raise ScopeConflict("history caller is not this world's native session")
         lineage = (self._history_lineage(scope.engram_id) if self._history_lineage
                    is not None else (scope.engram_id,))
-        own = tuple(self.scope_for(engram_id, scope.context_id) for engram_id in lineage)
+        return tuple(self.scope_for(engram_id, scope.context_id) for engram_id in lineage)
+
+    def _history_scopes(self, scope: HarnessScope) -> tuple[HarnessScope, ...]:
+        own = self._own_history_scopes(scope)
         extra = self.team.history_scopes(scope) if self.team is not None else ()
         return (own + tuple(s for s in extra if s not in own))[:256]
 

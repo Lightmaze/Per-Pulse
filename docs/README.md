@@ -35,6 +35,6 @@ Read in order; each page builds on the ones before it.
 - Reading: [Unicode source search](unicode-source-search.md)
 - Language: [interface language](continuity-interface-language.md),
   [reply language](integration-reply-language.md)
-- History: [alpha landing](alpha-landing-gate.md),
+- History: [read earlier tool results](tool-history.md), [alpha landing](alpha-landing-gate.md),
   [UI/UX integration](integration-core-uiux-pulse.md),
   [UI/UX study](uiux-study/README.md), [research notes](research/)
