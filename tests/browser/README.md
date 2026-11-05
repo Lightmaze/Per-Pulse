@@ -90,6 +90,12 @@ PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
 passage as an example, opens the original reading conversation from another
 page, and verifies the same passage and exit code after an offline restart.
 
+`node tests/browser/example_revision_flow.mjs` refines an example's title and
+note during a quiet native step, opens the refinement's actual conversation,
+and checks the unchanged original passage and source after restart. A later
+owner edit replaces the current Pulse attribution. Set
+`PER_PULSE_REVISION_SCREENSHOTS` for desktop and phone source-detail captures.
+
 It approves commands through the actual World and Kernel, captures real OS pipe
 bytes, follows both streams in the model and browser, verifies downloads,
 rejects damaged responses, and cancels obsolete reads and pending saves. It also

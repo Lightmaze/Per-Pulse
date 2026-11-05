@@ -267,6 +267,7 @@ class PostureMemory:
     def _advance(record: dict) -> None:
         previous = {key: deepcopy(value) for key, value in record.items() if key != "history"}
         record["history"].append(previous)
+        record.pop("revision_source", None)
         record["revision"] += 1
         record["updated_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -348,17 +349,30 @@ class PostureMemory:
         return sorted(records, key=lambda value: (value["updated_at"], value["id"]), reverse=True)
 
     def revise_experience(self, experience_id: str, *, expected_revision: int,
-                          changes: dict) -> dict:
+                          changes: dict, revision_source: dict | None = None) -> dict:
+        """Revise content or controls, retaining an optional host-attributed actor.
+
+        A native interpretation changes only an example's title or note. Its
+        actor belongs to this revision and its history, separate from the
+        original observation and from outcome feedback.
+        """
         if not isinstance(changes, dict) or not changes or set(changes) - _EDITABLE:
             raise ValueError("posture revision contains unsupported fields")
+        if revision_source is not None:
+            revision_source = _source(revision_source)
         with self._locked():
             state = self._load()
             record = self._record(state, experience_id)
             self._revision(record, expected_revision)
             _check_changes(record, changes)
+            if revision_source is not None and (record.get("representation") != "example"
+                                                or set(changes) - {"title", "note"}):
+                raise ValueError("an attributed interpretation can change only an example title or note")
             was_active = record["active"]
             self._advance(record)
             record.update(deepcopy(changes))
+            if revision_source is not None:
+                record["revision_source"] = revision_source
             _validate_content(record)
             control = self._stop_control(record) if was_active and changes == {"active": False} else None
             self._save(state, stop_control=control)
@@ -479,9 +493,15 @@ class PostureMemory:
                 item["encounter"] = deepcopy(record["encounter"])
                 item["source"]["evidence"] = deepcopy(record["source"])
                 item["feedback"] = deepcopy(record["feedback"][-4:])
+                if "revision_source" in record:
+                    item["revision_source"] = deepcopy(record["revision_source"])
             else:
                 item["feedback"] = [{"verdict": entry["verdict"], "revision": entry["revision"]}
                                     for entry in record["feedback"][-4:]]
+                if "revision_source" in record:
+                    item["revision_source"] = {key: record["revision_source"][key]
+                                               for key in ("kind", "selector_evidence_class")
+                                               if key in record["revision_source"]}
             episodes.append(item)
         return {"schema": SCHEMA, "episodes": episodes, "eligibility": "subject_scope_and_active_only",
                 "semantic_applicability": "not_yet_assessed", "source_context_id": context_id}
