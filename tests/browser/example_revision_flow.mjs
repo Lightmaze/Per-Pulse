@@ -149,6 +149,9 @@ try {
   assert.deepEqual((await experience()).source, before.source);
   assert.deepEqual((await experience()).feedback, []);
   await dialog().getByText('The owner’s current interpretation.', { exact: true }).waitFor();
+  // The native revision can settle before React paints the cleared source
+  // attribution. Wait for that specific UI state, not an arbitrary delay.
+  await dialog().getByText('Pulse refined this interpretation. Test interpretation.', { exact: true }).waitFor({ state: 'hidden' });
   assert.equal(await dialog().getByText('Pulse refined this interpretation. Test interpretation.', { exact: true }).count(), 0);
   checks.push('restart retains the exact source and native actor; a later owner edit clears current Pulse attribution and fits a phone');
   assert.deepEqual(errors, []);
