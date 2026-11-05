@@ -97,6 +97,8 @@ try {
   assert.equal((await json('/__command_examples/evidence')).commands, 1);
   check('one approved command exits with 7; the model reads its tail and retains the delivered passage with distinct receipt identity');
 
+  const sourceDraft = 'Unsent source draft: retain the actual command reading.';
+  await composer.fill(sourceDraft);
   await openExperience();
   const dialog = page.getByRole('dialog', { name: 'Lessons and examples', exact: true });
   const example = dialog.getByRole('article').filter({ has: page.getByRole('heading', { name: saved.title, exact: true }) });
@@ -107,22 +109,51 @@ try {
   if (screenshots) await page.screenshot({ path: join(screenshots, 'command-example-source.png') });
   await example.getByRole('button', { name: 'Open output reading conversation', exact: true }).click();
   await page.locator(`#message-${saved.sourceAnchor.resultMessageId}`).waitFor();
+  await page.waitForFunction(id => document.activeElement?.id === id, `message-${saved.sourceAnchor.resultMessageId}`);
   assert.equal(await page.evaluate(() => document.activeElement?.id), `message-${saved.sourceAnchor.resultMessageId}`);
   check('experience labels the passage as command output and opens the actual reading conversation');
 
   const receiver = await create('Compare command experience', 'Continue with an existing observation. [Explicit fixture]');
   await wait(async () => (await json(`/api/pages/${receiver}`)).messages.some(item => item.role === 'assistant'), 'receiver ready');
+  const receiverDraft = 'Unsent receiver draft: compare this command experience.';
+  const receiverComposer = page.getByRole('textbox', { name: 'Message Compare command experience', exact: true });
+  await receiverComposer.fill(receiverDraft);
   await openExperience();
   await example.getByText('Saved from command output. Command exit code: 7.', { exact: true }).waitFor();
   assert.equal(await example.getByText('diagnostic progress', { exact: false }).count(), 0);
   const shared = (await json(`/api/pages/${receiver}/posture`)).experiences[0];
   assert.equal(shared.source, undefined); assert.equal(shared.encounter, undefined);
   await example.getByText('Source experience', { exact: true }).click();
+  // A source message can already be visible in the cached page while its
+  // fresh view is loading. Delay that read so visibility cannot stand in for
+  // completed source navigation and focus restoration.
+  let releaseSourceRead;
+  const sourceReadGate = new Promise(done => { releaseSourceRead = done; });
+  let sourceReadHeld = false;
+  const sourceReadPattern = new RegExp(`/api/pages/${source}(?:[?]|$)`);
+  await page.route(sourceReadPattern, async route => {
+    const response = await route.fetch();
+    sourceReadHeld = true;
+    await sourceReadGate;
+    await route.fulfill({ response });
+  });
   await example.getByRole('button', { name: 'Open output reading conversation', exact: true }).click();
+  await wait(async () => sourceReadHeld, 'fresh source view held after navigation');
   await page.locator(`#message-${saved.sourceAnchor.resultMessageId}`).waitFor();
+  assert.equal(await composer.inputValue(), sourceDraft);
+  releaseSourceRead();
+  await page.waitForFunction(id => document.activeElement?.id === id, `message-${saved.sourceAnchor.resultMessageId}`);
   assert.equal(await page.evaluate(() => document.activeElement?.id), `message-${saved.sourceAnchor.resultMessageId}`);
+  assert.equal(new URL(page.url()).pathname.split('/').pop(), source);
+  assert.equal(new URL(page.url()).hash, `#message-${saved.sourceAnchor.resultMessageId}`);
+  assert.equal(await composer.inputValue(), sourceDraft);
+  await page.unroute(sourceReadPattern);
   await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await page.getByRole('heading', { name: 'Compare command experience', exact: true }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.tagName === 'H1'
+    && document.activeElement.textContent === 'Compare command experience');
+  assert.equal(new URL(page.url()).pathname.split('/').pop(), receiver);
+  assert.equal(await receiverComposer.inputValue(), receiverDraft);
   check('another page sees the selected passage and exit fact, follows its source, and returns without receiving surrounding output');
 
   await stop(server); server = start(true);
