@@ -1,4 +1,4 @@
-/** Read a real spontaneous result from Home and Activity without creating work.
+/** Read and retain a real spontaneous result from Home and Activity.
  * Explicit TEST_DOUBLE transport; native World, Kernel and browser persistence.
  * Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
  */
@@ -25,7 +25,7 @@ const errors = [], checks = [];
 const start = (disablePulse = false) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/attention_server.py'), '--data-dir', directory,
-    '--port', String(port), '--spontaneous', ...(disablePulse ? ['--no-pulse'] : []),
+    '--port', String(port), '--spontaneous', '--posture', ...(disablePulse ? ['--no-pulse'] : []),
   ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', value => { serverLog += value; });
   child.stderr.on('data', value => { serverLog += value; });
@@ -47,6 +47,7 @@ const wait = async (probe, label, timeout = 20000) => {
   throw new Error(`Timed out: ${label}\n${serverLog}`);
 };
 const get = async path => (await (await fetch(base + path)).json());
+const experiences = id => get('/api/pages/' + id + '/posture').then(value => value.experiences);
 try {
   server = start();
   await wait(async () => (await fetch(base + '/api/health')).ok, 'native server');
@@ -62,6 +63,8 @@ try {
   assert.equal(activation.messageId, null);
   const originalMessages = (await get('/api/pages/' + work)).messages;
   assert.equal(originalMessages.filter(message => message.role === 'assistant').length, 2);
+  const backgroundResult = originalMessages.find(message => message.id === activation.resultMessageId);
+  assert.equal(backgroundResult.role, 'assistant');
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
     args: process.env.PLAYWRIGHT_CHROMIUM_ARGS ? JSON.parse(process.env.PLAYWRIGHT_CHROMIUM_ARGS) : undefined });
   page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -82,6 +85,45 @@ try {
   await wait(() => new URL(page.url()).hash === '#message-' + activation.resultMessageId, 'exact background answer');
   assert.equal(await page.locator('.composer textarea').inputValue(), workDraft);
   checks.push('Home opens the original source and separate background answer while keeping both drafts.');
+
+  await page.locator('#message-' + activation.resultMessageId).getByRole('button', { name: 'Save example', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Save example', exact: true });
+  await editor.getByRole('textbox', { name: 'Example name', exact: true }).fill('An observed background result');
+  assert.equal(await editor.getByRole('textbox', { name: 'Original passage', exact: true }).inputValue(), backgroundResult.content);
+  assert.equal(await editor.locator('#example-followup').inputValue(), '');
+  assert.equal(await editor.locator('#example-followup option').count(), 1);
+  await editor.getByRole('button', { name: 'Save example', exact: true }).click();
+  const exampleCard = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: 'An observed background result', exact: true }) });
+  await exampleCard.waitFor();
+  assert.equal(await exampleCard.locator('pre').textContent(), backgroundResult.content);
+  await exampleCard.getByText('Source experience', { exact: true }).click();
+  await exampleCard.getByText('Internal continuation without new input text.', { exact: true }).waitFor();
+  await exampleCard.getByText('No follow-up attached', { exact: true }).waitFor();
+  const savedExample = (await experiences(work)).find(item => item.title === 'An observed background result');
+  assert.deepEqual(savedExample.sourceAnchor, { resultMessageId: activation.resultMessageId });
+  assert.equal(savedExample.record_type, 'constructed_fixture');
+  assert.equal(savedExample.source.provider_evidence_class, 'TEST_DOUBLE');
+  assert.equal(savedExample.source.feedback_evidence_class, 'not_attached');
+  assert.equal(savedExample.source.situation_source.event_id, activation.eventId);
+  assert.equal(savedExample.source.situation_source.turn_id, savedExample.source.original_turn_id);
+  assert.equal(savedExample.source.situation_source.kind, 'spontaneous');
+  assert.equal(savedExample.source.situation_source.source, 'self');
+  assert.equal(savedExample.source.situation_source.input_text, null);
+  assert.equal(savedExample.source.situation_source.context_pulse, 'reentry');
+  assert.equal('outcome' in savedExample.encounter, false);
+  assert.deepEqual(savedExample.feedback, []);
+  assert.equal('situation' in (savedExample.encounterSources ?? {}), false);
+  assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'background-example-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await exampleCard.getByText('Internal continuation without new input text.', { exact: true }).scrollIntoViewIfNeeded();
+  assert.ok(await page.getByRole('dialog', { name: 'Lessons and examples', exact: true }).evaluate(el => el.scrollWidth <= el.clientWidth));
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'background-example-mobile-en.png') });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  assert.equal(await page.locator('.composer textarea').inputValue(), workDraft);
+  checks.push('Save example retains the actual contentless Pulse result and native trigger without adding a user message or follow-up.');
+
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
   await page.getByRole('button', { name: 'Continuing observation · Open result', exact: true }).click();
   await wait(() => new URL(page.url()).hash === '#message-' + activation.resultMessageId, 'Activity answer');
@@ -111,6 +153,28 @@ try {
   assert.equal(reopened.budget.used, 1);
   assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
   checks.push('Restart with Pulse disabled preserves the exact result, draft and single prior admission without new autonomous turns.');
+
+  if (!await page.getByRole('button', { name: '设置', exact: true }).isVisible()) {
+    await page.getByRole('button', { name: '展开或收起导航', exact: true }).click();
+  }
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '查看此页面的经验', exact: true }).click();
+  await exampleCard.waitFor();
+  assert.equal(await exampleCard.locator('pre').textContent(), backgroundResult.content);
+  await exampleCard.getByText('原始经历', { exact: true }).click();
+  await exampleCard.getByText('Internal continuation without new input text.', { exact: true }).waitFor();
+  await exampleCard.getByText('未附后续反馈', { exact: true }).waitFor();
+  const reopenedExample = (await experiences(work)).find(item => item.id === savedExample.id);
+  assert.deepEqual(reopenedExample.source, savedExample.source);
+  assert.deepEqual(reopenedExample.encounter, savedExample.encounter);
+  assert.ok(await page.getByRole('dialog', { name: '工作中的经验', exact: true }).evaluate(el => el.scrollWidth <= el.clientWidth));
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'background-example-mobile-zh.png') });
+  await exampleCard.getByRole('button', { name: '查看原始结果', exact: true }).click();
+  await page.locator('#message-' + activation.resultMessageId).waitFor();
+  assert.equal(new URL(page.url()).hash, '#message-' + activation.resultMessageId);
+  assert.equal(await page.locator('.composer textarea').inputValue(), workDraft);
+  assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
+  checks.push('The saved spontaneous example and its exact source survive restart, Chinese phone inspection and return to the original result.');
 
   // Browser-only presentation fixture: each link resolves to a real native
   // assistant message from a separate Work; ONLY the extra Pulse observation
@@ -167,7 +231,7 @@ try {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   checks.push('With autonomous Pulse actually disabled, Chinese mobile Home still opens an earlier native result and expands five source-verified Work messages; drafts and receipts persist.');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'] }, null, 2));
+  console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
 } catch (error) {
   if (screenshots && page) await page.screenshot({ path: join(screenshots, 'background-result-failure.png') }).catch(() => {});
   throw error;
