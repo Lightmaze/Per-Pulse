@@ -66,7 +66,7 @@ from ..core.errors import (
 )
 from ..core.events import EventDraft
 from ..core.provider import CancellationToken, CancellationRequested
-from ..core.replay import bound_text, digest_json
+from ..core.replay import bound_text, digest_json, stored_text_flags
 from ..core.session_store import HarnessStore
 
 
@@ -699,7 +699,11 @@ class StructuredWorkspaceToolProvider:
             ToolDescriptor(
                 name="read_file",
                 description=("Read one file relative to the configured workspace: a UTF-8 text file, "
-                             "or the text of a PDF with a [Page N] line before each page."),
+                             "or the text of a PDF with a [Page N] line before each page. "
+                             "Returns a bounded passage with Unicode character coordinates. "
+                             "Call again with the returned next arguments until eof is true; "
+                             "next includes the source digest. If workspace_digest_conflict is returned, "
+                             "restart with offset=0 and omit expected_digest to inspect the current version."),
                 mutable=False,
                 requires_approval=False,
                 capability="workspace.read",
@@ -1066,10 +1070,18 @@ class StructuredWorkspaceToolProvider:
             code="tool_not_supported",
         )
 
-    def read_file(self, scope: HarnessScope, path: str) -> Mapping[str, Any]:
+    def read_file(
+        self, scope: HarnessScope, path: str, *, offset: int = 0,
+        max_chars: int | None = None, expected_digest: str | None = None,
+    ) -> Mapping[str, Any]:
         """Direct read API used by deterministic adapter tests and diagnostics."""
 
-        return self._read(scope, ToolCall("direct-read", "read_file", {"path": path}), CancellationToken())
+        arguments = {"path": path, "offset": offset}
+        if max_chars is not None:
+            arguments["max_chars"] = max_chars
+        if expected_digest is not None:
+            arguments["expected_digest"] = expected_digest
+        return self._read(scope, ToolCall("direct-read", "read_file", arguments), CancellationToken())
 
     def preview_mutation(
         self,
@@ -1292,12 +1304,29 @@ class StructuredWorkspaceToolProvider:
     ) -> Mapping[str, Any]:
         self.store.get_session(scope.session_scope())
         arguments = dict(call.arguments)
-        if set(arguments) != {"path"}:
+        if "path" not in arguments or set(arguments) - {"path", "offset", "max_chars", "expected_digest"}:
             raise ProviderProtocolError("read_file arguments are not canonical", code="tool_arguments_invalid")
+        offset = arguments.get("offset", 0)
+        maximum = arguments.get("max_chars", self.store.max_payload_bytes)
+        if type(offset) is not int or offset < 0 or type(maximum) is not int or maximum < 1:
+            raise ProviderProtocolError("read_file range is invalid", code="tool_arguments_invalid")
+        if "expected_digest" in arguments and (
+            not isinstance(arguments["expected_digest"], str)
+            or _HEX_DIGEST.fullmatch(arguments["expected_digest"]) is None
+        ):
+            raise ProviderProtocolError("read_file digest is invalid", code="tool_arguments_invalid")
         relative_path = _normalize_relative_path(arguments["path"])
         target = self._safe_target(relative_path, allow_missing=False)
         cancellation.raise_if_cancelled()
         snapshot, text, is_pdf, complete, missing_text = self._snapshot_text(target, cancellation)
+        if not snapshot.exists:
+            raise WorkspaceAdapterError("workspace file disappeared", code="workspace_file_not_found")
+        if arguments.get("expected_digest", snapshot.digest) != snapshot.digest:
+            raise WorkspaceDigestConflict(
+                "read_file source changed; restart with offset=0 and omit expected_digest to read the current version",
+            )
+        if offset > len(text):
+            raise ProviderProtocolError("read_file offset exceeds source text length", code="tool_arguments_invalid")
         output = {
             "path": relative_path,
             "digest": snapshot.digest,
@@ -1308,12 +1337,45 @@ class StructuredWorkspaceToolProvider:
                 "adapter": "pulse_harness.workspace.v1",
                 "workspace_digest": self._workspace_provenance,
             },
+            "position": {"start_char": offset, "end_char": offset, "total_chars": len(text),
+                         "unit": "unicode_characters"},
         }
-        return self._bounded_text_output(
-            output, text, text_key="content", redacted_key="redacted",
-            truncated_key="truncated", tool_call_id=call.tool_call_id,
-            action_request_id=action_request_id, status="succeeded",
-        )
+
+        def set_end(end: int) -> None:
+            content = text[offset:end]
+            redacted, previously_truncated = stored_text_flags(content)
+            output.update(content=content, redacted=redacted,
+                          truncated=end < len(text) or previously_truncated, eof=end == len(text))
+            output["position"]["end_char"] = end
+            output["next"] = ({"path": relative_path, "offset": end, "expected_digest": snapshot.digest,
+                               **({"max_chars": maximum} if "max_chars" in arguments else {})}
+                              if end < len(text) else None)
+
+        def fits() -> bool:
+            envelope = {"tool_call_id": call.tool_call_id, "action_request_id": action_request_id,
+                        "status": "succeeded", "output": output, "error_code": None}
+            return len(_canonical_json(envelope).encode("utf-8")) <= self.store.max_payload_bytes
+
+        end = min(len(text), offset + maximum)
+        set_end(end)
+        if not fits():
+            low, high = offset, end
+            while low < high:
+                middle = (low + high + 1) // 2
+                set_end(middle)
+                if fits():
+                    low = middle
+                else:
+                    high = middle - 1
+            end = low
+            set_end(end)
+        if not fits() or (end == offset and offset < len(text)):
+            raise ProviderProtocolError(
+                "workspace allowance cannot fit a read_file passage and its continuation",
+                code="payload_too_large",
+            )
+        cancellation.raise_if_cancelled()
+        return output
 
     def _mutate(
         self,

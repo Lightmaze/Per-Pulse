@@ -10,6 +10,8 @@ no dependency on its `pulse_rim` package and does not import its other modules.
 
 Set `P_PULSE_RIM_POLICY=1` before starting a normal configured PerPulse
 workspace. Off is the default. Invalid flag values fail configuration.
+This flag is separate from [ordinary experience](experience.md), which normal
+`per-pulse` enables by default; model capture of a lesson or example is optional.
 When an owned Work has two or more active known collaborators, the model can
 ask for a single native consultation using:
 
@@ -36,7 +38,7 @@ influence selection. A Work keeps a rated outcome to itself with an active
 shared; either applies to later selections at once. This uses the existing
 operator feedback revision/withdrawal interface and the original native
 World/Kernel, not a global reward store. An explicit single-recipient
-`consult` still avoids probabilistic sharing.
+`consult` chooses its requested collaborator without sampling.
 
 ## Ordinary consultation carries current operator guidance
 
@@ -94,7 +96,7 @@ The existing Kernel action and original source turn must both succeed.
 The selected collaborator must still be active at dispatch. Restart or
 recovery reuses the saved target, never draws a second one. No new tool
 permission, budget, participant, identity, model invocation, or automatic
-approval is introduced. Direct `consult` remains unchanged.
+approval is introduced. Direct `consult` keeps its explicitly chosen collaborator.
 
 ## Work-visible delivered guidance
 
@@ -115,10 +117,11 @@ reworked or not used, and save scoped, revisable operator guidance from its
 original result using the same controls as adaptive consultations. Only a
 completed, source-verified ordinary consultation that actually carried approved
 guidance can enter this read/write path. The assessment is an explicit, immutable
-native outcome (not a model-inferred reward), and its new guidance is not
-implicitly shared across Works. Prepared, blocked, source-inconsistent, Home
-and foreign-Work records cannot acquire a rating here; an old rating stays
-historical after consent withdrawal. This closes a practical correction cycle
+native outcome (not a model-inferred reward), and its new guidance text starts
+Work-only. Its rating follows the subject-wide default described above.
+Prepared, blocked, source-inconsistent, Home and foreign-Work records cannot
+acquire a rating here; an old rating stays historical after guidance
+withdrawal. This closes a practical correction cycle
 without adding an executor, training loop or new permissions.
 
 ## Work-visible choice and original sources
@@ -150,9 +153,13 @@ that collaborator improved a delivered work artifact.
 The feature does not silently form habits when the model does not select
 `consult_adaptive`, and it does not teach the provider's weights. A completed
 contribution without explicit operator outcome is not a reward. Outcomes remain immutable and the default evidence scope is the
-whole subject. A Work-only note or a withdrawn note keeps an outcome out of
-**future** choices in other Works; it does not erase choices already persisted
-or text already sent. It does not infer rewards from
+whole subject. An active Work-only note or a withdrawn collaborator-scoped
+note keeps an outcome out of **future** choices in other Works. Withdrawing
+a Work-only note removes that local override and restores default subject-wide
+rating eligibility; its guidance text stops being delivered. The [annotation
+state table](rim-operator-outcome-feedback.md#revisable-guidance-and-cross-work-learning)
+shows both paths. Revisions and withdrawals do not erase choices already
+persisted or text already sent. It does not infer rewards from
 feedback prose, improve the underlying provider weights or generalize to
 arbitrary cognitive strategies.
 
