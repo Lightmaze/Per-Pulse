@@ -124,7 +124,7 @@ def test_changed_source_is_not_exposed_attached_or_overwritten_by_a_repeated_upl
 
 def test_dotfile_upload_is_a_native_material_without_starting_a_turn(tmp_path):
     """An ordinary .env is source material; its original bytes and ownership stay intact."""
-    content = b"LOCAL_FLAG=synthetic-only\\n"
+    content = b"LOCAL_FLAG=synthetic-only\n"
     with client_for(tmp_path, model_factory=None) as client:
         response = upload(client, "home", ".env", content)
         assert response.status_code == 201, response.text
