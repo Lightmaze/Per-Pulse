@@ -38,8 +38,8 @@ _FIELDS = {'list': set(), 'inspect': {'work_id'}, 'create': {'title', 'instructi
 
 def descriptor() -> ToolDescriptor:
     return ToolDescriptor(NAME,
-        'Manage this same P\'s focused Work from ordinary Home conversation. '
-        'For a user-delegated job, create(title,instruction) with only relevant instructions, '
+        'Manage this subject\'s focused Work from its Home context. '
+        'Use create(title,instruction) to open focused Work with relevant instructions, '
         'constraints and file references; do not copy unrelated Home history. '
         'Use list to discover your existing Works, inspect(work_id) for scoped recent results, '
         'and send(work_id,instruction) to direct a follow-up to that exact Work. '
@@ -192,7 +192,7 @@ class NativeWork:
             r.harness.authorize_work(scope, action_request_id, call)
             if cancellation.cancelled:
                 raise ScopeConflict('work operation cancelled before admission')
-            if a['op'] in {'create', 'send', 'report'} and not r.harness._allow_mutations:
+            if a['op'] in {'create', 'send', 'report'} and not r.harness.allow_work_organization:
                 raise ScopeConflict('this runtime profile does not allow scheduling Work')
             subject = scope.engram_id
             if a['op'] == 'list':

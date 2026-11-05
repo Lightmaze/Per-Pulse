@@ -31,6 +31,23 @@ mobile screenshots. Test data and images should stay outside the repository.
 
 ## Native approvals and file results
 
+To check ordinary Home conversation organizing Work while file actions remain
+disabled, run:
+
+```sh
+PLAYWRIGHT_MODULE=/tmp/per-pulse-browser-tools/node_modules/playwright \
+  PER_PULSE_PYTHON=python \
+  node tests/browser/work_organization_flow.mjs
+```
+
+The explicit synthetic HTTP transport selects real native `work` create,
+list/send and report calls. The browser stays in Home, refreshes the workspace
+through Settings, opens the same Work through the existing navigation, and
+checks its reports against the actual persisted outbox and source turns.
+Offline restart retains both pages, results and drafts on desktop and phone. Set
+`PER_PULSE_WORK_ORGANIZATION_SCREENSHOTS` for screenshots. The existing CI
+verify job runs this flow with workspace file actions disabled.
+
 ```sh
 PER_PULSE_PLAYWRIGHT_PATH=/tmp/per-pulse-browser-tools/node_modules/playwright \
   PER_PULSE_TEST_PYTHON=python \

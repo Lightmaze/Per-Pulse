@@ -10,6 +10,8 @@ Undo uses the checkpoint the Kernel records before every change.
 
 Start with `--ask-before-edits` to approve each file change instead, or
 `--no-workspace-actions` to let the model read files without changing them.
+Home can still create and follow up in its Work pages, and Works can send their
+selected reports back to Home while file actions are disabled.
 Commands (available when `P_PULSE_COMMAND_IMAGE` names a container image) always
 ask first. A pending approval and exact-turn Stop stay in their original page.
 An approval waits for you for up to a week, and a turn you start has no time
