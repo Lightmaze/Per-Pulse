@@ -163,6 +163,53 @@ def test_native_file_guards_apply_to_materials_browser(tmp_path):
         assert nested.json()["content"] == "A nested source."
 
 
+def test_materials_browser_keeps_ordinary_dotfiles_visible_and_internal_paths_closed(tmp_path):
+    """The owner's .env/.gitignore are files, not forbidden hidden content."""
+    root = tmp_path / "workspace"
+    with _client(tmp_path) as client:
+        identity = _identity(client)
+        (root / ".env").write_text("API_KEY=synthetic-only\n", encoding="utf-8", newline="")
+        (root / ".gitignore").write_text("build/\n", encoding="utf-8", newline="")
+        (root / ".config").mkdir()
+        (root / ".config" / "notes.txt").write_text("Nested source.\n", encoding="utf-8", newline="")
+        (root / ".git").mkdir(exist_ok=True)
+        (root / ".git" / "config").write_text("Internal metadata.\n", encoding="utf-8", newline="")
+        (root / ".pulse").mkdir(exist_ok=True)
+        (root / ".pulse-harness-transaction").write_text("Transient.\n", encoding="utf-8", newline="")
+
+        listing = client.get("/api/workspace/files", headers=identity)
+        assert listing.status_code == 200, listing.text
+        names = {entry["name"] for entry in listing.json()["entries"]}
+        assert {".env", ".gitignore", ".config"} <= names
+        assert not {".git", ".pulse", ".pulse-harness-transaction"} & names
+
+        for path, expected in ((".env", "API_KEY=synthetic-only\n"),
+                               (".gitignore", "build/\n"),
+                               (".config/notes.txt", "Nested source.\n")):
+            result = client.get("/api/workspace/files/content", params={"path": path}, headers=identity)
+            assert result.status_code == 200, result.text
+            assert result.json()["content"] == expected
+        nested = client.get("/api/workspace/files", params={"path": ".config"}, headers=identity)
+        assert [row["name"] for row in nested.json()["entries"]] == ["notes.txt"]
+        for path in (".pulse", ".PULSE", ".git/config", ".GIT/config",
+                     ".pulse-harness-transaction", ".PULSE-HARNESS-transaction", "../outside.txt"):
+            assert client.get("/api/workspace/files/content", params={"path": path}, headers=identity).status_code == 400
+
+        uploaded = _upload(client, b"LOCAL=example\n", name=".env")
+        assert uploaded.status_code == 201, uploaded.text
+        assert uploaded.json()["name"] == ".env"
+        assert client.get("/api/workspace/files/content",
+                          params={"path": uploaded.json()["path"]}, headers=identity).json()["content"] == "LOCAL=example\n"
+
+    # Reopening must not turn an existing dotfile or the imported copy invisible.
+    with _client(tmp_path) as client:
+        identity = _identity(client)
+        listing = client.get("/api/workspace/files", headers=identity).json()
+        assert ".env" in {entry["name"] for entry in listing["entries"]}
+        assert client.get("/api/workspace/files/content", params={"path": ".env"},
+                          headers=identity).json()["content"] == "API_KEY=synthetic-only\n"
+
+
 @pytest.mark.parametrize("tool_name", ["read_file", "reading"])
 def test_imported_source_is_read_by_existing_native_tools_in_separate_works(tmp_path, monkeypatch, tool_name):
     """Synthetic tool choices, real imported bytes and original action receipts."""

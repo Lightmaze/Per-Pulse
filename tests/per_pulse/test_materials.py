@@ -122,8 +122,23 @@ def test_changed_source_is_not_exposed_attached_or_overwritten_by_a_repeated_upl
         assert client.get(f"/api/pages/home/materials/{record['id']}").json()["error"]["code"] == "material_unavailable"
 
 
+def test_dotfile_upload_is_a_native_material_without_starting_a_turn(tmp_path):
+    """An ordinary .env is source material; its original bytes and ownership stay intact."""
+    content = b"LOCAL_FLAG=synthetic-only\n"
+    with client_for(tmp_path, model_factory=None) as client:
+        response = upload(client, "home", ".env", content)
+        assert response.status_code == 201, response.text
+        material = response.json()["material"]
+        assert material["name"] == ".env" and material["source"] == "user_upload"
+        assert (tmp_path / "workspace" / material["path"]).read_bytes() == content
+        assert client.get(f"/api/pages/home/materials/{material['id']}").json()["content"].encode() == content
+        assert client.get("/api/pages/home/materials").json()["materials"] == [material]
+        assert not client.get("/api/pages/home").json()["messages"]
+
+
 @pytest.mark.parametrize("name,content,status", [
-    ("../outside.txt", b"hello", 400), (".env", b"hello", 400), ("secret.key", b"hello", 400),
+    ("../outside.txt", b"hello", 400), (".git", b"hello", 400),
+    (".pulse", b"hello", 400), ("secret.key", b"hello", 400),
     ("binary.txt", b"hello\x00", 415), ("binary.txt", b"\xff\xfe", 415),
     ("large.txt", b"x" * (MAX_FILE_BYTES + 1), 413),
 ])
