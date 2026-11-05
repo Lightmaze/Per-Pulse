@@ -16,6 +16,8 @@ import pytest
 from per_pulse.app import create_app
 from per_pulse.service import PulseSettings
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
+from pulse_system.core.causality import CausalTransitionError
+from pulse_system.service.runtime import ServiceError
 
 
 class Transport:
@@ -24,10 +26,13 @@ class Transport:
         self.requests: list[list[dict]] = []
         self.lock = threading.Lock()
         self.delay = delay
+        self.before_reply = None
 
     def factory(self, scope):
         def respond(request):
             body = json.loads(request.content)
+            if self.before_reply is not None:
+                self.before_reply()
             if self.delay:
                 time.sleep(self.delay)
             with self.lock:
@@ -179,3 +184,177 @@ def test_stop_cancels_a_queued_step_that_has_not_started(tmp_path, monkeypatch):
         time.sleep(0.4)
         assert len(transport.requests) == 1, "A cancelled step never reaches the model."
         assert replies(view(client, work)) == ["STEP_1"]
+
+
+@pytest.mark.parametrize("home", [False, True], ids=["work", "home"])
+@pytest.mark.parametrize("interrupt_takeover", [False, True], ids=["durable-stop", "restart-before-stop"])
+def test_native_user_input_cancels_queued_steps_across_restart(tmp_path, monkeypatch, home, interrupt_takeover):
+    transport = Transport(monkeypatch)
+    with client_for(tmp_path, model_factory=transport.factory) as client:
+        runtime = client.app.state.pages.runtime
+        if home:
+            runtime.inject(runtime.continuity_engram_id, "LOCAL_HISTORY")
+            page_id = "home"
+            eventually(lambda: view(client, page_id), lambda v: len(replies(v)) == 1)
+        else:
+            page_id = new_work(client)
+        monkeypatch.setattr(runtime._engine, "tick", lambda *args, **kwargs: [])
+        assert client.post(f"/api/pages/{page_id}/tick", json={"count": 5}).status_code == 201
+        step, = runtime.causal_ledger.list_events(kind="spontaneous", limit=10)
+        if interrupt_takeover:
+            # Simulate exit after the input commit but before its cancellation.
+            # Startup must reconcile that durable input before Engine dispatch.
+            monkeypatch.setattr(runtime.context_pulse, "stop_ticks", lambda *args, **kwargs: None)
+        if home:
+            runtime.inject(runtime.continuity_engram_id, "I will take over now.")
+        else:
+            runtime.send_task_front_message(page_id, "I will take over now.")
+        if not interrupt_takeover:
+            stopped = view(client, page_id)["tick"]
+            assert stopped["status"] == "stopped" and stopped["reason"] == "user_message"
+            assert stopped["delivered"] == stopped["completed"] == 0
+            assert runtime.causal_ledger.get_event(step.id).status.value == "cancelled"
+        assert len(transport.requests) == 1
+
+    with client_for(tmp_path, model_factory=transport.factory) as client:
+        continued = eventually(lambda: view(client, page_id), lambda v: len(replies(v)) == 2)
+        assert continued["tick"]["status"] == "stopped"
+        assert continued["tick"]["reason"] == "user_message"
+        assert continued["tick"]["delivered"] == continued["tick"]["completed"] == 0
+        assert client.app.state.pages.runtime.causal_ledger.get_event(step.id).status.value == "cancelled"
+        time.sleep(0.2)
+        assert len(transport.requests) == 2, "Only the new user message continues after restart."
+        assert transport.requests[-1][-1] == {"role": "user", "content": "I will take over now."}
+
+
+def test_rejected_other_context_and_old_idempotent_input_do_not_stop_ticks(tmp_path, monkeypatch):
+    transport = Transport(monkeypatch)
+    with client_for(tmp_path, model_factory=transport.factory) as client:
+        runtime = client.app.state.pages.runtime
+        subject = runtime.continuity_engram_id
+        original = runtime.inject(subject, "Original Home input.", idempotency_key="tick-original-input")
+        eventually(lambda: view(client, "home"), lambda v: len(replies(v)) == 1)
+        other = new_work(client)
+        dispatch = runtime._engine.tick
+        monkeypatch.setattr(runtime._engine, "tick", lambda *args, **kwargs: [])
+        assert client.post("/api/pages/home/tick", json={"count": 5}).status_code == 201
+        step, = runtime.causal_ledger.list_events(kind="spontaneous", limit=10)
+        with pytest.raises(ServiceError):
+            runtime.inject(subject, " ")
+        assert runtime.inject(subject, "Original Home input.", idempotency_key="tick-original-input") == original
+        runtime.send_task_front_message(other, "A separate Work remains independent.")
+        runtime.context_pulse.tick()
+        assert view(client, "home")["tick"]["status"] == "running"
+        assert runtime.causal_ledger.get_event(step.id).status.value == "queued"
+        client.post("/api/pages/home/tick/stop", json={})
+        monkeypatch.setattr(runtime._engine, "tick", dispatch)
+        eventually(lambda: view(client, other), lambda v: len(replies(v)) == 2)
+        assert len(transport.requests) == 3
+
+
+def test_user_takeover_allows_an_already_running_step_to_finish(tmp_path, monkeypatch):
+    transport = Transport(monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    with client_for(tmp_path, model_factory=transport.factory) as client:
+        page_id = new_work(client)
+        runtime = client.app.state.pages.runtime
+
+        def hold_reply():
+            entered.set()
+            assert release.wait(5), "The test must release its synthetic response."
+
+        transport.before_reply = hold_reply
+        try:
+            assert client.post(f"/api/pages/{page_id}/tick", json={"count": 5}).status_code == 201
+            assert entered.wait(5)
+            step, = runtime.causal_ledger.list_events(kind="spontaneous", limit=10)
+            assert runtime.causal_ledger.get_event(step.id).status.value == "running"
+            runtime.send_task_front_message(page_id, "Continue with my new input.")
+            stopped = view(client, page_id)["tick"]
+            assert stopped["status"] == "stopped" and stopped["reason"] == "user_message"
+            assert runtime.causal_ledger.get_event(step.id).status.value == "running"
+        finally:
+            transport.before_reply = None
+            release.set()
+        finished = eventually(lambda: view(client, page_id),
+                              lambda v: len(replies(v)) == 3 and v["tick"]["completed"] == 1)
+        assert finished["tick"]["delivered"] == 1
+        assert finished["tick"]["status"] == "stopped" and finished["tick"]["reason"] == "user_message"
+        assert runtime.causal_ledger.get_event(step.id).status.value == "settled"
+        time.sleep(0.2)
+        assert len(transport.requests) == 3
+
+
+@pytest.mark.parametrize("count", [1, 2])
+def test_takeover_counts_a_settled_step_before_controller_observation(tmp_path, monkeypatch, count):
+    transport = Transport(monkeypatch)
+    with client_for(tmp_path, model_factory=transport.factory) as client:
+        page_id = new_work(client)
+        runtime = client.app.state.pages.runtime
+        controller = runtime.context_pulse
+        advance = controller._advance_tick
+
+        def hold_after_first_delivery(key, now):
+            if controller._state["tick_runs"][key]["last_event_id"] is None:
+                advance(key, now)
+
+        monkeypatch.setattr(controller, "_advance_tick", hold_after_first_delivery)
+        assert client.post(f"/api/pages/{page_id}/tick", json={"count": count}).status_code == 201
+        step, = runtime.causal_ledger.list_events(kind="spontaneous", limit=10)
+        eventually(lambda: runtime.causal_ledger.get_event(step.id), lambda event: event.status.value == "settled")
+        assert view(client, page_id)["tick"]["completed"] == 0
+        runtime.send_task_front_message(page_id, "Continue after that completed step.")
+        run = view(client, page_id)["tick"]
+        assert run["delivered"] == run["completed"] == 1
+        assert run["status"] == ("complete" if count == 1 else "stopped")
+        assert run["reason"] == (None if count == 1 else "user_message")
+        monkeypatch.setattr(controller, "_advance_tick", advance)
+        eventually(lambda: view(client, page_id), lambda v: len(replies(v)) == 3)
+        time.sleep(0.2)
+        assert len(transport.requests) == 3
+
+
+def test_user_admission_cancels_queued_tick_before_a_concurrent_claim(tmp_path, monkeypatch):
+    transport = Transport(monkeypatch)
+    with client_for(tmp_path, model_factory=transport.factory) as client:
+        page_id = new_work(client)
+        runtime = client.app.state.pages.runtime
+        ledger = runtime.causal_ledger
+        monkeypatch.setattr(runtime._engine, "tick", lambda *args, **kwargs: [])
+        assert client.post(f"/api/pages/{page_id}/tick", json={"count": 5}).status_code == 201
+        step, = ledger.list_events(kind="spontaneous", limit=10)
+        accepted, claim_attempted, claimed = threading.Event(), threading.Event(), threading.Event()
+        outcomes = []
+        enqueue = ledger.enqueue
+
+        def hold_after_acceptance(*args, **kwargs):
+            event = enqueue(*args, **kwargs)
+            if kwargs.get("content") == "Take over at the claim boundary.":
+                accepted.set()
+                assert claim_attempted.wait(5)
+                assert not claimed.wait(0.1), "A claim must wait until accepted input cancels its queued step."
+            return event
+
+        def claim_step():
+            assert accepted.wait(5)
+            claim_attempted.set()
+            try:
+                ledger.begin_turn(step.id, runtime.continuity_engram_id, "",
+                                  execution_context=page_id, runtime_fence=runtime._current_runtime_fence())
+                outcomes.append("claimed")
+            except CausalTransitionError:
+                outcomes.append("cancelled")
+            finally:
+                claimed.set()
+
+        monkeypatch.setattr(ledger, "enqueue", hold_after_acceptance)
+        claimant = threading.Thread(target=claim_step)
+        claimant.start()
+        try:
+            runtime.send_task_front_message(page_id, "Take over at the claim boundary.")
+        finally:
+            claimant.join(timeout=5)
+        assert not claimant.is_alive()
+        assert outcomes == ["cancelled"]
+        assert ledger.get_event(step.id).status.value == "cancelled"
+        assert view(client, page_id)["tick"]["reason"] == "user_message"

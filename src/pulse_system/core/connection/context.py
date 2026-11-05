@@ -346,9 +346,14 @@ class ContextConnectionNetwork:
                         sources, at, create=False)
                     learning["pairs"] += 1
                     self.learning_audit.record_applied(channel, changed)
-                learning["recent"] = ([item for item in recent if item["center_id"] != result.center_id]
-                                      + [{"center_id": result.center_id, "event_id": result.id,
-                                          "at": at.isoformat()}])[-256:] if can_learn else []
+                if can_learn:
+                    learning["recent"] = ([item for item in recent if item["center_id"] != result.center_id]
+                                          + [{"center_id": result.center_id, "event_id": result.id,
+                                              "at": at.isoformat()}])[-256:]
+                else:
+                    # An excluded context cannot erase another context's live
+                    # trace. Disabling learning still clears the whole window.
+                    learning["recent"] = recent if enabled else []
                 learning["cursor"] = result.seq
             self.storage.save_component_state(self.component_key, state)
 
