@@ -621,16 +621,23 @@ class TurnRunner:
                 )
             identity = dict(candidate) if candidate is not None else None
         provider_type = f"{type(self.tool_provider).__module__}.{type(self.tool_provider).__qualname__}"
-        descriptor_digest = digest_json(
-            {
-                "name": descriptor.name,
-                "description": descriptor.description,
-                "mutable": descriptor.mutable,
-                "requires_approval": descriptor.requires_approval,
-                "capability": descriptor.capability,
-                "source": descriptor.source,
-            }
-        )
+        # A tool's identity is what it does and how it is approved, not the
+        # wording of its description: editing that text must not invalidate
+        # an action already waiting for approval.
+        tool_identity = {
+            "name": descriptor.name,
+            "mutable": descriptor.mutable,
+            "requires_approval": descriptor.requires_approval,
+            "capability": descriptor.capability,
+            "source": descriptor.source,
+        }
+        descriptor_digest = digest_json(tool_identity)
+        # Actions recorded before this change hold a digest that also covers
+        # the description. Keep matching those while the text is unchanged.
+        legacy_digest = digest_json({**tool_identity, "description": descriptor.description})
+        stored = self._stored_action_authority(scope, call)
+        if stored is not None and stored.get("descriptor_digest") == legacy_digest:
+            descriptor_digest = legacy_digest
         return {
             "version": 1,
             "required": True,
@@ -639,6 +646,14 @@ class TurnRunner:
             "descriptor_digest": descriptor_digest,
             "identity": identity,
         }
+
+    def _stored_action_authority(
+        self, scope: HarnessScope, call: ToolCall,
+    ) -> Mapping[str, Any] | None:
+        try:
+            return self.store.get_action_authority(scope, _action_request_id(scope, call))
+        except HarnessError:
+            return None
 
     def _create_action_for_call(
         self,
