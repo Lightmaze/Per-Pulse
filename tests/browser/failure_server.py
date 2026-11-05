@@ -18,16 +18,20 @@ os.environ['PER_PULSE_FAILURE_QA_KEY'] = 'synthetic-test-credential'
 temporary = tempfile.TemporaryDirectory(prefix='per-pulse-failure-')
 state = Path(temporary.name)
 lock = threading.Lock()
-failures = {'remaining': 1}
+# A turn fails only when its request and both automatic retries fail.
+ATTEMPTS = 1 + ChatHTTPConfig('https://fixture.invalid/chat/completions', 'm').max_retries
+failures = {'remaining': ATTEMPTS, 'requests': 0}
 
 
 def handler(request):
     with lock:
+        failures['requests'] += 1
         fail = failures['remaining'] > 0
         if fail:
             failures['remaining'] -= 1
     if fail:
-        return httpx.Response(503, json={'error': {'message': 'Synthetic: service unavailable.'}})
+        return httpx.Response(503, headers={'retry-after': '0'},
+                              json={'error': {'message': 'Synthetic: service unavailable.'}})
     events = [{'choices': [{'index': 0, 'delta': {'content': 'Synthetic fixture: answered.'}, 'finish_reason': None}]},
               {'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]}]
     stream = ''.join('data: ' + json.dumps(e) + '\n\n' for e in events) + 'data: [DONE]\n\n'
@@ -46,14 +50,22 @@ app = create_app(state, model_factory=factory)
 
 
 @app.post('/__failure/next')
-def fail_next():
+def fail_next(times: int = ATTEMPTS):
+    """Fail the next ``times`` model requests; by default, every attempt of one turn."""
     with lock:
-        failures['remaining'] = 1
+        failures['remaining'] = times
+        failures['requests'] = 0
     return {'ok': True}
 
 
-fixture_routes = app.router.routes[-1:]
-del app.router.routes[-1:]
+@app.get('/__failure/requests')
+def request_count():
+    with lock:
+        return {'requests': failures['requests']}
+
+
+fixture_routes = app.router.routes[-2:]
+del app.router.routes[-2:]
 frontend_index = next(i for i, route in enumerate(app.router.routes) if getattr(route, 'path', None) == '/{route:path}')
 app.router.routes[frontend_index:frontend_index] = fixture_routes
 

@@ -9,11 +9,13 @@ from __future__ import annotations
 import json
 import math
 import os
+import random
 import re
 import threading
 import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -114,6 +116,53 @@ def _provider_usage(value: Mapping[str, Any]) -> ProviderUsage:
 
 OUTPUT_LIMIT_NOTE = "\n\n[Stopped at the reply length limit. Ask to continue for the rest.]"
 
+# A request the service refused or never answered is sent again, as the
+# official OpenAI and Anthropic clients do: a busy (429) or failing (5xx)
+# service, a timed-out (408) or conflicting (409) request, or a connection
+# that failed before any reply. The wait doubles from half a second up to
+# eight seconds, with jitter, unless the service asks for a wait of up to a
+# minute. Once a reply starts it is never sent again.
+RETRY_STATUSES = frozenset({408, 409, 429})
+INITIAL_RETRY_SECONDS = 0.5
+MAX_RETRY_SECONDS = 8.0
+MAX_RETRY_AFTER_SECONDS = 60.0
+
+
+def _retryable(response: httpx.Response) -> bool:
+    should = response.headers.get("x-should-retry", "").strip().lower()
+    if should in {"true", "false"}:
+        return should == "true"
+    return response.status_code in RETRY_STATUSES or response.status_code >= 500
+
+
+def _retry_after(headers: httpx.Headers) -> float | None:
+    """The wait the service asked for, in seconds, if it asked for one."""
+    try:
+        if "retry-after-ms" in headers:
+            return float(headers["retry-after-ms"]) / 1000
+    except ValueError:
+        pass
+    value = headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        return parsedate_to_datetime(value).timestamp() - time.time()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def retry_delay(retry: int, headers: httpx.Headers | None = None) -> float:
+    """Seconds to wait before retry number ``retry`` (1 for the first)."""
+    asked = _retry_after(headers) if headers is not None else None
+    if asked is not None and math.isfinite(asked) and 0 <= asked <= MAX_RETRY_AFTER_SECONDS:
+        return asked
+    delay = min(INITIAL_RETRY_SECONDS * 2 ** (retry - 1), MAX_RETRY_SECONDS)
+    return delay * (1 - 0.25 * random.random())
+
 
 @dataclass(frozen=True)
 class ChatHTTPConfig:
@@ -126,6 +175,8 @@ class ChatHTTPConfig:
     timeout_seconds: float = 120.0
     # Upper bound on one streamed reply, however steadily it arrives.
     max_stream_seconds: float = 1800.0
+    # Times a refused or unanswered request is sent again (see RETRY_STATUSES).
+    max_retries: int = 2
     max_output_tokens: int = 4096
     max_response_bytes: int = 2 * 1024 * 1024
     # Exact serialized HTTP JSON body bound; not a token or monetary budget.
@@ -157,6 +208,8 @@ class ChatHTTPConfig:
         for value in (self.max_output_tokens, self.max_response_bytes, self.max_request_bytes):
             if type(value) is not int or value <= 0:
                 raise ValueError("token and response bounds must be positive integers")
+        if type(self.max_retries) is not int or not 0 <= self.max_retries <= 10:
+            raise ValueError("max_retries must be an integer from 0 to 10")
         if self.reasoning_field not in {None, "reasoning_content"}:
             raise ValueError("unsupported reasoning wire field")
         if self.provider_namespace not in {None, "openrouter"}:
@@ -205,7 +258,10 @@ WORKSPACE_SCHEMAS: dict[str, dict[str, Any]] = {
 
 
 class ChatHTTPModelAdapter:
-    """Streaming network adapter; no retry, no fallback, no tool execution.
+    """Streaming network adapter; no fallback model, no tool execution.
+
+    A request the service refuses or never answers is retried before any
+    reply arrives (see RETRY_STATUSES); a reply that started is never resent.
 
     Supply schemas for every tool in the selected catalog. Credentials are
     resolved only when a request starts and never enter durable request data.
@@ -375,6 +431,16 @@ class _ChatStream:
     def _cancelled(self) -> bool:
         return self._closed.is_set() or (self.cancel is not None and self.cancel.is_set())
 
+    def _pause(self, seconds: float) -> bool:
+        """Wait before a retry; False when the turn is stopped meanwhile."""
+        deadline = time.monotonic() + seconds
+        while not self._cancelled():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return True
+            self._closed.wait(min(remaining, 0.05))
+        return False
+
     def __iter__(self) -> Iterator[ModelDelta]:
         if self._started:
             raise ProviderProtocolError("model response stream cannot be replayed")
@@ -405,22 +471,45 @@ class _ChatStream:
             # This narrows dispatch risk, but is not an atomic provider bill cap.
             if self._cancelled():
                 return
-            response = self.adapter._client.send(request, stream=True)
-            with self._lock:
-                self._response = response
-                cancelled = self._cancelled()
-            if cancelled:
-                return
-            if response.status_code != 200:
-                # Never persist a remote body, URL, request headers or credentials.
-                raise ProviderUnavailable(f"model endpoint returned HTTP {response.status_code}",
-                                          code=f"provider_http_{response.status_code}")
+            retries = self.adapter.config.max_retries
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    response = self.adapter._client.send(request, stream=True)
+                except httpx.ReadTimeout:
+                    # The service took the request and went quiet; sending it
+                    # again would only repeat the wait.
+                    raise
+                except httpx.TransportError:
+                    if attempt > retries or self._cancelled():
+                        raise
+                    if not self._pause(retry_delay(attempt)):
+                        return
+                    continue
+                with self._lock:
+                    self._response = response
+                    cancelled = self._cancelled()
+                if cancelled:
+                    return
+                if response.status_code == 200:
+                    break
+                if attempt > retries or not _retryable(response):
+                    # Never persist a remote body, URL, request headers or credentials.
+                    tries = f" after {attempt} attempts" if attempt > 1 else ""
+                    raise ProviderUnavailable(f"model endpoint returned HTTP {response.status_code}{tries}",
+                                              code=f"provider_http_{response.status_code}")
+                delay = retry_delay(attempt, response.headers)
+                response.close()
+                response = None
+                if not self._pause(delay):
+                    return
             if "text/event-stream" not in response.headers.get("content-type", "").lower():
                 raise ProviderProtocolError("model endpoint did not return an SSE stream")
             yield from self._deltas(response)
         except httpx.HTTPError:
             if not self._cancelled():
-                raise ProviderUnavailable("model transport failed; request was not retried", code="provider_transport_error") from None
+                raise ProviderUnavailable("model transport failed", code="provider_transport_error") from None
         finally:
             if response is not None:
                 response.close()
@@ -600,6 +689,7 @@ def model_factory_from_env():
         credential_env=os.environ.get("P_PULSE_CREDENTIAL_ENV", "P_PULSE_API_KEY"),
         timeout_seconds=float(os.environ.get("P_PULSE_CHAT_TIMEOUT", "120")),
         max_stream_seconds=float(os.environ.get("P_PULSE_CHAT_MAX_SECONDS", "1800")),
+        max_retries=int(os.environ.get("P_PULSE_CHAT_RETRIES", "2")),
         max_output_tokens=int(os.environ.get("P_PULSE_MAX_OUTPUT_TOKENS", "4096")),
         max_request_bytes=int(os.environ.get("P_PULSE_MAX_REQUEST_BYTES", "8388608")),
         reasoning_field=os.environ.get("P_PULSE_REASONING_FIELD") or None,

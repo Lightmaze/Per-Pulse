@@ -338,7 +338,8 @@ def test_provider_failure_stays_visible_without_fabricated_answer(tmp_path, monk
         assert view["messages"][0]["id"] == message["messageId"]
         assert view["messages"][0]["role"] == "user"
         assert view["messages"][0]["status"] in {"failed", "uncertain"}
-        assert len(requests) == 1
+        # One model request, which the adapter sent again twice on the 503.
+        assert len(requests) == 3 and all(request == requests[0] for request in requests)
 
 
 def test_old_source_link_resolves_in_own_page_without_exposing_other_context(tmp_path):

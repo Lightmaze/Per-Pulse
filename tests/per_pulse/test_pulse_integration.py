@@ -48,9 +48,11 @@ class TransportFixture:
             return httpx.Response(200, headers={"content-type": "text/event-stream"},
                                   content=stream + "data: [DONE]\n\n")
 
+        # These tests count model rounds, so the adapter sends each request
+        # once; its own retries are covered in test_provider_retry.py.
         return ChatHTTPModelAdapter(
             ChatHTTPConfig("https://fixture.invalid/chat/completions", "pulse-core-fixture",
-                           credential_env="PER_PULSE_CORE_TEST_KEY"),
+                           credential_env="PER_PULSE_CORE_TEST_KEY", max_retries=0),
             transport=httpx.MockTransport(respond),
         )
 
