@@ -165,6 +165,28 @@ export function useWorkspace() {
   const cachedView = views[route.id];
   const activeView = pageBelongsToWorkspace(cachedView, bootstrap)
     ? { ...cachedView!, provider: bootstrap!.provider } : undefined;
+
+  // A page response can lose a race with an explicit service reconnect: the
+  // old view must be discarded, but the route must not remain an empty Home
+  // after its loading pass has finished. Make one fresh, identity-scoped read.
+  // Never loop on a failed request or resurrect a previous service's view.
+  const missingViewRecovery = useRef<string | null>(null);
+  const missingView = Boolean(bootstrap?.workspaceId && bootstrap?.serviceInstanceId
+    && !loading && !activeView && !error);
+  useEffect(() => {
+    if (!missingView) return;
+    const key = `${bootstrap!.workspaceId}/${bootstrap!.serviceInstanceId}/${route.id}/${route.serial}`;
+    if (missingViewRecovery.current === key) return;
+    missingViewRecovery.current = key;
+    const controller = new AbortController();
+    refreshPage(route.id, controller.signal).catch(problem => {
+      if (!controller.signal.aborted) setError(problem instanceof Error
+        ? problem.message : 'This page could not be loaded.');
+    });
+    return () => controller.abort();
+  }, [bootstrap?.workspaceId, bootstrap?.serviceInstanceId, route.id, route.serial,
+    missingView, refreshPage]);
+
   const shouldPoll = activeView?.provider.configured && (['queued', 'working', 'needs_attention'].includes(activeView.page.status)
     || activeView.tick?.status === 'running');
   const shouldPollWorkspace = bootstrap?.provider.configured && bootstrap.pages.some(page =>
