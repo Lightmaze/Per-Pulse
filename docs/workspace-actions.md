@@ -34,8 +34,8 @@ This works for existing results while disconnected and after restart. File
 access remains limited to text up to 1 MiB; the native write path currently
 has a separate 64 KiB output bound. It does not restore older overwritten bytes.
 
-The **Materials** flow accepts UTF-8 text, Markdown, CSV, JSON or code in
-Home or Work. **Upload file** saves the original bytes; **Add to draft** selects
+The **Materials** flow accepts UTF-8 text, Markdown, CSV, JSON or code, and
+PDFs (read as their text), in Home or Work. **Upload file** saves the original bytes; **Add to draft** selects
 the inspected version; only **Send** submits it to the conversation.
 Text and file-only drafts survive browser refresh. Each
 message can include up to five files of at most 1 MiB each. PDF, images and

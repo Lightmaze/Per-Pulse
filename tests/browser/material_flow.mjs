@@ -72,7 +72,7 @@ try {
     // The composer remains inert until the modal actually closes.
     await dialog().waitFor({ state: 'hidden' });
   };
-  const choose = (name, buffer, mimeType = 'text/plain') => dialog().getByLabel('Choose a text file', { exact: true }).setInputFiles({ name, mimeType, buffer });
+  const choose = (name, buffer, mimeType = 'text/plain') => dialog().getByLabel('Choose a file', { exact: true }).setInputFiles({ name, mimeType, buffer });
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Inventory review');
   await page.getByRole('textbox', { name: 'Where should we begin?', exact: true }).fill('Prepare to inspect a supplied CSV. [Explicit synthetic fixture]');
@@ -203,7 +203,7 @@ try {
   assert.deepEqual(home.materials, [material]);
   await page.locator('[data-message-id="' + home.id + '"]').getByRole('button', { name: filename, exact: true }).click();
   await dialog().getByText('Inspect the original file from the source page. Its upload and message stay in that page.', { exact: true }).waitFor();
-  assert.equal(await dialog().getByLabel('Choose a text file', { exact: true }).count(), 0);
+  assert.equal(await dialog().getByLabel('Choose a file', { exact: true }).count(), 0);
   assert.equal(await dialog().getByRole('button', { name: 'Add to draft', exact: true }).count(), 0);
   await dialog().getByRole('button', { name: 'Source', exact: true }).click();
   assert.equal(await dialog().locator('.document-source').textContent(), bytes.toString('utf8'));
@@ -238,7 +238,7 @@ try {
   assert.equal((await data('/api/pages/' + origin + '/materials')).materials.length, 2);
   await choose('too-large.txt', Buffer.alloc(1024 * 1024 + 1, 97));
   await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
-  await dialog().getByText('Choose a text file no larger than 1 MiB.', { exact: true }).waitFor();
+  await dialog().getByText('Choose a text file of at most 1 MiB or a PDF of at most 32 MiB.', { exact: true }).waitFor();
   await close();
   await attach();
   await dialog().locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();

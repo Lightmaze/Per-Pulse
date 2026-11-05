@@ -351,10 +351,13 @@ silently retry a write against a different World.
   `truncated`, `limit_bytes` and `scope: "shared_native_workspace"`.
 - `GET /api/workspace/files/content?path=uploads/example.txt` reads a single
   regular UTF-8 file up to 1 MiB, returning `path`, `content`, `bytes` and
-  `sha256`. This is current file content, not a historical artifact receipt.
+  `sha256`. For a `.pdf` file up to 32 MiB, `content` is its text with a
+  `[Page N]` line before each page, and `format` is `"pdf_text"`; `bytes` and
+  `sha256` describe the original PDF. This is current file content, not a historical artifact receipt.
 - `POST /api/workspace/files?name=notes.md` accepts raw bytes with
   `Content-Type: application/octet-stream`. Its streamed body is limited to
-  1 MiB, independent of Content-Length. Success is `201` with `path`, original
+  1 MiB (32 MiB for a `.pdf`), independent of Content-Length. A PDF must be
+  readable and not password-protected (`pdf_unreadable`, `pdf_encrypted`). Success is `201` with `path`, original
   `name`, `bytes`, `sha256` and `source: "user_upload"`. Empty, binary,
   oversized and protected-path uploads are rejected before publication. A unique native `uploads/` file is created without replacing
   an existing file. Short extensions survive long Unicode file names.

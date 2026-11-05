@@ -1,6 +1,8 @@
 import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, TickRun, WorkspaceSettings } from './types';
 import type { AdaptiveWorkChoices, CollaboratorOutcome, CollaboratorFeedbackScope, CollaboratorFeedbackView, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 
+import { uploadLimit } from './uploadLimits';
+
 export type ActionReceipt = { accepted: boolean; repeated: boolean; actionStatus: string; actionCompleted: boolean; continuationError: { code: string; message: string } | null; view: PageView };
 export type PulseWriteIdentity = Pick<PulseObservation, 'workspaceId' | 'serviceInstanceId'>;
 
@@ -112,7 +114,7 @@ export const api = {
     return verifiedDownload(response, material.sha256, 'material_download_unverified');
   },
   uploadMaterial: async (pageId: string, identity: WorkspaceFileIdentity, uploadId: string, file: File, signal?: AbortSignal) => {
-    if (file.size > 1024 * 1024) throw new ApiError('Choose a text file of at most 1 MiB.', 'material_too_large', 413);
+    if (file.size > uploadLimit(file.name)) throw new ApiError('Choose a text file of at most 1 MiB or a PDF of at most 32 MiB.', 'material_too_large', 413);
     const bytes = await file.arrayBuffer();
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), value => value.toString(16).padStart(2, '0')).join('');
     const result = await request<WorkspaceFileIdentity & { material: Material; repeated: boolean }>(`${pagePath(pageId)}/materials?name=${encodeURIComponent(file.name)}`, {

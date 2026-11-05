@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { UPLOAD_ACCEPT, pdfHasText, uploadLimit } from '../uploadLimits';
 import { api, ApiError } from '../api';
 import { useLanguage, type MessageKey } from '../i18n';
 import type { Material, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList } from '../types';
@@ -6,20 +7,21 @@ import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { TextDocument } from './TextDocument';
 
-const MAX_BYTES = 1024 * 1024;
 const PREVIEW_CHARS = 64_000;
 // The same native file errors also serve result downloads. Keep upload advice
 // in this flow rather than replacing their explanations across the product.
 const materialErrors: Record<string, MessageKey> = {
   workspace_changed: 'library.workspaceChanged', file_too_large: 'library.tooLarge',
   empty_file: 'library.emptyFile', text_files_only: 'library.textOnly',
-  credential_content_blocked: 'library.credentials', protected_or_invalid_path: 'library.invalidPath',
+  pdf_unreadable: 'library.pdfUnreadable', pdf_encrypted: 'library.pdfEncrypted',
+  protected_or_invalid_path: 'library.invalidPath',
   invalid_path: 'library.invalidPath', filename_only: 'library.invalidPath',
   file_changed_retry: 'library.changed', file_unavailable: 'library.unavailable',
   path_unavailable: 'library.unavailable', not_a_single_regular_file: 'library.invalidPath',
   upload_failed_or_unconfirmed: 'library.uploadUnconfirmed',
   material_file_too_large: 'library.tooLarge', material_too_large: 'library.tooLarge',
-  material_text_files_only: 'library.textOnly', material_credential_content_blocked: 'library.credentials',
+  material_text_files_only: 'library.textOnly',
+  material_pdf_unreadable: 'library.pdfUnreadable', material_pdf_encrypted: 'library.pdfEncrypted',
   material_upload_unconfirmed: 'library.uploadUnconfirmed',
   material_reference_unconfirmed: 'library.referenceUnconfirmed',
 };
@@ -97,7 +99,7 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
   function upload() {
     if (!selected || busy || stale) return;
     if (!selected.size) { setError(t('library.emptyFile')); return; }
-    if (selected.size > MAX_BYTES) { setError(t('library.tooLarge')); return; }
+    if (selected.size > uploadLimit(selected.name)) { setError(t('library.tooLarge')); return; }
     const file = selected;
     setPreview(null);
     void perform(async (signal, current) => {
@@ -153,7 +155,7 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
     <form className="material-upload" onSubmit={event => { event.preventDefault(); upload(); }}>
       <label className="field-label" htmlFor={inputId}>{t('library.choose')}</label>
       <p id={`${inputId}-hint`} className="material-hint">{t('library.hint')}</p>
-      <input ref={input} id={inputId} type="file" accept="text/*,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.log,.py,.ts,.js,.html,.css" disabled={disabled}
+      <input ref={input} id={inputId} type="file" accept={UPLOAD_ACCEPT} disabled={disabled}
         aria-describedby={`${inputId}-hint${error ? ` ${inputId}-error` : ''}`}
         onChange={event => { setSelected(event.target.files?.[0] ?? null); uploadId.current = crypto.randomUUID().replaceAll('-', ''); setPreview(null); setError(''); setNotice(''); }} />
       {selected ? <p className="material-selected">{selected.name} <span>({selected.size.toLocaleString()} {t('library.bytes')})</span></p> : null}
@@ -175,6 +177,8 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
     </section>
     {preview ? <section className="material-preview" aria-label={t('library.preview')}>
       <h3 ref={previewHeading} tabIndex={-1}>{preview.path.split('/').at(-1)}</h3>
+      {preview.format === 'pdf_text' ? <p className="material-hint">{t(pdfHasText(preview.content) ? 'materials.pdfText' : 'materials.pdfNoText')}</p> : null}
+      {preview.format === 'pdf_text' && preview.complete === false ? <p className="material-hint">{t('materials.pdfPartial')}</p> : null}
       <TextDocument key={`${preview.path}/${preview.sha256}`} path={preview.path} content={preview.content.slice(0, PREVIEW_CHARS)} truncated={preview.content.length > PREVIEW_CHARS} />
       {preview.content.length > PREVIEW_CHARS ? <p className="material-hint">{t('library.previewLimited')}</p> : null}
       <details><summary>{t('library.details')}</summary><p>{preview.path}</p><p>SHA-256: {preview.sha256}</p></details>

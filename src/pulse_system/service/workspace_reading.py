@@ -86,7 +86,7 @@ def descriptor() -> ToolDescriptor:
         "without opening files. Use an older receipt to reread its following page; "
         "use open to deliberately start a changed version. "
         "No automatic next step, summary, file write, or task is created. "
-        "Only bounded UTF-8 files in the configured shared workspace are supported.",
+        "Reads bounded UTF-8 files and the text of PDFs in the configured shared workspace.",
         mutable=False, requires_approval=False, capability="workspace.read",
         source="pulse.native-reading",
     )
@@ -301,17 +301,22 @@ def execute(
     else:
         path = call.arguments["path"]
     path = _normalize_relative_path(path)
-    snapshot = provider._snapshot(provider._safe_target(path, allow_missing=False))
+    snapshot, source_text, is_pdf, complete, missing_text = provider._snapshot_text(
+        provider._safe_target(path, allow_missing=False), cancellation)
     if not snapshot.exists:
         raise WorkspaceAdapterError("reading source disappeared", code="workspace_file_not_found")
     if op in {"open", "find"} and call.arguments.get("expected_digest", snapshot.digest) != snapshot.digest:
         raise WorkspaceDigestConflict("reading source differs from the supplied version", code="reading_source_changed")
     cancellation.raise_if_cancelled()
-    text, redacted = _view(snapshot.text)
+    text, redacted = _view(source_text)
     source = {
         "path": path, "digest": snapshot.digest,
         "view_digest": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "view_format": VIEW, "workspace_digest": provider._workspace_provenance,
+        # A long PDF's text may stop at the reading bounds: then this view
+        # covers only the start of the original file.
+        **({"source_complete": complete,
+            "pages_without_selectable_text": missing_text} if is_pdf else {}),
     }
     if op == "find":
         query = call.arguments["query"]
@@ -325,6 +330,8 @@ def execute(
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "scope": "current_action_source", "observation_only": True,
             "redacted": redacted, "searched_entire_redacted_view": True,
+            # Even a fully extracted text layer cannot search images or scans.
+            **({} if complete and not missing_text else {"searched_entire_source": False}),
             "coordinates": "unicode_characters_in_redacted_view",
             "case_mode": "unicode_casefold" if casefold else "case_sensitive" if not flags else "regex_ignorecase",
             "matches": [], "more_matches": False,

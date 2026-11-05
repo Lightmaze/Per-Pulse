@@ -97,8 +97,13 @@ try {
   await page.getByRole('textbox', { name: 'Message Reconsider a design', exact: true }).fill(draft);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'replay-working.png') });
   await fixture('release');
-  await page.getByText(excerpt, { exact: true }).waitFor();
-  await wait(async () => (await view(origin)).execution.replay === null, 'replay ended');
+  // Wait for the saved reply, not the live preview of it, then for the replay
+  // to end with that reply as the page's last message.
+  await page.locator('.message-assistant').getByText(excerpt, { exact: true }).last().waitFor();
+  await wait(async () => {
+    const current = await view(origin);
+    return current.execution.replay === null && current.messages.at(-1)?.role === 'assistant';
+  }, 'replay ended with its saved reply');
   const replayed = (await view(origin)).messages.at(-1);
   const article = page.locator('[data-message-id="' + replayed.id + '"]');
   await article.getByText('Reconsidered saved material', { exact: true }).waitFor();

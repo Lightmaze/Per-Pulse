@@ -23,12 +23,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.concurrency import run_in_threadpool
 
 from pulse_system.service.runtime import ServiceError
-from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES
+from pulse_system.product.files import FileAccessError, upload_limit
 
 from . import __version__
 from .language import ResponseLanguage
 from .execution import ExecutionError
-from .materials import MaterialError, MAX_FILE_BYTES
+from .materials import MaterialError, TOO_LARGE as MATERIAL_TOO_LARGE
 from .service import PageError, PageService, PulseSettings, _ENV_PROVIDER
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
@@ -336,8 +336,10 @@ def create_app(
     @app.exception_handler(FileAccessError)
     async def file_error(_request: Request, error: FileAccessError):
         messages = {
-            "file_too_large": "Choose a text file no larger than 1 MiB.",
-            "text_files_only": "Choose a UTF-8 text file, such as Markdown, plain text or CSV.",
+            "file_too_large": "Choose a text file of at most 1 MiB or a PDF of at most 32 MiB.",
+            "text_files_only": "Choose a UTF-8 text file, such as Markdown, plain text or CSV, or a PDF.",
+            "pdf_unreadable": "This PDF could not be read. Try saving it as a PDF again.",
+            "pdf_encrypted": "This PDF is password-protected. Remove the password and try again.",
             "protected_or_invalid_path": "This file name or location cannot be opened here.",
             "invalid_path": "This file location is invalid.",
             "filename_only": "Choose a file name without folders.",
@@ -395,8 +397,9 @@ def create_app(
         # Bound streamed bodies too; Content-Length is not an authority and
         # must not turn an oversized upload into an unbounded allocation.
         data = bytearray()
+        limit = upload_limit(name)
         async for chunk in request.stream():
-            if len(data) + len(chunk) > MAX_FILE_BYTES:
+            if len(data) + len(chunk) > limit:
                 raise FileAccessError("file_too_large", 413)
             data.extend(chunk)
         return await run_in_threadpool(service.upload_file, name, bytes(data),
@@ -479,9 +482,10 @@ def create_app(
         if request.headers.get("x-per-pulse-world") != service.runtime.world_id:
             raise MaterialError("material_workspace_changed", "The workspace changed. Refresh before uploading.")
         data = bytearray()
+        limit = upload_limit(name)
         async for chunk in request.stream():
-            if len(data) + len(chunk) > MAX_FILE_BYTES:
-                raise MaterialError("material_too_large", "Choose a text file of at most 1 MiB.", 413)
+            if len(data) + len(chunk) > limit:
+                raise MaterialError("material_too_large", MATERIAL_TOO_LARGE, 413)
             data.extend(chunk)
         result = await asyncio.to_thread(service.materials.upload, page_id, name, bytes(data),
             upload_id=request.headers.get("x-per-pulse-upload-id"),
