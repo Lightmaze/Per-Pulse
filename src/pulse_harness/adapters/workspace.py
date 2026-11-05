@@ -43,7 +43,7 @@ import tempfile
 from typing import Any, Mapping, Sequence
 from weakref import ref
 
-from .document_text import MAX_PDF_BYTES, DocumentTextError, is_pdf_path, pdf_text
+from .document_text import MAX_PDF_BYTES, DocumentTextError, is_pdf_path, read_pdf
 from .resources import workspace_write_resource
 from ..core.changes import ChangePreview
 from ..core.contracts import (
@@ -1297,11 +1297,12 @@ class StructuredWorkspaceToolProvider:
         relative_path = _normalize_relative_path(arguments["path"])
         target = self._safe_target(relative_path, allow_missing=False)
         cancellation.raise_if_cancelled()
-        snapshot, text, is_pdf = self._snapshot_text(target, cancellation)
+        snapshot, text, is_pdf, complete = self._snapshot_text(target, cancellation)
         output = {
             "path": relative_path,
             "digest": snapshot.digest,
-            **({"format": "pdf_text"} if is_pdf else {}),
+            # pdf_complete is false when the text stops before the PDF's end.
+            **({"format": "pdf_text", "pdf_complete": complete} if is_pdf else {}),
             "workspace_provenance": {
                 "adapter": "pulse_harness.workspace.v1",
                 "workspace_digest": self._workspace_provenance,
@@ -1814,27 +1815,29 @@ class StructuredWorkspaceToolProvider:
         self,
         target: Path,
         cancellation: CancellationToken | None = None,
-    ) -> tuple[_FileSnapshot, str, bool]:
+    ) -> tuple[_FileSnapshot, str, bool, bool]:
         """A file's bytes and its text; a PDF's text is read page by page.
 
-        Returns ``(snapshot, text, is_pdf)``. A PDF may be larger than a text
-        file (``MAX_PDF_BYTES``). Only its text is read; it is never edited.
+        Returns ``(snapshot, text, is_pdf, complete)``. ``complete`` is false
+        when a PDF's text stopped at the reading bounds, so the text covers
+        only the start of the original. A PDF may be larger than a text file
+        (``MAX_PDF_BYTES``). Only its text is read; it is never edited.
         """
 
         if not is_pdf_path(target):
             snapshot = self._snapshot(target)
-            return snapshot, snapshot.text, False
+            return snapshot, snapshot.text, False, True
         snapshot = self._snapshot(target, max_bytes=max(self._max_file_bytes, MAX_PDF_BYTES))
         if not snapshot.exists:
-            return snapshot, "", True
+            return snapshot, "", True, True
         try:
-            text = pdf_text(
+            pdf = read_pdf(
                 snapshot.data,
                 should_stop=(lambda: cancellation.cancelled) if cancellation is not None else None,
             )
         except DocumentTextError as error:
             raise WorkspaceValidationError(str(error), code=error.code) from error
-        return snapshot, text, True
+        return snapshot, pdf.text, True, pdf.complete
 
     def _snapshot(self, target: Path, *, max_bytes: int | None = None) -> _FileSnapshot:
         limit = self._max_file_bytes if max_bytes is None else max_bytes

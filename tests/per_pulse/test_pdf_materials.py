@@ -28,7 +28,7 @@ from test_pages import client_for, send, wait_for
 REPORT = synthetic_pdf(["Quarterly revenue grew 12 percent.", "Costs fell in the second half."])
 
 
-def _reading_model(monkeypatch, seen, tool="reading"):
+def _reading_model(monkeypatch, seen, tool="reading", extra=None):
     """Read the attached file with ``tool``, then answer with what it returned."""
     monkeypatch.setenv("PER_PULSE_PDF_FIXTURE_KEY", "synthetic-test-credential")
 
@@ -49,6 +49,7 @@ def _reading_model(monkeypatch, seen, tool="reading"):
             source = json.loads(task.rsplit("[Attached workspace materials]\n", 1)[1].splitlines()[0])["files"][0]
             arguments = ({"op": "open", "path": source["path"], "expected_digest": source["sha256"]}
                          if tool == "reading" else {"path": source["path"]})
+            arguments.update(extra or {})
             return respond({"tool_calls": [{"index": 0, "id": "pdf-open", "type": "function", "function": {
                 "name": tool, "arguments": json.dumps(arguments)}}]}, "tool_calls")
         seen.append(results[-1])
@@ -153,3 +154,30 @@ def test_reading_stops_at_the_page_bound_and_says_where():
                                 "the reading limit. Split the PDF to read the rest.]")
     whole = read_pdf(synthetic_pdf(["Only page."]))
     assert whole.complete and whole.text == "[Page 1]\nOnly page."
+
+
+def test_a_search_of_a_pdf_read_only_in_part_says_it_is_partial(tmp_path, monkeypatch):
+    """A miss in the first part of a long PDF is not presented as a whole-document negative."""
+    bomb = amplifying_pdf(repeats=3000, later_page="LATER PAGE MARKER")
+    assert read_pdf(bomb).complete is False and "LATER PAGE MARKER" not in read_pdf(bomb).text
+    found, read = [], []
+    with client_for(tmp_path, model_factory=_reading_model(
+            monkeypatch, found, extra={"op": "find", "query": "LATER PAGE MARKER"})) as client:
+        material = upload(client, "home", "long.pdf", bomb).json()["material"]
+        send(client, "home", "Find the marker.", materials=[material["id"]])
+        wait_for(client, "home", lambda view: any(m["role"] == "assistant" for m in view["messages"]), timeout=30)
+    result = found[-1]["output"]
+    assert result["kind"] == "pulse.reading-find.v1" and result["matches"] == []
+    assert result["source"]["source_complete"] is False
+    assert result["searched_entire_source"] is False
+    with client_for(tmp_path / "second", model_factory=_reading_model(monkeypatch, read, tool="read_file")) as client:
+        material = upload(client, "home", "long.pdf", bomb).json()["material"]
+        send(client, "home", "Read it.", materials=[material["id"]])
+        wait_for(client, "home", lambda view: any(m["role"] == "assistant" for m in view["messages"]), timeout=30)
+    assert read[-1]["output"]["format"] == "pdf_text" and read[-1]["output"]["pdf_complete"] is False
+    whole = []
+    with client_for(tmp_path / "third", model_factory=_reading_model(monkeypatch, whole, tool="read_file")) as client:
+        material = upload(client, "home", "short.pdf", REPORT).json()["material"]
+        send(client, "home", "Read it.", materials=[material["id"]])
+        wait_for(client, "home", lambda view: any(m["role"] == "assistant" for m in view["messages"]), timeout=15)
+    assert whole[-1]["output"]["pdf_complete"] is True

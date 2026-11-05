@@ -301,7 +301,7 @@ def execute(
     else:
         path = call.arguments["path"]
     path = _normalize_relative_path(path)
-    snapshot, source_text, _ = provider._snapshot_text(
+    snapshot, source_text, is_pdf, complete = provider._snapshot_text(
         provider._safe_target(path, allow_missing=False), cancellation)
     if not snapshot.exists:
         raise WorkspaceAdapterError("reading source disappeared", code="workspace_file_not_found")
@@ -313,6 +313,9 @@ def execute(
         "path": path, "digest": snapshot.digest,
         "view_digest": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "view_format": VIEW, "workspace_digest": provider._workspace_provenance,
+        # A long PDF's text may stop at the reading bounds: then this view
+        # covers only the start of the original file.
+        **({"source_complete": complete} if is_pdf else {}),
     }
     if op == "find":
         query = call.arguments["query"]
@@ -326,6 +329,7 @@ def execute(
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "scope": "current_action_source", "observation_only": True,
             "redacted": redacted, "searched_entire_redacted_view": True,
+            **({} if complete else {"searched_entire_source": False}),
             "coordinates": "unicode_characters_in_redacted_view",
             "case_mode": "unicode_casefold" if casefold else "case_sensitive" if not flags else "regex_ignorecase",
             "matches": [], "more_matches": False,

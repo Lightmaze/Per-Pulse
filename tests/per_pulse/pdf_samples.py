@@ -38,17 +38,27 @@ def synthetic_pdf(pages: list[str], *, padding: int = 0) -> bytes:
     return bytes(out)
 
 
-def amplifying_pdf(line_chars: int = 1024, repeats: int = 3000) -> bytes:
-    """A few KB PDF whose compressed page content expands to repeats x line_chars of text."""
+def amplifying_pdf(line_chars: int = 1024, repeats: int = 3000, later_page: str | None = None) -> bytes:
+    """A few KB PDF whose compressed first page expands to repeats x line_chars of text.
+
+    ``later_page`` adds a second page with that line of text.
+    """
     import zlib
     line = b"BT /F1 12 Tf 72 720 Td (" + b"A" * line_chars + b") Tj ET\n"
     stream = zlib.compress(line * repeats, 9)
-    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+    kids = b"[4 0 R 6 0 R]" if later_page else b"[4 0 R]"
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids " + kids + b" /Count " + (b"2" if later_page else b"1") + b" >>",
                b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
                b"/Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
                b"<< /Length " + str(len(stream)).encode() + b" /Filter /FlateDecode >>\nstream\n"
                + stream + b"\nendstream"]
+    if later_page:
+        content = b"BT /F1 12 Tf 72 720 Td (" + later_page.encode("ascii") + b") Tj ET"
+        objects += [b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                    b"/Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>",
+                    b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"\nendstream"]
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objects, start=1):
