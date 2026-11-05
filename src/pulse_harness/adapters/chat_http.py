@@ -17,7 +17,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 
@@ -171,6 +171,9 @@ class ChatHTTPConfig:
     endpoint: str
     model: str
     credential_env: str = "P_PULSE_API_KEY"
+    # Authentication for an operator-selected HTTPS provider. Azure OpenAI
+    # API-key endpoints use the api-key header rather than Bearer.
+    auth_style: str = "bearer"
     # Connect and idle timeout: the longest wait for the next bytes, not the
     # whole reply. A long reply keeps streaming as long as bytes keep coming.
     timeout_seconds: float = 120.0
@@ -195,13 +198,23 @@ class ChatHTTPConfig:
                       and url.hostname in {"127.0.0.1", "::1", "localhost"})
         if (url.scheme != "https" and not local_http) or not url.hostname:
             raise ValueError("model endpoint requires HTTPS, or explicit loopback HTTP")
-        if url.username or url.password or url.query or url.fragment:
-            raise ValueError("model endpoint must not contain credentials, query or fragment")
+        if url.username or url.password or url.fragment:
+            raise ValueError("model endpoint must not contain credentials or fragment")
+        if url.query:
+            # Azure's versioned Chat Completions endpoint needs a URL query.
+            # Allow that non-secret parameter, never credentials in the URL.
+            parameters = parse_qsl(url.query, keep_blank_values=True)
+            if (len(parameters) != 1 or parameters[0][0] != "api-version"
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", parameters[0][1])):
+                raise ValueError("model endpoint query supports api-version only; keep keys in the credential environment")
+        if self.auth_style not in {"bearer", "api-key"}:
+            raise ValueError("unsupported model authentication style")
         if not self.model.strip() or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.credential_env):
             raise ValueError("model and credential environment variable must be valid")
         if type(self.no_auth_local) is not bool:
             raise ValueError("no_auth_local must be a boolean")
-        if self.no_auth_local and (not local_http or self.provider_namespace is not None):
+        if self.no_auth_local and (not local_http or self.provider_namespace is not None
+                                   or self.auth_style != "bearer"):
             raise ValueError("credential-free model calls require explicitly enabled loopback HTTP only")
         for seconds in (self.timeout_seconds, self.max_stream_seconds):
             if isinstance(seconds, bool) or not math.isfinite(seconds) or seconds <= 0:
@@ -216,6 +229,8 @@ class ChatHTTPConfig:
         if self.provider_namespace not in {None, "openrouter"}:
             raise ValueError("unsupported provider namespace")
         if self.provider_namespace == "openrouter":
+            if self.auth_style != "bearer":
+                raise ValueError("OpenRouter namespace requires Bearer authentication")
             from pulse_harness.adapters.openrouter_usage import (
                 OPENROUTER_CHAT_ENDPOINT,
             )
@@ -464,7 +479,10 @@ class _ChatStream:
                 key = os.environ.get(self.adapter.config.credential_env)
                 if not key:
                     raise ProviderUnavailable("configured model credential is missing", code="provider_credential_missing")
-                headers["Authorization"] = f"Bearer {key}"
+                if self.adapter.config.auth_style == "api-key":
+                    headers["api-key"] = key
+                else:
+                    headers["Authorization"] = f"Bearer {key}"
             request = self.adapter._client.build_request("POST", self.adapter.config.endpoint,
                 headers=headers, json=self.body)
             # Check the actual encoded HTTP body, including tool schemas and
@@ -697,6 +715,7 @@ def model_factory_from_env():
     config = ChatHTTPConfig(
         endpoint, model,
         credential_env=os.environ.get("P_PULSE_CREDENTIAL_ENV", "P_PULSE_API_KEY"),
+        auth_style=os.environ.get("P_PULSE_CHAT_AUTH_STYLE", "bearer"),
         timeout_seconds=float(os.environ.get("P_PULSE_CHAT_TIMEOUT", "120")),
         max_stream_seconds=float(os.environ.get("P_PULSE_CHAT_MAX_SECONDS", "1800")),
         max_retries=int(os.environ.get("P_PULSE_CHAT_RETRIES", "2")),
