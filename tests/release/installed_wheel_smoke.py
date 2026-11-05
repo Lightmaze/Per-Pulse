@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -78,6 +79,10 @@ def run_workspace(root: Path, *, example: bool, fake_provider: bool,
         process = subprocess.Popen(
             command, env=env, cwd=root, stdin=subprocess.DEVNULL,
             stdout=output, stderr=subprocess.STDOUT,
+            # Windows terminate() kills the service without its lifespan
+            # cleanup, unlike POSIX SIGTERM. Give the CLI a console group so
+            # CTRL_BREAK can exercise the same graceful stop as Ctrl+C.
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
         )
         try:
             deadline = time.monotonic() + 25
@@ -211,7 +216,11 @@ def run_workspace(root: Path, *, example: bool, fake_provider: bool,
                 f"{output.read().decode('utf-8', 'replace')[-5000:]}"
             ) from error
         finally:
-            process.terminate()
+            if process.poll() is None:
+                if os.name == "nt":
+                    process.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    process.terminate()
             try:
                 process.wait(timeout=8)
             except subprocess.TimeoutExpired:

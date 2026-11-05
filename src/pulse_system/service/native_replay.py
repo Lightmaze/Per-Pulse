@@ -29,22 +29,14 @@ SCHEMA = {'type': 'object', 'properties': {
 
 def descriptor():
     return ToolDescriptor(NAME,
-        'Optionally enter a bounded replay of selected saved experiences, in this same context. '
-        'First find actual message IDs with search_history. enter(message_ids) must be the '
-        'only tool call in its round. By default it keeps the current conversation. Optional '
-        'focus selects a bounded question instead: after successful entry, model requests keep '
-        'host instructions, this declared focus, selected source references and replay exchanges; '
-        'other conversation and experience/expert advice are omitted until the next turn. '
-        'Earlier provider exposure is not erased. No persona or task is copied. '
-        'For the remainder of THIS turn only replay inspect/read '
-        'are available; no files, commands, Work, team, local-state changes or live perception. '
-        'At most four further ordinary model rounds, within the current turn timeout/budget; '
-        'read selected originals with read(message_id,offset?,max_chars?). Consider alternatives '
-        'or leave a tentative interpretation; no particular summary or lesson is required. '
-        'Finish normally to exit. The next ordinary turn regains its normal tools. Final text '
-        'is retained as replay, not a newly observed external event, and does not automatically '
-        'propagate along CONTENT edges. Earlier actual actions are not undone. This is not '
-        'sleep scheduling, provider forgetting, training success or permission for external action.',
+        'Revisit selected earlier messages within this turn. Find message IDs with '
+        'search_history first. enter(message_ids, focus?) must be the only tool call in its'
+        ' round. With focus, the rest of this turn keeps only that question, the selected '
+        'messages and the replay; other conversation and experience advice are left out '
+        'until the next turn. During the replay only inspect and read(message_id, offset?, '
+        'max_chars?) are available, for at most four more model rounds; the other tools '
+        'return next turn. Finish your reply to end it. The final text is kept as a replay,'
+        ' and earlier actions are not undone.',
         capability='history.replay', source='pulse.native-replay')
 
 
