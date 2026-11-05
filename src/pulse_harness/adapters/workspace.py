@@ -1297,12 +1297,13 @@ class StructuredWorkspaceToolProvider:
         relative_path = _normalize_relative_path(arguments["path"])
         target = self._safe_target(relative_path, allow_missing=False)
         cancellation.raise_if_cancelled()
-        snapshot, text, is_pdf, complete = self._snapshot_text(target, cancellation)
+        snapshot, text, is_pdf, complete, missing_text = self._snapshot_text(target, cancellation)
         output = {
             "path": relative_path,
             "digest": snapshot.digest,
             # pdf_complete is false when the text stops before the PDF's end.
-            **({"format": "pdf_text", "pdf_complete": complete} if is_pdf else {}),
+            **({"format": "pdf_text", "pdf_complete": complete,
+                "pdf_pages_without_selectable_text": missing_text} if is_pdf else {}),
             "workspace_provenance": {
                 "adapter": "pulse_harness.workspace.v1",
                 "workspace_digest": self._workspace_provenance,
@@ -1815,10 +1816,10 @@ class StructuredWorkspaceToolProvider:
         self,
         target: Path,
         cancellation: CancellationToken | None = None,
-    ) -> tuple[_FileSnapshot, str, bool, bool]:
+    ) -> tuple[_FileSnapshot, str, bool, bool, bool]:
         """A file's bytes and its text; a PDF's text is read page by page.
 
-        Returns ``(snapshot, text, is_pdf, complete)``. ``complete`` is false
+        Returns ``(snapshot, text, is_pdf, complete, missing_text)``. ``complete`` is false
         when a PDF's text stopped at the reading bounds, so the text covers
         only the start of the original. A PDF may be larger than a text file
         (``MAX_PDF_BYTES``). Only its text is read; it is never edited.
@@ -1826,10 +1827,10 @@ class StructuredWorkspaceToolProvider:
 
         if not is_pdf_path(target):
             snapshot = self._snapshot(target)
-            return snapshot, snapshot.text, False, True
+            return snapshot, snapshot.text, False, True, False
         snapshot = self._snapshot(target, max_bytes=max(self._max_file_bytes, MAX_PDF_BYTES))
         if not snapshot.exists:
-            return snapshot, "", True, True
+            return snapshot, "", True, True, False
         try:
             pdf = read_pdf(
                 snapshot.data,
@@ -1837,7 +1838,7 @@ class StructuredWorkspaceToolProvider:
             )
         except DocumentTextError as error:
             raise WorkspaceValidationError(str(error), code=error.code) from error
-        return snapshot, pdf.text, True, pdf.complete
+        return snapshot, pdf.text, True, pdf.complete, pdf.pages_without_selectable_text
 
     def _snapshot(self, target: Path, *, max_bytes: int | None = None) -> _FileSnapshot:
         limit = self._max_file_bytes if max_bytes is None else max_bytes
