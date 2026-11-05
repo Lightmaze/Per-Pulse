@@ -114,6 +114,9 @@ jobs:
       - name: Verify structured result reading, copying and source return in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_RESULT_SCREENSHOTS="$RUNNER_TEMP/per-pulse-result-screenshots" node tests/browser/result_reading_flow.mjs
+      - name: Verify native report sources and offline Home return in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_REPORT_SOURCE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-result-screenshots/native-report" node tests/browser/report_source_flow.mjs
       - name: Verify concrete example capture, native retrieval and later feedback in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_EXAMPLE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-example-screenshots" node tests/browser/example_flow.mjs

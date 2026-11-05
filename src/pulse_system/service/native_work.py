@@ -143,12 +143,20 @@ class NativeWork:
             self.runtime.world_id, request_id)
         if (event is None or event.id != event_id or event.engram_id != subject
                 or record['world_id'] != self.runtime.world_id
-                or record['subject'] != subject or event.center_id is not None
+                or event.center_id is not None
                 or event.source.value != 'self'
                 or event.metadata.get('stimulus_source_turn_id') != record['source_turn_id']
                 or self.report_content(record) != content):
             return None
-        if require_settled_source:
+        source_subject = record['subject']
+        inherited = source_subject != subject
+        # Queued reports move with a committed Home handoff. The receiving
+        # event must still belong exactly to the caller; its outbox and source
+        # turn retain the original subject's immutable provenance.
+        if inherited and source_subject not in self.runtime.causal_ledger.committed_history_lineage(
+                self.runtime.world_id, subject):
+            return None
+        if require_settled_source or inherited:
             # Before a Home input exists, prove that this is the source Work's
             # admitted report, not just a queued message with a familiar prefix.
             # The original admission checked the Kernel action. These current
@@ -158,10 +166,10 @@ class NativeWork:
                 record['source_turn_id'], self.runtime.world_id)
             scope = record.get('source_scope', {})
             if (source is None or source.state is not HarnessTurnState.SETTLED
-                    or not source.result_event_id or source.engram_id != subject
+                    or not source.result_event_id or source.engram_id != source_subject
                     or not source.execution_context.startswith('work:')
                     or scope.get('world_id') != self.runtime.world_id
-                    or scope.get('engram_id') != subject
+                    or scope.get('engram_id') != source_subject
                     or scope.get('turn_id') != source.id
                     or scope.get('context_id') != source.execution_context
                     or event.metadata.get('stimulus_class') != 'subject_reflection'
