@@ -253,10 +253,12 @@ only where a sensible value cannot be inferred.
 - Research and evaluation modules sat in the product package.
 - The README, interface and CLI said what features do not prove, and the CLI
   printed "not a bill cap" twice at startup. The docs held 226 such lines.
-- With the CLI's defaults, tool descriptions add about 17,000 characters to
+- With the CLI's defaults, tool descriptions added about 17,000 characters to
   every model request, and their schemas another 8,000.
-  - About a third of the sentences are negations.
-  - The `team` tool alone takes 4,700 characters.
+  - About a third of the sentences were negations.
+  - The `team` tool alone took 4,700 characters.
+  - #151 cut the descriptions to about 9,000 characters and kept every rule
+    they carried.
 
 **Principle.** Say what a thing does and what to do with it. Mention a
 limitation only where it changes the person's or the model's next decision.
@@ -354,8 +356,10 @@ compose it.
 
 ### 3.8 High first-run cost
 
-**Seen here.** A first run needs Python 3.12 and Node 20, a frontend build,
-and environment variables to configure the model.
+**Seen here.** A first run needed Python 3.12 and Node 20, a frontend build,
+and environment variables to configure the model. The release wheel now
+includes the built interface, so Node and the build are needed only to
+develop (#162); a model is still configured through environment variables.
 
 **Principle.** Shorten the time to first value; package what can be packaged.
 
@@ -504,7 +508,6 @@ and characters.
 | Model servers elsewhere on the local network, and endpoints with a query string (Azure), are refused | Over-defense | Open |
 | Images cannot be sent to the model; old turns are dropped, not summarized | Outdated practice | Open |
 | Library defaults differ from the CLI's (ask before edits), so many tests exercise an unshipped flow | Tests pinning old behavior | Open |
-| Tool descriptions add about 17,000 characters to every request | Disclaimer text | In review (#151): about 8,900, keeping each source-authority sentence |
 | About 30 internal terms in the Activity panel | Internal concepts | Open |
 | 94 accesses to other objects' private members | Layering | Open |
 | The provider's class path is part of the action digest | Durable data | Open |
