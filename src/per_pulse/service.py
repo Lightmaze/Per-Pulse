@@ -178,6 +178,7 @@ class PageService:
         harness = KernelHarnessFactory(
             db_path=self.data_dir / "kernel.db", workspace=workspace,
             model_factory=factory, allow_unconfigured=True, allow_mutations=self.allow_workspace_actions,
+            allow_work_organization=not example,
             enable_posture=False if example else posture, auto_apply_edits=self.auto_apply_edits,
             max_model_rounds=FOREGROUND_MODEL_ROUNDS, approval_ttl_sec=APPROVAL_TTL_SECONDS,
             max_context_tokens=context_tokens_from_env(),

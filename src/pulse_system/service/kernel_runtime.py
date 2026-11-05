@@ -308,6 +308,7 @@ class KernelHarnessRuntime:
                  checkpoint_root: str | Path | None = None,
                  model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None = None,
                  allow_mutations: bool = False,
+                 allow_work_organization: bool | None = None,
                  allow_unconfigured: bool = False,
                  enable_posture: bool | None = None,
                  auto_apply_edits: bool = False,
@@ -327,6 +328,12 @@ class KernelHarnessRuntime:
         )
         self._allow_unconfigured = allow_unconfigured
         self._allow_mutations = allow_mutations
+        if allow_work_organization is not None and type(allow_work_organization) is not bool:
+            raise ValueError("allow_work_organization must be a bool or None")
+        # Generic callers retain their existing read-only profile unless they
+        # explicitly separate internal Work organization from workspace effects.
+        self._allow_work_organization = (
+            allow_mutations if allow_work_organization is None else allow_work_organization)
         # File changes inside the workspace apply without a per-change
         # approval and can be undone from their checkpoint. Commands still ask.
         self._auto_apply_edits = bool(allow_mutations and auto_apply_edits)
@@ -392,6 +399,11 @@ class KernelHarnessRuntime:
         self._shutdown_lock = threading.Lock()
         self._closed = False
         self._closing = False
+
+    @property
+    def allow_work_organization(self) -> bool:
+        """Whether owned Home/Work turns may stage internal Work requests."""
+        return self._allow_work_organization
 
     def configure_approval_compute(self, capacity: int) -> None:
         """Set one native compute gate before admitting any Pulse workers."""
@@ -1400,6 +1412,7 @@ class KernelHarnessFactory:
                  checkpoint_root: str | Path | None = None,
                  model_factory: Callable[[HarnessScope], ChatHTTPModelAdapter] | None = None,
                  allow_mutations: bool = False,
+                 allow_work_organization: bool | None = None,
                  allow_unconfigured: bool = False,
                  enable_posture: bool | None = None,
                  auto_apply_edits: bool = False,
@@ -1408,6 +1421,7 @@ class KernelHarnessFactory:
                  max_context_tokens: int | None = None) -> None:
         self._kwargs = dict(db_path=db_path, workspace=workspace, checkpoint_root=checkpoint_root,
                             model_factory=model_factory, allow_mutations=allow_mutations,
+                            allow_work_organization=allow_work_organization,
                             allow_unconfigured=allow_unconfigured, enable_posture=enable_posture,
                             auto_apply_edits=auto_apply_edits, max_model_rounds=max_model_rounds,
                             approval_ttl_sec=approval_ttl_sec, max_context_tokens=max_context_tokens)

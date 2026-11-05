@@ -183,7 +183,7 @@ class NativeWork:
             r.harness.authorize_work(scope, action_request_id, call)
             if cancellation.cancelled:
                 raise ScopeConflict('work operation cancelled before admission')
-            if a['op'] in {'create', 'send', 'report'} and not r.harness._allow_mutations:
+            if a['op'] in {'create', 'send', 'report'} and not r.harness.allow_work_organization:
                 raise ScopeConflict('this runtime profile does not allow scheduling Work')
             subject = scope.engram_id
             if a['op'] == 'list':

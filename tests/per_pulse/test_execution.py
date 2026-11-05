@@ -339,7 +339,6 @@ def test_native_turn_deadline_cancels_pending_action_without_file_effect(tmp_pat
 
 
 @pytest.mark.parametrize("name,arguments,in_work", [
-    ("work", {"op": "create", "title": "Unapproved work", "instruction": "Do not schedule this."}, False),
     ("team", {"op": "establish", "name": "Unapproved collaborator", "instruction": "Do not create this participant."}, True),
     ("local", {"op": "set_excitability", "value": 1.0}, False),
 ])
