@@ -59,6 +59,16 @@ try {
   await wait(async () => await activity.getByRole('button', { name: 'Send again', exact: true }).count() === 0, 'Send again hidden');
   checks.push('Send again gets the answer; the page is not stuck after one model error');
 
+  // One brief service error is retried automatically: the reply just arrives.
+  await fetch(base + '/__failure/next?times=1', { method: 'POST' });
+  await composer.fill('And after that?');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => await page.locator('.message-assistant').getByText('Synthetic fixture: answered.').count() === 2,
+    'reply after one automatic retry');
+  assert.equal((await (await fetch(base + '/__failure/requests')).json()).requests, 2);
+  assert.equal(await activity.getByText('Turn interrupted', { exact: true }).count(), 0);
+  checks.push('a single model-service error is retried and the reply arrives without a failure');
+
   const zh = await browser.newPage({ viewport: { width: 390, height: 844 }, locale: 'zh-CN' });
   zh.on('pageerror', error => errors.push(error.message));
   await fetch(base + '/__failure/next', { method: 'POST' });
