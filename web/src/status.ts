@@ -27,6 +27,7 @@ export function failureReason(code: string | null | undefined): { key: MessageKe
   if (['provider_timeout', 'provider_transport_error', 'provider_closed', 'provider_stream_incomplete'].includes(code)) {
     return { key: 'status.failureUnreachable', text: 'The model service stopped responding. Check the connection, then send again.' };
   }
+  if (code === 'payload_too_large') return { key: 'status.failurePayloadTooLarge', text: 'One message or action was too large to save. Review completed work, then continue in smaller steps.' };
   if (code === 'provider_output_limit') return { key: 'status.failureOutputLimit', text: 'The reply reached its length limit in the middle of an action. Ask for a shorter step, or raise P_PULSE_MAX_OUTPUT_TOKENS.' };
   if (code === 'provider_content_filtered') return { key: 'status.failureFiltered', text: "The model service's content filter stopped this reply." };
   if (code === 'provider_stream_too_long') return { key: 'status.failureStreamTooLong', text: 'The reply kept streaming past the time limit (P_PULSE_CHAT_MAX_SECONDS).' };
