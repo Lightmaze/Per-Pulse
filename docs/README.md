@@ -15,6 +15,7 @@ Read in order; each page builds on the ones before it.
 
 ## Design and engineering notes
 
+- [Autonomous practice](autonomous-practice.md): explicit SELF departure, weekly requests and safe continuation
 - [Design principles](design-principles.md): error patterns met in this
   project, the principles that replace them, and a checklist before merging
 - Harness: [foundation](harness-foundation.md), [verification](harness-verification.md),
