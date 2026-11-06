@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a2-py3-none-any.whl` from the
-[v0.1.0a2 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a2).
+Download `per_pulse-0.1.0a3-py3-none-any.whl` from the
+[v0.1.0a3 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a3).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a2-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a3-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a2-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a3-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -60,7 +60,7 @@ See [workspace actions](workspace-actions.md) for what Undo can restore.
 ## Start autonomous practice
 
 For self-directed work, open Activity, choose a weekly request limit and select
-**Start autonomous practice**. The new a2 wheel includes this entry point;
+**Start autonomous practice**. The current wheel includes this entry point;
 previously published a1 wheels do not. See [autonomous practice](autonomous-practice.md)
 for pause, usage and restart behavior.
 
@@ -79,7 +79,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a2-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a3-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
