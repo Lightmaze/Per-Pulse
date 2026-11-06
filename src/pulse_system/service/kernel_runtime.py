@@ -328,6 +328,8 @@ class KernelHarnessRuntime:
             else model_factory_from_env()
         )
         self._allow_unconfigured = allow_unconfigured
+        self._attempt_accounting_factory = None
+        self._provider_clients_started = False
         self._allow_mutations = allow_mutations
         if allow_work_organization is not None and type(allow_work_organization) is not bool:
             raise ValueError("allow_work_organization must be a bool or None")
@@ -695,9 +697,33 @@ class KernelHarnessRuntime:
             raise
         self._database_owner = connection
 
+    def bind_provider_attempt_accounting(self, factory):
+        """Install host accounting before any native model client is opened.
+
+        The factory receives a resolver for the adapter's current World turn.
+        Borrowed review/expert calls inherit that turn; their temporary fork
+        identities never become a second source of budget authority.
+        """
+        if not callable(factory):
+            raise TypeError("provider accounting factory must be callable")
+        with self._lock:
+            self._check()
+            if self._attempt_accounting_factory is not None or self._active or self._provider_clients_started:
+                raise ScopeConflict("provider accounting must be installed before model execution")
+            self._attempt_accounting_factory = factory
+
+    def _provider_parent_scope(self, adapter_scope):
+        with self._lock:
+            self._check()
+            active = self._active.get((adapter_scope.engram_id, adapter_scope.context_id))
+            if active is None or active.session_scope() != adapter_scope.session_scope():
+                raise ScopeConflict("provider request has no active native World turn")
+            return active
+
     def _make_model(self, scope):
         if self._model_factory is None:
             raise _error("provider_unconfigured", "AI is disconnected; configure a model before running a turn")
+        self._provider_clients_started = True
         adapter = self._model_factory(scope)
         # This bridge owns HTTP clients, not arbitrary child processes. New
         # transports need their own explicit lifecycle integration.
@@ -705,6 +731,13 @@ class KernelHarnessRuntime:
             if adapter is not None:
                 adapter.close()
             raise ScopeConflict("native world currently supports ChatHTTPModelAdapter only")
+        if self._attempt_accounting_factory is not None:
+            try:
+                adapter.bind_attempt_accounting(self._attempt_accounting_factory(
+                    lambda: self._provider_parent_scope(scope)))
+            except BaseException:
+                adapter.close()
+                raise
         adapter.extend_tool_schemas({
             workspace_index.NAME: workspace_index.SCHEMA,
             workspace_reading.NAME: workspace_reading.SCHEMA,

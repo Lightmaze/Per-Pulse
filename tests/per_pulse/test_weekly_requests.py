@@ -179,7 +179,7 @@ def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
     from types import SimpleNamespace as Row
     from pulse_harness.core.scope import HarnessScope
     from pulse_harness.core.errors import ProviderUnavailable
-    from pulse_system.core.types import CausalEventKind as Kind, CausalEventSource as Source
+    from pulse_system.core.types import CausalEventDomain as Domain, CausalEventKind as Kind, CausalEventSource as Source
     from pulse_system.service.weekly_requests import world_source_for_scope
 
     class Ledger:
@@ -212,6 +212,15 @@ def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
                source=Source.SELF, parent_event_id="result")
     assert world_source_for_scope(Ledger([user, result, tool], "tool"),
                                   "world", scope) is None
+    # A native generation summary is a continuation of its initiating work,
+    # even though the internal summary input is spontaneous and SELF-authored.
+    summary = Row(id="summary", world_id="world", domain=Domain.GENERATION,
+                  kind=Kind.SPONTANEOUS, source=Source.SELF, parent_event_id="result")
+    assert world_source_for_scope(Ledger([user, result, summary], "summary"),
+                                  "world", scope) is None
+    summary.parent_event_id = "self"
+    assert world_source_for_scope(Ledger([self_root, summary], "summary"),
+                                  "world", scope) == "self"
     # A later native spontaneous reentry *is* a new autonomous origin, even
     # when it descends from a user-requested result.
     reentry = Row(id="reentry", world_id="world", kind=Kind.SPONTANEOUS,

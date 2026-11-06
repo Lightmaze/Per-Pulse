@@ -54,6 +54,10 @@ const checks = [];
 
 try {
   await wait(async () => (await fetch(base + '/api/health')).ok, 'World/Kernel HTTP ready');
+  assert.equal((await fetch(base + '/api/pulse/weekly-usage', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: true, weeklyLimit: 100 }),
+  })).status, 200);
   browser = await chromium.launch({
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
     args: process.env.PLAYWRIGHT_CHROMIUM_ARGS

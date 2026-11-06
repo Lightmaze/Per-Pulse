@@ -6626,7 +6626,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             spontaneous_center=self._spontaneous_center_for_engram,
             spontaneous_emitter=self._spontaneous_dispatch_for_engram,
             scheduler=self._scheduler,
-            admission_filter=(self._context_pulse.admits if self._context_pulse else None),
+            admission_filter=self._native_event_admitted,
             context_wait_modifier=(self._context_pulse.wait_modifier if self._context_pulse else None),
             approval_parked=native_approval_parked,
             unsettled_provider_usage=native_unsettled_provider_usage,
@@ -8386,6 +8386,22 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         if self._harness_kind == "kernel":
             return self._harness.kernel
         return None
+
+    def bind_native_provider_attempt_accounting(self, factory, *, event_admission=None):
+        """Bind host-owned physical request admission on the existing Kernel."""
+        self._require_runtime_owner()
+        if self._harness_kind != "kernel":
+            raise RuntimeError("provider accounting requires the native Kernel")
+        if event_admission is not None and not callable(event_admission):
+            raise TypeError("provider event admission must be callable")
+        self._harness.bind_provider_attempt_accounting(factory)
+        self._native_provider_admission = event_admission
+
+    def _native_event_admitted(self, event, observed_at):
+        if self._context_pulse is not None and not self._context_pulse.admits(event, observed_at):
+            return False
+        admission = getattr(self, "_native_provider_admission", None)
+        return admission is None or admission(event, observed_at)
 
     def _native_kernel_context_for_center(self, center_id: str | None) -> str:
         if center_id is None:

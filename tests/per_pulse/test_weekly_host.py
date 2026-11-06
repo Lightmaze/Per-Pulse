@@ -53,6 +53,18 @@ def _settled(client, page_id):
     raise AssertionError("The real Kernel did not settle the fixture reply")
 
 
+def _enqueue_self(runtime, content, key):
+    from pulse_system.core.types import CausalEventDomain, CausalEventKind, CausalEventSource
+    # Host-owned input, like native ContextPulse reentry. The public user
+    # injection API correctly rejects content with an untyped SELF label.
+    return runtime.causal_ledger.enqueue(
+        world_id=runtime.world_id, flow=None, domain=CausalEventDomain.PULSE,
+        kind=CausalEventKind.SPONTANEOUS, source=CausalEventSource.SELF,
+        content=content, engram_id=runtime.continuity_engram_id,
+        idempotency_key=key, runtime_fence=runtime._current_runtime_fence(),
+    ).id
+
+
 def test_host_binds_weekly_gate_but_keeps_direct_user_work_outside_pool(tmp_path, monkeypatch):
     calls = []
     app = create_app(tmp_path, model_factory=_factory(monkeypatch, calls))
@@ -73,6 +85,17 @@ def test_host_binds_weekly_gate_but_keeps_direct_user_work_outside_pool(tmp_path
         assert page.status_code == 201, page.text
         _settled(client, page.json()["page"]["id"])
         assert calls
+        before = len(calls)
+        continued = client.post(
+            f"/api/pages/{page.json()['page']['id']}/messages",
+            json={"content": "Continue in the same native Work."},
+        )
+        assert continued.status_code == 202
+        deadline = time.monotonic() + 20
+        while len(calls) == before and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert len(calls) > before
+        _settled(client, page.json()["page"]["id"])
         status = client.get("/api/pulse/weekly-usage").json()["usage"]
         assert status["consumed"] == 0
         assert status["remaining"] == 2
@@ -109,6 +132,77 @@ def test_weekly_api_rejects_unconfigured_spending_and_invalid_world(tmp_path):
         assert mismatch.status_code == 409
         assert status["world_id"] != "another-world"
         assert client.get("/api/pulse/weekly-usage").json()["usage"]["enabled"] is False
+
+
+def test_native_self_turn_uses_weekly_pool_while_exhaustion_keeps_home_usable(tmp_path, monkeypatch):
+    calls = []
+    with TestClient(create_app(tmp_path, model_factory=_factory(monkeypatch, calls)),
+                    base_url="http://localhost") as client:
+        runtime = client.app.state.pages.runtime
+        assert client.patch("/api/pulse/weekly-usage", json={"enabled": True, "weeklyLimit": 1}).status_code == 200
+        _enqueue_self(runtime, "Synthetic autonomous practice.", "fixture-first-self")
+        _settled(client, "home")
+        usage = client.get("/api/pulse/weekly-usage").json()["usage"]
+        assert usage["consumed"] == 1 and usage["remaining"] == 0
+        assert usage["states"]["completed"] == 1
+        before = len(calls)
+        event_id = _enqueue_self(runtime, "Synthetic exhausted continuation.", "fixture-exhausted-self")
+        # Drive the ordinary scheduler repeatedly with no allowance. The same
+        # durable event waits; no Kernel turn is created and no send occurs.
+        for _ in range(3):
+            runtime.tick_once()
+        event = runtime.causal_ledger.get_event(event_id)
+        assert event.status.value == "queued"
+        assert len(calls) == before
+        sent = client.post("/api/pages/home/messages", json={"content": "A direct user request."})
+        assert sent.status_code == 202
+        deadline = time.monotonic() + 20
+        while len(calls) == before and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert len(calls) > before
+        assert client.get("/api/pulse/weekly-usage").json()["usage"]["consumed"] == 1
+        assert runtime.causal_ledger.get_event(event_id).status.value == "queued"
+        assert client.patch("/api/pulse/weekly-usage", json={"enabled": True, "weeklyLimit": 2}).status_code == 200
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            event = runtime.causal_ledger.get_event(event_id)
+            if event.status.value == "settled":
+                break
+            time.sleep(.02)
+        assert event.status.value == "settled"
+        assert client.get("/api/pulse/weekly-usage").json()["usage"]["consumed"] == 2
+
+
+def test_paused_native_event_survives_offline_reopen_then_resumes_once(tmp_path, monkeypatch):
+    from per_pulse.service import PulseSettings
+    settings = PulseSettings(enabled=True, spontaneous_rate=0)
+    calls = []
+    with TestClient(create_app(tmp_path, pulse=settings, model_factory=_factory(monkeypatch, calls)),
+                    base_url="http://localhost") as client:
+        assert client.patch("/api/pulse", json={"paused": True}).status_code == 200
+        assert client.patch("/api/pulse/weekly-usage", json={"enabled": True, "weeklyLimit": 2}).status_code == 200
+        runtime = client.app.state.pages.runtime
+        event_id = _enqueue_self(runtime, "Synthetic retained practice.", "fixture-retained-self")
+        for _ in range(3):
+            runtime.tick_once()
+        assert runtime.causal_ledger.get_event(event_id).status.value == "queued"
+        assert calls == []
+
+    with TestClient(create_app(tmp_path, pulse=settings), base_url="http://localhost") as client:
+        assert client.patch("/api/pulse", json={"paused": False}).status_code == 200
+        runtime = client.app.state.pages.runtime
+        for _ in range(3):
+            assert client.get("/api/pulse/observation").status_code == 200
+        assert runtime.causal_ledger.get_event(event_id).status.value == "queued"
+        assert client.get("/api/pulse/weekly-usage").json()["usage"]["consumed"] == 0
+
+    with TestClient(create_app(tmp_path, pulse=settings, model_factory=_factory(monkeypatch, calls)),
+                    base_url="http://localhost") as client:
+        _settled(client, "home")
+        runtime = client.app.state.pages.runtime
+        assert runtime.causal_ledger.get_event(event_id).status.value == "settled"
+        assert len(calls) == 1
+        assert client.get("/api/pulse/weekly-usage").json()["usage"]["consumed"] == 1
 
 
 def test_example_cannot_enable_remote_provider_budget(tmp_path):

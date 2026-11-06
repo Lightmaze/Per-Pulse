@@ -154,9 +154,12 @@ class WeeklyRequestBudget:
                 entry["settled_at"] = stamp.isoformat()
             self._save_week(state)
 
-    def dispatch(self, ticket: RequestTicket, *, now: datetime | None = None) -> None:
+    def dispatch(self, ticket: RequestTicket, *, now: datetime | None = None, admission_guard=None) -> None:
         """Durably consume a slot before the HTTP send (no refund on errors)."""
-        self._change(ticket, old="reserved", new="dispatched", now=now)
+        with self.storage._lock:
+            if admission_guard is not None:
+                admission_guard()
+            self._change(ticket, old="reserved", new="dispatched", now=now)
 
     def settle(self, ticket: RequestTicket, outcome: str, *, now: datetime | None = None) -> None:
         if outcome not in {"completed", "rejected", "uncertain"}:
@@ -222,9 +225,7 @@ class WeeklyRequestGate:
         if ticket is not None:
             from pulse_harness.core.errors import ProviderUnavailable
             try:
-                if self.admission_guard is not None:
-                    self.admission_guard()
-                self.budget.dispatch(ticket)
+                self.budget.dispatch(ticket, admission_guard=self.admission_guard)
             except WeeklyRequestUnavailable as exc:
                 raise ProviderUnavailable(
                     "Autonomous weekly provider requests were paused before dispatch.",
@@ -240,17 +241,16 @@ class WeeklyRequestGate:
             self.budget.abandon(ticket)
 
 
-def world_source_for_scope(ledger, world_id: str, scope) -> str | None:
+def world_source_for_scope(ledger, world_id: str, scope, *, explicit_foreground=None) -> str | None:
     """Derive the original request pool from immutable World causal ancestry.
 
-    A direct user stimulus is the *only* free foreground root. SELF and
-    unattended environment roots consume autonomous allowance. Delegation,
+    A direct user stimulus or a host-verified bounded continuation uses the
+    foreground pool. SELF and unattended environment roots consume autonomous allowance. Delegation,
     TUNNEL and response-review descendants retain their ancestral pool; a
     missing, cyclic or foreign ledger lineage fails closed instead of being
     silently billed to the user's direct Work.
     """
     from pulse_harness.core.errors import ProviderUnavailable
-    from pulse_system.core.types import CausalEventKind, CausalEventSource
 
     def unknown():
         return ProviderUnavailable(
@@ -265,34 +265,45 @@ def world_source_for_scope(ledger, world_id: str, scope) -> str | None:
     turn = ledger.get_turn_for_world(scope.turn_id, world_id)
     if turn is None or turn.engram_id != scope.engram_id:
         raise unknown()
-    event = ledger.get_event(turn.event_id)
+    return world_source_for_event(ledger, world_id, turn.event_id, explicit_foreground=explicit_foreground)
+
+
+def world_source_for_event(ledger, world_id: str, event_id: str, *, explicit_foreground=None) -> str | None:
+    """Resolve immutable causal origin before a queued event starts a turn."""
+    from pulse_harness.core.errors import ProviderUnavailable
+    from pulse_system.core.types import CausalEventDomain, CausalEventKind, CausalEventSource
+
+    def unknown():
+        return ProviderUnavailable(
+            "The original World causal source cannot be verified; request not sent.",
+            code="autonomous_request_source_unverified",
+        )
+
+    event = ledger.get_event(event_id)
     seen: set[str] = set()
     autonomous_root: str | None = None
     for _ in range(256):
         if (event is None or event.world_id != world_id or event.id in seen):
             raise unknown()
         seen.add(event.id)
-        # A real user stimulus begins a fresh foreground request, even if the
-        # original Work was opened from an older autonomous or succession
-        # event. An autonomous activation *after* that user input is still
-        # charged. Do not let an earlier SELF ancestor relabel a newer user
-        # instruction as unattended spending.
         if event.source is CausalEventSource.USER and event.kind is CausalEventKind.STIMULUS:
+            return autonomous_root
+        if explicit_foreground is not None and explicit_foreground(event):
+            # A person can request finite quiet steps after any prior work.
+            # A later genuinely spontaneous reentry still starts its own pool.
             return autonomous_root
         # Assistant results and tool receipts are SELF-authored even during
         # an ordinary user-requested Work. They do not start a new autonomous
         # request pool. Only a native *activation/input* can convert a user
         # lineage into autonomous work (e.g. a later spontaneous reentry).
         if (
-            # Generation summaries are native continuity maintenance, not
-            # unsolicited new growth. They inherit the originating user's
-            # or autonomous pulse's pool through the generation parent.
             not (event.kind is CausalEventKind.SPONTANEOUS
                  and getattr(event, "metadata", {}).get("generation_stage") == "summary")
             and event.source in {
                 CausalEventSource.SELF, CausalEventSource.HABITAT,
                 CausalEventSource.SENSORY, CausalEventSource.PROPAGATION,
             }
+            and getattr(event, "domain", None) != CausalEventDomain.GENERATION
             and event.kind in {
                 CausalEventKind.STIMULUS,
                 CausalEventKind.SPONTANEOUS,

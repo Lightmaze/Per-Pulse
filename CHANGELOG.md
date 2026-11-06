@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add an opt-in weekly allowance for autonomous model requests in Activity.
+  Retries and uncertain sends remain counted across restarts; direct user
+  messages stay usable while background events wait for more allowance.
+
 ## 0.1.0a1
 
 First local alpha with a bundled browser interface and a Python wheel install.

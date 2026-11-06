@@ -51,6 +51,10 @@ const experiences = id => get('/api/pages/' + id + '/posture').then(value => val
 try {
   server = start();
   await wait(async () => (await fetch(base + '/api/health')).ok, 'native server');
+  assert.equal((await fetch(base + '/api/pulse/weekly-usage', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: true, weeklyLimit: 100 }),
+  })).status, 200);
   const response = await fetch(base + '/api/pages', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title: 'Continuing observation', instruction: 'An explicitly synthetic bounded observation.' }) });
   assert.equal(response.status, 201);

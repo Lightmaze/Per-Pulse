@@ -12,12 +12,12 @@ from __future__ import annotations
 from pulse_system.service.weekly_requests import (
     WeeklyRequestBudget,
     WeeklyRequestGate,
+    world_source_for_event,
     world_source_for_scope,
 )
 
 
-
-def _source_for_model_request(ledger, world_id, origin_scope, request_scope):
+def _source_for_model_request(ledger, world_id, origin_scope, request_scope, *, explicit_foreground=None):
     """Keep borrowed reviewer sends on their original trusted World turn.
 
     The Kernel alone creates the model adapter for origin_scope. CoverMe and
@@ -63,7 +63,7 @@ def _source_for_model_request(ledger, world_id, origin_scope, request_scope):
         # These source-bound, tool-less forks are only entered via the
         # adapter loaned by the native Kernel. The requester cannot select
         # the adapter's immutable originating scope or its request pool.
-    return world_source_for_scope(ledger, world_id, origin_scope)
+    return world_source_for_scope(ledger, world_id, origin_scope, explicit_foreground=explicit_foreground)
 
 
 def install_world_request_gate(pages) -> WeeklyRequestBudget:
@@ -78,51 +78,37 @@ def install_world_request_gate(pages) -> WeeklyRequestBudget:
     ledger = runtime.causal_ledger
     world_id = runtime.world_id
     budget = WeeklyRequestBudget(storage, world_id)
-    runtime._require_runtime_owner()
-    budget.reconcile()
 
-    # kernel_service is the public _WorldKernelService facade (messages,
-    # approvals, provenance). It deliberately does not own model adapters.
-    # Bind the actual existing KernelHarnessRuntime created by the one host.
-    from pulse_system.service.kernel_runtime import KernelHarnessRuntime
-    kernel = runtime._harness
-    if type(kernel) is not KernelHarnessRuntime:
-        raise RuntimeError("Per Pulse weekly admission requires the native Kernel")
-    if getattr(kernel, "_per_pulse_weekly_gate", None) is not None:
-        raise RuntimeError("native request admission is already installed")
-
-    original_factory = kernel._model_factory
     def still_admitted() -> None:
-        # A person can hold background Pulse independently of weekly limits.
-        # Refuse a new physical retry after that hold, without affecting
-        # already-dispatched calls or direct foreground messages.
         from pulse_system.service.weekly_requests import WeeklyRequestUnavailable
-        with storage._lock:
-            pulse = runtime.context_pulse
-            if pulse.config.enabled and pulse._state["paused"]:
-                raise WeeklyRequestUnavailable("background activity is paused")
+        if runtime.context_pulse.background_paused():
+            raise WeeklyRequestUnavailable("background activity is paused")
 
-    if original_factory is not None:
-        def metered_factory(scope):
-            adapter = original_factory(scope)
-            if adapter is None:
-                return None
-            # One adapter is created for one native Kernel turn. Reviewer
-            # forks borrow it but never acquire authority to change its pool.
-            gate = WeeklyRequestGate(
-                budget,
-                lambda request_scope: _source_for_model_request(
-                    ledger, world_id, scope, request_scope),
-                admission_guard=still_admitted,
-            )
-            try:
-                adapter.bind_attempt_accounting(gate)
-            except BaseException:
-                adapter.close()
-                raise
-            return adapter
+    def accounting_factory(parent_scope):
+        # Resolve on every physical attempt: an adapter survives multiple
+        # turns, while a tool-less expert/review fork borrows its active turn.
+        return WeeklyRequestGate(
+            budget, lambda scope: _source_for_model_request(
+                ledger, world_id, parent_scope(), scope,
+                explicit_foreground=runtime.context_pulse.is_person_requested_tick),
+            admission_guard=still_admitted,
+        )
 
-        kernel._model_factory = metered_factory
+    def event_admitted(event, observed_at):
+        from pulse_harness.core.errors import ProviderUnavailable
+        try:
+            source = world_source_for_event(
+                ledger, world_id, event.event_id,
+                explicit_foreground=runtime.context_pulse.is_person_requested_tick)
+        except ProviderUnavailable:
+            return False
+        if source is None:
+            return True
+        if not pages.configured or pages.example:
+            return False
+        usage = budget.status(now=observed_at)
+        return usage["enabled"] and usage["remaining"] > 0 and not runtime.context_pulse.background_paused()
 
-    kernel._per_pulse_weekly_gate = budget
+    runtime.bind_native_provider_attempt_accounting(accounting_factory, event_admission=event_admitted)
+    budget.reconcile()
     return budget
