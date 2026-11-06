@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import time
+import threading
 
 from fastapi.testclient import TestClient
 import httpx
@@ -733,8 +734,22 @@ def test_large_native_rewrite_continues_downloads_and_undoes_after_restart(tmp_p
         assert target.read_bytes() == before.encode()
 
 
-def test_native_rewrite_over_envelope_stops_before_changing_the_file(tmp_path, monkeypatch):
+@pytest.mark.parametrize("observe_transition", [False, True], ids=["settled", "during-transition"])
+def test_native_rewrite_over_envelope_stops_before_changing_the_file(tmp_path, monkeypatch, observe_transition):
     from per_pulse.service import NATIVE_PAYLOAD_BYTES
+    from pulse_harness.core import TurnRunner, TurnStatus
+
+    entered, release = threading.Event(), threading.Event()
+    original_transition = TurnRunner._transition_turn
+
+    def pause_at_failure(runner, scope, status):
+        original_transition(runner, scope, status)
+        if status is TurnStatus.FAILED:
+            entered.set()
+            assert release.wait(8), "Release the observed failure transition."
+
+    if observe_transition:
+        monkeypatch.setattr(TurnRunner, "_transition_turn", pause_at_failure)
 
     before = "Keep the existing report.\n"
     requests = []
@@ -748,10 +763,15 @@ def test_native_rewrite_over_envelope_stops_before_changing_the_file(tmp_path, m
         target.write_bytes(before.encode())
         page_id = _page(client, "OVER_ENVELOPE")
         execution = client.app.state.pages.execution
-        view = _wait(execution, page_id, lambda view: view["status"] == "error")
-        assert view["failureCode"] == "payload_too_large"
-        assert target.read_bytes() == before.encode()
-        assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
+        try:
+            if observe_transition:
+                assert entered.wait(8), "The Kernel must reach the failed state."
+            view = _wait(execution, page_id, lambda view: view["status"] == "error")
+            assert view["failureCode"] == "payload_too_large"
+            assert target.read_bytes() == before.encode()
+            assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
+        finally:
+            release.set()
 
 
 def test_legacy_truncated_receipt_is_not_reconstructed_from_file_existence(tmp_path, monkeypatch):

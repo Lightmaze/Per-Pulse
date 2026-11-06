@@ -2308,12 +2308,9 @@ class TurnRunner:
             TurnStatus.CANCELLED,
         }:
             return self._outcome(scope, error_code=error.code, evidence=evidence)
-        try:
-            self._transition_turn(scope, status)
-        except InvalidTransition:
-            current = self.store.get_turn(scope)
-            if current.status not in {status, TurnStatus.CANCELLED, TurnStatus.SUCCEEDED, TurnStatus.FAILED}:
-                raise
+        # Publish the reason first. Observers may read between these durable
+        # writes; once the failed/blocked state is visible its reason must
+        # already be available, including after a process interruption.
         self._append_event(
             scope,
             event_type="turn.error",
@@ -2323,6 +2320,12 @@ class TurnRunner:
             event_id=f"turn-error:{scope.turn_id}:{error.code}",
             item_id=f"turn-error-item:{scope.turn_id}:{error.code}",
         )
+        try:
+            self._transition_turn(scope, status)
+        except InvalidTransition:
+            current = self.store.get_turn(scope)
+            if current.status not in {status, TurnStatus.CANCELLED, TurnStatus.SUCCEEDED, TurnStatus.FAILED}:
+                raise
         return self._outcome(scope, error_code=error.code, evidence=evidence)
 
     def _cancelled_outcome(self, scope: HarnessScope, reason: str) -> TurnOutcome:
