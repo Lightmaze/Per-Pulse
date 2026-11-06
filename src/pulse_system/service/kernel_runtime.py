@@ -315,7 +315,8 @@ class KernelHarnessRuntime:
                  auto_apply_edits: bool = False,
                  max_model_rounds: int = 16,
                  approval_ttl_sec: float = 300.0,
-                 max_context_tokens: int | None = None) -> None:
+                 max_context_tokens: int | None = None,
+                 max_payload_bytes: int = 64 * 1024) -> None:
         self.db_path = str(db_path) if str(db_path) == ":memory:" else str(Path(db_path).expanduser().resolve())
         self.workspace = Path(workspace).expanduser().resolve()
         self.checkpoint_root = checkpoint_root
@@ -345,6 +346,7 @@ class KernelHarnessRuntime:
         self._max_model_rounds = max_model_rounds
         self._approval_ttl_sec = approval_ttl_sec
         self._max_context_tokens = max_context_tokens
+        self._max_payload_bytes = max_payload_bytes
         self.life = LifeHub()
         self.work = None
         self.team = None
@@ -607,6 +609,7 @@ class KernelHarnessRuntime:
                 max_model_rounds=self._max_model_rounds,
                 approval_ttl_sec=self._approval_ttl_sec,
                 max_context_tokens=self._max_context_tokens,
+                max_payload_bytes=self._max_payload_bytes,
                 tool_provider_factory=lambda store, root, checkpoints: _WorldWorkspace(
                     store, root, checkpoints, guard=self._check,
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
@@ -1452,13 +1455,15 @@ class KernelHarnessFactory:
                  auto_apply_edits: bool = False,
                  max_model_rounds: int = 16,
                  approval_ttl_sec: float = 300.0,
-                 max_context_tokens: int | None = None) -> None:
+                 max_context_tokens: int | None = None,
+                 max_payload_bytes: int = 64 * 1024) -> None:
         self._kwargs = dict(db_path=db_path, workspace=workspace, checkpoint_root=checkpoint_root,
                             model_factory=model_factory, allow_mutations=allow_mutations,
                             allow_work_organization=allow_work_organization,
                             allow_unconfigured=allow_unconfigured, enable_posture=enable_posture,
                             auto_apply_edits=auto_apply_edits, max_model_rounds=max_model_rounds,
-                            approval_ttl_sec=approval_ttl_sec, max_context_tokens=max_context_tokens)
+                            approval_ttl_sec=approval_ttl_sec, max_context_tokens=max_context_tokens,
+                            max_payload_bytes=max_payload_bytes)
         self._bootstrapped = False
 
     def bootstrap(self, *, workspace, config, owner_id, epoch):

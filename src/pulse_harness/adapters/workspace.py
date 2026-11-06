@@ -1307,7 +1307,9 @@ class StructuredWorkspaceToolProvider:
         if "path" not in arguments or set(arguments) - {"path", "offset", "max_chars", "expected_digest"}:
             raise ProviderProtocolError("read_file arguments are not canonical", code="tool_arguments_invalid")
         offset = arguments.get("offset", 0)
-        maximum = arguments.get("max_chars", self.store.max_payload_bytes)
+        # A larger write envelope must not flood each read with a whole file.
+        # The caller can request a larger passage or follow the saved cursor.
+        maximum = arguments.get("max_chars", min(self.store.max_payload_bytes, 64 * 1024))
         if type(offset) is not int or offset < 0 or type(maximum) is not int or maximum < 1:
             raise ProviderProtocolError("read_file range is invalid", code="tool_arguments_invalid")
         if "expected_digest" in arguments and (
@@ -1354,7 +1356,7 @@ class StructuredWorkspaceToolProvider:
         def fits() -> bool:
             envelope = {"tool_call_id": call.tool_call_id, "action_request_id": action_request_id,
                         "status": "succeeded", "output": output, "error_code": None}
-            return len(_canonical_json(envelope).encode("utf-8")) <= self.store.max_payload_bytes
+            return len(_canonical_json(envelope).encode("utf-8")) <= min(self.store.max_payload_bytes, 64 * 1024)
 
         end = min(len(text), offset + maximum)
         set_end(end)
@@ -1705,7 +1707,9 @@ class StructuredWorkspaceToolProvider:
         and reduce only the observer text, retaining its digest/visibility
         marker. Never raise the store's bound or truncate authority fields.
         """
-        budget = self.store.max_payload_bytes
+        # Observer text stays compact even when the caller allows larger
+        # durable action arguments for a complete document rewrite.
+        budget = min(self.store.max_payload_bytes, 64 * 1024)
         while True:
             preview, redacted, truncated = _safe_observer_text(text, budget)
             output = {**metadata, text_key: preview,
@@ -1713,7 +1717,7 @@ class StructuredWorkspaceToolProvider:
             envelope = {"tool_call_id": tool_call_id,
                         "action_request_id": action_request_id, "status": status,
                         "output": output, "error_code": error_code}
-            if len(_canonical_json(envelope).encode("utf-8")) <= self.store.max_payload_bytes:
+            if len(_canonical_json(envelope).encode("utf-8")) <= min(self.store.max_payload_bytes, 64 * 1024):
                 return output
             if budget == 128:
                 raise ProviderProtocolError(
