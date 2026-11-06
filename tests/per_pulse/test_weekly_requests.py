@@ -148,3 +148,28 @@ def test_pause_after_reservation_fences_dispatch_without_charging():
     assert budget.status(now=NOW)["consumed"] == 0
     budget.configure(enabled=True, weekly_limit=1)
     assert budget.status(now=NOW)["remaining"] == 1
+
+
+def test_native_world_sqlite_survives_process_reopen(tmp_path):
+    from pulse_system.substrate.storage import Storage
+
+    world_path = tmp_path / "world.db"
+    first_store = Storage(world_path)
+    try:
+        first = WeeklyRequestBudget(first_store, "world")
+        first.configure(enabled=True, weekly_limit=2)
+        ticket = first.reserve(source_event_id="SELF-root", now=NOW)
+        first.dispatch(ticket, now=NOW)
+        assert first.status(now=NOW)["consumed"] == 1
+    finally:
+        first_store.close()
+
+    second_store = Storage(world_path)
+    try:
+        second = WeeklyRequestBudget(second_store, "world")
+        assert second.reconcile(now=NOW) == 1
+        status = second.status(now=NOW)
+        assert status["enabled"] and status["states"]["uncertain"] == 1
+        assert status["remaining"] == 1
+    finally:
+        second_store.close()
