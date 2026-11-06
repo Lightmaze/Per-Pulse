@@ -215,6 +215,55 @@ def test_example_cannot_enable_remote_provider_budget(tmp_path):
         assert reply.json()["error"]["code"] == "example_mode"
 
 
+def test_user_delegation_and_sourced_report_complete_while_autonomous_allowance_is_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("PER_PULSE_WEEK_HOST_KEY", "synthetic-credential")
+    calls = []
+    def factory(scope):
+        def handler(request):
+            calls.append(request)
+            messages = json.loads(request.content)["messages"]
+            boundary = max(i for i, item in enumerate(messages) if item["role"] == "user")
+            current = messages[boundary:]
+            finished_tool = any(item["role"] == "tool" for item in current)
+            if not finished_tool and (scope.context_id.startswith("work:") or "Delegate a task." in messages[boundary]["content"]):
+                args = ({"op": "report", "kind": "finding", "note": "The delegated finding is ready."}
+                        if scope.context_id.startswith("work:") else
+                        {"op": "create", "title": "Weekly delegation", "instruction": "Return a small finding."})
+                delta = {"tool_calls": [{"index": 0, "id": "fixture-work", "type": "function",
+                         "function": {"name": "work", "arguments": json.dumps(args)}}]}
+                finish = "tool_calls"
+            else:
+                delta, finish = {"content": "The delegated work is complete. [Synthetic fixture]"}, "stop"
+            frames = [{"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
+                      {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]}]
+            return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                content="".join("data: " + json.dumps(item) + "\n\n" for item in frames) + "data: [DONE]\n\n")
+        return ChatHTTPModelAdapter(ChatHTTPConfig("https://fixture.invalid/chat/completions", "delegation-week-test",
+            credential_env="PER_PULSE_WEEK_HOST_KEY"), transport=httpx.MockTransport(handler))
+
+    with TestClient(create_app(tmp_path, model_factory=factory, posture=False), base_url="http://localhost") as client:
+        assert client.get("/api/pulse/weekly-usage").json()["usage"]["enabled"] is False
+        assert client.post("/api/pages/home/messages", json={"content": "Delegate a task."}).status_code == 202
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            fronts = client.get("/api/bootstrap").json()["pages"]
+            works = [item for item in fronts if item["title"] == "Weekly delegation"]
+            if works:
+                break
+            time.sleep(.03)
+        assert works
+        _settled(client, works[0]["id"])
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            home = client.get("/api/pages/home").json()
+            if sum(item["role"] == "assistant" for item in home["messages"]) >= 2:
+                break
+            time.sleep(.03)
+        assert any(item.get("activation") == "work_report" for item in home["messages"])
+        assert len(calls) >= 5
+        assert client.get("/api/pulse/weekly-usage").json()["usage"]["consumed"] == 0
+
+
 def test_borrowed_posture_and_coverme_sends_inherit_native_origin_pool(tmp_path):
     """A trace-only reviewer is not a new World root or an unmetered request."""
     from types import SimpleNamespace as Row

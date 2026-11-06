@@ -292,6 +292,26 @@ def world_source_for_event(ledger, world_id: str, event_id: str, *, explicit_for
             # A person can request finite quiet steps after any prior work.
             # A later genuinely spontaneous reentry still starts its own pool.
             return autonomous_root
+        # Native Work instructions/reports carry typed SELF provenance rather
+        # than a parent_event_id. Follow their settled World source turn so
+        # delegation preserves both a person's request and an autonomous pool.
+        metadata = getattr(event, "metadata", {})
+        if (event.source is CausalEventSource.SELF and event.kind is CausalEventKind.STIMULUS
+                and metadata.get("stimulus_class") == "subject_reflection"):
+            from pulse_system.core.types import HarnessTurnState
+            source_id = metadata.get("stimulus_source_turn_id")
+            source = ledger.get_turn_for_world(source_id, world_id) if source_id else None
+            if source is None or source.state is not HarnessTurnState.SETTLED or not source.result_event_id:
+                raise unknown()
+            if source.engram_id != event.engram_id and source.engram_id not in ledger.committed_history_lineage(world_id, event.engram_id):
+                raise unknown()
+            origin = ledger.get_event(source.result_event_id)
+            if (origin is None or origin.world_id != world_id or origin.engram_id != source.engram_id
+                    or origin.kind is not CausalEventKind.ASSISTANT_RESULT
+                    or origin.parent_event_id != source.event_id):
+                raise unknown()
+            event = origin
+            continue
         # Assistant results and tool receipts are SELF-authored even during
         # an ordinary user-requested Work. They do not start a new autonomous
         # request pool. Only a native *activation/input* can convert a user

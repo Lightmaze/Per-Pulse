@@ -272,6 +272,36 @@ def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
         world_source_for_scope(Ledger([delegated], "delegated"), "world", scope)
 
 
+def test_typed_native_work_instruction_and_report_inherit_their_settled_source():
+    from types import SimpleNamespace as Row
+    from pulse_harness.core.scope import HarnessScope
+    from pulse_harness.core.errors import ProviderUnavailable
+    from pulse_system.core.types import CausalEventKind as Kind, CausalEventSource as Source, HarnessTurnState
+    from pulse_system.service.weekly_requests import world_source_for_scope
+
+    root = Row(id="root", world_id="world", engram_id="engram", kind=Kind.STIMULUS,
+               source=Source.USER, parent_event_id=None)
+    result = Row(id="result", world_id="world", engram_id="engram", kind=Kind.ASSISTANT_RESULT,
+                 source=Source.SELF, parent_event_id="root")
+    reflected = Row(id="reflected", world_id="world", engram_id="engram", kind=Kind.STIMULUS,
+                    source=Source.SELF, parent_event_id=None,
+                    metadata={"stimulus_class": "subject_reflection", "stimulus_source_turn_id": "origin"})
+    origin_turn = Row(engram_id="engram", event_id="root", result_event_id="result", state=HarnessTurnState.SETTLED)
+    class Ledger:
+        def get_turn_for_world(self, turn_id, world_id):
+            return origin_turn if turn_id == "origin" else Row(engram_id="engram", event_id="reflected")
+        def get_event(self, event_id):
+            return {"root": root, "result": result, "reflected": reflected}.get(event_id)
+
+    scope = HarnessScope("world", "engram", "session", 0, "owner", turn_id="turn")
+    assert world_source_for_scope(Ledger(), "world", scope) is None
+    root.kind, root.source = Kind.SPONTANEOUS, Source.SELF
+    assert world_source_for_scope(Ledger(), "world", scope) == "root"
+    result.parent_event_id = "unrelated"
+    with pytest.raises(ProviderUnavailable):
+        world_source_for_scope(Ledger(), "world", scope)
+
+
 def test_lowered_weekly_limit_fences_reserved_tickets_at_dispatch():
     ledger = WeeklyRequestBudget(_Storage(), "world")
     ledger.configure(enabled=True, weekly_limit=3)
