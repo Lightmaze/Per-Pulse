@@ -284,7 +284,12 @@ def world_source_for_scope(ledger, world_id: str, scope) -> str | None:
         # request pool. Only a native *activation/input* can convert a user
         # lineage into autonomous work (e.g. a later spontaneous reentry).
         if (
-            event.source in {
+            # Generation summaries are native continuity maintenance, not
+            # unsolicited new growth. They inherit the originating user's
+            # or autonomous pulse's pool through the generation parent.
+            not (event.kind is CausalEventKind.SPONTANEOUS
+                 and getattr(event, "metadata", {}).get("generation_stage") == "summary")
+            and event.source in {
                 CausalEventSource.SELF, CausalEventSource.HABITAT,
                 CausalEventSource.SENSORY, CausalEventSource.PROPAGATION,
             }
