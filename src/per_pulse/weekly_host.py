@@ -77,7 +77,7 @@ def install_world_request_gate(pages) -> WeeklyRequestBudget:
     storage = runtime.storage
     ledger = runtime.causal_ledger
     world_id = runtime.world_id
-    budget = WeeklyRequestBudget(storage, world_id)
+    budget = WeeklyRequestBudget(storage, world_id, fence=runtime.native_provider_fence)
 
     def still_admitted() -> None:
         from pulse_system.service.weekly_requests import WeeklyRequestUnavailable

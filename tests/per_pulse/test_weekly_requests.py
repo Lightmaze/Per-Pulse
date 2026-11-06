@@ -3,26 +3,19 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from threading import RLock
 
 import pytest
 
 from pulse_system.service.weekly_requests import WeeklyRequestBudget, WeeklyRequestUnavailable
 
 
-class _Storage:
-    """Minimal synchronized World component-state fixture."""
+from pulse_system.substrate.storage import Storage
+
+
+class _Storage(Storage):
+    """Real in-memory SQLite for the standalone accounting contracts."""
     def __init__(self):
-        self._lock = RLock()
-        self.values = {}
-
-    def load_component_state(self, key):
-        import copy
-        return copy.deepcopy(self.values.get(key))
-
-    def save_component_state(self, key, state):
-        import copy
-        self.values[key] = copy.deepcopy(state)
+        super().__init__(":memory:")
 
 
 NOW = datetime(2026, 11, 5, 23, tzinfo=timezone.utc)

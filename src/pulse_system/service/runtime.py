@@ -8397,6 +8397,10 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         self._harness.bind_provider_attempt_accounting(factory)
         self._native_provider_admission = event_admission
 
+    def native_provider_fence(self):
+        """Current World ownership for atomic physical-request accounting."""
+        return self._current_runtime_fence()
+
     def _native_event_admitted(self, event, observed_at):
         if self._context_pulse is not None and not self._context_pulse.admits(event, observed_at):
             return False

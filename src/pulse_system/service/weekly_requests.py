@@ -8,6 +8,7 @@ therefore consumes an uncertain slot rather than granting a free replay.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -36,7 +37,7 @@ def _week(now: datetime) -> str:
 
 
 class WeeklyRequestBudget:
-    """Serialize native World-component request accounting under its lock.
+    """Serialize native World request accounting in lease-fenced transactions.
 
     The policy is opt-in and remains disabled until a person enables it. A
     reservation holds one slot; dispatch consumes it permanently for that UTC
@@ -44,16 +45,28 @@ class WeeklyRequestBudget:
     Nothing on this surface can authorize a tool effect or a new model turn.
     """
 
-    def __init__(self, storage, world_id: str):
+    def __init__(self, storage, world_id: str, *, fence=None):
         if not isinstance(world_id, str) or not world_id.strip():
             raise ValueError("world identity is required")
         self.storage = storage
+        if fence is not None and not callable(fence):
+            raise TypeError("a runtime fence resolver must be callable")
+        self.fence = fence
         self.world_id = world_id
         self._policy_key = f"autonomous-provider-policy-v1:{world_id}"
         self._key_prefix = f"autonomous-provider-week-v1:{world_id}:"
 
-    def _load_policy(self) -> dict:
-        state = self.storage.load_component_state(self._policy_key)
+    @contextmanager
+    def _write(self):
+        fence = self.fence() if self.fence is not None else None
+        with self.storage.component_state_transaction(
+            runtime_owner_id=fence.owner_id if fence else None,
+            runtime_lease_epoch=fence.epoch if fence else None,
+        ) as state:
+            yield state, fence
+
+    def _load_policy(self, transaction=None) -> dict:
+        state = (transaction or self.storage).load_component_state(self._policy_key)
         if state is None:
             return {"version": 1, "enabled": False, "weekly_limit": 0}
         if (state.get("version") != 1 or type(state.get("enabled")) is not bool
@@ -62,8 +75,8 @@ class WeeklyRequestBudget:
             raise ValueError("invalid persistent weekly request policy")
         return state
 
-    def _load_week(self, week: str) -> dict:
-        state = self.storage.load_component_state(self._key_prefix + week)
+    def _load_week(self, week: str, transaction=None) -> dict:
+        state = (transaction or self.storage).load_component_state(self._key_prefix + week)
         if state is None:
             return {"version": 1, "world_id": self.world_id, "week": week, "attempts": {}}
         if (state.get("version") != 1 or state.get("world_id") != self.world_id
@@ -71,17 +84,17 @@ class WeeklyRequestBudget:
             raise ValueError("invalid persistent weekly request ledger")
         return state
 
-    def _save_week(self, state: dict) -> None:
-        self.storage.save_component_state(self._key_prefix + state["week"], state)
+    def _save_week(self, state: dict, transaction=None) -> None:
+        (transaction or self.storage).save_component_state(self._key_prefix + state["week"], state)
 
     def configure(self, *, enabled: bool, weekly_limit: int) -> dict:
         if type(enabled) is not bool or type(weekly_limit) is not int or not 0 <= weekly_limit <= 100_000:
             raise ValueError("weekly request settings must be a boolean and 0..100000 requests")
         if enabled and weekly_limit == 0:
             raise ValueError("enabled autonomous requests need a positive weekly allowance")
-        with self.storage._lock:
+        with self._write() as (transaction, _fence):
             policy = {"version": 1, "enabled": enabled, "weekly_limit": weekly_limit}
-            self.storage.save_component_state(self._policy_key, policy)
+            transaction.save_component_state(self._policy_key, policy)
             return dict(policy)
 
     def status(self, *, now: datetime | None = None) -> dict:
@@ -104,28 +117,34 @@ class WeeklyRequestBudget:
             raise ValueError("a trusted causal source identity is required")
         stamp = _utc(now)
         week = _week(stamp)
-        with self.storage._lock:
-            policy = self._load_policy()
-            state = self._load_week(week)
+        with self._write() as (transaction, fence):
+            policy = self._load_policy(transaction)
+            state = self._load_week(week, transaction)
             active = sum(item["status"] != "abandoned" for item in state["attempts"].values())
             if not policy["enabled"] or active >= policy["weekly_limit"]:
                 raise WeeklyRequestUnavailable("autonomous weekly provider requests are paused or exhausted")
             attempt_id = uuid4().hex
             state["attempts"][attempt_id] = {"source_event_id": source_event_id,
                 "status": "reserved", "created_at": stamp.isoformat(), "dispatched_at": None,
-                "settled_at": None}
-            self._save_week(state)
+                "settled_at": None, "runtime_owner_id": fence.owner_id if fence else None,
+                "runtime_lease_epoch": fence.epoch if fence else None}
+            self._save_week(state, transaction)
             return RequestTicket(attempt_id, week, source_event_id)
 
-    def _change(self, ticket: RequestTicket, *, old: str, new: str, now: datetime | None) -> None:
+    def _change(self, ticket: RequestTicket, *, old: str, new: str, now: datetime | None, admission_guard=None) -> None:
         if not isinstance(ticket, RequestTicket):
             raise ValueError("request ticket is required")
         stamp = _utc(now)
-        with self.storage._lock:
-            state = self._load_week(ticket.week)
+        with self._write() as (transaction, fence):
+            if admission_guard is not None:
+                admission_guard()
+            state = self._load_week(ticket.week, transaction)
             entry = state["attempts"].get(ticket.attempt_id)
             if entry is None or entry["source_event_id"] != ticket.source_event_id:
                 raise ValueError("unknown or mismatched provider request ticket")
+            if fence is not None and (entry.get("runtime_owner_id") != fence.owner_id
+                    or entry.get("runtime_lease_epoch") != fence.epoch):
+                raise WeeklyRequestUnavailable("provider request ticket belongs to an earlier owner")
             if entry["status"] == new:
                 if new == "dispatched":
                     raise ValueError("one provider ticket cannot authorize two physical sends")
@@ -136,7 +155,7 @@ class WeeklyRequestBudget:
                 # Recheck the policy at the wire boundary, not only when the
                 # ticket was reserved. A lowered limit must fence outstanding
                 # reservations before they become new provider charges.
-                policy = self._load_policy()
+                policy = self._load_policy(transaction)
                 if not policy["enabled"]:
                     raise WeeklyRequestUnavailable("autonomous provider requests are paused")
                 if ticket.week != _week(stamp):
@@ -152,14 +171,11 @@ class WeeklyRequestBudget:
                 entry["dispatched_at"] = stamp.isoformat()
             else:
                 entry["settled_at"] = stamp.isoformat()
-            self._save_week(state)
+            self._save_week(state, transaction)
 
     def dispatch(self, ticket: RequestTicket, *, now: datetime | None = None, admission_guard=None) -> None:
         """Durably consume a slot before the HTTP send (no refund on errors)."""
-        with self.storage._lock:
-            if admission_guard is not None:
-                admission_guard()
-            self._change(ticket, old="reserved", new="dispatched", now=now)
+        self._change(ticket, old="reserved", new="dispatched", now=now, admission_guard=admission_guard)
 
     def settle(self, ticket: RequestTicket, outcome: str, *, now: datetime | None = None) -> None:
         if outcome not in {"completed", "rejected", "uncertain"}:
@@ -173,8 +189,8 @@ class WeeklyRequestBudget:
     def reconcile(self, *, now: datetime | None = None) -> int:
         """On restart, classify old in-flight dispatches as uncertain (not free)."""
         stamp = _utc(now)
-        with self.storage._lock:
-            state = self._load_week(_week(stamp))
+        with self._write() as (transaction, _fence):
+            state = self._load_week(_week(stamp), transaction)
             changed = 0
             for entry in state["attempts"].values():
                 if entry["status"] == "dispatched":
@@ -187,7 +203,7 @@ class WeeklyRequestBudget:
                     entry["settled_at"] = stamp.isoformat()
                     changed += 1
             if changed:
-                self._save_week(state)
+                self._save_week(state, transaction)
             return changed
 
 

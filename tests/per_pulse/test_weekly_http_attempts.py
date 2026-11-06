@@ -6,7 +6,6 @@ attempt accounting, not evidence of a live provider or autonomous learning.
 from __future__ import annotations
 
 import json
-from threading import RLock
 
 import httpx
 import pytest
@@ -18,18 +17,13 @@ from pulse_harness.core.scope import HarnessScope
 from pulse_system.service.weekly_requests import WeeklyRequestBudget, WeeklyRequestGate, WeeklyRequestUnavailable
 
 
-class _Storage:
+from pulse_system.substrate.storage import Storage
+
+
+class _Storage(Storage):
+    """Real in-memory SQLite for the standalone accounting contracts."""
     def __init__(self):
-        self._lock = RLock()
-        self.values = {}
-
-    def load_component_state(self, key):
-        import copy
-        return copy.deepcopy(self.values.get(key))
-
-    def save_component_state(self, key, state):
-        import copy
-        self.values[key] = copy.deepcopy(state)
+        super().__init__(":memory:")
 
 
 def _response(*, valid=True):
