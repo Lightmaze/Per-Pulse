@@ -26,6 +26,8 @@ Kernel implementation.
   headings, tables and code blocks.
 - Let pages continue: background pulses within an hourly budget, or type
   `/tick 3` to give a page three more steps.
+- Start autonomous practice from Activity with a weekly request allowance. Work and
+  its sources persist through pauses, budget holds and restarts.
 - Keep examples and lessons from your corrections. They are available across
   your pages unless you keep one to its page.
 - Let the model change files in its workspace, and undo any change from the
@@ -39,13 +41,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a1-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a1)
+[`per_pulse-0.1.0a2-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a2)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a1-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a2-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -115,6 +117,16 @@ also pass finished results to each other through connections; see
 Pages can learn connections from their activity, and their local rhythm adapts
 across the workspace. Activity shows learned connections and lets you remove
 them. Use `--no-adaptive-pulse` to freeze connection learning and keep a fixed rhythm.
+
+## Start autonomous practice
+
+With a model configured, open **Activity**, set a weekly request limit and select
+**Start autonomous practice**. An original SELF departure can create native
+Works and return source-linked results without you first sending a message.
+**Pause autonomous practice** stops new autonomous sends; increasing the
+allowance lets retained Work continue. A weekly slot counts a physical model
+request, including retries and delegated requests, not a price or token cap.
+See [Autonomous practice](docs/autonomous-practice.md) for details and limits.
 
 ## Explore the example
 
