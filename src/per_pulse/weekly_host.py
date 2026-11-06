@@ -31,8 +31,12 @@ def install_world_request_gate(pages) -> WeeklyRequestBudget:
     runtime._require_runtime_owner()
     budget.reconcile()
 
-    kernel = runtime.kernel_service
-    if kernel is None:
+    # kernel_service is the public _WorldKernelService facade (messages,
+    # approvals, provenance). It deliberately does not own model adapters.
+    # Bind the actual existing KernelHarnessRuntime created by the one host.
+    from pulse_system.service.kernel_runtime import KernelHarnessRuntime
+    kernel = runtime._harness
+    if type(kernel) is not KernelHarnessRuntime:
         raise RuntimeError("Per Pulse weekly admission requires the native Kernel")
     if getattr(kernel, "_per_pulse_weekly_gate", None) is not None:
         raise RuntimeError("native request admission is already installed")
