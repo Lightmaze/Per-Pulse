@@ -7,7 +7,6 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 from __future__ import annotations
 
 import hashlib
-import json
 
 import pytest
 
@@ -89,3 +88,31 @@ def test_two_distinct_works_revisit_one_persistent_region(tmp_path, monkeypatch)
         assert len(resumed.runtime.storage.list_engrams()) == 1
     finally:
         resumed.runtime.close()
+
+def test_read_only_workspace_never_advertises_habitat_mutation(tmp_path):
+    pages = PageService(tmp_path, model_factory=None, posture=False,
+                        allow_workspace_actions=False)
+    try:
+        from pulse_system.service.native_habitat import descriptors
+        assert any(d.name == WRITE and d.mutable and d.requires_approval
+                   for d in descriptors())
+        assert pages.runtime.harness._allow_mutations is False
+        # A direct call cannot bypass the front-end's read-only configuration.
+        from pulse_system.service.native_habitat import NativeHabitat
+        from pulse_harness.core.contracts import ToolCall
+        from pulse_harness.core.provider import CancellationToken
+        from pulse_harness.core.errors import ScopeConflict
+        from pulse_harness.core import HarnessScope
+        scope = HarnessScope(pages.runtime.world_id,
+                             pages.runtime.continuity_engram_id,
+                             "untrusted-session", 0, "untrusted-owner",
+                             context_id="", turn_id="untrusted-turn")
+        with pytest.raises(ScopeConflict, match="disabled"):
+            NativeHabitat(pages.runtime).execute(
+                scope, ToolCall("x", WRITE, {"op":"write", "region":"garden",
+                     "file":"notes.txt", "content":"not allowed"}),
+                CancellationToken(), action_request_id="untrusted-action",
+            )
+        assert not (pages.runtime.habitat.root / "regions/garden/notes.txt").exists()
+    finally:
+        pages.runtime.close()

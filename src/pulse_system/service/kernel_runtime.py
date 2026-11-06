@@ -127,7 +127,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
 
     def descriptors(self):
         return tuple(d for d in super().descriptors()
-                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),)) + (() if self._attention is None else (self._attention_descriptor(),)) + (() if self._posture is None else (self._posture_descriptor(),)) + (() if self._notice is None else (self._notice_descriptor(),)) + (() if self._habitat is None else self._habitat_descriptors())
+                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),)) + (() if self._attention is None else (self._attention_descriptor(),)) + (() if self._posture is None else (self._posture_descriptor(),)) + (() if self._notice is None else (self._notice_descriptor(),)) + (() if self._habitat is None else tuple(d for d in self._habitat_descriptors() if self._allow_mutations or not d.mutable))
 
     def descriptors_for_scope(self, scope):
         return ((native_replay.descriptor(),) if native_replay.mode(self.store, scope)
@@ -221,6 +221,8 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         if call.name in {"habitat_observe", "habitat_write"}:
             if self._habitat is None:
                 raise ScopeConflict("native Habitat is unavailable")
+            if call.name == "habitat_write" and not self._allow_mutations:
+                raise ScopeConflict("Habitat writes are disabled by this workspace profile")
             return self._habitat.execute(
                 scope, call, cancellation, action_request_id=action_request_id,
             )

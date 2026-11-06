@@ -57,7 +57,7 @@ def descriptors() -> tuple[ToolDescriptor, ToolDescriptor]:
             "The first write creates the region. The exact original Kernel action "
             "and the physical before/after digests remain in the Habitat effect "
             "journal. This is a workspace mutation: it requires the existing "
-            "approval, or the owner's enabled auto-apply/Undo policy. "
+            "approval, or the owner's enabled auto-apply policy; Habitat effects lack automatic Undo. "
             "Do not replay an uncertain effect.",
             mutable=True, requires_approval=True,
             capability="workspace.write", source="pulse.native-habitat",
@@ -105,6 +105,8 @@ class NativeHabitat:
     def execute(self, scope, call, cancellation, *, action_request_id=None):
         runtime = self.runtime
         values = validate(call.name, call.arguments)
+        if call.name == WRITE and not runtime.harness._allow_mutations:
+            raise ScopeConflict("Habitat writes are disabled by this workspace profile")
         runtime.harness.authorize_habitat(scope, action_request_id, call)
         cancellation.raise_if_cancelled()
         location = "regions/" + values["region"]
