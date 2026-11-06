@@ -130,3 +130,21 @@ def test_gate_only_charges_host_resolved_autonomous_sources():
     with pytest.raises(ProviderUnavailable) as error:
         gate.reserve("self")
     assert error.value.code == "autonomous_weekly_requests_exhausted"
+
+
+def test_pause_after_reservation_fences_dispatch_without_charging():
+    from pulse_harness.core.errors import ProviderUnavailable
+    from pulse_system.service.weekly_requests import WeeklyRequestGate
+
+    budget = WeeklyRequestBudget(_Storage(), "world")
+    budget.configure(enabled=True, weekly_limit=1)
+    gate = WeeklyRequestGate(budget, lambda _scope: "SELF-root")
+    ticket = gate.reserve("self")
+    budget.configure(enabled=False, weekly_limit=1)
+    with pytest.raises(ProviderUnavailable) as error:
+        gate.dispatch(ticket)
+    assert error.value.code == "autonomous_weekly_requests_paused"
+    gate.abandon(ticket)
+    assert budget.status(now=NOW)["consumed"] == 0
+    budget.configure(enabled=True, weekly_limit=1)
+    assert budget.status(now=NOW)["remaining"] == 1
