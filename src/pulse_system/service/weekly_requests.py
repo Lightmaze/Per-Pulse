@@ -1,0 +1,213 @@
+"""Durable weekly admission for autonomous physical provider requests.
+
+This is a World component, not another runtime or billing authority. The host
+is responsible for deriving a trusted original causal event before calling
+``reserve``. Every wire attempt (including a retry) needs a fresh ticket.
+An attempt is marked dispatched *before* the HTTP send; loss of the process
+therefore consumes an uncertain slot rather than granting a free replay.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+
+class WeeklyRequestUnavailable(RuntimeError):
+    """The person's autonomous request allowance is disabled or exhausted."""
+
+
+@dataclass(frozen=True, slots=True)
+class RequestTicket:
+    attempt_id: str
+    week: str
+    source_event_id: str
+
+
+def _utc(now: datetime | None) -> datetime:
+    stamp = now or datetime.now(timezone.utc)
+    if not isinstance(stamp, datetime) or stamp.tzinfo is None or stamp.utcoffset() is None:
+        raise ValueError("time must be timezone aware")
+    return stamp.astimezone(timezone.utc)
+
+
+def _week(now: datetime) -> str:
+    return (now.date() - timedelta(days=now.weekday())).isoformat()
+
+
+class WeeklyRequestBudget:
+    """Serialize native World-component request accounting under its lock.
+
+    The policy is opt-in and remains disabled until a person enables it. A
+    reservation holds one slot; dispatch consumes it permanently for that UTC
+    calendar week, regardless of provider usage reports or transport success.
+    Nothing on this surface can authorize a tool effect or a new model turn.
+    """
+
+    def __init__(self, storage, world_id: str):
+        if not isinstance(world_id, str) or not world_id.strip():
+            raise ValueError("world identity is required")
+        self.storage = storage
+        self.world_id = world_id
+        self._policy_key = f"autonomous-provider-policy-v1:{world_id}"
+        self._key_prefix = f"autonomous-provider-week-v1:{world_id}:"
+
+    def _load_policy(self) -> dict:
+        state = self.storage.load_component_state(self._policy_key)
+        if state is None:
+            return {"version": 1, "enabled": False, "weekly_limit": 0}
+        if (state.get("version") != 1 or type(state.get("enabled")) is not bool
+                or type(state.get("weekly_limit")) is not int
+                or not 0 <= state["weekly_limit"] <= 100_000):
+            raise ValueError("invalid persistent weekly request policy")
+        return state
+
+    def _load_week(self, week: str) -> dict:
+        state = self.storage.load_component_state(self._key_prefix + week)
+        if state is None:
+            return {"version": 1, "world_id": self.world_id, "week": week, "attempts": {}}
+        if (state.get("version") != 1 or state.get("world_id") != self.world_id
+                or state.get("week") != week or not isinstance(state.get("attempts"), dict)):
+            raise ValueError("invalid persistent weekly request ledger")
+        return state
+
+    def _save_week(self, state: dict) -> None:
+        self.storage.save_component_state(self._key_prefix + state["week"], state)
+
+    def configure(self, *, enabled: bool, weekly_limit: int) -> dict:
+        if type(enabled) is not bool or type(weekly_limit) is not int or not 0 <= weekly_limit <= 100_000:
+            raise ValueError("weekly request settings must be a boolean and 0..100000 requests")
+        if enabled and weekly_limit == 0:
+            raise ValueError("enabled autonomous requests need a positive weekly allowance")
+        with self.storage._lock:
+            policy = {"version": 1, "enabled": enabled, "weekly_limit": weekly_limit}
+            self.storage.save_component_state(self._policy_key, policy)
+            return dict(policy)
+
+    def status(self, *, now: datetime | None = None) -> dict:
+        week = _week(_utc(now))
+        with self.storage._lock:
+            policy, state = self._load_policy(), self._load_week(week)
+            counts = {name: 0 for name in ("reserved", "dispatched", "completed", "rejected", "uncertain", "abandoned")}
+            for item in state["attempts"].values():
+                counts[item["status"]] += 1
+            held = counts["reserved"]
+            consumed = counts["dispatched"] + counts["completed"] + counts["rejected"] + counts["uncertain"]
+            return {"world_id": self.world_id, "week": week, **policy,
+                    "held": held, "consumed": consumed,
+                    "remaining": max(0, policy["weekly_limit"] - held - consumed),
+                    "attempts": sum(counts.values()), "states": counts}
+
+    def reserve(self, *, source_event_id: str, now: datetime | None = None) -> RequestTicket:
+        """Hold one physical send; source_event_id must come from trusted World admission."""
+        if not isinstance(source_event_id, str) or not source_event_id.strip():
+            raise ValueError("a trusted causal source identity is required")
+        stamp = _utc(now)
+        week = _week(stamp)
+        with self.storage._lock:
+            policy = self._load_policy()
+            state = self._load_week(week)
+            active = sum(item["status"] != "abandoned" for item in state["attempts"].values())
+            if not policy["enabled"] or active >= policy["weekly_limit"]:
+                raise WeeklyRequestUnavailable("autonomous weekly provider requests are paused or exhausted")
+            attempt_id = uuid4().hex
+            state["attempts"][attempt_id] = {"source_event_id": source_event_id,
+                "status": "reserved", "created_at": stamp.isoformat(), "dispatched_at": None,
+                "settled_at": None}
+            self._save_week(state)
+            return RequestTicket(attempt_id, week, source_event_id)
+
+    def _change(self, ticket: RequestTicket, *, old: str, new: str, now: datetime | None) -> None:
+        if not isinstance(ticket, RequestTicket):
+            raise ValueError("request ticket is required")
+        stamp = _utc(now)
+        with self.storage._lock:
+            state = self._load_week(ticket.week)
+            entry = state["attempts"].get(ticket.attempt_id)
+            if entry is None or entry["source_event_id"] != ticket.source_event_id:
+                raise ValueError("unknown or mismatched provider request ticket")
+            if entry["status"] == new:
+                if new == "dispatched":
+                    raise ValueError("one provider ticket cannot authorize two physical sends")
+                return
+            if entry["status"] != old:
+                raise ValueError("provider request ticket cannot be reused or rewritten")
+            entry["status"] = new
+            if new == "dispatched":
+                entry["dispatched_at"] = stamp.isoformat()
+            else:
+                entry["settled_at"] = stamp.isoformat()
+            self._save_week(state)
+
+    def dispatch(self, ticket: RequestTicket, *, now: datetime | None = None) -> None:
+        """Durably consume a slot before the HTTP send (no refund on errors)."""
+        self._change(ticket, old="reserved", new="dispatched", now=now)
+
+    def settle(self, ticket: RequestTicket, outcome: str, *, now: datetime | None = None) -> None:
+        if outcome not in {"completed", "rejected", "uncertain"}:
+            raise ValueError("invalid provider attempt outcome")
+        self._change(ticket, old="dispatched", new=outcome, now=now)
+
+    def abandon(self, ticket: RequestTicket, *, now: datetime | None = None) -> None:
+        """Release a ticket only if dispatch was never recorded."""
+        self._change(ticket, old="reserved", new="abandoned", now=now)
+
+    def reconcile(self, *, now: datetime | None = None) -> int:
+        """On restart, classify old in-flight dispatches as uncertain (not free)."""
+        stamp = _utc(now)
+        with self.storage._lock:
+            state = self._load_week(_week(stamp))
+            changed = 0
+            for entry in state["attempts"].values():
+                if entry["status"] == "dispatched":
+                    entry["status"] = "uncertain"
+                    entry["settled_at"] = stamp.isoformat()
+                    changed += 1
+                elif entry["status"] == "reserved":
+                    # The send path always commits dispatch *before* calling HTTP.
+                    entry["status"] = "abandoned"
+                    entry["settled_at"] = stamp.isoformat()
+                    changed += 1
+            if changed:
+                self._save_week(state)
+            return changed
+
+
+class WeeklyRequestGate:
+    """Trusted Kernel/World bridge for one adapter's physical send boundary.
+
+    The resolver is host-supplied and must walk the original World causal
+    source, including autonomous descendants; it is never a model argument.
+    ``None`` means a genuine user-sourced request outside this pool.
+    """
+
+    def __init__(self, budget: WeeklyRequestBudget, source_for_scope):
+        if not callable(source_for_scope):
+            raise TypeError("a trusted scope-to-causal-source resolver is required")
+        self.budget = budget
+        self.source_for_scope = source_for_scope
+
+    def reserve(self, scope):
+        from pulse_harness.core.errors import ProviderUnavailable
+        source_event_id = self.source_for_scope(scope)
+        if source_event_id is None:
+            return None
+        try:
+            return self.budget.reserve(source_event_id=source_event_id)
+        except WeeklyRequestUnavailable as exc:
+            raise ProviderUnavailable(
+                "Autonomous weekly provider requests are disabled or exhausted.",
+                code="autonomous_weekly_requests_exhausted",
+            ) from exc
+
+    def dispatch(self, ticket):
+        if ticket is not None:
+            self.budget.dispatch(ticket)
+
+    def settle(self, ticket, outcome):
+        if ticket is not None:
+            self.budget.settle(ticket, outcome)
+
+    def abandon(self, ticket):
+        if ticket is not None:
+            self.budget.abandon(ticket)
