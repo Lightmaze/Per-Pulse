@@ -358,6 +358,11 @@ def world_source_for_event(ledger, world_id: str, event_id: str, *, explicit_for
             }
         ):
             autonomous_root = event.id
+            if (event.source is CausalEventSource.SELF
+                    and event.kind in {CausalEventKind.SPONTANEOUS, CausalEventKind.PULSE}):
+                # A fresh native activation owns its pool even after a long
+                # lifetime of prior pulses and results in the same context.
+                return autonomous_root
         if event.parent_event_id is None:
             if autonomous_root is not None:
                 return autonomous_root

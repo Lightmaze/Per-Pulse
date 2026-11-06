@@ -295,6 +295,30 @@ def test_typed_native_work_instruction_and_report_inherit_their_settled_source()
         world_source_for_scope(Ledger(), "world", scope)
 
 
+def test_a_fresh_self_activation_remains_admissible_after_hundreds_of_prior_pulses():
+    from types import SimpleNamespace as Row
+    from pulse_harness.core.scope import HarnessScope
+    from pulse_system.core.types import CausalEventKind as Kind, CausalEventSource as Source
+    from pulse_system.service.weekly_requests import world_source_for_scope
+    events = {}
+    parent = None
+    for index in range(300):
+        pulse = Row(id=f"pulse-{index}", world_id="world", kind=Kind.SPONTANEOUS,
+                    source=Source.SELF, parent_event_id=parent)
+        events[pulse.id] = pulse
+        result = Row(id=f"result-{index}", world_id="world", kind=Kind.ASSISTANT_RESULT,
+                     source=Source.SELF, parent_event_id=pulse.id)
+        events[result.id] = result
+        parent = result.id
+    class Ledger:
+        def get_turn_for_world(self, turn_id, world_id):
+            return Row(engram_id="engram", event_id="pulse-299")
+        def get_event(self, event_id):
+            return events.get(event_id)
+    scope = HarnessScope("world", "engram", "session", 0, "owner", turn_id="turn")
+    assert world_source_for_scope(Ledger(), "world", scope) == "pulse-299"
+
+
 def test_lowered_weekly_limit_fences_reserved_tickets_at_dispatch():
     ledger = WeeklyRequestBudget(_Storage(), "world")
     ledger.configure(enabled=True, weekly_limit=3)
