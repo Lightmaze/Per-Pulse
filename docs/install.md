@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a4-py3-none-any.whl` from the
-[v0.1.0a4 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a4).
+Download `per_pulse-0.1.0a5-py3-none-any.whl` from the
+[v0.1.0a5 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a5).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a4-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a5-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a4-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a5-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -89,7 +89,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a4-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a5-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails

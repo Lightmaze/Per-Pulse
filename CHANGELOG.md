@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.0a5
+
+- Include the two fixed public synthetic TLS test fixtures in the source archive, so
+  extracted sources can reproduce native HTTPS/TLS tests. Keep private-key and
+  certificate exclusions intact for all other paths and for the installed wheel.
+- Require those exact fixture hashes in source archive verification; a missing
+  or changed fixture now fails packaging. No runtime feature change from a4.
+
 ## 0.1.0a4
 
 - Upload and preview still PNG/JPEG materials up to 1 MiB and 8,388,608 pixels,
