@@ -177,7 +177,6 @@ def test_native_world_sqlite_survives_process_reopen(tmp_path):
 
 def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
     from types import SimpleNamespace as Row
-    from pulse_harness.core.provider import ModelRequest
     from pulse_harness.core.scope import HarnessScope
     from pulse_harness.core.errors import ProviderUnavailable
     from pulse_system.core.types import CausalEventKind as Kind, CausalEventSource as Source
