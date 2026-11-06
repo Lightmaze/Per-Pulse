@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a3-py3-none-any.whl` from the
-[v0.1.0a3 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a3).
+Download `per_pulse-0.1.0a4-py3-none-any.whl` from the
+[v0.1.0a4 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a4).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a3-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a4-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a3-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a4-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -43,6 +43,11 @@ You need a model that supports streaming, tool calls and usage reporting.
 3. Select a result and bring it Home. Follow its source link to return to the
    original page and message.
 4. Stop and restart the service; your pages and messages remain available.
+
+Open **Materials** to attach text, PDFs or still PNG/JPEG images. Images need
+a model that accepts image input; PDF reading covers extracted text. You can
+also ask the model to read a public HTTPS text page and return to its saved
+source observation. See [Materials](materials.md).
 
 Without a model, new messages stay queued. Connecting a model and restarting
 can process those messages. To start fresh instead, use a new directory:
@@ -66,10 +71,15 @@ for pause, usage and restart behavior.
 
 ## Update and keep your work
 
-Stop the service before upgrading, then install the new wheel in the same
-environment. Your workspace is outside the installation, in
+Your workspace is outside the installation, in
 `~/.local/share/per-pulse` by default, or your chosen `--data-dir`.
-For a backup or a move, use [workspace images](image.md) while stopped.
+Before upgrading, stop the service and copy the complete data directory to a
+backup, then install the new wheel in the same environment.
+The first start of a4 upgrades the World database to schema v12 by
+adding a consultation-source index, preserving stored records. The existing
+migration process first saves a database backup beside it. For a move, see
+[workspace images](image.md); restore an older image with its matching
+implementation before upgrading the restored directory.
 There is no in-place data downgrade guarantee; keep a backup before an upgrade.
 
 ## Check the download
@@ -79,7 +89,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a3-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a4-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails

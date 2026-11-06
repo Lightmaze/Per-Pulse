@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.1.0a4
+
+- Upload and preview still PNG/JPEG materials up to 1 MiB and 8,388,608 pixels,
+  and send their original bytes to an image-compatible model with exact source references.
+- Read public HTTPS text pages with saved source URLs, reading times and partial
+  coverage. Recall original observations from history after restart.
+- Describe PDF reading and search as extracted-text coverage, including pages
+  that mix text with images, with the original available for visual inspection.
+- Stop pinning an oversized historical opening in every later context projection.
+- With more than one worker, reserve capacity for user-directed work while
+  keeping running work and same-context messages in order.
+- Index exact consultation-source lookups as completed consultations accumulate.
+  The schema v12 upgrade preserves stored records and uses the existing backup process.
+
 ## 0.1.0a3
 
 - Report the installed runtime version consistently in Bootstrap and OpenAPI,

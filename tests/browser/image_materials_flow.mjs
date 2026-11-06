@@ -1,6 +1,8 @@
 /** Actual image upload/read/source journey against a labelled local HTTP fixture.
  * Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
  * The fixture verifies bytes; it does not simulate visual understanding.
+ * PER_PULSE_INSTALLED_PYTHON verifies a wheel venv from a temporary working
+ * directory; otherwise the journey explicitly exercises this checkout.
  */
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
@@ -15,11 +17,46 @@ import { createRequire } from 'node:module';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const python = process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python');
+const installedPython = process.env.PER_PULSE_INSTALLED_PYTHON;
+const python = installedPython || process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python');
 const directory = await mkdtemp(join(tmpdir(), 'per-pulse-images-'));
 const screenshots = process.env.PER_PULSE_IMAGE_SCREENSHOTS;
-const examples = new Map(['PNG', 'JPEG'].map(format => [format, execFileSync(python, ['-c',
-  'from PIL import Image; import sys; im=Image.new("RGB",(240,160),(25,100,225)); im.paste((235,50,60),(25,30,85,90)); im.save(sys.stdout.buffer,format=sys.argv[1])', format])]));
+const pythonCwd = installedPython ? directory : root;
+const pythonArguments = installedPython ? ['-I'] : [];
+const pythonEnv = { ...process.env };
+if (installedPython) {
+  delete pythonEnv.PYTHONPATH;
+  delete pythonEnv.PYTHONHOME;
+  pythonEnv.PYTHONNOUSERSITE = '1';
+} else {
+  pythonEnv.PYTHONPATH = join(root, 'src') + ':' + join(root, 'research');
+}
+const installation = installedPython ? JSON.parse(execFileSync(python, ['-I', '-c', `
+import importlib, importlib.metadata, json, os, sys, sysconfig
+from pathlib import Path
+prefix = Path(sys.prefix).resolve()
+site = Path(sysconfig.get_path("purelib")).resolve()
+assert prefix != Path(sys.base_prefix).resolve(), "Use a fresh, isolated wheel venv"
+assert site.is_relative_to(prefix) and site.name == "site-packages", "Expected this venv's site-packages"
+assert "PYTHONPATH" not in os.environ and "PYTHONHOME" not in os.environ
+assert sys.flags.isolated == 1
+modules = {}
+for name in ("per_pulse.app", "pulse_harness.adapters.image_input", "pulse_harness.adapters.chat_http",
+             "pulse_system.service.kernel_runtime", "pulse_system.interaction.api.harness_kernel", "PIL"):
+    location = Path(importlib.import_module(name).__file__).resolve()
+    assert location.is_relative_to(site), (name, str(location), str(site))
+    modules[name] = str(location)
+from per_pulse.app import default_web_dir
+web = default_web_dir().resolve()
+assert web.is_relative_to(site) and (web / "index.html").is_file(), "Built UI must come from the installed wheel"
+distribution = importlib.metadata.distribution("per-pulse")
+origin = json.loads(distribution.read_text("direct_url.json") or "{}")
+assert not origin.get("dir_info", {}).get("editable"), "Editable installs are not wheel acceptance"
+print(json.dumps({"prefix": str(prefix), "version": distribution.version, "modules": modules, "webDir": str(web)}))
+`], { cwd: pythonCwd, env: pythonEnv }).toString()) : null;
+const examples = new Map(['PNG', 'JPEG'].map(format => [format, execFileSync(python, [...pythonArguments, '-c',
+  'from PIL import Image; import sys; im=Image.new("RGB",(240,160),(25,100,225)); im.paste((235,50,60),(25,30,85,90)); im.save(sys.stdout.buffer,format=sys.argv[1])', format],
+  { cwd: pythonCwd, env: pythonEnv })]));
 const requests = [];
 const seenPixels = [];
 const checks = [];
@@ -68,13 +105,13 @@ await new Promise(done => socket.listen(0, '127.0.0.1', done));
 const port = socket.address().port;
 await new Promise(done => socket.close(done));
 const base = 'http://127.0.0.1:' + port;
-const env = { ...process.env, PYTHONPATH: join(root, 'src') + ':' + join(root, 'research'),
+const env = { ...pythonEnv,
   P_PULSE_CHAT_ENDPOINT: 'http://127.0.0.1:' + model.address().port + '/chat/completions',
   P_PULSE_CHAT_MODEL: 'explicit-local-image-fixture', P_PULSE_ALLOW_LOCAL_HTTP: '1', P_PULSE_LOCAL_NO_AUTH: '1' };
 delete env.P_PULSE_PROVIDER_NAMESPACE;
 const start = () => {
-  const child = spawn(python, ['-m', 'per_pulse.cli', '--data-dir', directory, '--port', String(port), '--no-pulse'],
-    { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(python, [...pythonArguments, '-m', 'per_pulse.cli', '--data-dir', directory, '--port', String(port), '--no-pulse'],
+    { cwd: pythonCwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', chunk => { serverLog += chunk; });
   child.stderr.on('data', chunk => { serverLog += chunk; });
   return child;
@@ -180,7 +217,8 @@ try {
   assert.equal(seenPixels.length, before, 'Later turns must not replay old pixel payloads');
   checks.push('Restart preserves source preview on mobile; later turns do not resend old images');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ checks, providerRequests: requests.length, imagesReceived: seenPixels.length, errors }, null, 2));
+  console.log(JSON.stringify({ checks, providerRequests: requests.length, imagesReceived: seenPixels.length, errors,
+    ...(installation ? { installation } : { source: 'checkout' }) }, null, 2));
 } catch (error) {
   console.error(serverLog);
   throw error;
