@@ -15,7 +15,7 @@ from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapte
 from pulse_harness.core.errors import ProviderProtocolError, ProviderUnavailable
 from pulse_harness.core.provider import ModelDeltaKind, ModelRequest
 from pulse_harness.core.scope import HarnessScope
-from pulse_system.service.weekly_requests import WeeklyRequestBudget, WeeklyRequestGate
+from pulse_system.service.weekly_requests import WeeklyRequestBudget, WeeklyRequestGate, WeeklyRequestUnavailable
 
 
 class _Storage:
@@ -145,5 +145,37 @@ def test_preflight_request_size_failure_happens_before_reservation(monkeypatch):
         assert failure.value.code == "provider_request_too_large"
         assert requests == []
         assert budget.status()["attempts"] == 0
+    finally:
+        adapter.close()
+
+
+def test_pause_between_reservation_and_dispatch_stops_new_wire_attempt(monkeypatch):
+    monkeypatch.setenv("WEEKLY_TEST_KEY", "fixture-credential")
+    storage = _Storage()
+    budget = WeeklyRequestBudget(storage, "world")
+    budget.configure(enabled=True, weekly_limit=1)
+    outbound = []
+
+    def paused():
+        raise WeeklyRequestUnavailable("background is paused")
+
+    gate = WeeklyRequestGate(
+        budget, lambda _scope: "SELF-root", admission_guard=paused,
+    )
+    adapter = ChatHTTPModelAdapter(
+        ChatHTTPConfig("https://fixture.invalid/chat/completions", "weekly-fixture",
+                       credential_env="WEEKLY_TEST_KEY"),
+        transport=httpx.MockTransport(lambda request: outbound.append(request) or _response()),
+        attempt_accounting=gate,
+    )
+    try:
+        with pytest.raises(ProviderUnavailable) as failure:
+            _run(adapter)
+        assert failure.value.code == "autonomous_weekly_requests_paused"
+        assert outbound == []
+        receipt = budget.status()
+        assert receipt["consumed"] == 0
+        assert receipt["states"]["abandoned"] == 1
+        assert receipt["remaining"] == 1
     finally:
         adapter.close()
