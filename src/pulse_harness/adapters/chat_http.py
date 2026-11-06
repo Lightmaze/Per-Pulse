@@ -309,6 +309,21 @@ class ChatHTTPModelAdapter:
         self._lock = threading.RLock()
         self._closed = False
 
+    def bind_attempt_accounting(self, accounting) -> None:
+        """Bind a trusted World gate before this adapter creates any streams.
+
+        Only the host may supply the gate; provider messages and tool output
+        never carry budget authority. A running adapter cannot switch pools.
+        """
+        if accounting is None:
+            raise ValueError("a host request-accounting gate is required")
+        with self._lock:
+            if self._closed or self._streams:
+                raise ProviderProtocolError("cannot bind accounting to an active model")
+            if self._attempt_accounting is not None and self._attempt_accounting is not accounting:
+                raise ProviderProtocolError("model request accounting is already bound")
+            self._attempt_accounting = accounting
+
     def extend_tool_schemas(self, schemas: Mapping[str, Mapping[str, Any]]) -> None:
         """Host-only catalog extension, before the adapter starts streaming."""
         checked = _decode(_json(dict(schemas)))
