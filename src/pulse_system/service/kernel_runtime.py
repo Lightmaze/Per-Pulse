@@ -768,7 +768,15 @@ class KernelHarnessRuntime:
             from .native_notice import SCHEMA, NAME
             adapter.extend_tool_schemas({NAME: SCHEMA})
         adapter.life_image_resolver = self.life.resolve_image
+        adapter.workspace_image_resolver = self._resolve_workspace_image
         return _GuardedModel(adapter, self._check)
+
+    def _resolve_workspace_image(self, scope, payload):
+        with self._mutation_guard():
+            self._check()
+            if self.kernel is None:
+                return []
+            return self.kernel.resolve_workspace_image(scope, payload)
 
     def _cognition_scope_check(self, scope):
         self._check()

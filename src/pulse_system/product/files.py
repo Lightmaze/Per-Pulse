@@ -15,6 +15,7 @@ import stat
 from typing import Iterator
 from uuid import uuid4
 
+from pulse_harness.adapters.image_input import ImageInputError, image_metadata, image_data_url, is_image_path
 from pulse_harness.adapters.document_text import (
     MAX_PDF_BYTES, DocumentTextError, PdfText, is_pdf_path, read_pdf,
 )
@@ -65,6 +66,13 @@ def _pdf_text(data: bytes) -> PdfText:
         return read_pdf(data)
     except DocumentTextError as error:
         raise FileAccessError(error.code, 415) from None
+
+
+def _image(data: bytes) -> dict:
+    try:
+        return image_metadata(data)
+    except ImageInputError as error:
+        raise FileAccessError(error.code, 415) from error
 
 
 def _text(data: bytes) -> str:
@@ -182,9 +190,13 @@ class WorkspaceFiles:
         return data
 
     def read(self, path: str) -> dict:
-        """A file's text; for a PDF, its text page by page (``complete`` is false if it stops early)."""
+        """Text, PDF text, or a transient original-image preview with source identity."""
         data = self.read_bytes(path)
         result = {"path": path, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        if is_image_path(path):
+            metadata = _image(data)
+            return {**result, "content": "", "format": "image",
+                    "image": metadata, "imageDataUrl": image_data_url(data, metadata["mime"])}
         if not is_pdf_path(path):
             return {**result, "content": _text(data)}
         pdf = _pdf_text(data)
@@ -196,7 +208,9 @@ class WorkspaceFiles:
             raise FileAccessError("filename_only")
         if len(data) > upload_limit(name):
             raise FileAccessError("file_too_large", 413)
-        if is_pdf_path(name):
+        if is_image_path(name):
+            _image(data)
+        elif is_pdf_path(name):
             _pdf_text(data)
         else:
             _text(data)

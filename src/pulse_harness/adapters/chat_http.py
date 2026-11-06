@@ -296,6 +296,7 @@ class ChatHTTPModelAdapter:
                  tool_schemas: Mapping[str, Mapping[str, Any]] | None = None,
                  transport: httpx.BaseTransport | None = None,
                  attempt_accounting=None) -> None:
+        self.workspace_image_resolver = None
         self.life_image_resolver = None  # native runtime may bind a scoped, ephemeral observation renderer
         self.config = config
         self._schemas = _decode(_json(dict(WORKSPACE_SCHEMAS if tool_schemas is None else tool_schemas)))
@@ -441,6 +442,32 @@ class ChatHTTPModelAdapter:
                         if len(visual) >= 16: break  # at most eight transient frames per model round
                 if visual:
                     messages.append({'role':'user','content':visual})
+        if self.workspace_image_resolver is not None and transcript_messages and transcript_messages[-1]["role"] == "tool":
+            boundary = max((i for i, item in enumerate(transcript_messages) if item["role"] == "assistant"), default=-1)
+            names = {call["id"]: call["function"]["name"]
+                     for item in transcript_messages[max(0, boundary):] for call in item.get("tool_calls", [])}
+            visual = []
+            count = 0
+            seen_images = set()
+            for item in transcript_messages[boundary + 1:]:
+                if item["role"] != "tool" or names.get(item.get("tool_call_id")) != "read_file":
+                    continue
+                result = _decode(item["content"])
+                output = result.get("output")
+                payload = output.get("image") if isinstance(output, dict) else None
+                if result.get("status") != "succeeded" or not isinstance(payload, dict) or payload.get("kind") != "pulse.workspace-image.v1":
+                    continue
+                identity = (payload.get("path"), payload.get("sha256"))
+                if not all(isinstance(value, str) for value in identity) or identity in seen_images:
+                    continue
+                seen_images.add(identity)
+                count += 1
+                parts = self.workspace_image_resolver(request.scope, payload) if count <= 5 else []
+                visual.extend(parts or [{"type": "text", "text":
+                    "No pixels accompany this image reference: its source changed, its live read expired, "
+                    "or this round exceeded five images. Use read_file again for the required source."}])
+            if visual:
+                messages.append({"role": "user", "content": visual})
         # continuation_of/tool_results already exist in the durable transcript.
         # Appending them here would replay a tool exchange twice on resume.
         return body

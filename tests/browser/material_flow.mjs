@@ -238,7 +238,7 @@ try {
   assert.equal((await data('/api/pages/' + origin + '/materials')).materials.length, 2);
   await choose('too-large.txt', Buffer.alloc(1024 * 1024 + 1, 97));
   await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
-  await dialog().getByText('Choose a text file of at most 1 MiB or a PDF of at most 32 MiB.', { exact: true }).waitFor();
+  await dialog().getByText('Choose text or a PNG/JPEG image of at most 1 MiB, or a PDF of at most 32 MiB.', { exact: true }).waitFor();
   await close();
   await attach();
   await dialog().locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();

@@ -1,6 +1,6 @@
 # Bring source material into a conversation
 
-Open **Materials**, choose a UTF-8 text file up to 1 MiB or a PDF up to 32 MiB,
+Open **Materials**, choose UTF-8 text or a PNG/JPEG image up to 1 MiB, or a PDF up to 32 MiB,
 and select **Upload file**. A PDF is kept as the original file; its preview and
 what Per Pulse reads is its text, with a `[Page N]` line before each page. A
 password-protected PDF must be unlocked first. A page with no selectable
@@ -37,7 +37,7 @@ Uploads create new files and do not grant model write permissions.
 
 Markdown materials and file results have **Read** and **Source** views. Headings,
 lists, tables and code are readable while the original text remains available.
-Images appear as descriptions; links to external sources open only when chosen.
+Images embedded in Markdown appear as descriptions; links to external sources open only when chosen.
 CSV and TSV files also have a table view. Values remain text, including leading
 zeros and empty cells. Use **First row contains headings** to match the file.
 The view shows up to 200 data rows and 64 columns, with keyboard scrolling for
@@ -46,6 +46,22 @@ your choices survive switching between Read and Source during that preview.
 A partial preview is labelled and omits an unfinished trailing
 row; irregular quotes, unequal rows or wider files fall back to source text.
 The **Add to draft** action stays visible while reading a long material.
+
+## Read an image
+
+Upload a still PNG or JPEG in **Materials**, inspect its image preview, then choose
+**Add to draft** and send your question. Images can contain up to 8 megapixels
+(8,388,608 pixels); corrupt or animated images are refused with a reason. The
+original file stays unchanged, with its exact source version and download.
+
+With an image-compatible model configured, Per Pulse reads the image through
+`read_file` and sends its original pixels in the next model request. There is no
+separate image-model setting. For compatible models, see the providers'
+[OpenAI vision](https://developers.openai.com/api/docs/guides/images-vision) and
+[DeepSeek vision](https://api-docs.deepseek.com/guides/vision/) documentation.
+Image input is part of normal provider usage. Up to five images can accompany one
+request, within the existing request-size bound. If the model needs an image
+again in a later turn or after a restart, it reads the source again.
 
 ## Carry a file result from another Work
 

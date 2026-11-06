@@ -6,11 +6,16 @@ import type { Material, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList 
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { TextDocument } from './TextDocument';
+import { ImagePreview } from './ImagePreview';
 
 const PREVIEW_CHARS = 64_000;
 // The same native file errors also serve result downloads. Keep upload advice
 // in this flow rather than replacing their explanations across the product.
 const materialErrors: Record<string, MessageKey> = {
+  image_unreadable: 'library.imageUnreadable', material_image_unreadable: 'library.imageUnreadable',
+  image_pixels_exceeded: 'library.imagePixels', material_image_pixels_exceeded: 'library.imagePixels',
+  image_animated: 'library.imageAnimated', material_image_animated: 'library.imageAnimated',
+  image_too_large: 'library.tooLarge', material_image_too_large: 'library.tooLarge',
   workspace_changed: 'library.workspaceChanged', file_too_large: 'library.tooLarge',
   empty_file: 'library.emptyFile', text_files_only: 'library.textOnly',
   pdf_unreadable: 'library.pdfUnreadable', pdf_encrypted: 'library.pdfEncrypted',
@@ -179,7 +184,9 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
       <h3 ref={previewHeading} tabIndex={-1}>{preview.path.split('/').at(-1)}</h3>
       {preview.format === 'pdf_text' ? <p className="material-hint">{t(pdfHasText(preview.content) ? 'materials.pdfText' : 'materials.pdfNoText')}</p> : null}
       {preview.format === 'pdf_text' && preview.complete === false ? <p className="material-hint">{t('materials.pdfPartial')}</p> : null}
-      <TextDocument key={`${preview.path}/${preview.sha256}`} path={preview.path} content={preview.content.slice(0, PREVIEW_CHARS)} truncated={preview.content.length > PREVIEW_CHARS} />
+      {preview.format === 'image'
+        ? <ImagePreview name={preview.path.split('/').at(-1) ?? preview.path} image={preview.image} source={preview.imageDataUrl} />
+        : <TextDocument key={`${preview.path}/${preview.sha256}`} path={preview.path} content={preview.content.slice(0, PREVIEW_CHARS)} truncated={preview.content.length > PREVIEW_CHARS} />}
       {preview.content.length > PREVIEW_CHARS ? <p className="material-hint">{t('library.previewLimited')}</p> : null}
       <details><summary>{t('library.details')}</summary><p>{preview.path}</p><p>SHA-256: {preview.sha256}</p></details>
     </section> : null}

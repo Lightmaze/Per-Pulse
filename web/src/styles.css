@@ -584,3 +584,7 @@ button, a, input, textarea { outline-offset: 4px; }
 .execution-step .step-note { font-size: 11px; }
 .execution-step.step-running span:first-child { color: var(--text); }
 .execution-step.step-failed .step-note { color: var(--error); }
+
+.material-image { margin: 12px 0; }
+.material-image img { display: block; width: auto; height: auto; max-width: 100%; max-height: 42vh; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #f4f6f0; }
+.material-image figcaption { margin-top: 8px; color: var(--muted); font-size: 12px; }
