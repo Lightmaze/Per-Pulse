@@ -196,11 +196,14 @@ class WeeklyRequestGate:
     ``None`` means a genuine user-sourced request outside this pool.
     """
 
-    def __init__(self, budget: WeeklyRequestBudget, source_for_scope):
+    def __init__(self, budget: WeeklyRequestBudget, source_for_scope, *, admission_guard=None):
         if not callable(source_for_scope):
             raise TypeError("a trusted scope-to-causal-source resolver is required")
+        if admission_guard is not None and not callable(admission_guard):
+            raise TypeError("the admission guard must be callable")
         self.budget = budget
         self.source_for_scope = source_for_scope
+        self.admission_guard = admission_guard
 
     def reserve(self, scope):
         from pulse_harness.core.errors import ProviderUnavailable
@@ -219,6 +222,8 @@ class WeeklyRequestGate:
         if ticket is not None:
             from pulse_harness.core.errors import ProviderUnavailable
             try:
+                if self.admission_guard is not None:
+                    self.admission_guard()
                 self.budget.dispatch(ticket)
             except WeeklyRequestUnavailable as exc:
                 raise ProviderUnavailable(
