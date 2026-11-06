@@ -204,6 +204,20 @@ def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
                     source=Source.DELEGATION, parent_event_id="propagated")
 
     assert world_source_for_scope(Ledger([user], "user"), "world", scope) is None
+    # An assistant result or tool receipt is SELF-authored *inside* the
+    # original person-directed Work, not an autonomous activation by itself.
+    result = Row(id="result", world_id="world", kind=Kind.ASSISTANT_RESULT,
+                 source=Source.SELF, parent_event_id="user")
+    tool = Row(id="tool", world_id="world", kind=Kind.TOOL_CALL,
+               source=Source.SELF, parent_event_id="result")
+    assert world_source_for_scope(Ledger([user, result, tool], "tool"),
+                                  "world", scope) is None
+    # A later native spontaneous reentry *is* a new autonomous origin, even
+    # when it descends from a user-requested result.
+    reentry = Row(id="reentry", world_id="world", kind=Kind.SPONTANEOUS,
+                  source=Source.SELF, parent_event_id="result")
+    assert world_source_for_scope(Ledger([user, result, reentry], "reentry"),
+                                  "world", scope) == "reentry"
     assert world_source_for_scope(Ledger([self_root, propagated, delegated], "delegated"),
                                   "world", scope) == "self"
     delegated.parent_event_id = "user"
