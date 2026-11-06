@@ -76,6 +76,13 @@ Provider options inherited from Pulse include `P_PULSE_CHAT_TIMEOUT`, `P_PULSE_M
 
 **Keys and passwords in your content.** Messages you send and files the model reads or edits are passed to your model as they are, including any keys or passwords in them, as other agent tools do. With a hosted model, the provider receives them; use a local model or keep such values out of the workspace if that matters to you. Your provider's own API key stays in the server environment and is never part of a conversation.
 
-**Long conversations.** Each request carries a page's history up to an estimated `P_PULSE_CONTEXT_TOKENS` (default 96000). Beyond that, the request keeps the page's opening message and its most recent whole turns, and tells the model that earlier messages can be looked up with its history tools; nothing is deleted from the page. Set it below your model's context window, for example `P_PULSE_CONTEXT_TOKENS=12000` for a local model served with a 16K context.
+**Long conversations.** Each request selects from the page's saved history using
+an estimated `P_PULSE_CONTEXT_TOKENS` budget (default 96000). It keeps the most
+recent whole turns and retains the opening message when it fits beside the
+latest exchange. An oversized old opening can be left out of that request;
+earlier messages remain available through the history tools, and nothing is
+deleted from the page. The current exchange stays intact and may still exceed
+the budget. Set the budget below your model's context window, for example
+`P_PULSE_CONTEXT_TOKENS=12000` for a local model served with a 16K context.
 
 **Tokens used.** Under a page's title, Per Pulse shows the tokens the model service reported for that page, including background work on it. Open it for the tokens sent, the tokens served from cache, the tokens written, and the latest turn's total. Only reported usage is counted. If the service reports none for a call, the total says "at least" and names how many calls are missing. For cost, apply your provider's rates to these numbers.

@@ -266,6 +266,11 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" \
           PER_PULSE_PYTHON="$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" \
           node tests/browser/materials_flow.mjs
+      - name: Verify native images from the installed wheel
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" \
+          PER_PULSE_INSTALLED_PYTHON="$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" \
+          node tests/browser/image_materials_flow.mjs
 
   windows:
     runs-on: windows-latest

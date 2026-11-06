@@ -114,6 +114,20 @@ def test_a_stuck_background_step_is_bounded_while_your_own_turns_are_not(tmp_pat
 
             pending, = execution.snapshot(approval)["pendingActions"]
             assert pending["canResolve"], "a person's own approval must stay open"
+
+            # The page sees the terminal turn before the coordinator harvests
+            # its completed worker. Keep the app running until that ordinary
+            # settlement is recorded, rather than racing the shutdown path.
+            def timeout_settled():
+                observed = [json.loads(line) for line in
+                            (tmp_path / "metrics.jsonl").read_text().splitlines()]
+                timed_out = {event["event_id"] for event in observed
+                             if event.get("type") == "pulse_failed"
+                             and event.get("code") == "world_turn_timeout"}
+                return any(event.get("type") == "center_reservation_settled"
+                           and event.get("event") in timed_out for event in observed)
+
+            _until(timeout_settled, "background timeout coordinator settlement")
     finally:
         release.set()
 
