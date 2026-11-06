@@ -215,3 +215,41 @@ def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
     delegated.parent_event_id = "delegated"
     with pytest.raises(ProviderUnavailable):
         world_source_for_scope(Ledger([delegated], "delegated"), "world", scope)
+
+
+def test_lowered_weekly_limit_fences_reserved_tickets_at_dispatch():
+    ledger = WeeklyRequestBudget(_Storage(), "world")
+    ledger.configure(enabled=True, weekly_limit=3)
+    one = ledger.reserve(source_event_id="SELF", now=NOW)
+    two = ledger.reserve(source_event_id="SELF", now=NOW)
+    three = ledger.reserve(source_event_id="SELF", now=NOW)
+
+    # An already-held ticket is not a promise to spend after the user lowers
+    # the allowance. Only the first physical send can still be admitted.
+    ledger.configure(enabled=True, weekly_limit=1)
+    ledger.dispatch(one, now=NOW)
+    with pytest.raises(WeeklyRequestUnavailable, match="lowered"):
+        ledger.dispatch(two, now=NOW)
+    with pytest.raises(WeeklyRequestUnavailable, match="lowered"):
+        ledger.dispatch(three, now=NOW)
+    ledger.abandon(two, now=NOW)
+    ledger.abandon(three, now=NOW)
+    assert ledger.status(now=NOW)["consumed"] == 1
+    assert ledger.status(now=NOW)["remaining"] == 0
+
+
+def test_week_boundary_rejects_stale_reservation_before_http_send():
+    ledger = WeeklyRequestBudget(_Storage(), "world")
+    ledger.configure(enabled=True, weekly_limit=1)
+    sunday = datetime(2026, 11, 8, 23, 59, 59, tzinfo=timezone.utc)
+    monday = datetime(2026, 11, 9, 0, 0, 1, tzinfo=timezone.utc)
+    stale = ledger.reserve(source_event_id="SELF", now=sunday)
+    with pytest.raises(WeeklyRequestUnavailable, match="expired"):
+        ledger.dispatch(stale, now=monday)
+    ledger.abandon(stale, now=monday)
+    assert ledger.status(now=sunday)["consumed"] == 0
+    assert ledger.status(now=sunday)["held"] == 0
+    fresh = ledger.reserve(source_event_id="SELF", now=monday)
+    ledger.dispatch(fresh, now=monday)
+    ledger.settle(fresh, "completed", now=monday)
+    assert ledger.status(now=monday)["consumed"] == 1
