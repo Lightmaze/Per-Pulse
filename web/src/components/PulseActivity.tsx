@@ -6,7 +6,7 @@ import { activationMessageTarget, attentionSourceTarget, localRetainedAttention 
 import { pulseActivityLabel } from '../pulseActivityLabels';
 import { pulseAdmissionHold, pulseWorkerPressure } from '../pulseAdmission';
 import { otherPendingPulseContexts, pulseQueueForPage } from '../pulseQueue';
-import type { PageSummary, PulseState } from '../types';
+import type { PageSummary, PulseState, WeeklyRequestUsage } from '../types';
 import { Dialog } from './Dialog';
 import type { Navigate } from './SessionLink';
 
@@ -31,6 +31,9 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
 }) {
   const { t, pageTitle } = useLanguage();
   const [pulse, setPulse] = useState<PulseState | null>(null);
+  const [weekly, setWeekly] = useState<WeeklyRequestUsage | null>(null);
+  const [weeklyLimit, setWeeklyLimit] = useState('20');
+  const weeklyLimitDirty = useRef(false);
   const [error, setError] = useState('');
   const [identityChanged, setIdentityChanged] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -46,15 +49,21 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
     const ticket = gate.beginRead();
     if (!ticket) return; // A PATCH owns the visible state until it settles.
     try {
-      const observation = await api.pulseObservation(signal);
+      const [observation, { usage }] = await Promise.all([
+        api.pulseObservation(signal), api.weeklyUsage(signal),
+      ]);
       if (!signal?.aborted && gate.acceptsRead(ticket)) {
-        if (observation.workspaceId !== workspaceId || observation.serviceInstanceId !== serviceInstanceId) {
+        if (observation.workspaceId !== workspaceId || observation.serviceInstanceId !== serviceInstanceId
+            || usage.world_id !== workspaceId) {
           setPulse(null);
+          setWeekly(null);
           setIdentityChanged(true);
           setError(t('pulse.workspaceChanged'));
           return;
         }
         setPulse(observation.pulse);
+        setWeekly(usage);
+        if (!weeklyLimitDirty.current) setWeeklyLimit(String(usage.weekly_limit || 20));
         setIdentityChanged(false);
         if (!preserveError) setError('');
       }
@@ -90,6 +99,47 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
       } else {
         // A network failure can hide an already-committed mutation. Re-read
         // native status rather than claiming this action definitely failed.
+        unconfirmed = true;
+        const detail = problem instanceof Error ? problem.message : t('pulse.confirmUnknown');
+        setError(t('pulse.confirm', { detail }));
+      }
+    } finally {
+      gate.finishWrite();
+      setBusy(false);
+      if (unconfirmed) void reload(undefined, true);
+    }
+  };
+
+  const saveWeekly = async (enabled: boolean) => {
+    if (!gate.beginWrite()) return;
+    const requestedLimit = Number(weeklyLimit);
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100000) {
+      gate.finishWrite();
+      setError(t('pulse.weeklyInvalid'));
+      return;
+    }
+    setBusy(true);
+    setError('');
+    let unconfirmed = false;
+    try {
+      const result = await api.setWeeklyUsage(enabled, requestedLimit, { workspaceId, serviceInstanceId });
+      if (result.usage.world_id !== workspaceId) {
+        setWeekly(null);
+        setPulse(null);
+        setIdentityChanged(true);
+        setError(t('pulse.workspaceChanged'));
+      } else {
+        setWeekly(result.usage);
+        weeklyLimitDirty.current = false;
+        setWeeklyLimit(String(result.usage.weekly_limit));
+      }
+    } catch (problem) {
+      if (problem instanceof ApiError && problem.code === 'pulse_workspace_changed') {
+        setPulse(null);
+        setWeekly(null);
+        setIdentityChanged(true);
+        setError(t('pulse.workspaceChanged'));
+      } else {
         unconfirmed = true;
         const detail = problem instanceof Error ? problem.message : t('pulse.confirmUnknown');
         setError(t('pulse.confirm', { detail }));
@@ -191,6 +241,29 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
         {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">{t('pulse.oldest', { time: eventTime(pulse.queue.oldestQueuedAt) })}</p> : null}
         {!pulse.providerConfigured ? <p className="pulse-activity-detail">{t('pulse.noProvider')}</p> : null}
       </section>
+      {weekly ? <section className="pulse-activity-section" aria-label={t('pulse.weeklyTitle')}>
+        <h3>{t('pulse.weeklyTitle')}</h3>
+        <p className="pulse-activity-detail">{t('pulse.weeklyDescription')}</p>
+        <p className="pulse-activity-summary" role="status">{weekly.enabled
+          ? t('pulse.weeklyStatus', { used: weekly.consumed, held: weekly.held, remaining: weekly.remaining, limit: weekly.weekly_limit })
+          : t('pulse.weeklyOff')}</p>
+        {weekly.states.uncertain > 0 ? <p className="pulse-activity-detail">{t('pulse.weeklyUncertain', {
+          count: weekly.states.uncertain,
+        })}</p> : null}
+        <div className="pulse-activity-heading">
+          <label className="pulse-activity-detail">{t('pulse.weeklyLimit')}
+            <input type="number" min={1} max={100000} step={1} value={weeklyLimit}
+              disabled={busy || identityChanged}
+              onChange={event => { weeklyLimitDirty.current = true; setWeeklyLimit(event.target.value); }} />
+          </label>
+          <button type="button" disabled={busy || identityChanged}
+            onClick={() => void saveWeekly(weekly.enabled)}>{t('pulse.weeklySave')}</button>
+          <button type="button" disabled={busy || identityChanged || (!weekly.enabled && !pulse.providerConfigured)}
+            onClick={() => void saveWeekly(!weekly.enabled)}>
+            {weekly.enabled ? t('pulse.weeklyDisable') : t('pulse.weeklyEnable')}
+          </button>
+        </div>
+      </section> : null}
       {workerPressure && workerCapacity ? <section className="pulse-activity-section" aria-label={t('pulse.slotPressureTitle')}>
         <h3>{t('pulse.slotPressureTitle')}</h3>
         <p role="status" className="pulse-activity-detail">{t('pulse.slotPressure', {
