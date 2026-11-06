@@ -324,6 +324,7 @@ class PulseEngine:
         runtime_fence: RuntimeFence | None = None,
         execution_context: Callable[[PulseEvent], str] | None = None,
         admission_filter: Callable[[PulseEvent, datetime], bool] | None = None,
+        foreground_event: Callable[[PulseEvent], bool] | None = None,
         context_wait_modifier: Callable[[CausalEvent], float] | None = None,
         approval_parked: Callable[[str, str], bool] | None = None,
         unsettled_provider_usage: Callable[[], tuple[int, int, int] | None] | None = None,
@@ -413,6 +414,9 @@ class PulseEngine:
         # claim a turn: rejected candidates remain durable and are reconsidered
         # on the next coordinator observation.
         self._admission_filter = admission_filter
+        if foreground_event is not None and not callable(foreground_event):
+            raise ValueError("foreground_event must be callable or null")
+        self._foreground_event = foreground_event
         parked_limit = self._config.approval_parked_limit
         if type(parked_limit) is not int or not 0 <= parked_limit <= 64:
             raise ValueError("approval_parked_limit must be an integer from 0 to 64")
@@ -1710,6 +1714,30 @@ class PulseEngine:
         if len(event_by_id) != len(schedulable):
             raise RuntimeError("durable scheduler candidates contain duplicate events")
 
+        # Non-preemptible background calls must not take the last carrier
+        # before the person arrives. Capacity one still runs background work.
+        # The host classifies trusted causal ancestry; scheduling does not
+        # change provider accounting, permissions or the Work/Life lanes.
+        foreground: dict[str, bool] = {}
+        background_budget = None
+        if self._foreground_event is not None and self._config.background_dispatch:
+            def is_foreground(event: PulseEvent) -> bool:
+                if event.event_id not in foreground:
+                    value = self._foreground_event(event)
+                    if type(value) is not bool:
+                        raise TypeError("foreground_event must return a bool")
+                    foreground[event.event_id] = value
+                return foreground[event.event_id]
+
+            with self._shutdown_lock:
+                running = tuple(self._inflight.values())
+            background_running = sum(not is_foreground(event) for event, _ in running)
+            background_budget = max(
+                0, max(1, self._config.max_parallel_pulses - 1) - background_running,
+            )
+            for event in schedulable:
+                is_foreground(event)
+
         plan = self._scheduler.plan(
             [
                 CenterAdmissionCandidate(
@@ -1719,11 +1747,13 @@ class PulseEngine:
                     priority=event.priority,
                     created_at=event.created_at,
                     execution_context=self._execution_key(event)[1],
+                    foreground=foreground.get(event.event_id, False),
                 )
                 for event in schedulable
             ],
             budget=budget,
             tick=self._tick_count,
+            background_budget=background_budget,
         )
         admitted_ids = tuple(plan.admitted_event_ids)
         if len(admitted_ids) != len(set(admitted_ids)):
