@@ -133,11 +133,20 @@ class WeeklyRequestBudget:
             if entry["status"] != old:
                 raise ValueError("provider request ticket cannot be reused or rewritten")
             if new == "dispatched":
-                # Pause must fence tickets that were reserved but not yet
-                # physically sent. Previously dispatched slots are not freed.
+                # Recheck the policy at the wire boundary, not only when the
+                # ticket was reserved. A lowered limit must fence outstanding
+                # reservations before they become new provider charges.
                 policy = self._load_policy()
                 if not policy["enabled"]:
                     raise WeeklyRequestUnavailable("autonomous provider requests are paused")
+                if ticket.week != _week(stamp):
+                    raise WeeklyRequestUnavailable("weekly reservation expired before dispatch")
+                consumed = sum(
+                    item["status"] in {"dispatched", "completed", "rejected", "uncertain"}
+                    for item in state["attempts"].values()
+                )
+                if consumed >= policy["weekly_limit"]:
+                    raise WeeklyRequestUnavailable("autonomous weekly allowance was lowered")
             entry["status"] = new
             if new == "dispatched":
                 entry["dispatched_at"] = stamp.isoformat()
