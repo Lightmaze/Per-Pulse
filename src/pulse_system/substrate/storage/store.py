@@ -689,6 +689,14 @@ class Storage:
                 state TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS idx_native_team_origin
+                ON component_state (
+                    CASE WHEN json_valid(state) THEN json_extract(state, '$.subject') END,
+                    CASE WHEN json_valid(state) THEN json_extract(state, '$.delegation_event_id') END,
+                    updated_at DESC,
+                    component
+                )
+                WHERE component GLOB 'native-team-v1:*';
 
             CREATE TABLE IF NOT EXISTS weight_state (
                 component TEXT NOT NULL,
@@ -7424,10 +7432,15 @@ class Storage:
         clauses = ["component GLOB 'native-team-v1:*'"]
         args = []
         if subject is not None:
-            clauses.append("json_extract(state, '$.subject') = ?")
+            clauses.append(
+                "(CASE WHEN json_valid(state) THEN json_extract(state, '$.subject') END) = ?"
+                if delegation_event_id is not None else "json_extract(state, '$.subject') = ?")
             args.append(subject)
         if delegation_event_id is not None:
-            clauses.append("json_extract(state, '$.delegation_event_id') = ?")
+            # Match migration 0012's guarded index expressions exactly. This
+            # lookup runs on every admission; LIMIT alone still scans history.
+            # An invalid old record cannot establish a verified causal origin.
+            clauses.append("(CASE WHEN json_valid(state) THEN json_extract(state, '$.delegation_event_id') END) = ?")
             args.append(delegation_event_id)
         if pending:
             clauses.append("json_extract(state, '$.status') = 'prepared'")
