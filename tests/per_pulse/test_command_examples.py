@@ -159,6 +159,10 @@ def test_same_response_read_is_unseen_but_a_later_quiet_round_can_keep_it(tmp_pa
         response = client.post(f"/api/pages/{page}/tick", json={"count": 1})
         assert response.status_code == 201, response.text
         wait_for(client, page, lambda view: view["tick"]["status"] == "complete")
+        # The durable turn settles before the existing posture outbox is
+        # admitted later in the runtime tick. Observe that separate result.
+        wait_for(client, page, lambda _: len(client.get(
+            f"/api/pages/{page}/posture").json()["experiences"]) == 1)
         saved, = client.get(f"/api/pages/{page}/posture").json()["experiences"]
         assert saved["excerpt"] == "STDERR_FINAL_DIAGNOSIS" and saved["feedback"] == []
         assert client.app.state.pages.runtime.harness._command_executor.calls == 1

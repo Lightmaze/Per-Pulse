@@ -10,10 +10,12 @@ import time
 
 from fastapi.testclient import TestClient
 import pytest
+from types import SimpleNamespace
 
 from per_pulse.app import create_app
 from test_rim_native_integration import _model_factory, START
 from pulse_system.core.types import CausalEventDomain, CausalEventKind, CausalEventSource
+from pulse_system.core.pulse.engine import PulseEvent
 
 
 @pytest.mark.parametrize("autonomous", [False, True], ids=["user-request", "self-request"])
@@ -53,3 +55,15 @@ def test_native_rim_consultation_and_return_inherit_the_original_pool(tmp_path, 
         usage = client.get("/api/pulse/weekly-usage").json()["usage"]
         assert len(seen) - before >= 4
         assert usage["consumed"] == (len(seen) - before if autonomous else 0)
+
+        # The same trusted caller identity controls the execution reserve.
+        # A user-directed consultation and its return can use it; a SELF
+        # consultation cannot turn itself into foreground via a tool call.
+        requests = runtime.causal_ledger.list_events(kind="delegation_request", limit=50)
+        assert requests
+        request = requests[-1]
+        returns = runtime.causal_ledger.list_events(kind="delegation_result", limit=50)
+        assert returns
+        assert runtime._native_foreground_event(PulseEvent.from_causal_event(request)) is not autonomous
+        assert runtime._native_foreground_event(PulseEvent.from_causal_event(returns[-1])) is not autonomous
+        assert not runtime._native_foreground_event(SimpleNamespace(event_id="missing"))

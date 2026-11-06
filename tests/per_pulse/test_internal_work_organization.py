@@ -19,6 +19,7 @@ from pulse_harness.core.provider import CancellationToken
 from pulse_system.agent.harness.base import HarnessError
 from pulse_system.service.kernel_runtime import KernelHarnessFactory, KernelHarnessRuntime
 from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
+from pulse_system.core.pulse.engine import PulseEvent
 
 
 class WorkFixture(MaterialFixture):
@@ -96,6 +97,7 @@ def test_product_organizes_and_reports_work_with_file_actions_disabled(local):
     receipt = fixture.outcomes[-1]["output"]
     assert runtime.list_task_fronts() == []  # Delivery waits for the existing outbox drain.
     incoming = delivered(runtime, receipt)
+    assert runtime._native_foreground_event(PulseEvent.from_causal_event(incoming))
     front = runtime.world.get_task_front(receipt["work_id"])
     assert front.focal_engram_id == runtime.continuity_engram_id
     assert runtime.world.get_activity_center(front.center_id).origin.value == "self"
@@ -111,6 +113,7 @@ def test_product_organizes_and_reports_work_with_file_actions_disabled(local):
     assert fixture.outcomes[0]["output"]["content"] == "A real note to inspect without changing files.\n"
     report = delivered(runtime, fixture.outcomes[-1]["output"])
     assert report.center_id is None
+    assert runtime._native_foreground_event(PulseEvent.from_causal_event(report))
     origin = runtime._native_work.report_origin(report.id, report.idempotency_key,
                                                runtime.continuity_engram_id, report.content)
     assert origin["work_id"] == front.id
@@ -125,6 +128,7 @@ def test_product_organizes_and_reports_work_with_file_actions_disabled(local):
     assert fixture.outcomes[0]["output"]["works"][0]["id"] == front.id
     followup = delivered(runtime, fixture.outcomes[-1]["output"])
     assert followup.center_id == front.center_id
+    assert runtime._native_foreground_event(PulseEvent.from_causal_event(followup))
     assert len(runtime.list_task_fronts()) == 1 and len(runtime.storage.list_engrams()) == 1
     for request in fixture.requests:
         names = {tool["function"]["name"] for tool in request["tools"]}
@@ -148,6 +152,8 @@ def test_spontaneous_home_can_create_a_same_subject_work_without_new_user_input(
         incoming.metadata["stimulus_source_turn_id"], runtime.world_id)
     assert source_turn.event_id == trigger.id and source_turn.prompt_accepted is True
     assert incoming.source.value == "self" and len(runtime.storage.list_engrams()) == 1
+    assert not runtime._native_foreground_event(PulseEvent.from_causal_event(trigger))
+    assert not runtime._native_foreground_event(PulseEvent.from_causal_event(incoming))
 
 
 def test_workspace_mutations_still_fail_at_the_provider_boundary(local):

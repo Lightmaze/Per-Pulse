@@ -119,6 +119,7 @@ class CenterAdmissionCandidate:
     # Stable, non-content execution lane within one Engram. Empty preserves
     # the historical subject-wide slot for callers that do not opt in.
     execution_context: str = ""
+    foreground: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "event_id", _nonempty(self.event_id, "event_id"))
@@ -137,6 +138,8 @@ class CenterAdmissionCandidate:
         if "\x00" in execution_context:
             raise ValueError("execution_context must not contain NUL")
         object.__setattr__(self, "execution_context", execution_context)
+        if type(self.foreground) is not bool:
+            raise ValueError("foreground must be a bool")
 
     @property
     def execution_key(self) -> tuple[str, str]:
@@ -266,11 +269,14 @@ class DurableCenterScheduler:
         *,
         budget: int,
         tick: int,
+        background_budget: int | None = None,
     ) -> CenterAdmissionPlan:
         """Choose and atomically reserve at most ``budget`` ready events."""
 
         _nonnegative_int(budget, "budget")
         _nonnegative_int(tick, "tick")
+        if background_budget is not None:
+            _nonnegative_int(background_budget, "background_budget")
         candidate_rows = self._validate_candidates(candidates)
         now = _utc(self._clock(), "clock result")
         prior_states = {
@@ -283,8 +289,7 @@ class DurableCenterScheduler:
             centers,
             prior_states,
         )
-        deduplicated = self._deduplicate_execution_keys(scored)
-        selected = self._select(deduplicated, budget)
+        selected = self._select(scored, budget, background_budget)
         admissions = tuple(
             CenterAdmission(
                 candidate=row.candidate,
@@ -556,36 +561,39 @@ class DurableCenterScheduler:
             )
         return tuple(scored), active_ready, blocked_centers
 
-    @staticmethod
-    def _deduplicate_execution_keys(
-        candidates: tuple[_ScoredCandidate, ...],
-    ) -> tuple[_ScoredCandidate, ...]:
-        chosen: list[_ScoredCandidate] = []
-        seen_execution_keys: set[tuple[str, str]] = set()
-        for row in sorted(candidates, key=lambda item: item.sort_key):
-            if row.candidate.execution_key in seen_execution_keys:
-                continue
-            seen_execution_keys.add(row.candidate.execution_key)
-            chosen.append(row)
-        return tuple(chosen)
-
     def _select(
         self,
         candidates: tuple[_ScoredCandidate, ...],
         budget: int,
+        background_budget: int | None = None,
     ) -> tuple[tuple[_ScoredCandidate, CenterScheduleReason], ...]:
         selected: list[tuple[_ScoredCandidate, CenterScheduleReason]] = []
         selected_events: set[str] = set()
+        selected_execution_keys: set[tuple[str, str]] = set()
         selected_centers: set[str] = set()
+        background_selected = 0
+
+        def available(row: _ScoredCandidate) -> bool:
+            return (
+                len(selected) < budget
+                and row.candidate.execution_key not in selected_execution_keys
+                and (background_budget is None or row.candidate.foreground
+                     or background_selected < background_budget)
+            )
 
         def choose(
             row: _ScoredCandidate,
             reason: CenterScheduleReason,
         ) -> bool:
-            if len(selected) >= budget or row.candidate.event_id in selected_events:
+            nonlocal background_selected
+            if not available(row):
                 return False
             selected.append((row, reason))
+            background_selected += not row.candidate.foreground
             selected_events.add(row.candidate.event_id)
+            # A budget-rejected background must not hide a user event in the
+            # same context. Exclusion starts only after a successful choice.
+            selected_execution_keys.add(row.candidate.execution_key)
             if row.candidate.center_id is not None:
                 selected_centers.add(row.candidate.center_id)
             return True
@@ -599,13 +607,20 @@ class DurableCenterScheduler:
         }
         if budget >= 2 and by_lane[CenterLane.WORK] and by_lane[CenterLane.LIFE]:
             quota = min(self._config.lane_reservation_per_tick, budget // 2)
-            for index in range(quota):
-                for lane in (CenterLane.WORK, CenterLane.LIFE):
-                    if index < len(by_lane[lane]):
-                        choose(
-                            by_lane[lane][index],
-                            CenterScheduleReason.LANE_RESERVATION,
-                        )
+            for _ in range(quota):
+                heads = [
+                    next((row for row in rows if available(row)), None)
+                    for rows in by_lane.values()
+                ]
+                # When only one background can run, fixed Work-first order
+                # would defeat Life's accumulated debt on every tick.
+                for head in sorted((row for row in heads if row is not None),
+                                   key=lambda item: item.sort_key):
+                    # The other lane may just have spent the last background
+                    # slot; its peer can still offer an eligible user event.
+                    row = next((row for row in by_lane[head.lane] if available(row)), None)
+                    if row is not None:
+                        choose(row, CenterScheduleReason.LANE_RESERVATION)
 
         remaining = [
             row for row in candidates if row.candidate.event_id not in selected_events
@@ -623,7 +638,7 @@ class DurableCenterScheduler:
             fair_share.append(min(center_rows, key=lambda item: item.sort_key))
         # An unbound context (including a subject's Home) is a real contender,
         # not spare work that must wait for every Center to get a slot first.
-        # Context deduplication above already gives each of these one candidate.
+        # Successful choices enforce one event per execution context.
         # Use the same score/age ordering; preserve the Work/Life reservations
         # and per-Center share instead of inventing a Center or a Home priority.
         fair_share.extend(
