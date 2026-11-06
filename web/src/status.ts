@@ -38,7 +38,9 @@ export function failureReason(code: string | null | undefined): { key: MessageKe
 }
 
 export function getPageActivity(status: PageSummary['status'], configured: boolean, stale = false,
-                                failureCode?: string | null): Activity {
+                                failureCode?: string | null, providerWaiting = false): Activity {
+  if (providerWaiting) return activity('neutral', 'status.waitingAllowance', 'Waiting for autonomous allowance',
+    'status.waitingAllowanceDetail', 'Your work is saved. Open Activity to resume autonomous requests or raise the limit.');
   const reason = status === 'error' || status === 'needs_attention' ? failureReason(failureCode) : null;
   if (status === 'error') {
     return reason

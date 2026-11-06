@@ -1,8 +1,9 @@
 """Local context dynamics inside one continuing subject's native World.
 
 This component is driven by RuntimeService's existing tick. It has no model
-loop, conversation store, or synthetic prompt. Settled Kernel results are the
-only content that can cross a context connection; quiet reentry carries no
+loop or conversation store. The first authorized departure records the
+host's orientation as a SELF input. Settled Kernel results are the only
+content that can cross a context connection; later quiet reentry carries no
 new text. The causal ledger owns every admitted unit of background work.
 """
 from __future__ import annotations
@@ -280,6 +281,52 @@ class ContextPulseController:
         with self.storage._lock:
             return self.config.enabled and self._state["paused"]
 
+
+    def request_first_departure(self):
+        """Create one trusted SELF origin after the person enables autonomy.
+
+        The World event is also the restart receipt: repeated requests retain
+        its original identity, content, status and subject across generations.
+        No conversation or prior user stimulus is required.
+        """
+        from .autonomy import FIRST_DEPARTURE_ORIENTATION
+
+        if not self.config.enabled:
+            raise TickError("pulse_not_enabled", "Start Per Pulse with --pulse to begin autonomous practice.")
+        key = f"autonomous-first-departure-v1:{self.world_id}"
+        with self.storage._lock:
+            try:
+                return self.ledger.enqueue(
+                    world_id=self.world_id, flow=None, domain=CausalEventDomain.PULSE,
+                    kind=CausalEventKind.SPONTANEOUS, source=CausalEventSource.SELF,
+                    content=FIRST_DEPARTURE_ORIENTATION, engram_id=self.subject(),
+                    metadata={"context_pulse": "first_departure", "orientation_version": 1,
+                              "authorization": "person_enabled_autonomy", "depth": 0},
+                    idempotency_key=key, admission_guard=self._guard, runtime_fence=self.fence(),
+                )
+            except _QuotaReached as exc:
+                raise TickError("background_budget_held", "Background allowance is held. Start again when allowance is available.") from exc
+
+    def request_provider_continuation(self, event, turn_id):
+        """Retain safe unfinished work with its confirmed state as SELF input."""
+        from .autonomy import PROVIDER_CONTINUATION_ORIENTATION
+        if not self.config.enabled or event.world_id != self.world_id or event.engram_id != self.subject():
+            return None
+        with self.storage._lock:
+            try:
+                return self.ledger.enqueue(
+                    world_id=self.world_id, flow=None, domain=CausalEventDomain.PULSE,
+                    kind=CausalEventKind.SPONTANEOUS, source=CausalEventSource.SELF,
+                    content=PROVIDER_CONTINUATION_ORIENTATION, parent_event_id=event.id,
+                    engram_id=self.subject(), center_id=event.center_id,
+                    metadata={"context_pulse": "provider_continuation", "source_turn_id": turn_id,
+                              "depth": event.metadata.get("depth", 0)},
+                    idempotency_key=f"provider-continuation-v1:{self.world_id}:{turn_id}",
+                    admission_guard=self._guard, runtime_fence=self.fence(),
+                )
+            except _QuotaReached:
+                return None
+
     def set_paused(self, paused: bool) -> None:
         """Atomically hold native background admission without erasing influence.
 
@@ -499,7 +546,7 @@ class ContextPulseController:
         return conn.execute(
             "SELECT COUNT(*) FROM causal_events WHERE world_id = ? "
             "AND kind IN ('spontaneous', 'propagation') "
-            "AND (json_extract(metadata, '$.context_pulse') = 'reentry' "
+            "AND (json_extract(metadata, '$.context_pulse') IN ('reentry', 'first_departure', 'provider_continuation') "
             "OR json_extract(metadata, '$.context_connection_id') IS NOT NULL) "
             "AND julianday(created_at) >= julianday(?)",
             (self.world_id, (now - timedelta(hours=1)).isoformat()),
@@ -535,7 +582,7 @@ class ContextPulseController:
             "AND result.kind = 'assistant_result' AND result.status = 'settled' "
             "WHERE root.world_id = ? "
             "AND ((root.kind IN ('spontaneous', 'propagation') "
-            "AND (json_extract(root.metadata, '$.context_pulse') = 'reentry' "
+            "AND (json_extract(root.metadata, '$.context_pulse') IN ('reentry', 'first_departure', 'provider_continuation') "
             "OR json_extract(root.metadata, '$.context_connection_id') IS NOT NULL)) "
             "OR (root.kind = 'pulse' AND json_extract(root.metadata, '$.context_pulse') = 'convergence')) "
             "AND root.status <> 'reconciled' "
@@ -717,7 +764,7 @@ class ContextPulseController:
         """
         if (event.engram_id == self.subject() and
                 (event.metadata.get("context_connection_id") or
-                 event.metadata.get("context_pulse") in {"reentry", "convergence"})):
+                 event.metadata.get("context_pulse") in {"reentry", "convergence", "first_departure", "provider_continuation"})):
             return self._factors(event.center_id)[1]
         return 1.0
 
@@ -979,7 +1026,7 @@ class ContextPulseController:
         if event.event_id is None:
             return None
         fact = self.ledger.get_event(event.event_id)
-        if fact is None or not (fact.metadata.get("context_pulse") in {"reentry", "convergence"}
+        if fact is None or not (fact.metadata.get("context_pulse") in {"reentry", "convergence", "first_departure", "provider_continuation"}
                                 or fact.metadata.get("context_connection_id")):
             return None
         if not self.config.enabled:
@@ -1213,7 +1260,7 @@ class ContextPulseController:
             recent = self.storage._conn.execute(
                 "SELECT id, center_id, kind, status, created_at, parent_event_id FROM causal_events "
                 "WHERE world_id = ? AND kind IN ('spontaneous', 'propagation', 'pulse') "
-                "AND (json_extract(metadata, '$.context_pulse') IN ('reentry', 'convergence') "
+                "AND (json_extract(metadata, '$.context_pulse') IN ('reentry', 'convergence', 'first_departure', 'provider_continuation') "
                 "OR json_extract(metadata, '$.context_connection_id') IS NOT NULL) "
                 "ORDER BY seq DESC LIMIT 20", (self.world_id,),
             ).fetchall()
@@ -1230,7 +1277,7 @@ class ContextPulseController:
                 "MIN(CASE WHEN status = 'queued' THEN seq END) "
                 "FROM causal_events WHERE world_id = ? AND status IN ('queued', 'running') "
                 "AND kind IN ('spontaneous', 'propagation', 'pulse') "
-                "AND (json_extract(metadata, '$.context_pulse') IN ('reentry', 'convergence') "
+                "AND (json_extract(metadata, '$.context_pulse') IN ('reentry', 'convergence', 'first_departure', 'provider_continuation') "
                 "OR json_extract(metadata, '$.context_connection_id') IS NOT NULL) "
                 "GROUP BY center_id",
                 (self.world_id,),

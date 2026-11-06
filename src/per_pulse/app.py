@@ -152,6 +152,10 @@ class WeeklyUsageInput(Input):
     weeklyLimit: int = Field(ge=0, le=100_000, strict=True)
 
 
+class AutonomousPracticeInput(Input):
+    weeklyLimit: int = Field(ge=1, le=100_000, strict=True)
+
+
 class ExperienceShift(Input):
     understanding: Content
     candidates: Content
@@ -430,6 +434,23 @@ def create_app(
     @app.get("/api/pulse/weekly-usage")
     def pulse_weekly_usage(request: Request):
         return {"usage": request.app.state.weekly_requests.status()}
+
+
+    @app.post("/api/pulse/practice")
+    def begin_autonomous_practice(body: AutonomousPracticeInput, request: Request):
+        service = pulse_write_service(request)
+        if service.example:
+            raise PageError("example_mode", "The example workspace cannot start autonomous practice.", 409)
+        if not service.configured:
+            raise PageError("provider_unconfigured", "Connect a model before starting autonomous practice.", 409)
+        from pulse_system.core.pulse.context import TickError
+        try:
+            departure = service.runtime.request_first_autonomous_departure()
+        except TickError as exc:
+            raise PageError(exc.code, str(exc), 409) from exc
+        budget = request.app.state.weekly_requests
+        budget.configure(enabled=True, weekly_limit=body.weeklyLimit)
+        return {"usage": budget.status(), "departureEventId": departure.id}
 
     def pulse_write_service(request: Request) -> PageService:
         service = pages(request)

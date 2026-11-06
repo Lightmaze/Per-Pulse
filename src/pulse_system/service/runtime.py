@@ -8396,6 +8396,51 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             raise TypeError("provider event admission must be callable")
         self._harness.bind_provider_attempt_accounting(factory)
         self._native_provider_admission = event_admission
+        self._provider_continuation_lock = threading.Lock()
+        self._provider_continuations = set()
+        self._mgr.add_turn_terminal_listener(self._note_provider_continuation)
+        from pulse_system.core.types import HarnessTurnState
+        for turn in self._causal_ledger.list_turns(state=HarnessTurnState.UNCERTAIN):
+            self._note_provider_continuation(turn.id)
+
+    def _note_provider_continuation(self, turn_id):
+        turn = self._causal_ledger.get_turn_for_world(turn_id, self._world_id)
+        if turn is not None and turn.error_code in {
+            "autonomous_weekly_requests_exhausted", "autonomous_weekly_requests_paused",
+        }:
+            with self._provider_continuation_lock:
+                self._provider_continuations.add(turn_id)
+
+    def _retry_provider_continuations(self):
+        from pulse_harness.core.errors import HarnessError as KernelError
+        if not hasattr(self, "_provider_continuations"):
+            return
+        with self._provider_continuation_lock:
+            pending = tuple(self._provider_continuations)
+        for turn_id in pending:
+            turn = self._causal_ledger.get_turn_for_world(turn_id, self._world_id)
+            key = f"provider-continuation-v1:{self._world_id}:{turn_id}"
+            retained = self._causal_ledger.find_causal_event_by_idempotency(self._world_id, key)
+            remove = retained is not None or turn is None or turn.engram_id != self.continuity_engram_id
+            if not remove:
+                event = self._causal_ledger.get_event(turn.event_id)
+                context = "" if turn.execution_context in {"", "home"} else turn.execution_context
+                scope = self._harness.scope_for(turn.engram_id, context).for_turn(turn.id)
+                try:
+                    previous = self._harness.kernel.store.get_turn(scope)
+                    safe = self._harness.can_supersede(previous)
+                except (KernelError, ValueError, KeyError):
+                    safe = False
+                # Never replay an action whose physical outcome is unknown.
+                # The new input continues the existing transcript; terminal
+                # actions remain history, not commands to execute again.
+                if not safe or event is None:
+                    remove = True
+                else:
+                    remove = self._context_pulse.request_provider_continuation(event, turn_id) is not None
+            if remove:
+                with self._provider_continuation_lock:
+                    self._provider_continuations.discard(turn_id)
 
     def native_provider_fence(self):
         """Current World ownership for atomic physical-request accounting."""
@@ -8410,6 +8455,13 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             return False
         admission = getattr(self, "_native_provider_admission", None)
         return admission is None or admission(event, observed_at)
+
+
+    def request_first_autonomous_departure(self):
+        """Record one person-enabled SELF origin in the existing World."""
+        with self._tick_lock:
+            self._require_runtime_owner()
+            return self._context_pulse.request_first_departure()
 
     def _native_kernel_context_for_center(self, center_id: str | None) -> str:
         if center_id is None:
@@ -12259,6 +12311,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             try:
                 if self._context_pulse is not None:
                     self._context_pulse.tick()
+                self._retry_provider_continuations()
                 result = self._engine.tick()
             except RuntimeLeaseError as exc:
                 # The owner can change in the narrow interval after the

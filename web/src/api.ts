@@ -148,6 +148,10 @@ export const api = {
   pulseObservation: (signal?: AbortSignal) => request<PulseObservation>('/pulse/observation', { signal }),
   weeklyUsage: (signal?: AbortSignal) =>
     request<{ usage: WeeklyRequestUsage }>('/pulse/weekly-usage', { signal }),
+  beginAutonomousPractice: (weeklyLimit: number, identity: PulseWriteIdentity) =>
+    request<{ usage: WeeklyRequestUsage; departureEventId: string }>('/pulse/practice', {
+      method: 'POST', headers: pulseWriteHeaders(identity), body: JSON.stringify({ weeklyLimit }),
+    }),
   setWeeklyUsage: (enabled: boolean, weeklyLimit: number, identity: PulseWriteIdentity) =>
     request<{ usage: WeeklyRequestUsage }>('/pulse/weekly-usage', {
       method: 'PATCH', headers: pulseWriteHeaders(identity),

@@ -21,13 +21,14 @@ function shortId(value: string): string {
   return value.length > 18 ? value.slice(0, 16) + '…' : value;
 }
 
-export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, navigate, onClose }: {
+export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, navigate, onClose, onChanged }: {
   pageId: string;
   pages: PageSummary[];
   workspaceId: string;
   serviceInstanceId: string;
   navigate: Navigate;
   onClose: () => void;
+  onChanged?: () => void;
 }) {
   const { t, pageTitle } = useLanguage();
   const [pulse, setPulse] = useState<PulseState | null>(null);
@@ -110,7 +111,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
     }
   };
 
-  const saveWeekly = async (enabled: boolean) => {
+  const saveWeekly = async (enabled: boolean, beginPractice = false) => {
     if (!gate.beginWrite()) return;
     const requestedLimit = Number(weeklyLimit);
     if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100000) {
@@ -122,7 +123,10 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
     setError('');
     let unconfirmed = false;
     try {
-      const result = await api.setWeeklyUsage(enabled, requestedLimit, { workspaceId, serviceInstanceId });
+      const identity = { workspaceId, serviceInstanceId };
+      const result = beginPractice
+        ? await api.beginAutonomousPractice(requestedLimit, identity)
+        : await api.setWeeklyUsage(enabled, requestedLimit, identity);
       if (result.usage.world_id !== workspaceId) {
         setWeekly(null);
         setPulse(null);
@@ -132,6 +136,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
         setWeekly(result.usage);
         weeklyLimitDirty.current = false;
         setWeeklyLimit(String(result.usage.weekly_limit));
+        if (beginPractice) onChanged?.();
       }
     } catch (problem) {
       if (problem instanceof ApiError && problem.code === 'pulse_workspace_changed') {
@@ -258,8 +263,8 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
           </label>
           <button type="button" disabled={busy || identityChanged}
             onClick={() => void saveWeekly(weekly.enabled)}>{t('pulse.weeklySave')}</button>
-          <button type="button" disabled={busy || identityChanged || (!weekly.enabled && !pulse.providerConfigured)}
-            onClick={() => void saveWeekly(!weekly.enabled)}>
+          <button type="button" disabled={busy || identityChanged || (!weekly.enabled && (!pulse.providerConfigured || !pulse.enabled))}
+            onClick={() => void saveWeekly(!weekly.enabled, !weekly.enabled)}>
             {weekly.enabled ? t('pulse.weeklyDisable') : t('pulse.weeklyEnable')}
           </button>
         </div>
