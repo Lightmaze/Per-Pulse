@@ -5,6 +5,16 @@ Connect a model, open **Activity**, choose a weekly request limit, and select
 message. Pulse receives an open-ended orientation, chooses a concern, and can
 continue in an existing or new Work using the normal workspace tools.
 
+Work can read public HTTPS HTML and plain-text pages with `read_web(url)`.
+The observation keeps its URL, read time and extracted text in the original
+Work history. **Web sources** opens those URLs; a source's live webpage may
+have changed since it was read. History recall reads the saved observation.
+Images, interactive content and page layout require opening the original page.
+Reads retain up to 512 KiB of response bytes and 24,576 text characters, marking
+partial text explicitly. The reader does not sign in, fetch local/private
+addresses or write files. Ordinary workspace actions remain responsible for
+saving any resulting work.
+
 The first departure is recorded as SELF activity in the existing World.
 Model-generated Work instructions are workspace activity too. Results retain
 their original messages, file actions and links back to the producing Work.

@@ -91,6 +91,11 @@ test('a failed turn explains its cause from the Kernel error code', () => {
   assert.equal(failureReason('provider_http_503').key, 'status.failureService');
   assert.equal(failureReason('provider_http_400').key, 'status.failureRejected');
   assert.equal(failureReason('provider_timeout').key, 'status.failureUnreachable');
+  for (const code of ['web_url_invalid', 'web_address_blocked', 'web_dns_failed', 'web_read_timeout',
+    'web_redirect_failed', 'web_content_unsupported', 'web_http_failed', 'web_connection_failed']) {
+    assert.equal(failureReason(code).key, 'status.failureWeb');
+    assert.match(failureReason(code).text, /public HTTPS text page/);
+  }
   assert.equal(failureReason('provider_output_limit').key, 'status.failureOutputLimit');
   assert.equal(failureReason('payload_too_large').key, 'status.failurePayloadTooLarge');
   assert.match(failureReason('payload_too_large').text, /Review completed work/);

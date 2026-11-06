@@ -28,6 +28,19 @@ def check_paths(names: list[str]) -> None:
                                   ".jsonl", ".pyc", ".pem", ".key", ".p12")), name
 
 
+def check_source_paths(read, names: set[str], prefix: str) -> None:
+    """Only these exact public synthetic TLS bytes may accompany source tests."""
+    fixtures = {
+        prefix + "tests/fixtures/web_tls/cert.pem": "5f91ebfaaa08a8231e7c550f55329c3c981d2108cff42dfc9036ff81b291909d",
+        prefix + "tests/fixtures/web_tls/key.pem": "4a2ec18c3606e562b460d177d63ed9267f900c41998d927d57a7635f063fca81",
+    }
+    check_paths([prefix.rstrip("/")])
+    check_paths([name for name in names if name not in fixtures])
+    for name, digest in fixtures.items():
+        if name in names:
+            assert hashlib.sha256(read(name)).hexdigest() == digest, f"Changed public TLS fixture: {name}"
+
+
 def check_client(read, names: set[str], prefix: str) -> None:
     html = read(prefix + "index.html").decode("utf-8")
     assert '<div id="root"></div>' in html, "Missing client entry point"
@@ -62,8 +75,9 @@ def verify(directory: Path, version: str) -> list[Path]:
             assert any(name.endswith("/licenses/" + license_name) for name in names), license_name
         check_client(archive.read, names, "per_pulse/static/")
     with tarfile.open(source, "r:gz") as archive:
-        names = set(archive.getnames())
-        check_paths(list(names))
+        raw_names = archive.getnames()
+        assert len(raw_names) == len(set(raw_names)), "Duplicate source archive paths"
+        names = set(raw_names)
         assert all(member.isfile() or member.isdir() for member in archive.getmembers()), "Archive has links/devices"
         prefix = f"per_pulse-{version}/"
         assert all(name.startswith(prefix) for name in names), "Unexpected source archive root"
@@ -71,6 +85,7 @@ def verify(directory: Path, version: str) -> list[Path]:
             handle = archive.extractfile(name)
             assert handle is not None, name
             return handle.read()
+        check_source_paths(read, names, prefix)
         for name in ("pyproject.toml", "README.md", "LICENSE", "NOTICE", "SECURITY.md",
                      "CHANGELOG.md", "CONTRIBUTING.md", "scripts/verify_distribution.py",
                      f"docs/releases/v{version}.md"):

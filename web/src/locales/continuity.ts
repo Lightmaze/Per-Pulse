@@ -1,5 +1,11 @@
 /** Interface text only: original work, events and filenames remain verbatim. */
 export const continuityEnglish = {
+  "webSources.title": "Web sources",
+  "status.failureWeb": "The webpage could not be read. Check that the source is a public HTTPS text page, or try another source.",
+  "webSources.scope": "Saved observations of extracted text. Open a source to see its current page, including images and layout.",
+  "webSources.observed": "Read {time}",
+  "webSources.partial": "Only part of this page's text was read.",
+  "webSources.recent": "Recent sources are shown. Earlier observations remain in this conversation's history.",
   "pulse.title": "Activity",
   "pulse.homeReview.title": "Pages needing attention",
   "pulse.homeReview.info": "An earlier page is waiting for your decision or could not finish. Open that original page to inspect its turn. Home cannot approve actions.",
@@ -274,6 +280,12 @@ export const continuityEnglish = {
   "status.sendAgain": "Send again",
 } as const;
 export const continuityChinese: Record<keyof typeof continuityEnglish, string> = {
+  "webSources.title": "网页来源",
+  "status.failureWeb": "无法读取这个网页。请确认来源是公开的 HTTPS 文本网页，或尝试其他来源。",
+  "webSources.scope": "已保存提取文本的阅读记录。打开来源可查看当前网页，包括图片和排版。",
+  "webSources.observed": "阅读时间：{time}",
+  "webSources.partial": "只读取了这个网页的部分文本。",
+  "webSources.recent": "这里显示近期来源，更早的阅读记录仍保留在此会话的历史中。",
   "pulse.title": "活动",
   "pulse.homeReview.title": "需要处理的工作",
   "pulse.homeReview.info": "有些页面正等待你的决断或未能完成。打开原始页面检查对应回合；不能在 Home 直接批准操作。",

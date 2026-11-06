@@ -16,6 +16,7 @@ function activity(tone: ActivityTone, labelKey: MessageKey, label: string, detai
 /** A readable reason for the Kernel's error code of a failed or paused turn. */
 export function failureReason(code: string | null | undefined): { key: MessageKey; text: string; params?: Record<string, string> } | null {
   if (!code) return null;
+  if (code.startsWith('web_')) return { key: 'status.failureWeb', text: 'The webpage could not be read. Check that the source is a public HTTPS text page, or try another source.' };
   const http = /^provider_http_(\d{3})$/.exec(code);
   const status = http ? Number(http[1]) : 0;
   if (status === 401 || status === 403) return { key: 'status.failureAuth', text: 'The model service did not accept the API key. Check P_PULSE_API_KEY, then send again.' };
