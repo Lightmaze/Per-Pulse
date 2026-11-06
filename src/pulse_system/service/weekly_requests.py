@@ -272,6 +272,13 @@ def world_source_for_scope(ledger, world_id: str, scope) -> str | None:
         if (event is None or event.world_id != world_id or event.id in seen):
             raise unknown()
         seen.add(event.id)
+        # A real user stimulus begins a fresh foreground request, even if the
+        # original Work was opened from an older autonomous or succession
+        # event. An autonomous activation *after* that user input is still
+        # charged. Do not let an earlier SELF ancestor relabel a newer user
+        # instruction as unattended spending.
+        if event.source is CausalEventSource.USER and event.kind is CausalEventKind.STIMULUS:
+            return autonomous_root
         # Assistant results and tool receipts are SELF-authored even during
         # an ordinary user-requested Work. They do not start a new autonomous
         # request pool. Only a native *activation/input* can convert a user
