@@ -272,10 +272,24 @@ def world_source_for_scope(ledger, world_id: str, scope) -> str | None:
         if (event is None or event.world_id != world_id or event.id in seen):
             raise unknown()
         seen.add(event.id)
-        if event.source in {
-            CausalEventSource.SELF, CausalEventSource.HABITAT,
-            CausalEventSource.SENSORY, CausalEventSource.PROPAGATION,
-        }:
+        # Assistant results and tool receipts are SELF-authored even during
+        # an ordinary user-requested Work. They do not start a new autonomous
+        # request pool. Only a native *activation/input* can convert a user
+        # lineage into autonomous work (e.g. a later spontaneous reentry).
+        if (
+            event.source in {
+                CausalEventSource.SELF, CausalEventSource.HABITAT,
+                CausalEventSource.SENSORY, CausalEventSource.PROPAGATION,
+            }
+            and event.kind in {
+                CausalEventKind.STIMULUS,
+                CausalEventKind.SPONTANEOUS,
+                CausalEventKind.PULSE,
+                CausalEventKind.PROPAGATION,
+                CausalEventKind.HABITAT_OBSERVATION,
+                CausalEventKind.HABITAT_CONSEQUENCE,
+            }
+        ):
             autonomous_root = event.id
         if event.parent_event_id is None:
             if autonomous_root is not None:
