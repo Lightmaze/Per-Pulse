@@ -6526,6 +6526,10 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             self._world_id,
             publication_authority=self._publication_permit,
         )
+        if self._harness_kind == "kernel" and _is_native_kernel_runtime(self._harness):
+            from .native_habitat import NativeHabitat
+            self._native_habitat = NativeHabitat(self)
+            self._harness.bind_native_habitat(self._native_habitat)
         self._sensory = SensoryCortex(
             self._dendrite,
             default_wait=max(0.0, c.default_max_wait),
