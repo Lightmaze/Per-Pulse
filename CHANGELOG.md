@@ -4,11 +4,6 @@
 
 ## 0.1.0a2
 
-- Make a fresh workspace able to begin native, source-linked SELF practice with one explicit Activity action, without inventing a user message.
-- Preserve unfinished Work after pause, weekly quota exhaustion or restart; retry accounting includes actual provider sends and review/delegation descendants.
-- Improve material access, historical tool-result recall and practical long-file/command continuity since the first alpha.
-- Keep hosted-model configuration and English/Chinese local controls visible in the normal workspace.
-
 - Start autonomous practice once from Activity, with a native SELF origin,
   focused Work, shared weekly requests, source-linked results and restart-safe pause.
 
@@ -18,6 +13,8 @@
 - Complete document rewrites use a 1 MiB native message and action envelope,
   including approval details, with compact file passages and result previews.
   Downloads and checkpoint Undo preserve the original bytes across restarts.
+- Improve access to ordinary dotfiles, history and retained command output, and
+  make hosted-model configuration clearer, including Azure-compatible endpoints.
 
 ## 0.1.0a1
 
