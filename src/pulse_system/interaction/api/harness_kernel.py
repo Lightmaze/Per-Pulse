@@ -417,6 +417,21 @@ class HarnessKernelService:
             return None
         return runtime.runner.live_reply(scope)
 
+    def resolve_workspace_image(self, scope: HarnessScope, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Render an image reference through its existing live workspace provider.
+
+        No session, provider or model call is created. A recovered reference
+        cannot acquire a new provider merely by asking to render its pixels.
+        The provider also verifies the exact turn and original source version.
+        """
+        with self._runtime_lock:
+            self._require_open()
+            runtime = self._runtimes.get(scope.session_id)
+            if runtime is None or runtime.scope != scope.session_scope():
+                return []
+            renderer = getattr(runtime.provider, "resolve_image", None)
+            return renderer(scope, payload) if callable(renderer) else []
+
     def restore_checkpoint(self, scope: HarnessScope, checkpoint_id: str) -> Mapping[str, Any]:
         """Undo one applied file change from its sealed checkpoint.
 

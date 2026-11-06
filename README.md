@@ -21,9 +21,11 @@ Kernel implementation.
   where you were with your unsent draft and reading position intact.
 - Bring selected text Home with a link to its source message, or pass a
   selected result from one Work to another.
-- Attach text materials (Markdown, CSV, JSON or code, up to 1 MiB) or PDFs
-  (up to 32 MiB, read as their text) and read structured replies with
-  headings, tables and code blocks.
+- Attach text materials (Markdown, CSV, JSON or code, up to 1 MiB), PDFs
+  (up to 32 MiB, read as their text), or PNG/JPEG images (up to 1 MiB and
+  8 megapixels). Preview them in Materials and send an exact source version.
+  Reading an image sends its original pixels to your configured model, which
+  must support image input. Replies can include headings, tables and code blocks.
 - Let pages continue: background pulses within an hourly budget, or type
   `/tick 3` to give a page three more steps.
 - Start autonomous practice from Activity with a weekly request allowance. Work and
