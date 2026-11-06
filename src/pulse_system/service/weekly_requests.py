@@ -224,3 +224,52 @@ class WeeklyRequestGate:
     def abandon(self, ticket):
         if ticket is not None:
             self.budget.abandon(ticket)
+
+
+def world_source_for_scope(ledger, world_id: str, scope) -> str | None:
+    """Derive the original request pool from immutable World causal ancestry.
+
+    A direct user stimulus is the *only* free foreground root. SELF and
+    unattended environment roots consume autonomous allowance. Delegation,
+    TUNNEL and response-review descendants retain their ancestral pool; a
+    missing, cyclic or foreign ledger lineage fails closed instead of being
+    silently billed to the user's direct Work.
+    """
+    from pulse_harness.core.errors import ProviderUnavailable
+    from pulse_system.core.types import CausalEventKind, CausalEventSource
+
+    def unknown():
+        return ProviderUnavailable(
+            "The original World causal source cannot be verified; request not sent.",
+            code="autonomous_request_source_unverified",
+        )
+
+    if (not isinstance(world_id, str) or not world_id.strip()
+            or getattr(scope, "world_id", None) != world_id
+            or not getattr(scope, "turn_id", None)):
+        raise unknown()
+    turn = ledger.get_turn_for_world(scope.turn_id, world_id)
+    if turn is None or turn.engram_id != scope.engram_id:
+        raise unknown()
+    event = ledger.get_event(turn.event_id)
+    seen: set[str] = set()
+    autonomous_root: str | None = None
+    for _ in range(256):
+        if (event is None or event.world_id != world_id or event.id in seen):
+            raise unknown()
+        seen.add(event.id)
+        if event.source in {
+            CausalEventSource.SELF, CausalEventSource.HABITAT,
+            CausalEventSource.SENSORY, CausalEventSource.PROPAGATION,
+        }:
+            autonomous_root = event.id
+        if event.parent_event_id is None:
+            if autonomous_root is not None:
+                return autonomous_root
+            if event.source is CausalEventSource.USER and event.kind is CausalEventKind.STIMULUS:
+                return None
+            # A standalone SYSTEM or DELEGATION event cannot obtain a free
+            # foreground attribution by falling through the source resolver.
+            raise unknown()
+        event = ledger.get_event(event.parent_event_id)
+    raise unknown()
