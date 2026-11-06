@@ -42,8 +42,19 @@ def install_world_request_gate(pages) -> WeeklyRequestBudget:
         raise RuntimeError("native request admission is already installed")
 
     original_factory = kernel._model_factory
+    def still_admitted() -> None:
+        # A person can hold background Pulse independently of weekly limits.
+        # Refuse a new physical retry after that hold, without affecting
+        # already-dispatched calls or direct foreground messages.
+        from pulse_system.service.weekly_requests import WeeklyRequestUnavailable
+        with storage._lock:
+            pulse = runtime.context_pulse
+            if pulse.config.enabled and pulse._state["paused"]:
+                raise WeeklyRequestUnavailable("background activity is paused")
+
     gate = WeeklyRequestGate(
         budget, lambda scope: world_source_for_scope(ledger, world_id, scope),
+        admission_guard=still_admitted,
     )
     if original_factory is not None:
         def metered_factory(scope):
