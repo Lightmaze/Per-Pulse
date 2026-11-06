@@ -294,13 +294,17 @@ class ChatHTTPModelAdapter:
     """
     def __init__(self, config: ChatHTTPConfig, *,
                  tool_schemas: Mapping[str, Mapping[str, Any]] | None = None,
-                 transport: httpx.BaseTransport | None = None) -> None:
+                 transport: httpx.BaseTransport | None = None,
+                 attempt_accounting=None) -> None:
         self.life_image_resolver = None  # native runtime may bind a scoped, ephemeral observation renderer
         self.config = config
         self._schemas = _decode(_json(dict(WORKSPACE_SCHEMAS if tool_schemas is None else tool_schemas)))
         self._client = httpx.Client(timeout=config.timeout_seconds, follow_redirects=False,
                                     trust_env=False, transport=transport)
         self._test_transport = transport is not None
+        # Host-provided, trusted World admission for physical HTTP attempts.
+        # Do not accept a budget or source marker from model-produced text.
+        self._attempt_accounting = attempt_accounting
         self._streams: set[_ChatStream] = set()
         self._lock = threading.RLock()
         self._closed = False
@@ -429,7 +433,7 @@ class ChatHTTPModelAdapter:
     def stream(self, request: ModelRequest, *, cancel_event: threading.Event | None = None) -> _ChatStream:
         with self._lock:
             self.preflight_stream()
-            stream = _ChatStream(self, self.request_body(request), cancel_event)
+            stream = _ChatStream(self, self.request_body(request), cancel_event, request.scope)
             self._streams.add(stream)
             return stream
 
@@ -444,14 +448,16 @@ class ChatHTTPModelAdapter:
 
 class _ChatStream:
     """Owns the live HTTP response so kernel cancellation can close it."""
-    def __init__(self, adapter: ChatHTTPModelAdapter, body: dict[str, Any], cancel: threading.Event | None) -> None:
-        self.adapter, self.body, self.cancel = adapter, body, cancel
+    def __init__(self, adapter: ChatHTTPModelAdapter, body: dict[str, Any],
+                 cancel: threading.Event | None, scope) -> None:
+        self.adapter, self.body, self.cancel, self.scope = adapter, body, cancel, scope
         self._closed = threading.Event()
         self._response: httpx.Response | None = None
         self._lock = threading.RLock()
         self._started = False
         self.usage: ProviderUsage | None = None
         self.response_id: str | None = None
+        self._done = False
 
     def _cancelled(self) -> bool:
         return self._closed.is_set() or (self.cancel is not None and self.cancel.is_set())
@@ -471,6 +477,8 @@ class _ChatStream:
             raise ProviderProtocolError("model response stream cannot be replayed")
         self._started = True
         response = None
+        active_ticket = None
+        accounting = self.adapter._attempt_accounting
         try:
             if self._cancelled():
                 return
@@ -503,13 +511,32 @@ class _ChatStream:
             attempt = 0
             while True:
                 attempt += 1
+                # Each *physical* HTTP attempt, including transport and HTTP
+                # retries, must reserve a distinct durable slot. The World
+                # decides whether this scope belongs to an autonomous root.
+                ticket = accounting.reserve(self.scope) if accounting is not None else None
+                if self._cancelled():
+                    if accounting is not None:
+                        accounting.abandon(ticket)
+                    return
+                if accounting is not None:
+                    try:
+                        accounting.dispatch(ticket)  # durable before any send
+                    except BaseException:
+                        accounting.abandon(ticket)
+                        raise
+                    active_ticket = ticket
                 try:
                     response = self.adapter._client.send(request, stream=True)
                 except httpx.ReadTimeout:
-                    # The service took the request and went quiet; sending it
-                    # again would only repeat the wait.
+                    # The provider may already have the request. Keep its slot.
                     raise
                 except httpx.TransportError:
+                    # A failed handshake and an accepted-but-lost request look
+                    # alike at this boundary. Conservatively count it.
+                    if active_ticket is not None:
+                        accounting.settle(active_ticket, "uncertain")
+                        active_ticket = None
                     if attempt > retries or self._cancelled():
                         raise
                     if not self._pause(retry_delay(attempt)):
@@ -522,6 +549,9 @@ class _ChatStream:
                     return
                 if response.status_code == 200:
                     break
+                if active_ticket is not None:
+                    accounting.settle(active_ticket, "rejected")
+                    active_ticket = None
                 if attempt > retries or not _retryable(response):
                     # Never persist a remote body, URL, request headers or credentials.
                     tries = f" after {attempt} attempts" if attempt > 1 else ""
@@ -539,9 +569,16 @@ class _ChatStream:
             if not self._cancelled():
                 raise ProviderUnavailable("model transport failed", code="provider_transport_error") from None
         finally:
-            if response is not None:
-                response.close()
-            self.close()
+            try:
+                # Only a validated terminal SSE reply proves completion.
+                # Cancellation, a broken stream and a crash cannot refund a
+                # dispatched request, even without reported token usage.
+                if active_ticket is not None:
+                    accounting.settle(active_ticket, "completed" if self._done else "uncertain")
+            finally:
+                if response is not None:
+                    response.close()
+                self.close()
 
     def _events(self, response: httpx.Response) -> Iterator[str]:
         pending = b""
@@ -595,6 +632,7 @@ class _ChatStream:
                     ids.add(call["id"])
                     yield ModelDelta(ModelDeltaKind.TOOL_CALL,
                                      tool_call=ToolCall(call["id"], call["name"], arguments))
+                self._done = True
                 yield ModelDelta(
                     ModelDeltaKind.DONE,
                     finish_reason=finish,
