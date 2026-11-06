@@ -218,6 +218,21 @@ def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
                   source=Source.SELF, parent_event_id="result")
     assert world_source_for_scope(Ledger([user, result, reentry], "reentry"),
                                   "world", scope) == "reentry"
+    # Native Engram succession must not independently spend an opt-in growth
+    # allowance just because its durable summary is SELF/SPONTANEOUS. The
+    # real pool is inherited from the generation's preceding causal origin.
+    transition = Row(id="transition", world_id="world", kind=Kind.GENERATION_TRANSITION,
+                     source=Source.SELF, parent_event_id="result")
+    summary = Row(id="summary", world_id="world", kind=Kind.SPONTANEOUS,
+                  source=Source.SELF, parent_event_id="transition",
+                  metadata={"generation_stage": "summary"})
+    assert world_source_for_scope(
+        Ledger([user, result, transition, summary], "summary"), "world", scope,
+    ) is None
+    transition.parent_event_id = "reentry"
+    assert world_source_for_scope(
+        Ledger([user, result, reentry, transition, summary], "summary"), "world", scope,
+    ) == "reentry"
     # Reentering a prior autonomous context with an explicit new user
     # instruction resets the request pool, including after succession.
     # A subsequent SELF reactivation after that instruction spends the pool.
