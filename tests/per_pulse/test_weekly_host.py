@@ -53,14 +53,14 @@ def _settled(client, page_id):
     raise AssertionError("The real Kernel did not settle the fixture reply")
 
 
-def _enqueue_self(runtime, content, key):
+def _enqueue_self(runtime, content, key, center_id=None):
     from pulse_system.core.types import CausalEventDomain, CausalEventKind, CausalEventSource
     # Host-owned input, like native ContextPulse reentry. The public user
     # injection API correctly rejects content with an untyped SELF label.
     return runtime.causal_ledger.enqueue(
         world_id=runtime.world_id, flow=None, domain=CausalEventDomain.PULSE,
         kind=CausalEventKind.SPONTANEOUS, source=CausalEventSource.SELF,
-        content=content, engram_id=runtime.continuity_engram_id,
+        content=content, engram_id=runtime.continuity_engram_id, center_id=center_id,
         idempotency_key=key, runtime_fence=runtime._current_runtime_fence(),
     ).id
 

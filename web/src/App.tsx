@@ -413,7 +413,7 @@ export default function App() {
   const pages = bootstrap?.pages ?? [];
   const sourcePage = view?.page.sourcePageId ? pages.find(page => page.id === view.page.sourcePageId) : undefined;
   const breadcrumbs = view?.breadcrumbs.length ? view.breadcrumbs : [{ id: 'home', title: 'Home' }];
-  const activity = view ? getPageActivity(view.page.status, view.provider.configured, Boolean(syncError), view.execution?.failureCode) : null;
+  const activity = view ? getPageActivity(view.page.status, view.provider.configured, Boolean(syncError), view.execution?.failureCode, view.execution?.providerWaiting) : null;
   const failedMessage = view?.page.status === 'error'
     ? [...view.messages].reverse().find(message => message.role !== 'assistant') ?? null : null;
   const lastMessage = view?.messages[view.messages.length - 1];
@@ -492,7 +492,8 @@ export default function App() {
     </div>
     {pulseOpen && bootstrap ? <PulseActivity pageId={route.id} pages={pages}
       workspaceId={bootstrap.workspaceId} serviceInstanceId={bootstrap.serviceInstanceId}
-      navigate={navigate} onClose={() => setPulseOpen(false)} /> : null}
+      navigate={navigate} onChanged={() => { void refreshWorkspace().catch(() => {}); }}
+      onClose={() => setPulseOpen(false)} /> : null}
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
     {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : modal.mode === 'artifact' ? pages.filter(page => page.kind === 'work' && page.id !== modal.artifact.pageId) : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.mode === 'artifact' ? undefined : modal.message })} /> : null}

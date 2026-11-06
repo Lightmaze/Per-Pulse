@@ -808,6 +808,10 @@ class PageService:
         for row in rows:
             origin = self._state["messageOrigins"].get(row["event_id"], {})
             activation = None
+            if row["metadata"].get("context_pulse") == "first_departure":
+                activation = "self_departure"
+            if activation is None and row["kind"] in {"stimulus", "spontaneous"} and row["source"] == "self":
+                activation = "self_activity"
             if page_id == "home":
                 report_origin = self._native_report_origin(row)
                 if report_origin is not None:

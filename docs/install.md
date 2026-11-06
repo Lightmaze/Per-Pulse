@@ -57,6 +57,12 @@ Use `--pulse-budget N` to change this or `--no-pulse` to switch it off. Model
 file changes apply by default and offer Undo; `--ask-before-edits` asks first.
 See [workspace actions](workspace-actions.md) for what Undo can restore.
 
+## Start autonomous practice
+
+For self-directed work, open Activity, choose a weekly request limit and select
+**Start autonomous practice**. See [autonomous practice](autonomous-practice.md)
+for pause, usage and restart behavior.
+
 ## Update and keep your work
 
 Stop the service before upgrading, then install the new wheel in the same

@@ -165,6 +165,19 @@ export function useWorkspace() {
   const cachedView = views[route.id];
   const activeView = pageBelongsToWorkspace(cachedView, bootstrap)
     ? { ...cachedView!, provider: bootstrap!.provider } : undefined;
+  const latestPage = bootstrap?.pages.find(page => page.id === route.id);
+  useEffect(() => {
+    // A quiet page can gain a native SELF result or a Work report while no
+    // foreground turn is polling. Observe its newer World summary using the
+    // existing reader, retaining route, source focus and the unsent draft.
+    if (!activeView || !latestPage
+      || Date.parse(latestPage.updatedAt) <= Date.parse(activeView.page.updatedAt)) return;
+    const controller = new AbortController();
+    refreshPage(route.id, controller.signal).catch(problem => {
+      if (!controller.signal.aborted) setSyncError(problem instanceof Error ? problem.message : 'Updates could not be checked. Please try again.');
+    });
+    return () => controller.abort();
+  }, [route.id, route.serial, latestPage?.updatedAt, activeView?.page.updatedAt, refreshPage]);
   const shouldPoll = activeView?.provider.configured && (['queued', 'working', 'needs_attention'].includes(activeView.page.status)
     || activeView.tick?.status === 'running');
   const shouldPollWorkspace = bootstrap?.provider.configured && bootstrap.pages.some(page =>

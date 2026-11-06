@@ -389,15 +389,21 @@ class PageExecution:
                 turn and turn.status not in _TERMINAL and not superseded
                 and (turn.status is TurnStatus.BLOCKED or not self._attached(turn.scope))
             )
+            failure_code = (self._turn_error_code(turn.scope)
+                            if turn and turn.status in {TurnStatus.FAILED, TurnStatus.BLOCKED} else None)
+            provider_waiting = bool(turn and failure_code in {
+                "autonomous_weekly_requests_exhausted", "autonomous_weekly_requests_paused",
+            } and self._can_supersede(turn))
+            if provider_waiting:
+                recovery = False
             entry = native_replay.mode(kernel.store, turn.scope) if turn and turn.status not in _TERMINAL else None
             return {
                 "pageId": page_id, "sessionId": session.scope.session_id,
                 "turnId": turn.scope.turn_id if turn else None, "status": status,
-                "canCancel": bool(turn and turn.status not in _TERMINAL and not superseded),
+                "canCancel": bool(turn and turn.status not in _TERMINAL and not superseded and not provider_waiting),
                 "pendingActions": actions, "pendingActionsTruncated": pending_truncated,
                 "recoveryRequired": recovery,
-                "failureCode": (self._turn_error_code(turn.scope)
-                                if turn and turn.status in {TurnStatus.FAILED, TurnStatus.BLOCKED} else None),
+                "failureCode": failure_code, "providerWaiting": provider_waiting,
                 "steps": (self._steps(turn.scope)
                           if turn and turn.status not in _TERMINAL else []),
                 "replay": {"sourceCount": len(entry["message_ids"]),

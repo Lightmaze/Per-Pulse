@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Start autonomous practice once from Activity, with a native SELF origin,
+  focused Work, shared weekly requests, source-linked results and restart-safe pause.
+
 - Add an opt-in weekly allowance for autonomous model requests in Activity.
   Retries and uncertain sends remain counted across restarts; direct user
   messages stay usable while background events wait for more allowance.

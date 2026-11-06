@@ -83,6 +83,7 @@ export type PageExecution = {
   canCancel: boolean; pendingActions: PendingAction[]; pendingActionsTruncated: boolean;
   recoveryRequired: boolean; historicalUncertainty: boolean; updatedAt: string | null;
   failureCode?: string | null;
+  providerWaiting?: boolean;
   steps?: ExecutionStep[];
   commandOutputs?: { items: CommandOutput[]; truncated: boolean };
   uncertainActions: UncertainAction[];

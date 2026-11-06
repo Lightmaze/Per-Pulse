@@ -68,14 +68,20 @@ try {
   const allowance = page.getByRole('region', { name: 'Autonomous provider requests', exact: true });
   await allowance.getByText('Autonomous model requests are disabled.', { exact: true }).waitFor();
   await allowance.getByRole('spinbutton', { name: 'Requests per week', exact: true }).fill('3');
-  await allowance.getByRole('button', { name: 'Enable allowance', exact: true }).click();
-  await allowance.getByText('Used 0 of 3 requests this week (0 reserved, 3 available).', { exact: true }).waitFor();
-  assert.equal((await (await fetch(base + '/api/pulse/weekly-usage')).json()).usage.enabled, true);
-  checks.push('rendered Activity explicitly enables a finite persisted autonomous allowance');
+  await allowance.getByRole('button', { name: 'Save limit', exact: true }).click();
+  assert.equal((await fetch(base + '/api/pulse/weekly-usage', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: true, weeklyLimit: 3 }),
+  })).status, 200);
   await page.reload();
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
   await allowance.getByText('Used 0 of 3 requests this week (0 reserved, 3 available).', { exact: true }).waitFor();
-  await allowance.getByRole('button', { name: 'Disable new requests', exact: true }).click();
+  assert.equal((await (await fetch(base + '/api/pulse/weekly-usage')).json()).usage.enabled, true);
+  checks.push('rendered Activity saves a finite limit and reads an explicitly enabled autonomous allowance');
+  await page.reload();
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await allowance.getByText('Used 0 of 3 requests this week (0 reserved, 3 available).', { exact: true }).waitFor();
+  await allowance.getByRole('button', { name: 'Pause autonomous practice', exact: true }).click();
   await allowance.getByText('Autonomous model requests are disabled.', { exact: true }).waitFor();
   const heldAllowance = (await (await fetch(base + '/api/pulse/weekly-usage')).json()).usage;
   assert.equal(heldAllowance.enabled, false);
