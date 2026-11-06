@@ -100,7 +100,7 @@ def test_weekly_api_rejects_unconfigured_spending_and_invalid_world(tmp_path):
             json={"enabled": True, "weeklyLimit": 10},
         )
         assert enabled.status_code == 409
-        assert enabled.json()["error"] == "provider_unconfigured"
+        assert enabled.json()["error"]["code"] == "provider_unconfigured"
         mismatch = client.patch(
             "/api/pulse/weekly-usage",
             json={"enabled": False, "weeklyLimit": 0},
@@ -118,4 +118,4 @@ def test_example_cannot_enable_remote_provider_budget(tmp_path):
             json={"enabled": True, "weeklyLimit": 1},
         )
         assert reply.status_code == 409
-        assert reply.json()["error"] == "example_mode"
+        assert reply.json()["error"]["code"] == "example_mode"
