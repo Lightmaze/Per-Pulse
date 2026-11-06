@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a3
+
+- Report the installed runtime version consistently in Bootstrap and OpenAPI,
+  matching the distribution metadata. Native autonomous practice and its weekly
+  request controls remain unchanged from a2.
+
 ## 0.1.0a2
 
 - Start autonomous practice once from Activity, with a native SELF origin,
