@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from pulse_harness.core.contracts import ToolDescriptor
@@ -102,6 +103,11 @@ class NativeHabitat:
     def __init__(self, runtime):
         self.runtime = runtime
 
+    @staticmethod
+    def _index_key(world_id: str, location: str) -> str:
+        return "native-habitat:v1:" + world_id + ":" + hashlib.sha256(
+            location.encode("utf-8")).hexdigest()
+
     def execute(self, scope, call, cancellation, *, action_request_id=None):
         runtime = self.runtime
         values = validate(call.name, call.arguments)
@@ -138,12 +144,52 @@ class NativeHabitat:
                 "current": response.detail,
             }
             if response.effect_receipt is not None:
-                answer["effectReceipt"] = response.effect_receipt.to_dict()
+                receipt = response.effect_receipt.to_dict()
+                answer["effectReceipt"] = receipt
+                # Source lookup is a projection within the SAME World SQLite;
+                # it is not a separate session or a claim about an old version.
+                # A crash between the physical commit and this index leaves
+                # an unattributed current object, never a forged origin.
+                fence = runtime._current_runtime_fence()
+                record = {
+                    "worldId": runtime.world_id, "path": location,
+                    "afterDigest": receipt["after_digest"],
+                    "source": source, "effectReceipt": receipt,
+                }
+                try:
+                    runtime.storage.save_component_state_fenced(
+                        self._index_key(runtime.world_id, location),
+                        record, runtime_owner_id=fence.owner_id,
+                        runtime_lease_epoch=fence.epoch,
+                        now=datetime.now(timezone.utc),
+                    )
+                    answer["writerIndex"] = "recorded"
+                except Exception:
+                    # The file was already committed. Never retry that side
+                    # effect because only the attribution index failed.
+                    answer["writerIndex"] = "unavailable_after_commit"
             elif call.name == OBSERVE and values["op"] == "read":
                 # The observation may be bounded; this hashes exactly what
                 # was observed, not an unverified full historical file version.
-                answer["observedTextSha256"] = hashlib.sha256(
+                observed_digest = hashlib.sha256(
                     response.detail.encode("utf-8")).hexdigest()
+                answer["observedTextSha256"] = observed_digest
+                record = runtime.storage.load_component_state(
+                    self._index_key(runtime.world_id, location))
+                if (isinstance(record, dict)
+                        and record.get("worldId") == runtime.world_id
+                        and record.get("path") == location
+                        and record.get("afterDigest") == observed_digest
+                        and isinstance(record.get("source"), dict)
+                        and isinstance(record.get("effectReceipt"), dict)):
+                    answer["lastVerifiedWrite"] = {
+                        "source": record["source"],
+                        "effectReceipt": record["effectReceipt"],
+                    }
+                else:
+                    # External edits or old partial journal recovery do not
+                    # inherit attribution from a mismatched earlier version.
+                    answer["lastVerifiedWrite"] = None
             return answer
 
         if call.name == WRITE:

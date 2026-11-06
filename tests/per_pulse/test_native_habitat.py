@@ -65,6 +65,9 @@ def test_two_distinct_works_revisit_one_persistent_region(tmp_path, monkeypatch)
         run_event(pages.runtime, pages.runtime.causal_ledger.get_event(second["initialMessageId"]))
         assert fixture.outcomes[0]["status"] == "succeeded"
         assert fixture.outcomes[0]["output"]["current"] == "An actual first observation.\n"
+        assert fixture.outcomes[0]["output"]["lastVerifiedWrite"]["effectReceipt"] == receipt
+        assert fixture.outcomes[0]["output"]["lastVerifiedWrite"]["source"]["contextId"].startswith("work:")
+        assert fixture.outcomes[0]["output"]["lastVerifiedWrite"]["source"]["kernelActionId"] == receipt["correlation_id"]
         assert fixture.outcomes[0]["output"]["source"]["contextId"].startswith("work:")
         assert len(pages.runtime.storage.list_engrams()) == 1
     finally:
@@ -85,6 +88,7 @@ def test_two_distinct_works_revisit_one_persistent_region(tmp_path, monkeypatch)
         assert (resumed.runtime.habitat.root / "regions/garden/notes.txt").read_text() == after
         assert answer["output"]["effectReceipt"]["before_digest"] == receipt["after_digest"]
         assert answer["output"]["effectReceipt"]["after_digest"] == hashlib.sha256(after.encode()).hexdigest()
+        assert answer["output"]["writerIndex"] == "recorded"
         assert len(resumed.runtime.storage.list_engrams()) == 1
     finally:
         resumed.runtime.close()
