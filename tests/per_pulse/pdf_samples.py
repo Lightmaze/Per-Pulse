@@ -5,13 +5,16 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 from __future__ import annotations
 
 
-def synthetic_pdf(pages: list[str], *, padding: int = 0) -> bytes:
+def synthetic_pdf(pages: list[str], *, padding: int = 0, scan_marker: bool = False) -> bytes:
     """A valid PDF whose pages each carry one line of ASCII text.
 
     ``padding`` adds a comment of that many bytes, to make a larger file.
+    ``scan_marker`` draws SCAN as a raster image on page one, alongside its
+    selectable text. The marker is pixels, not text in the content stream.
     """
     objects: list[bytes] = []
     page_ids = [4 + 2 * index for index in range(len(pages))]
+    image_id = 4 + 2 * len(pages)
     objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
     kids = " ".join(f"{page} 0 R" for page in page_ids).encode()
     objects.append(b"<< /Type /Pages /Kids [" + kids + b"] /Count " + str(len(pages)).encode() + b" >>")
@@ -19,10 +22,30 @@ def synthetic_pdf(pages: list[str], *, padding: int = 0) -> bytes:
     for index, text in enumerate(pages):
         escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)").encode("ascii")
         stream = b"BT /F1 12 Tf 72 720 Td (" + escaped + b") Tj ET" if text else b""
+        image = scan_marker and index == 0
+        if image:
+            stream += b"\nq 230 0 0 70 72 600 cm /Marker Do Q"
+        resources = (b"/Resources << /Font << /F1 3 0 R >> "
+                     + (b"/XObject << /Marker " + str(image_id).encode() + b" 0 R >> " if image else b"")
+                     + b">> /Contents ")
         objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-                       b"/Resources << /Font << /F1 3 0 R >> >> /Contents "
+                       + resources
                        + str(page_ids[index] + 1).encode() + b" 0 R >>")
         objects.append(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream")
+    if scan_marker:
+        # Four 5x7 glyphs separated by one column, black on white. No font or
+        # image library is needed to create a genuinely non-searchable label.
+        glyphs = [
+            ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],  # S
+            ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],  # C
+            ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],  # A
+            ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],  # N
+        ]
+        pixels = bytes(0 if bit == "1" else 255
+                       for row in range(7) for bit in "0".join(glyph[row] for glyph in glyphs))
+        objects.append(b"<< /Type /XObject /Subtype /Image /Width 23 /Height 7 "
+                       b"/ColorSpace /DeviceGray /BitsPerComponent 8 /Length "
+                       + str(len(pixels)).encode() + b" >>\nstream\n" + pixels + b"\nendstream")
     out = bytearray(b"%PDF-1.4\n")
     if padding:
         out += b"%" + b"x" * padding + b"\n"

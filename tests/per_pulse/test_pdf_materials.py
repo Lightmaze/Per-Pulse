@@ -20,10 +20,12 @@ from per_pulse.materials import material_footer
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 from pulse_harness.adapters.document_text import MAX_PDF_TEXT_CHARS, read_pdf
 from pulse_system.product.files import MAX_FILE_BYTES
+from pulse_system.service import workspace_reading
 from pdf_samples import amplifying_pdf, synthetic_pdf
 from test_material_downloads import download as download_material, identity
 from test_materials import upload
 from test_pages import client_for, send, wait_for
+from test_reading_continuity import ReadingFixture, read
 
 REPORT = synthetic_pdf(["Quarterly revenue grew 12 percent.", "Costs fell in the second half."])
 
@@ -158,7 +160,7 @@ def test_reading_stops_at_the_page_bound_and_says_where():
 
 def test_nontext_pages_are_not_silent_search_negatives(tmp_path, monkeypatch):
     """A complete text-layer extraction is not a search of an unreadable image page."""
-    scanned = synthetic_pdf(["", "Visible text on page two."])
+    scanned = synthetic_pdf(["", "Visible text on page two."], scan_marker=True)
     extraction = read_pdf(scanned)
     assert extraction.complete is True and extraction.pages_without_selectable_text is True
     assert "[Page 1]" in extraction.text
@@ -181,6 +183,110 @@ def test_nontext_pages_are_not_silent_search_negatives(tmp_path, monkeypatch):
         wait_for(client, "home", lambda view: any(m["role"] == "assistant" for m in view["messages"]), timeout=15)
     assert read[-1]["output"]["pdf_pages_without_selectable_text"] is True
     assert "[Page 1]" in read[-1]["output"]["content"]
+
+
+@pytest.mark.parametrize("scan_marker,query,matched", [
+    (True, "SCAN", False),
+    (True, "Selectable caption", True),
+    (False, "Selectable caption", True),
+])
+def test_pdf_search_reports_text_scope_even_when_every_page_has_text(
+        tmp_path, monkeypatch, scan_marker, query, matched):
+    pdf = synthetic_pdf(["Selectable caption."], scan_marker=scan_marker)
+    page = PdfReader(BytesIO(pdf)).pages[0]
+    if scan_marker:
+        # A drawn raster object shares a page with selectable text.
+        image = page["/Resources"]["/XObject"]["/Marker"].get_object()
+        assert image["/Subtype"] == "/Image"
+        assert (image["/Width"], image["/Height"]) == (23, 7)
+        assert set(image.get_data()) == {0, 255}
+        assert b"/Marker Do" in page.get_contents().get_data()
+    assert "SCAN" not in page.extract_text()
+    extraction = read_pdf(pdf)
+    assert extraction.complete is True
+    assert extraction.pages_without_selectable_text is False
+    assert extraction.text == "[Page 1]\nSelectable caption."
+    found = []
+    with client_for(tmp_path, model_factory=_reading_model(
+            monkeypatch, found, extra={"op": "find", "query": query})) as client:
+        material = upload(client, "home", "caption.pdf", pdf).json()["material"]
+        send(client, "home", "Find the requested text.", materials=[material["id"]])
+        wait_for(client, "home", lambda view: any(m["role"] == "assistant" for m in view["messages"]), timeout=15)
+    result = found[-1]["output"]
+    assert result["source"]["source_complete"] is True
+    assert result["source"]["pages_without_selectable_text"] is False
+    assert result["content_scope"] == "extracted_pdf_text"
+    assert result["searched_entire_source"] is False
+    assert result["searched_entire_redacted_view"] is True
+    assert bool(result["matches"]) is matched
+    if matched:
+        assert "Selectable caption." in result["matches"][0]["excerpt"]
+
+
+@pytest.mark.parametrize("tool", ["reading", "read_file"])
+def test_pdf_reading_distinguishes_complete_text_from_visual_content(tmp_path, monkeypatch, tool):
+    pdf = synthetic_pdf(["Selectable caption."], scan_marker=True)
+    seen = []
+    with client_for(tmp_path, model_factory=_reading_model(monkeypatch, seen, tool)) as client:
+        material = upload(client, "home", "mixed.pdf", pdf).json()["material"]
+        preview = client.get(f"/api/pages/home/materials/{material['id']}").json()
+        assert preview["format"] == "pdf_text" and preview["complete"] is True
+        assert preview["content"] == "[Page 1]\nSelectable caption."
+        assert download_material(client, "home", material).content == pdf
+        send(client, "home", "Read the file.", materials=[material["id"]])
+        wait_for(client, "home", lambda view: any(m["role"] == "assistant" for m in view["messages"]), timeout=15)
+    result = seen[-1]["output"]
+    source = result["source"] if tool == "reading" else result
+    assert result["content_scope"] == "extracted_pdf_text"
+    assert source["source_complete" if tool == "reading" else "pdf_complete"] is True
+    assert source["pages_without_selectable_text" if tool == "reading" else "pdf_pages_without_selectable_text"] is False
+    assert "Selectable caption." in json.dumps(result)
+    assert "SCAN" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("operation", ["continue", "resume", "follow"])
+def test_pdf_receipts_from_before_scope_metadata_still_work_after_restart(tmp_path, monkeypatch, operation):
+    fixture = ReadingFixture(monkeypatch.setenv)
+    execute = workspace_reading.execute
+
+    def legacy_execute(*args, **kwargs):
+        result = execute(*args, **kwargs)
+        # Persist the previous release's receipt shape through the actual
+        # Kernel. The next process must accept that unchanged source identity.
+        result.pop("content_scope", None)
+        result.pop("searched_entire_source", None)
+        result["source"] = {key: result["source"][key] for key in (
+            "path", "digest", "view_digest", "view_format", "workspace_digest",
+            "source_complete", "pages_without_selectable_text")}
+        return result
+
+    monkeypatch.setattr(workspace_reading, "execute", legacy_execute)
+    pdf = synthetic_pdf(["Selectable caption. More text."], scan_marker=True)
+    text = read_pdf(pdf).text
+    with client_for(tmp_path, model_factory=fixture.factory) as client:
+        material = upload(client, "home", "old.pdf", pdf).json()["material"]
+        arguments = ({"op": "find", "query": "caption"} if operation == "follow"
+                     else {"op": "open", "max_chars": 12})
+        previous = read(client, "home", fixture, path=material["path"], **arguments)["output"]
+        assert "content_scope" not in previous
+    monkeypatch.setattr(workspace_reading, "execute", execute)
+    with client_for(tmp_path, model_factory=fixture.factory) as client:
+        if operation != "follow":
+            recent = read(client, "home", fixture, op="recent")["output"]["passages"][0]
+            assert recent["content_scope"] == "extracted_pdf_text"
+            assert recent["source"] == previous["source"]
+        arguments = {"match_index": 0} if operation == "follow" else {}
+        current = read(client, "home", fixture, op=operation, receipt_id=previous["receipt_id"],
+                       max_chars=8, **arguments)
+        assert current["status"] == "succeeded", current
+        result = current["output"]
+        start = text.index("caption") if operation == "follow" else 12
+        assert result["content"] == text[start:start + 8]
+        assert result["source"] == previous["source"]
+        assert result["content_scope"] == "extracted_pdf_text"
+        recent = read(client, "home", fixture, op="recent")["output"]["passages"][0]
+        assert recent["content_scope"] == "extracted_pdf_text"
+        assert recent["source"] == previous["source"]
 
 
 def test_a_search_of_a_pdf_read_only_in_part_says_it_is_partial(tmp_path, monkeypatch):
