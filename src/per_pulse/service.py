@@ -85,6 +85,9 @@ BACKGROUND_TURN_TIMEOUT_SECONDS = 600.0
 # out of the request (never deleted) and stay searchable with the history
 # tools. Set P_PULSE_CONTEXT_TOKENS to match a smaller or larger model.
 DEFAULT_CONTEXT_TOKENS = 96_000
+# One native message or tool envelope, including JSON metadata. Ordinary
+# document rewrites need more room than the generic Kernel's 64 KiB default.
+NATIVE_PAYLOAD_BYTES = 1024 * 1024
 # Effectively no World-wide token cap; see RuntimeServiceConfig below.
 UNCAPPED_WORLD_TOKENS_PER_HOUR = 10 ** 15
 
@@ -182,6 +185,7 @@ class PageService:
             enable_posture=False if example else posture, auto_apply_edits=self.auto_apply_edits,
             max_model_rounds=FOREGROUND_MODEL_ROUNDS, approval_ttl_sec=APPROVAL_TTL_SECONDS,
             max_context_tokens=context_tokens_from_env(),
+            max_payload_bytes=NATIVE_PAYLOAD_BYTES,
         )
         self.runtime = RuntimeService(config, harness_factory=harness)
         self.execution = PageExecution(self.runtime)

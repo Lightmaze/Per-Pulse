@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Complete document rewrites use a 1 MiB native message and action envelope,
+  including approval details, with compact file passages and result previews.
+  Downloads and checkpoint Undo preserve the original bytes across restarts.
+
 ## 0.1.0a1
 
 First local alpha with a bundled browser interface and a Python wheel install.

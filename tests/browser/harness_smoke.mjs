@@ -67,6 +67,20 @@ try {
   await sourceLink.click();
   await page.getByRole('heading',{name:'Approved note',exact:true}).waitFor();
   check('Home source link returns to the original Work',new URL(page.url()).pathname.endsWith('/'+approvedId));
+  await create('Complete document rewrite','WRITE_REWRITE');
+  const rewriteId = new URL(page.url()).pathname.split('/').pop();
+  await page.getByRole('button',{name:'Allow once',exact:true}).click();
+  await page.locator('.message-assistant').getByText('Synthetic model fixture: this page has finished its turn.',{exact:true}).waitFor();
+  await page.getByRole('button',{name:/rewritten-report.txt/}).click();
+  const rewritten = (await (await fetch(base+'/api/pages/'+rewriteId+'/artifacts')).json()).artifacts[0];
+  const downloaded = await (await fetch(base+'/api/pages/'+rewriteId+'/artifacts/'+rewritten.id+'/download')).text();
+  check('complete document rewrite over 64 KiB preserves exact bytes and continuation',
+    downloaded === 'A complete rewritten line: "quoted", café and source text.\r\n'.repeat(4000));
+  await page.reload();
+  await page.getByRole('heading',{name:'Complete document rewrite',exact:true}).waitFor();
+  await page.getByRole('button',{name:/rewritten-report.txt/}).click();
+  check('large rewrite remains source-linked after reload',
+    (await (await fetch(base+'/api/pages/'+rewriteId+'/artifacts')).json()).artifacts[0].id===rewritten.id);
   await create('Declined note','WRITE_DECLINE');
   const declinedId = new URL(page.url()).pathname.split('/').pop();
   // An approval blocked in a sibling Work must become discoverable in Home,
