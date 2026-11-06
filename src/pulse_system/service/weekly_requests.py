@@ -132,6 +132,12 @@ class WeeklyRequestBudget:
                 return
             if entry["status"] != old:
                 raise ValueError("provider request ticket cannot be reused or rewritten")
+            if new == "dispatched":
+                # Pause must fence tickets that were reserved but not yet
+                # physically sent. Previously dispatched slots are not freed.
+                policy = self._load_policy()
+                if not policy["enabled"]:
+                    raise WeeklyRequestUnavailable("autonomous provider requests are paused")
             entry["status"] = new
             if new == "dispatched":
                 entry["dispatched_at"] = stamp.isoformat()
@@ -202,7 +208,14 @@ class WeeklyRequestGate:
 
     def dispatch(self, ticket):
         if ticket is not None:
-            self.budget.dispatch(ticket)
+            from pulse_harness.core.errors import ProviderUnavailable
+            try:
+                self.budget.dispatch(ticket)
+            except WeeklyRequestUnavailable as exc:
+                raise ProviderUnavailable(
+                    "Autonomous weekly provider requests were paused before dispatch.",
+                    code="autonomous_weekly_requests_paused",
+                ) from exc
 
     def settle(self, ticket, outcome):
         if ticket is not None:
