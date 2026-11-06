@@ -56,6 +56,8 @@ exclude = [
 
 [tool.hatch.build.targets.sdist.force-include]
 "web/dist" = "web/dist"
+"tests/fixtures/web_tls/cert.pem" = "tests/fixtures/web_tls/cert.pem"
+"tests/fixtures/web_tls/key.pem" = "tests/fixtures/web_tls/key.pem"
 
 [tool.pytest.ini_options]
 testpaths = ["tests/per_pulse"]

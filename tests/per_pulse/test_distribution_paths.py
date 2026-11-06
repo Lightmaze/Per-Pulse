@@ -23,6 +23,14 @@ def test_source_archive_admits_exact_public_synthetic_tls_bytes():
     verifier.check_source_paths(FIXTURES.__getitem__, set(FIXTURES) | {PREFIX + "src/per_pulse/app.py"}, PREFIX)
 
 
+@pytest.mark.parametrize("missing", [("cert.pem",), ("key.pem",), ("cert.pem", "key.pem")])
+def test_source_archive_requires_both_public_tls_fixtures(missing):
+    remaining = {name: data for name, data in FIXTURES.items()
+                 if name.rsplit("/", 1)[-1] not in missing}
+    with pytest.raises(AssertionError, match="Missing public TLS fixture"):
+        verifier.check_source_paths(remaining.__getitem__, set(remaining), PREFIX)
+
+
 @pytest.mark.parametrize("name", ["cert.pem", "key.pem", "private.key", "private.p12"])
 def test_default_archive_policy_still_rejects_every_certificate_or_key(name):
     with pytest.raises(AssertionError):
