@@ -1334,6 +1334,7 @@ class StructuredWorkspaceToolProvider:
             "digest": snapshot.digest,
             # pdf_complete is false when the text stops before the PDF's end.
             **({"format": "pdf_text", "pdf_complete": complete,
+                "content_scope": "extracted_pdf_text",
                 "pdf_pages_without_selectable_text": missing_text} if is_pdf else {}),
             "workspace_provenance": {
                 "adapter": "pulse_harness.workspace.v1",

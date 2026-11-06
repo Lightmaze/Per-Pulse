@@ -227,9 +227,13 @@ def _recent(provider, scope, args, cancellation):
             "next": output["next"],
             "source_turn_id": record.scope.turn_id,
         }
-        for name in ("resumed_from", "followed_from"):
+        for name in ("resumed_from", "followed_from", "content_scope"):
             if name in output:
                 item[name] = output[name]
+        # Older PDF receipts already identified their text extraction with
+        # source_complete. Add presentation metadata without changing identity.
+        if "content_scope" not in item and type(output["source"].get("source_complete")) is bool:
+            item["content_scope"] = "extracted_pdf_text"
         result["passages"].append(item)
         if _size(result) > provider.store.max_payload_bytes // 2:
             result["passages"].pop()
@@ -314,9 +318,12 @@ def execute(
             "kind": FIND_KIND, "receipt_id": action_request_id, "source": source,
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "scope": "current_action_source", "observation_only": True,
+            **({"content_scope": "extracted_pdf_text"} if is_pdf else {}),
             "redacted": redacted, "searched_entire_redacted_view": True,
             # Even a fully extracted text layer cannot search images or scans.
-            **({} if complete and not missing_text else {"searched_entire_source": False}),
+            # Selectable text on every page does not establish visual coverage:
+            # a page can mix a text caption with an image or an incomplete OCR layer.
+            **({"searched_entire_source": False} if is_pdf or not complete or missing_text else {}),
             "coordinates": "unicode_characters_in_redacted_view",
             "case_mode": "unicode_casefold" if casefold else "case_sensitive" if not flags else "regex_ignorecase",
             "matches": [], "more_matches": False,
@@ -370,6 +377,7 @@ def execute(
     end = min(len(text), offset + call.arguments.get("max_chars", 4000))
     result = {
         "kind": KIND, "receipt_id": action_request_id, "source": source,
+        **({"content_scope": "extracted_pdf_text"} if is_pdf else {}),
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "position": {"start_char": offset, "end_char": end, "total_chars": len(text),
                      "unit": "unicode_characters_in_redacted_view"},
