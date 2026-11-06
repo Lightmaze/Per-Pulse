@@ -173,3 +173,46 @@ def test_native_world_sqlite_survives_process_reopen(tmp_path):
         assert status["remaining"] == 1
     finally:
         second_store.close()
+
+
+def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
+    from types import SimpleNamespace as Row
+    from pulse_harness.core.provider import ModelRequest
+    from pulse_harness.core.scope import HarnessScope
+    from pulse_harness.core.errors import ProviderUnavailable
+    from pulse_system.core.types import CausalEventKind as Kind, CausalEventSource as Source
+    from pulse_system.service.weekly_requests import world_source_for_scope
+
+    class Ledger:
+        def __init__(self, events, turn_event):
+            self.events = {event.id: event for event in events}
+            self.turn_event = turn_event
+
+        def get_turn_for_world(self, turn_id, world_id):
+            return Row(engram_id="engram", event_id=self.turn_event) if turn_id == "turn" and world_id == "world" else None
+
+        def get_event(self, event_id):
+            return self.events.get(event_id)
+
+    scope = HarnessScope("world", "engram", "session", 0, "owner", turn_id="turn")
+    user = Row(id="user", world_id="world", kind=Kind.STIMULUS,
+               source=Source.USER, parent_event_id=None)
+    self_root = Row(id="self", world_id="world", kind=Kind.SPONTANEOUS,
+                    source=Source.SELF, parent_event_id=None)
+    propagated = Row(id="propagated", world_id="world", kind=Kind.PROPAGATION,
+                     source=Source.PROPAGATION, parent_event_id="self")
+    delegated = Row(id="delegated", world_id="world", kind=Kind.DELEGATION_REQUEST,
+                    source=Source.DELEGATION, parent_event_id="propagated")
+
+    assert world_source_for_scope(Ledger([user], "user"), "world", scope) is None
+    assert world_source_for_scope(Ledger([self_root, propagated, delegated], "delegated"),
+                                  "world", scope) == "self"
+    delegated.parent_event_id = "user"
+    assert world_source_for_scope(Ledger([user, delegated], "delegated"), "world", scope) is None
+    delegated.parent_event_id = "missing"
+    with pytest.raises(ProviderUnavailable) as failure:
+        world_source_for_scope(Ledger([delegated], "delegated"), "world", scope)
+    assert failure.value.code == "autonomous_request_source_unverified"
+    delegated.parent_event_id = "delegated"
+    with pytest.raises(ProviderUnavailable):
+        world_source_for_scope(Ledger([delegated], "delegated"), "world", scope)
