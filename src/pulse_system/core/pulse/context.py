@@ -275,6 +275,11 @@ class ContextPulseController:
             runtime_lease_epoch=fence.epoch, now=now,
         )
 
+    def background_paused(self) -> bool:
+        """Whether the person's global hold blocks new background sends."""
+        with self.storage._lock:
+            return self.config.enabled and self._state["paused"]
+
     def set_paused(self, paused: bool) -> None:
         """Atomically hold native background admission without erasing influence.
 
@@ -717,6 +722,24 @@ class ContextPulseController:
         return 1.0
 
     # ── Explicit time steps (/tick) ───────────────────────────────
+
+    def is_person_requested_tick(self, event) -> bool:
+        """Verify the native receipt of a person's bounded continuation run."""
+        if (event.world_id != self.world_id or event.kind is not CausalEventKind.SPONTANEOUS
+                or event.source is not CausalEventSource.SELF or event.content is not None
+                or event.metadata.get("context_pulse") != "tick"):
+            return False
+        run_id = event.metadata.get("tick_run_id")
+        index, target = event.metadata.get("tick_index"), event.metadata.get("tick_target")
+        if (not isinstance(run_id, str) or not run_id or type(index) is not int
+                or type(target) is not int or not 1 <= index <= target <= TICK_LIMIT
+                or event.idempotency_key != f"context-tick:{self.world_id}:{run_id}:{index}"):
+            return False
+        parent = self.ledger.get_event(event.parent_event_id) if event.parent_event_id else None
+        return (parent is not None and parent.world_id == self.world_id
+                and parent.kind is CausalEventKind.ASSISTANT_RESULT
+                and parent.status is CausalEventStatus.SETTLED
+                and parent.center_id == event.center_id)
 
     def start_ticks(self, center_id: str | None, count: int, *, now: datetime | None = None) -> dict:
         """Give one context ``count`` quiet continuation turns, one at a time.

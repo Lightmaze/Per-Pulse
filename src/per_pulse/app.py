@@ -30,6 +30,7 @@ from .language import ResponseLanguage
 from .execution import ExecutionError
 from .materials import MaterialError, TOO_LARGE as MATERIAL_TOO_LARGE
 from .service import PageError, PageService, PulseSettings, _ENV_PROVIDER
+from .weekly_host import install_world_request_gate
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
 Content = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32_000)]
@@ -144,6 +145,11 @@ class ContextConnectionInput(ConnectionPages):
 
 class PulseControlInput(Input):
     paused: bool = Field(strict=True)
+
+
+class WeeklyUsageInput(Input):
+    enabled: bool = Field(strict=True)
+    weeklyLimit: int = Field(ge=0, le=100_000, strict=True)
 
 
 class ExperienceShift(Input):
@@ -267,6 +273,9 @@ def create_app(
         )
         app.state.pages = pages
         try:
+            # Native request admission must precede any model turn; a World
+            # restart keeps dispatched but unresolved attempts charged.
+            app.state.weekly_requests = await asyncio.to_thread(install_world_request_gate, pages)
             await pages.start()
             yield
         finally:
@@ -418,6 +427,10 @@ def create_app(
     def pulse_observation(request: Request):
         return pages(request).pulse_observation()
 
+    @app.get("/api/pulse/weekly-usage")
+    def pulse_weekly_usage(request: Request):
+        return {"usage": request.app.state.weekly_requests.status()}
+
     def pulse_write_service(request: Request) -> PageService:
         service = pages(request)
         service.require_pulse_identity(
@@ -425,6 +438,21 @@ def create_app(
             request.headers.get("x-per-pulse-service-instance"),
         )
         return service
+
+    @app.patch("/api/pulse/weekly-usage")
+    def configure_pulse_weekly_usage(body: WeeklyUsageInput, request: Request):
+        service = pulse_write_service(request)
+        service.runtime._require_runtime_owner()
+        if service.example and body.enabled:
+            raise PageError("example_mode", "The example workspace cannot enable model spending.", 409)
+        if body.enabled and not service.configured:
+            raise PageError("provider_unconfigured", "Connect a model before enabling autonomous requests.", 409)
+        try:
+            budget = request.app.state.weekly_requests
+            budget.configure(enabled=body.enabled, weekly_limit=body.weeklyLimit)
+        except ValueError as exc:
+            raise PageError("invalid_weekly_usage", str(exc), 422) from exc
+        return {"usage": budget.status()}
 
     @app.patch("/api/pulse")
     def set_pulse_paused(body: PulseControlInput, request: Request):

@@ -298,6 +298,26 @@ export type PulseRetainedAttention = {
   operatorEditedAt: string | null;
 };
 
+/** The native World ledger for physical autonomous provider attempts, UTC weeks. */
+export type WeeklyRequestUsage = {
+  world_id: string;
+  week: string;
+  enabled: boolean;
+  weekly_limit: number;
+  held: number;
+  consumed: number;
+  remaining: number;
+  attempts: number;
+  states: {
+    reserved: number;
+    dispatched: number;
+    completed: number;
+    rejected: number;
+    uncertain: number;
+    abandoned: number;
+  };
+};
+
 export type PulseState = {
   enabled: boolean;
   adaptiveConnections?: boolean;

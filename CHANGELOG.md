@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add an opt-in weekly allowance for autonomous model requests in Activity.
+  Retries and uncertain sends remain counted across restarts; direct user
+  messages stay usable while background events wait for more allowance.
 - Complete document rewrites use a 1 MiB native message and action envelope,
   including approval details, with compact file passages and result previews.
   Downloads and checkpoint Undo preserve the original bytes across restarts.

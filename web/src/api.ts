@@ -1,4 +1,4 @@
-import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, PostureExperience, PostureView, ResponseLanguage, TickRun, WorkspaceSettings } from './types';
+import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, WeeklyRequestUsage, PostureExperience, PostureView, ResponseLanguage, TickRun, WorkspaceSettings } from './types';
 import type { AdaptiveWorkChoices, CollaboratorOutcome, CollaboratorFeedbackScope, CollaboratorFeedbackView, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 import type { CommandOutput, CommandOutputRead, CommandOutputStream } from './types';
 
@@ -146,6 +146,13 @@ export const api = {
     }),
   pulse: (signal?: AbortSignal) => request<PulseState>('/pulse', { signal }),
   pulseObservation: (signal?: AbortSignal) => request<PulseObservation>('/pulse/observation', { signal }),
+  weeklyUsage: (signal?: AbortSignal) =>
+    request<{ usage: WeeklyRequestUsage }>('/pulse/weekly-usage', { signal }),
+  setWeeklyUsage: (enabled: boolean, weeklyLimit: number, identity: PulseWriteIdentity) =>
+    request<{ usage: WeeklyRequestUsage }>('/pulse/weekly-usage', {
+      method: 'PATCH', headers: pulseWriteHeaders(identity),
+      body: JSON.stringify({ enabled, weeklyLimit }),
+    }),
   setPulsePaused: (paused: boolean, identity: PulseWriteIdentity) =>
     request<{ pulse: PulseState }>('/pulse', { method: 'PATCH', headers: pulseWriteHeaders(identity), body: JSON.stringify({ paused }) }),
   setPulseContextPaused: (pageId: string, paused: boolean, identity: PulseWriteIdentity) =>

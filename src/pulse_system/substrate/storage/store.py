@@ -7126,6 +7126,54 @@ class Storage:
         ).fetchone()
         return json.loads(row[0]) if row else None
 
+    @contextmanager
+    def component_state_transaction(self, *, runtime_owner_id: str | None = None,
+                                    runtime_lease_epoch: int | None = None):
+        """Read and update component JSON atomically across SQLite connections.
+
+        A World with a lease requires its current owner and epoch. Check them
+        both before the callback and before commit; no stale blind replacement
+        can lose another connection's admission or publish after takeover.
+        """
+        if (runtime_owner_id is None) != (runtime_lease_epoch is None):
+            raise ValueError("runtime owner and epoch must be provided together")
+        if runtime_owner_id is not None:
+            runtime_owner_id = _require_owner_id(runtime_owner_id)
+            runtime_lease_epoch = _require_epoch(runtime_lease_epoch)
+        storage = self
+        class Access:
+            active = True
+            def load_component_state(self, component):
+                if not self.active:
+                    raise RuntimeError("component transaction has ended")
+                row = storage._conn.execute("SELECT state FROM component_state WHERE component = ?", (component,)).fetchone()
+                return json.loads(row[0]) if row else None
+            def save_component_state(self, component, state):
+                if not self.active:
+                    raise RuntimeError("component transaction has ended")
+                storage._conn.execute(
+                    "INSERT INTO component_state (component, state, updated_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(component) DO UPDATE SET state=excluded.state, updated_at=excluded.updated_at",
+                    (component, json.dumps(state), _ts(_now())),
+                )
+        def check(conn):
+            self._assert_runtime_publication()
+            if runtime_owner_id is not None:
+                self._assert_runtime_lease_uncommitted(runtime_owner_id, runtime_lease_epoch, _now(), conn)
+            else:
+                lease = self._get_runtime_lease_uncommitted(conn)
+                if lease is not None:
+                    raise RuntimeLeaseLostError(owner_id="unbound-component", epoch=0,
+                                                reason="lease_binding_required", lease=lease)
+        access = Access()
+        try:
+            with self._lock, self._immediate_transaction() as conn:
+                check(conn)
+                yield access
+                check(conn)
+        finally:
+            access.active = False
+
     @_locked
     def native_work_requests(self, *, subject: str | None = None,
                              pending: bool = False, limit: int = 16) -> list[dict]:

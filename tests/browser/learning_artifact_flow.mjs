@@ -64,6 +64,25 @@ try {
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(base);
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  const allowance = page.getByRole('region', { name: 'Autonomous provider requests', exact: true });
+  await allowance.getByText('Autonomous model requests are disabled.', { exact: true }).waitFor();
+  await allowance.getByRole('spinbutton', { name: 'Requests per week', exact: true }).fill('3');
+  await allowance.getByRole('button', { name: 'Enable allowance', exact: true }).click();
+  await allowance.getByText('Used 0 of 3 requests this week (0 reserved, 3 available).', { exact: true }).waitFor();
+  assert.equal((await (await fetch(base + '/api/pulse/weekly-usage')).json()).usage.enabled, true);
+  checks.push('rendered Activity explicitly enables a finite persisted autonomous allowance');
+  await page.reload();
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await allowance.getByText('Used 0 of 3 requests this week (0 reserved, 3 available).', { exact: true }).waitFor();
+  await allowance.getByRole('button', { name: 'Disable new requests', exact: true }).click();
+  await allowance.getByText('Autonomous model requests are disabled.', { exact: true }).waitFor();
+  const heldAllowance = (await (await fetch(base + '/api/pulse/weekly-usage')).json()).usage;
+  assert.equal(heldAllowance.enabled, false);
+  assert.equal(heldAllowance.weekly_limit, 3);
+  assert.equal(heldAllowance.consumed, 0);
+  checks.push('allowance survives reload and a person can stop new sends without erasing its limit');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   const create = async (title, instruction) => {
     await page.getByRole('button', { name: 'Create a page', exact: true }).click();
     await page.getByRole('textbox', { name: 'Page name', exact: true }).fill(title);

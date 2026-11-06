@@ -719,6 +719,35 @@ class NativeTeam:
         return tuple(extra)
 
 
+    def request_origin(self, event_id: str):
+        """Verify the settled caller turn behind a native TUNNEL request."""
+        r = self.runtime
+        event = r.causal_ledger.get_event(event_id)
+        if (event is None or event.world_id != r.world_id
+                or event.kind is not CausalEventKind.DELEGATION_REQUEST):
+            return None
+        caller = event.metadata.get('caller_id')
+        records = r.storage.native_team_requests(subject=caller, delegation_event_id=event.id, limit=1) if caller else []
+        if not records:
+            return None
+        rec = records[0]
+        identity = r.delegation_tunnel.identity_for(r.world_id, caller, rec['center_id'], rec['request_id'])
+        source = r.causal_ledger.get_turn_for_world(rec['source_turn_id'], r.world_id)
+        if (identity.request_event_id != event.id or event.content != consultation_content(rec)
+                or _target(rec) != event.engram_id or event.center_id != rec['center_id']
+                or rec['world_id'] != r.world_id or source is None or source.engram_id != caller
+                or source.state is not HarnessTurnState.SETTLED or not source.result_event_id
+                or rec.get('source_scope', {}).get('turn_id') != source.id
+                or rec.get('source_scope', {}).get('world_id') != r.world_id
+                or rec.get('source_scope', {}).get('engram_id') != caller
+                or rec.get('source_scope', {}).get('context_id') != source.execution_context):
+            return None
+        result = r.causal_ledger.get_event(source.result_event_id)
+        if (result is None or result.world_id != r.world_id or result.engram_id != caller
+                or result.kind is not CausalEventKind.ASSISTANT_RESULT or result.parent_event_id != source.event_id):
+            return None
+        return result
+
     def contribution_origin(self, event_id: str) -> dict[str, Any] | None:
         """Read-only presentation from the exact retained tunnel/result, not text tags."""
         from pulse_system.core.delegation import DelegationConflictError

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
 import httpx
@@ -57,8 +58,17 @@ class TransportFixture:
         )
 
 
+@contextmanager
 def client_for(path, **kwargs):
-    return TestClient(create_app(path, **kwargs), base_url="http://localhost")
+    with TestClient(create_app(path, **kwargs), base_url="http://localhost") as client:
+        settings = kwargs.get("pulse")
+        if (settings is not None and settings.enabled
+                and kwargs.get("model_factory") is not None and not kwargs.get("example")):
+            # Background fixtures explicitly opt into the same finite policy
+            # a person configures in Activity; no test bypasses send admission.
+            enabled = client.patch("/api/pulse/weekly-usage", json={"enabled": True, "weeklyLimit": 1000})
+            assert enabled.status_code == 200, enabled.text
+        yield client
 
 
 def eventually(probe, predicate, *, timeout=8):
