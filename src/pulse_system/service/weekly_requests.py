@@ -257,7 +257,7 @@ class WeeklyRequestGate:
             self.budget.abandon(ticket)
 
 
-def world_source_for_scope(ledger, world_id: str, scope, *, explicit_foreground=None) -> str | None:
+def world_source_for_scope(ledger, world_id: str, scope, *, explicit_foreground=None, origin_for_event=None) -> str | None:
     """Derive the original request pool from immutable World causal ancestry.
 
     A direct user stimulus or a host-verified bounded continuation uses the
@@ -281,10 +281,11 @@ def world_source_for_scope(ledger, world_id: str, scope, *, explicit_foreground=
     turn = ledger.get_turn_for_world(scope.turn_id, world_id)
     if turn is None or turn.engram_id != scope.engram_id:
         raise unknown()
-    return world_source_for_event(ledger, world_id, turn.event_id, explicit_foreground=explicit_foreground)
+    return world_source_for_event(ledger, world_id, turn.event_id,
+                                 explicit_foreground=explicit_foreground, origin_for_event=origin_for_event)
 
 
-def world_source_for_event(ledger, world_id: str, event_id: str, *, explicit_foreground=None) -> str | None:
+def world_source_for_event(ledger, world_id: str, event_id: str, *, explicit_foreground=None, origin_for_event=None) -> str | None:
     """Resolve immutable causal origin before a queued event starts a turn."""
     from pulse_harness.core.errors import ProviderUnavailable
     from pulse_system.core.types import CausalEventDomain, CausalEventKind, CausalEventSource
@@ -308,6 +309,13 @@ def world_source_for_event(ledger, world_id: str, event_id: str, *, explicit_for
             # A person can request finite quiet steps after any prior work.
             # A later genuinely spontaneous reentry still starts its own pool.
             return autonomous_root
+        if (event.kind is CausalEventKind.DELEGATION_REQUEST and event.parent_event_id is None
+                and origin_for_event is not None):
+            origin = origin_for_event(event)
+            if origin is None or origin.world_id != world_id:
+                raise unknown()
+            event = origin
+            continue
         # Native Work instructions/reports carry typed SELF provenance rather
         # than a parent_event_id. Follow their settled World source turn so
         # delegation preserves both a person's request and an autonomous pool.

@@ -8401,6 +8401,10 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         """Current World ownership for atomic physical-request accounting."""
         return self._current_runtime_fence()
 
+    def native_team_request_origin(self, event_id):
+        """Original caller result for a source-bound native consultation."""
+        return self._native_team.request_origin(event_id) if self._native_team is not None else None
+
     def _native_event_admitted(self, event, observed_at):
         if self._context_pulse is not None and not self._context_pulse.admits(event, observed_at):
             return False

@@ -17,7 +17,7 @@ from pulse_system.service.weekly_requests import (
 )
 
 
-def _source_for_model_request(ledger, world_id, origin_scope, request_scope, *, explicit_foreground=None):
+def _source_for_model_request(ledger, world_id, origin_scope, request_scope, *, explicit_foreground=None, origin_for_event=None):
     """Keep borrowed reviewer sends on their original trusted World turn.
 
     The Kernel alone creates the model adapter for origin_scope. CoverMe and
@@ -63,7 +63,8 @@ def _source_for_model_request(ledger, world_id, origin_scope, request_scope, *, 
         # These source-bound, tool-less forks are only entered via the
         # adapter loaned by the native Kernel. The requester cannot select
         # the adapter's immutable originating scope or its request pool.
-    return world_source_for_scope(ledger, world_id, origin_scope, explicit_foreground=explicit_foreground)
+    return world_source_for_scope(ledger, world_id, origin_scope,
+                                 explicit_foreground=explicit_foreground, origin_for_event=origin_for_event)
 
 
 def install_world_request_gate(pages) -> WeeklyRequestBudget:
@@ -90,7 +91,8 @@ def install_world_request_gate(pages) -> WeeklyRequestBudget:
         return WeeklyRequestGate(
             budget, lambda scope: _source_for_model_request(
                 ledger, world_id, parent_scope(), scope,
-                explicit_foreground=runtime.context_pulse.is_person_requested_tick),
+                explicit_foreground=runtime.context_pulse.is_person_requested_tick,
+                origin_for_event=lambda event: runtime.native_team_request_origin(event.id)),
             admission_guard=still_admitted,
         )
 
@@ -99,7 +101,8 @@ def install_world_request_gate(pages) -> WeeklyRequestBudget:
         try:
             source = world_source_for_event(
                 ledger, world_id, event.event_id,
-                explicit_foreground=runtime.context_pulse.is_person_requested_tick)
+                explicit_foreground=runtime.context_pulse.is_person_requested_tick,
+                origin_for_event=lambda event: runtime.native_team_request_origin(event.id))
         except ProviderUnavailable:
             return False
         if source is None:
