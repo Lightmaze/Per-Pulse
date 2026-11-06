@@ -218,6 +218,23 @@ def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
                   source=Source.SELF, parent_event_id="result")
     assert world_source_for_scope(Ledger([user, result, reentry], "reentry"),
                                   "world", scope) == "reentry"
+    # Reentering a prior autonomous context with an explicit new user
+    # instruction resets the request pool, including after succession.
+    # A subsequent SELF reactivation after that instruction spends the pool.
+    new_user = Row(id="new-user", world_id="world", kind=Kind.STIMULUS,
+                   source=Source.USER, parent_event_id="reentry")
+    new_result = Row(id="new-result", world_id="world", kind=Kind.ASSISTANT_RESULT,
+                     source=Source.SELF, parent_event_id="new-user")
+    assert world_source_for_scope(
+        Ledger([user, result, reentry, new_user, new_result], "new-result"),
+        "world", scope,
+    ) is None
+    next_reentry = Row(id="next-reentry", world_id="world", kind=Kind.SPONTANEOUS,
+                       source=Source.SELF, parent_event_id="new-result")
+    assert world_source_for_scope(
+        Ledger([user, result, reentry, new_user, new_result, next_reentry], "next-reentry"),
+        "world", scope,
+    ) == "next-reentry"
     assert world_source_for_scope(Ledger([self_root, propagated, delegated], "delegated"),
                                   "world", scope) == "self"
     delegated.parent_event_id = "user"
