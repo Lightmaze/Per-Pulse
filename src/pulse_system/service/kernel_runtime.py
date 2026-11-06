@@ -35,6 +35,7 @@ from pulse_harness.core.provider import validate_model_adapter
 from pulse_system.agent.harness.base import HarnessError, HarnessTurnResult
 from pulse_system.interaction.api.harness_kernel import HarnessKernelService
 from . import workspace_index, workspace_reading, native_replay
+from pulse_harness.adapters import web_read
 
 _TERMINAL = {TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED, TurnStatus.BLOCKED}
 
@@ -126,7 +127,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
 
     def descriptors(self):
         return tuple(d for d in super().descriptors()
-                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),)) + (() if self._attention is None else (self._attention_descriptor(),)) + (() if self._posture is None else (self._posture_descriptor(),)) + (() if self._notice is None else (self._notice_descriptor(),))
+                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), web_read.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),)) + (() if self._attention is None else (self._attention_descriptor(),)) + (() if self._posture is None else (self._posture_descriptor(),)) + (() if self._notice is None else (self._notice_descriptor(),))
 
     def descriptors_for_scope(self, scope):
         return ((native_replay.descriptor(),) if native_replay.mode(self.store, scope)
@@ -182,6 +183,10 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
     def execute_for_scope(self, scope, call, cancellation, *, action_request_id=None):
         self._guard()
         native_replay.check_tool(self.store, scope, call.name)
+        if call.name == web_read.NAME:
+            # Network reads do not hold the World publication lock. The Kernel
+            # retains ownership of cancellation and the resulting observation.
+            return web_read.read(dict(call.arguments), cancellation, action_request_id=action_request_id)
         if call.name == 'read_command_output' and self._command_history_scopes is not None:
             from pulse_harness.adapters import command_output
             # The World supplies committed predecessors for this exact local
@@ -744,6 +749,7 @@ class KernelHarnessRuntime:
         adapter.extend_tool_schemas({
             workspace_index.NAME: workspace_index.SCHEMA,
             workspace_reading.NAME: workspace_reading.SCHEMA,
+            web_read.NAME: web_read.SCHEMA,
             native_replay.NAME: native_replay.SCHEMA,
         })
         if self.cognition is not None:

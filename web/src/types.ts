@@ -87,6 +87,8 @@ export type PageExecution = {
   providerWaiting?: boolean;
   steps?: ExecutionStep[];
   commandOutputs?: { items: CommandOutput[]; truncated: boolean };
+  webSources?: { items: { actionId: string; turnId: string; url: string; title: string;
+    fetchedAt: string; truncated: boolean }[]; truncated: boolean };
   uncertainActions: UncertainAction[];
   uncertainActionsTruncated: boolean;
   replay?: { sourceCount: number; focus?: string } | null;

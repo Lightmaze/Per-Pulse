@@ -19,7 +19,7 @@ from pulse_harness.core import ApprovalDecision, HarnessScope, ModelRoundStatus,
 from pulse_harness.core.contracts import ActionRecord, ActionStatus, ApprovalStatus
 from pulse_harness.core.errors import HarnessError, ScopeConflict, StoreUnavailable
 from pulse_harness.core.replay import redact_text, stored_payload_flags
-from pulse_harness.adapters import command_output
+from pulse_harness.adapters import command_output, web_read
 from pulse_system.core.causality import CausalTransitionError
 from pulse_system.service import native_replay
 
@@ -256,11 +256,12 @@ class PageExecution:
                 break
         return list(reversed(steps))
 
-    def command_outputs(self, page_id: str, scopes=None) -> dict:
+    def command_outputs(self, page_id: str, scopes=None, *, actions=None) -> dict:
         """Recent command receipts; polling does not open retained output files."""
-        scope = self._scope(page_id)
-        scopes = self._history_scopes(scope) if scopes is None else scopes
-        actions = self._historical_actions(scopes, status=ActionStatus.SUCCEEDED, limit=129)
+        if actions is None:
+            scope = self._scope(page_id)
+            scopes = self._history_scopes(scope) if scopes is None else scopes
+            actions = self._historical_actions(scopes, status=ActionStatus.SUCCEEDED, limit=129)
         items = []
         for action in actions[:128]:
             streams = command_output.capture(action)
@@ -282,6 +283,16 @@ class PageExecution:
             if len(items) == 8:
                 break
         return {'items': items, 'truncated': len(actions) > 128 or len(items) == 8}
+
+    def web_sources(self, page_id: str, scopes=None, *, actions=None) -> dict:
+        """Recent verified observations in this page; never fetch while polling."""
+        if actions is None:
+            scope = self._scope(page_id)
+            scopes = self._history_scopes(scope) if scopes is None else scopes
+            actions = self._historical_actions(scopes, status=ActionStatus.SUCCEEDED, limit=129)
+        sources = [source for action in actions[:128]
+                   if (source := web_read.source_from_action(action)) is not None]
+        return {"items": sources[:8], "truncated": len(actions) > 128 or len(sources) > 8}
 
     def _command_action(self, page_id: str, action_id: str):
         scope = self._scope(page_id)
@@ -318,7 +329,9 @@ class PageExecution:
         try:
             scopes = self._history_scopes(scope)
             history = self._uncertainty(scope, scopes)
-            outputs = self.command_outputs(page_id, scopes)
+            succeeded = self._historical_actions(scopes, status=ActionStatus.SUCCEEDED, limit=129)
+            outputs = self.command_outputs(page_id, scopes, actions=succeeded)
+            web_sources = self.web_sources(page_id, scopes, actions=succeeded)
             try:
                 session = kernel.store.get_session(scope)
             except ScopeConflict as error:
@@ -330,6 +343,7 @@ class PageExecution:
                         "failureCode": None, "steps": [], "replay": None,
                         "usage": self._usage(scopes, None),
                         "commandOutputs": outputs,
+                        "webSources": web_sources,
                         **history,
                         "updatedAt": None,
                     }
@@ -410,6 +424,7 @@ class PageExecution:
                            **({"focus": entry["focus"]} if "focus" in entry else {})} if entry else None,
                 "usage": self._usage(scopes, turn),
                 "commandOutputs": outputs,
+                "webSources": web_sources,
                 **history,
                 "updatedAt": turn.updated_at if turn else session.updated_at,
             }
