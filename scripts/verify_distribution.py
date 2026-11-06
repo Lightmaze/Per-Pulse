@@ -37,8 +37,8 @@ def check_source_paths(read, names: set[str], prefix: str) -> None:
     check_paths([prefix.rstrip("/")])
     check_paths([name for name in names if name not in fixtures])
     for name, digest in fixtures.items():
-        if name in names:
-            assert hashlib.sha256(read(name)).hexdigest() == digest, f"Changed public TLS fixture: {name}"
+        assert name in names, f"Missing public TLS fixture: {name}"
+        assert hashlib.sha256(read(name)).hexdigest() == digest, f"Changed public TLS fixture: {name}"
 
 
 def check_client(read, names: set[str], prefix: str) -> None:
