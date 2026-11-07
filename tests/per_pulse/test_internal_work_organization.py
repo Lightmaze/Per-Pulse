@@ -20,6 +20,7 @@ from pulse_system.agent.harness.base import HarnessError
 from pulse_system.service.kernel_runtime import KernelHarnessFactory, KernelHarnessRuntime
 from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
 from pulse_system.core.pulse.engine import PulseEvent
+from pulse_system.core.types import ActivityOrigin
 
 
 class WorkFixture(MaterialFixture):
@@ -273,3 +274,56 @@ def test_successful_prepared_work_recovers_once_after_a_readonly_product_restart
         assert reopened.runtime.world.get_task_front(receipt["work_id"]).focal_engram_id == reopened.runtime.continuity_engram_id
     finally:
         reopened.runtime.close()
+
+
+def test_model_can_browse_older_works_after_first_32(local):
+    """Home must not lose older persistent Works when the subject accumulates many."""
+    pages, fixture = local
+    runtime = pages.runtime
+    subject = runtime.continuity_engram_id
+    for index in range(35):
+        runtime.world.create_task_bundle_for_existing_engram(
+            f"Persistent Work {index:02}", subject,
+            origin=ActivityOrigin.SELF,
+            front_id=f"older_work_{index:03}",
+            center_id=f"older_center_{index:03}",
+        )
+
+    home(pages, fixture, [("work", {"op": "list"})])
+    assert fixture.outcomes[0]["status"] == "succeeded"
+    first = fixture.outcomes[0]["output"]
+    assert len(first["works"]) == 32
+    assert first["more_works"] is True
+    assert first["next_after_work_id"] == first["works"][-1]["id"]
+    assert first["complete_history"] is False
+
+    home(pages, fixture, [("work", {
+        "op": "list", "after_work_id": first["next_after_work_id"]
+    })])
+    assert fixture.outcomes[0]["status"] == "succeeded"
+    older = fixture.outcomes[0]["output"]
+    assert len(older["works"]) == 3
+    assert older["more_works"] is False
+    assert older["next_after_work_id"] is None
+    assert older["complete_history"] is False  # Request receipts are still bounded.
+    ids = [front["id"] for front in first["works"] + older["works"]]
+    assert len(ids) == len(set(ids)) == 35
+    assert set(ids) == {f"older_work_{index:03}" for index in range(35)}
+    assert all(front["focal_engram_id"] == subject for front in first["works"] + older["works"])
+
+    # An actual older Work can now be inspected from the model's own list result.
+    home(pages, fixture, [("work", {"op": "inspect", "work_id": older["works"][-1]["id"]})])
+    assert fixture.outcomes[0]["status"] == "succeeded"
+    assert fixture.outcomes[0]["output"]["work"]["id"] == older["works"][-1]["id"]
+
+    # Do not allow an unknown or other-subject cursor to reveal a list position.
+    from pulse_system.service.native_work import validate
+    with pytest.raises(ValueError):
+        validate({"op": "list", "after_work_id": ""})
+
+    other = runtime.engrams.create(auto_name=False).id
+    foreign = runtime.world.create_task_bundle_for_existing_engram(
+        "Unrelated subject Work", other,
+    ).front
+    home(pages, fixture, [("work", {"op": "list", "after_work_id": foreign.id})])
+    assert fixture.outcomes[0]["status"] == "failed"
