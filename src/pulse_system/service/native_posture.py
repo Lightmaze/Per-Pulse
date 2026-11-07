@@ -130,10 +130,11 @@ def validate(arguments: Mapping[str, Any]) -> dict:
         raise ValueError("posture arguments must be an object")
     values = deepcopy(dict(arguments))
     if values.get("op") == "list" and set(values) in ({"op"}, {"op", "after_experience_id"}):
-        after = values.get("after_experience_id")
-        if after is not None and (not isinstance(after, str) or not re.fullmatch(
-                r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", after)):
-            raise ValueError("invalid after_experience_id")
+        if "after_experience_id" in values:
+            after = values["after_experience_id"]
+            if not isinstance(after, str) or not re.fullmatch(
+                    r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", after):
+                raise ValueError("invalid after_experience_id")
         return values
     if values.get("op") == "find" and set(values) in (
         {"op", "query"}, {"op", "query", "after_experience_id"}
