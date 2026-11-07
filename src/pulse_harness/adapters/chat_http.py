@@ -6,6 +6,7 @@ capability evidence describes this implementation, not a tested remote model.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import os
@@ -165,6 +166,11 @@ def retry_delay(retry: int, headers: httpx.Headers | None = None) -> float:
     return delay * (1 - 0.25 * random.random())
 
 
+_PRIVATE_MODEL_NETWORKS = tuple(ipaddress.ip_network(cidr) for cidr in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7",
+))
+
+
 @dataclass(frozen=True)
 class ChatHTTPConfig:
     # Full operator-selected URL, not an untrusted model-generated destination.
@@ -186,18 +192,30 @@ class ChatHTTPConfig:
     # Exact serialized HTTP JSON body bound; not a token or monetary budget.
     max_request_bytes: int = 8 * 1024 * 1024
     allow_local_http: bool = False
+    # An operator may explicitly select an HTTP server at a literal private LAN IP.
+    # Hostnames and public, loopback, link-local or unspecified IPs are not included.
+    allow_private_http: bool = False
     reasoning_field: str | None = None
     provider_namespace: str | None = None
-    # Explicitly allow a credential-free *loopback HTTP* model. This is never
-    # inferred from a missing key and never enabled for a remote HTTPS host.
+    # Explicitly allow a credential-free selected loopback or private-LAN HTTP
+    # model. This is never inferred from a missing key or enabled for remote HTTPS.
     no_auth_local: bool = False
 
     def __post_init__(self) -> None:
         url = urlsplit(self.endpoint)
         local_http = (self.allow_local_http and url.scheme == "http"
                       and url.hostname in {"127.0.0.1", "::1", "localhost"})
-        if (url.scheme != "https" and not local_http) or not url.hostname:
-            raise ValueError("model endpoint requires HTTPS, or explicit loopback HTTP")
+        if type(self.allow_private_http) is not bool:
+            raise ValueError("allow_private_http must be a boolean")
+        try:
+            address = ipaddress.ip_address(url.hostname or "")
+        except ValueError:
+            address = None
+        private_http = (self.allow_private_http and url.scheme == "http"
+                        and address is not None
+                        and any(address in network for network in _PRIVATE_MODEL_NETWORKS))
+        if (url.scheme != "https" and not (local_http or private_http)) or not url.hostname:
+            raise ValueError("model endpoint requires HTTPS, explicit loopback HTTP, or a private LAN IP")
         if url.username or url.password or url.fragment:
             raise ValueError("model endpoint must not contain credentials or fragment")
         if url.query:
@@ -213,9 +231,10 @@ class ChatHTTPConfig:
             raise ValueError("model and credential environment variable must be valid")
         if type(self.no_auth_local) is not bool:
             raise ValueError("no_auth_local must be a boolean")
-        if self.no_auth_local and (not local_http or self.provider_namespace is not None
+        if self.no_auth_local and (not (local_http or private_http)
+                                   or self.provider_namespace is not None
                                    or self.auth_style != "bearer"):
-            raise ValueError("credential-free model calls require explicitly enabled loopback HTTP only")
+            raise ValueError("credential-free model calls require explicitly enabled loopback or private LAN HTTP")
         for seconds in (self.timeout_seconds, self.max_stream_seconds):
             if isinstance(seconds, bool) or not math.isfinite(seconds) or seconds <= 0:
                 raise ValueError("timeout_seconds and max_stream_seconds must be finite and positive")
@@ -803,6 +822,7 @@ def model_factory_from_env():
         max_request_bytes=int(os.environ.get("P_PULSE_MAX_REQUEST_BYTES", "8388608")),
         reasoning_field=os.environ.get("P_PULSE_REASONING_FIELD") or None,
         allow_local_http=os.environ.get("P_PULSE_ALLOW_LOCAL_HTTP") == "1",
+        allow_private_http=os.environ.get("P_PULSE_ALLOW_PRIVATE_HTTP") == "1",
         provider_namespace=os.environ.get("P_PULSE_PROVIDER_NAMESPACE") or None,
         no_auth_local=os.environ.get("P_PULSE_LOCAL_NO_AUTH") == "1",
     )
