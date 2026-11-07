@@ -25,6 +25,7 @@ def inspect_provider() -> dict:
         "state": "invalid_config",
         "credential_variable": None,
         "credentialless_loopback": False,
+        "credentialless_private_http": False,
         "network_request_sent": False,
         "remote_streaming_verified": False,
         "remote_tools_verified": False,
@@ -42,9 +43,17 @@ def inspect_provider() -> dict:
     adapter = None
     try:
         adapter = factory(HarnessScope("per-pulse-doctor", "config", "config", 0, "config"))
-        # A no-auth exception is granted only by the validated loopback config.
-        # The diagnostic reveals neither the endpoint nor any credential.
-        report["credentialless_loopback"] = adapter.config.no_auth_local
+        # The adapter validates the endpoint and both explicit HTTP flags.
+        # Never print an address or secret in the diagnostic.
+        from urllib.parse import urlsplit
+        host = urlsplit(adapter.config.endpoint).hostname
+        report["credentialless_loopback"] = bool(
+            adapter.config.no_auth_local and host in {"127.0.0.1", "::1", "localhost"}
+        )
+        report["credentialless_private_http"] = bool(
+            adapter.config.no_auth_local and adapter.config.allow_private_http
+            and not report["credentialless_loopback"]
+        )
         report["credential_variable"] = (
             None if adapter.config.no_auth_local else adapter.config.credential_env
         )
