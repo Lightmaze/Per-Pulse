@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 
@@ -197,6 +197,16 @@ class WeeklyRequestBudget:
             # The same fenced transaction protects these changes as admission.
             for key in transaction.list_component_state_keys(self._key_prefix):
                 week = key[len(self._key_prefix):]
+                # A World id may contain a colon. Do not treat a nested
+                # World's keys as this World's week records.
+                if len(week) != 10:
+                    continue
+                try:
+                    week_start = date.fromisoformat(week)
+                except ValueError:
+                    continue
+                if week_start.isoformat() != week or week_start.weekday() != 0:
+                    continue
                 if week > current_week:
                     continue  # Do not mutate future weeks if the host clock moved back.
                 state = self._load_week(week, transaction)
