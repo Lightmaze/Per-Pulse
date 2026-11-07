@@ -7156,6 +7156,17 @@ class Storage:
                     raise RuntimeError("component transaction has ended")
                 row = storage._conn.execute("SELECT state FROM component_state WHERE component = ?", (component,)).fetchone()
                 return json.loads(row[0]) if row else None
+            def list_component_state_keys(self, prefix):
+                """Enumerate an indexed component prefix inside this fenced transaction."""
+                if not self.active:
+                    raise RuntimeError("component transaction has ended")
+                if not isinstance(prefix, str) or not prefix:
+                    raise ValueError("component prefix is required")
+                return [row[0] for row in storage._conn.execute(
+                    "SELECT component FROM component_state "
+                    "WHERE component >= ? AND component < ? ORDER BY component",
+                    (prefix, prefix + "\uffff"),
+                )]
             def save_component_state(self, component, state):
                 if not self.active:
                     raise RuntimeError("component transaction has ended")
