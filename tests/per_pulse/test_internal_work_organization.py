@@ -320,3 +320,10 @@ def test_model_can_browse_older_works_after_first_32(local):
     from pulse_system.service.native_work import validate
     with pytest.raises(ValueError):
         validate({"op": "list", "after_work_id": ""})
+
+    other = runtime.engrams.create(auto_name=False).id
+    foreign = runtime.world.create_task_bundle_for_existing_engram(
+        "Unrelated subject Work", other,
+    ).front
+    home(pages, fixture, [("work", {"op": "list", "after_work_id": foreign.id})])
+    assert fixture.outcomes[0]["status"] == "failed"
