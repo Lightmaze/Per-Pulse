@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.1.0a6
+
+- Keep long-lived Works reachable: browse native histories beyond 32 entries,
+  search persisted Work titles by native tool, and find older Works in a bounded
+  sidebar with a visible current Work and bilingual search.
+- Recover autonomous weekly request tickets across long, multi-week restarts,
+  retaining the same World ownership and accounting rules.
+- Improve provider tool-call compatibility and persistence for OpenAI/Azure,
+  Anthropic, DeepSeek, Gemini and OpenRouter streams. Preserve reasoning and
+  tool metadata needed for continuation without fabricating tool responses.
+- Extend native and browser tests for long Work histories and provider tool
+  continuation. Existing v0.1.0a5 artifacts and tags remain unchanged.
+
+
 ## 0.1.0a5
 
 - Include the two fixed public synthetic TLS test fixtures in the source archive, so
