@@ -57,6 +57,53 @@ def _usage_count(value: Any, field: str) -> int:
     return value
 
 
+def _google_tool_metadata(extra: Any) -> dict[str, Any]:
+    """Keep Google's opaque tool signature, without forwarding arbitrary fields."""
+    if extra is None:
+        return {}
+    if not isinstance(extra, Mapping):
+        raise ProviderProtocolError("model tool extra_content must be an object")
+    google = extra.get("google")
+    if google is None:
+        return {}
+    if not isinstance(google, Mapping):
+        raise ProviderProtocolError("model Google tool metadata must be an object")
+    signature = google.get("thought_signature")
+    if signature is None:
+        return {}
+    if not isinstance(signature, str) or not signature:
+        raise ProviderProtocolError("model thought signature must be non-empty text")
+    return {"google": {"thought_signature": signature}}
+
+
+def _append_reasoning_details(target: list[dict[str, Any]], fragments: Any) -> None:
+    """Reassemble adjacent text/summary deltas; keep encrypted blobs opaque.
+
+    OpenRouter's streaming indices can repeat across different block types.
+    Follow type transitions and signature closure, as its official SDK does,
+    rather than collapsing all index=0 blocks into one.
+    """
+    if not isinstance(fragments, list):
+        raise ProviderProtocolError("model reasoning_details must be an array")
+    for fragment in fragments:
+        if not isinstance(fragment, dict) or not isinstance(fragment.get("type"), str):
+            raise ProviderProtocolError("model reasoning detail must be a typed object")
+        if any(fragment.get(key) is not None and not isinstance(fragment[key], str)
+               for key in ("text", "summary", "signature", "data")):
+            raise ProviderProtocolError("model reasoning detail payload must be text")
+        previous = target[-1] if target else None
+        field = {"reasoning.text": "text", "reasoning.summary": "summary"}.get(fragment["type"])
+        if (field and previous and previous.get("type") == fragment["type"]
+                and not (field == "text" and previous.get("signature"))):
+            for key, value in fragment.items():
+                if key == field and isinstance(value, str):
+                    previous[key] = (previous.get(key) or "") + value
+                elif previous.get(key) is None:
+                    previous[key] = value
+        else:
+            target.append(dict(fragment))
+
+
 def _provider_usage(value: Mapping[str, Any]) -> ProviderUsage:
     """Normalize an OpenAI-compatible usage envelope without estimating."""
 
@@ -191,6 +238,9 @@ class ChatHTTPConfig:
     # Explicitly allow a credential-free *loopback HTTP* model. This is never
     # inferred from a missing key and never enabled for a remote HTTPS host.
     no_auth_local: bool = False
+    # Known official endpoints select their wire conventions automatically.
+    # Proxies can explicitly choose a profile without changing destinations.
+    provider_profile: str = "auto"
 
     def __post_init__(self) -> None:
         url = urlsplit(self.endpoint)
@@ -226,6 +276,8 @@ class ChatHTTPConfig:
             raise ValueError("max_retries must be an integer from 0 to 10")
         if self.reasoning_field not in {None, "reasoning_content"}:
             raise ValueError("unsupported reasoning wire field")
+        if self.provider_profile not in {"auto", "compatible", "openai", "anthropic", "gemini", "deepseek", "openrouter"}:
+            raise ValueError("unsupported Chat Completions provider profile")
         if self.provider_namespace not in {None, "openrouter"}:
             raise ValueError("unsupported provider namespace")
         if self.provider_namespace == "openrouter":
@@ -239,6 +291,32 @@ class ChatHTTPConfig:
                 raise ValueError(
                     "OpenRouter namespace requires the canonical OpenRouter chat endpoint"
                 )
+
+    @property
+    def resolved_profile(self) -> str:
+        if self.provider_profile != "auto":
+            return self.provider_profile
+        host = urlsplit(self.endpoint).hostname or ""
+        if host == "api.openai.com" or host.endswith(".openai.azure.com"):
+            return "openai"
+        if host == "api.anthropic.com":
+            return "anthropic"
+        if (host in {"generativelanguage.googleapis.com", "aiplatform.googleapis.com"}
+                or host.endswith(".aiplatform.googleapis.com")
+                or host.endswith("-aiplatform.googleapis.com")):
+            return "gemini"
+        if host == "api.deepseek.com":
+            return "deepseek"
+        if host == "openrouter.ai":
+            return "openrouter"
+        return "compatible"
+
+    @property
+    def reasoning_wire_field(self) -> str | None:
+        return self.reasoning_field or (
+            "reasoning_content" if self.resolved_profile == "deepseek"
+            else "reasoning" if self.resolved_profile == "openrouter" else None
+        )
 
 
 WORKSPACE_SCHEMAS: dict[str, dict[str, Any]] = {
@@ -259,6 +337,10 @@ WORKSPACE_SCHEMAS: dict[str, dict[str, Any]] = {
         "required": ["path"], "additionalProperties": False,
     },
     "mutate_file": {
+        # Anthropic rejects root oneOf/anyOf/allOf even on its compatibility
+        # endpoint. StructuredWorkspaceToolProvider enforces the exclusive
+        # choice before preview, approval or a physical file effect.
+        "description": "Supply exactly one of content or patch, together with path and expected_digest.",
         "type": "object", "properties": {
             "path": {"type": "string"},
             "expected_digest": {"type": ["string", "null"],
@@ -276,7 +358,6 @@ WORKSPACE_SCHEMAS: dict[str, dict[str, Any]] = {
                 "required": ["edits"], "additionalProperties": False,
             },
         }, "required": ["path", "expected_digest"],
-        "oneOf": [{"required": ["content"]}, {"required": ["patch"]}],
         "additionalProperties": False,
     },
 }
@@ -392,8 +473,18 @@ class ChatHTTPModelAdapter:
                             raise ProviderProtocolError("invalid assistant tool transcript")
                         message["tool_calls"].append({"id": call["tool_call_id"], "type": "function",
                             "function": {"name": call["name"], "arguments": _json(call["arguments"])}})
-                if self.config.reasoning_field and reasoning:
-                    message[self.config.reasoning_field] = reasoning
+                        if self.config.resolved_profile == "gemini":
+                            metadata = _google_tool_metadata(call.get("provider_metadata"))
+                            if metadata:
+                                message["tool_calls"][-1]["extra_content"] = metadata
+                        if self.config.resolved_profile == "openrouter":
+                            metadata = call.get("provider_metadata", {}).get("openrouter", {})
+                            if "reasoning_details" in metadata:
+                                if not isinstance(metadata["reasoning_details"], list):
+                                    raise ProviderProtocolError("retained reasoning_details must be an array")
+                                message["reasoning_details"] = metadata["reasoning_details"]
+                if self.config.reasoning_wire_field and (reasoning or message.get("tool_calls")):
+                    message[self.config.reasoning_wire_field] = reasoning
                 reasoning = ""
             elif role == "tool":
                 try:
@@ -409,8 +500,9 @@ class ChatHTTPModelAdapter:
             messages.append(message)
             if not str(record.get("item_id", "")).startswith("auxiliary-context:"):
                 transcript_messages.append(message)
+        token_field = "max_completion_tokens" if self.config.resolved_profile == "openai" else "max_tokens"
         body: dict[str, Any] = {"model": self.config.model, "messages": messages,
-            "stream": True, "max_tokens": self.config.max_output_tokens,
+            "stream": True, token_field: self.config.max_output_tokens,
             "stream_options": {"include_usage": True}}
         if request.tools:
             body["tools"] = []
@@ -654,7 +746,9 @@ class _ChatStream:
             raise ProviderProtocolError("model stream ended inside an SSE event", code="provider_stream_incomplete")
 
     def _deltas(self, response: httpx.Response) -> Iterator[ModelDelta]:
-        calls: dict[int, dict[str, str]] = {}
+        calls: dict[int, dict[str, Any]] = {}
+        reasoning_details: list[dict[str, Any]] = []
+        has_reasoning_details = False
         finish: str | None = None
         for data in self._events(response):
             if self._cancelled():
@@ -672,8 +766,14 @@ class _ChatStream:
                     if not call["id"] or not call["name"] or call["id"] in ids or not isinstance(arguments, dict):
                         raise ProviderProtocolError("invalid or duplicate tool call")
                     ids.add(call["id"])
+                    metadata = dict(call["provider_metadata"])
+                    if has_reasoning_details and index == min(calls):
+                        # Message-level continuation travels once with the
+                        # first call in the same durable assistant response.
+                        metadata["openrouter"] = {"reasoning_details": reasoning_details}
                     yield ModelDelta(ModelDeltaKind.TOOL_CALL,
-                                     tool_call=ToolCall(call["id"], call["name"], arguments))
+                                     tool_call=ToolCall(call["id"], call["name"], arguments,
+                                                        metadata))
                 self._done = True
                 yield ModelDelta(
                     ModelDeltaKind.DONE,
@@ -688,7 +788,20 @@ class _ChatStream:
                 raise ProviderProtocolError("invalid model event JSON") from None
             if not isinstance(event, dict) or "error" in event:
                 raise ProviderProtocolError("model stream reported a malformed or error event")
-            if "id" in event:
+            choices = event.get("choices")
+            if not isinstance(choices, list):
+                raise ProviderProtocolError("model event has no choices array")
+            # Azure sends filter-only frames with an empty response ID and,
+            # for output annotations, no delta. They can follow finish=stop.
+            annotation = (
+                not choices and any(isinstance(event.get(key), list)
+                    for key in ("prompt_annotations", "prompt_filter_results"))
+            ) or (
+                len(choices) == 1 and isinstance(choices[0], dict)
+                and isinstance(choices[0].get("content_filter_results"), dict)
+                and choices[0].get("delta") in (None, {})
+            )
+            if "id" in event and not (annotation and event["id"] in (None, "")):
                 try:
                     response_id = validate_provider_response_id(event["id"])
                 except (TypeError, ValueError):
@@ -702,7 +815,9 @@ class _ChatStream:
                         code="provider_response_id_conflict",
                     )
                 self.response_id = response_id
-            if "usage" in event:
+            # OpenAI and compatible services send usage:null on ordinary
+            # chunks, followed by one actual report (possibly usage-only).
+            if event.get("usage") is not None:
                 raw_usage = event["usage"]
                 if not isinstance(raw_usage, Mapping):
                     raise ProviderProtocolError(
@@ -715,20 +830,29 @@ class _ChatStream:
                         code="provider_usage_duplicate",
                     )
                 self.usage = _provider_usage(raw_usage)
-            choices = event.get("choices")
-            if not isinstance(choices, list):
-                raise ProviderProtocolError("model event has no choices array")
             if not choices:
                 continue
             if len(choices) != 1 or not isinstance(choices[0], dict) or choices[0].get("index") != 0:
                 raise ProviderProtocolError("only one completion choice is supported")
             choice = choices[0]
+            if annotation:
+                filters = choice["content_filter_results"]
+                if choice.get("finish_reason") == "content_filter" or any(
+                    isinstance(item, Mapping) and item.get("filtered") is True for item in filters.values()
+                ):
+                    raise ProviderProtocolError("model service filtered the reply", code="provider_content_filtered")
+                if choice.get("finish_reason") is None:
+                    continue
             if finish is not None:
                 raise ProviderProtocolError("model emitted content after its terminal")
             delta = choice.get("delta")
             if not isinstance(delta, dict):
                 raise ProviderProtocolError("model event delta is invalid")
-            for field, kind in (("content", ModelDeltaKind.TEXT), ("reasoning_content", ModelDeltaKind.REASONING)):
+            if self.adapter.config.resolved_profile == "openrouter" and delta.get("reasoning_details") is not None:
+                _append_reasoning_details(reasoning_details, delta["reasoning_details"])
+                has_reasoning_details = True
+            reasoning_field = "reasoning_content" if delta.get("reasoning_content") is not None else "reasoning"
+            for field, kind in (("content", ModelDeltaKind.TEXT), (reasoning_field, ModelDeltaKind.REASONING)):
                 value = delta.get(field)
                 if value is not None and not isinstance(value, str):
                     raise ProviderProtocolError("model content must be text")
@@ -742,7 +866,14 @@ class _ChatStream:
                     raise ProviderProtocolError("model tool index is invalid")
                 if fragment.get("type", "function") != "function":
                     raise ProviderProtocolError("unsupported tool-call type")
-                call = calls.setdefault(fragment["index"], {"id": "", "name": "", "arguments": ""})
+                call = calls.setdefault(fragment["index"], {
+                    "id": "", "name": "", "arguments": "", "provider_metadata": {},
+                })
+                metadata = _google_tool_metadata(fragment.get("extra_content"))
+                if metadata:
+                    if call["provider_metadata"] and call["provider_metadata"] != metadata:
+                        raise ProviderProtocolError("model tool continuation metadata changed midstream")
+                    call["provider_metadata"] = metadata
                 function = fragment.get("function") or {}
                 if not isinstance(function, dict):
                     raise ProviderProtocolError("model function delta is invalid")
@@ -805,6 +936,7 @@ def model_factory_from_env():
         allow_local_http=os.environ.get("P_PULSE_ALLOW_LOCAL_HTTP") == "1",
         provider_namespace=os.environ.get("P_PULSE_PROVIDER_NAMESPACE") or None,
         no_auth_local=os.environ.get("P_PULSE_LOCAL_NO_AUTH") == "1",
+        provider_profile=os.environ.get("P_PULSE_CHAT_PROFILE", "auto"),
     )
     def factory(_scope):
         return ChatHTTPModelAdapter(config)

@@ -295,6 +295,8 @@ jobs:
         run: python -m pytest -q tests/per_pulse/test_workspace_files_api.py tests/per_pulse/test_auto_apply_edits.py tests/per_pulse/test_artifacts.py tests/per_pulse/test_pages.py tests/per_pulse/test_keys_in_content.py tests/per_pulse/test_windows_file_boundary.py tests/per_pulse/test_pulse_schema_upgrade.py tests/per_pulse/test_native_team_origin_index.py
       - name: Verify bounded DNS, HTTPS hostname checks and cancellation on Windows
         run: python -m pytest -q tests/per_pulse/test_web_read.py
+      - name: Verify provider schemas, streaming and persistent tool continuation on Windows
+        run: python -m pytest -q tests/per_pulse/test_provider_compatibility.py
 
   browser-journey:
     runs-on: ubuntu-latest

@@ -278,6 +278,7 @@ class ModelDelta:
                 or not isinstance(self.tool_call.name, str)
                 or not self.tool_call.name.strip()
                 or not isinstance(self.tool_call.arguments, Mapping)
+                or not isinstance(self.tool_call.provider_metadata, Mapping)
             ):
                 raise ValueError("tool-call delta has invalid identity or arguments")
         elif self.kind is ModelDeltaKind.DONE:

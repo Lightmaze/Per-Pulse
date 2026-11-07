@@ -3369,10 +3369,12 @@ class HarnessStore:
                                     "name",
                                     "arguments",
                                 }
-                                if set(raw_call) != required or not all(
+                                if (set(raw_call).difference({"provider_metadata"}) != required or not all(
                                     isinstance(raw_call[key], str) and raw_call[key].strip()
                                     for key in ("tool_call_id", "action_request_id", "name")
-                                ) or not isinstance(raw_call["arguments"], Mapping):
+                                ) or not isinstance(raw_call["arguments"], Mapping)
+                                    or ("provider_metadata" in raw_call
+                                        and not isinstance(raw_call["provider_metadata"], Mapping))):
                                     raise StoreUnavailable(
                                         "model round assistant tool-call authority is invalid"
                                     )
@@ -3382,6 +3384,8 @@ class HarnessStore:
                                         "action_request_id": raw_call["action_request_id"],
                                         "name": raw_call["name"],
                                         "arguments": dict(raw_call["arguments"]),
+                                        **({"provider_metadata": dict(raw_call["provider_metadata"])}
+                                           if "provider_metadata" in raw_call else {}),
                                     }
                                 )
                             response_payload = {

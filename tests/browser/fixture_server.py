@@ -56,7 +56,7 @@ document_revision = '# A later version\n\nPRIVATE_LATER_WORK_RESULT belongs to i
 for filename, content in [('redacted.txt', before), ('large-report.txt', large_before),
                           ('rewritten-report.txt', rewrite_before)]:
     if not (state / 'workspace' / filename).exists():
-        (state / 'workspace' / filename).write_text(content)
+        (state / 'workspace' / filename).write_bytes(content.encode('utf-8'))
 download_name = 'Café 100% 文本.txt'
 download_before = '\ufeffDRAFT\r\n' + 'A fixture line: café 文本.\r\n' * 1400
 if not (state / 'workspace' / download_name).exists():
@@ -65,6 +65,11 @@ if not (state / 'workspace' / download_name).exists():
 def handler(request):
     body = json.loads(request.content)
     requests.append(body)
+    # Match Anthropic's real schema rejection, including native runtime tools.
+    for tool in body.get('tools', []):
+        schema = tool['function']['parameters']
+        if any(key in schema for key in ('oneOf', 'anyOf', 'allOf')):
+            return httpx.Response(400, json={'error': {'message': 'Unsupported root tool schema composition'}})
     messages = body['messages']
     text = json.dumps(messages)
     has_tool = any(m.get('role') == 'tool' for m in messages)
@@ -103,7 +108,9 @@ def handler(request):
     else:
         delta = {'content': 'Synthetic model fixture: this page has finished its turn.'}
         finish = 'stop'
-    chunks = [{'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]}, {'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish}]}]
+    chunks = [{'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}], 'usage': None},
+              {'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish}], 'usage': None},
+              {'choices': [], 'usage': {'prompt_tokens': 120, 'completion_tokens': 8, 'total_tokens': 128}}]
     stream = ''.join('data: ' + json.dumps(c) + '\n\n' for c in chunks) + 'data: [DONE]\n\n'
     return httpx.Response(200, headers={'content-type':'text/event-stream'}, content=stream)
 
