@@ -327,3 +327,90 @@ def test_model_can_browse_older_works_after_first_32(local):
     ).front
     home(pages, fixture, [("work", {"op": "list", "after_work_id": foreign.id})])
     assert fixture.outcomes[0]["status"] == "failed"
+
+
+def test_home_search_finds_older_owned_works_without_crawling(local):
+    """One native tool call finds Work titles beyond the first history page."""
+    pages, fixture = local
+    runtime = pages.runtime
+    subject = runtime.continuity_engram_id
+    for index in range(38):
+        runtime.world.create_task_bundle_for_existing_engram(
+            f"Expedition Record {index:02}", subject,
+            origin=ActivityOrigin.SELF,
+            front_id=f"search_exp_{index:03}",
+            center_id=f"search_center_{index:03}",
+        )
+    for index in range(7):
+        runtime.world.create_task_bundle_for_existing_engram(
+            f"Unrelated Project {index:02}", subject,
+            origin=ActivityOrigin.SELF,
+            front_id=f"search_other_{index:03}",
+            center_id=f"search_other_center_{index:03}",
+        )
+
+    # A different subject's identically named Work is not discoverable.
+    other = runtime.engrams.create(auto_name=False).id
+    foreign = runtime.world.create_task_bundle_for_existing_engram(
+        "Expedition Private", other,
+    ).front
+
+    home(pages, fixture, [("work", {"op": "search", "query": "  eXpEdItIoN "})])
+    assert fixture.outcomes[0]["status"] == "succeeded"
+    first = fixture.outcomes[0]["output"]
+    assert first["searched_field"] == "title"
+    assert first["scope"] == "current_subject_only"
+    assert len(first["works"]) == 32
+    assert first["more_works"] is True and first["search_complete"] is False
+    assert first["next_after_work_id"] == first["works"][-1]["id"]
+    assert "recent_requests" not in first
+
+    home(pages, fixture, [("work", {"op": "search", "query": "EXPEDITION",
+                                 "after_work_id": first["next_after_work_id"]})])
+    assert fixture.outcomes[0]["status"] == "succeeded"
+    older = fixture.outcomes[0]["output"]
+    assert len(older["works"]) == 6
+    assert older["more_works"] is False and older["search_complete"] is True
+    assert older["next_after_work_id"] is None
+    ids = [work["id"] for work in first["works"] + older["works"]]
+    assert len(ids) == len(set(ids)) == 38
+    assert all(work["title"].startswith("Expedition") for work in first["works"] + older["works"])
+    assert foreign.id not in ids
+
+    # Search returns real IDs usable for source-aware inspection, not summaries.
+    home(pages, fixture, [("work", {"op": "inspect", "work_id": older["works"][-1]["id"]})])
+    assert fixture.outcomes[0]["status"] == "succeeded"
+    assert fixture.outcomes[0]["output"]["work"]["id"] == older["works"][-1]["id"]
+
+    home(pages, fixture, [("work", {"op": "search", "query": "no such subject work"})])
+    assert fixture.outcomes[0]["status"] == "succeeded"
+    assert fixture.outcomes[0]["output"]["works"] == []
+    assert fixture.outcomes[0]["output"]["search_complete"] is True
+
+    # A foreign Work, or one absent from the matching set, cannot be a cursor.
+    for bad_anchor in (foreign.id, "search_other_001", "nonexistent"):
+        home(pages, fixture, [("work", {"op": "search", "query": "Expedition",
+                                     "after_work_id": bad_anchor})])
+        assert fixture.outcomes[0]["status"] == "failed"
+
+    from pulse_system.service.native_work import validate
+    for arguments in ({"op": "search"}, {"op": "search", "query": ""},
+                      {"op": "search", "query": "a" * 161},
+                      {"op": "list", "query": "Expedition"}):
+        with pytest.raises(ValueError):
+            validate(arguments)
+
+    # This is a durable World search, not an in-memory cache of the first list.
+    pages.runtime.close()
+    reopened = PageService(pages.data_dir, model_factory=fixture.factory,
+                           posture=False, allow_workspace_actions=False,
+                           pulse=PulseSettings(enabled=False))
+    try:
+        home(reopened, fixture, [("work", {"op": "search", "query": "Expedition"})])
+        assert fixture.outcomes[0]["status"] == "succeeded"
+        recovered = fixture.outcomes[0]["output"]
+        assert len(recovered["works"]) == 32
+        assert {work["id"] for work in recovered["works"]} == {
+            work["id"] for work in first["works"]}
+    finally:
+        reopened.runtime.close()
