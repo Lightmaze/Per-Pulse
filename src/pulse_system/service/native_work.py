@@ -215,7 +215,7 @@ class NativeWork:
                     'more_works': has_more,
                     'next_after_work_id': page[-1].id if has_more else None,
                     'recent_requests': [self._receipt(v) for v in requests],
-                    'scope': 'current_subject_only', 'complete_history': not has_more and start == 0}
+                    'scope': 'current_subject_only', 'complete_history': False}
             elif a['op'] == 'inspect':
                 front = self._owned(subject, a['work_id'])
                 detail = r.get_task_front(front.id)
