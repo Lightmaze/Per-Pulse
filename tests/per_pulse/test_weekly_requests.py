@@ -168,6 +168,47 @@ def test_native_world_sqlite_survives_process_reopen(tmp_path):
         second_store.close()
 
 
+def test_restart_reconciles_unfinished_requests_across_multiple_weeks(tmp_path):
+    # A World can be stopped for longer than one week. Its old dispatched
+    # attempts must never be mistaken for settled or made free on restart.
+    store_path = tmp_path / "world.db"
+    old_sunday = datetime(2026, 9, 27, 23, tzinfo=timezone.utc)
+    recent_sunday = datetime(2026, 11, 8, 23, tzinfo=timezone.utc)
+    restart_monday = datetime(2026, 11, 9, 0, tzinfo=timezone.utc)
+    store = Storage(store_path)
+    try:
+        budget = WeeklyRequestBudget(store, "world")
+        budget.configure(enabled=True, weekly_limit=2)
+        old_send = budget.reserve(source_event_id="SELF-old", now=old_sunday)
+        budget.dispatch(old_send, now=old_sunday)
+        budget.reserve(source_event_id="SELF-unsent", now=old_sunday)
+        recent_send = budget.reserve(source_event_id="SELF-recent", now=recent_sunday)
+        budget.dispatch(recent_send, now=recent_sunday)
+
+        # A separate World sharing the storage is never reconciled by this one.
+        other = WeeklyRequestBudget(store, "other-world")
+        other.configure(enabled=True, weekly_limit=1)
+        foreign = other.reserve(source_event_id="SELF-other", now=old_sunday)
+        other.dispatch(foreign, now=old_sunday)
+    finally:
+        store.close()
+
+    reopened = Storage(store_path)
+    try:
+        recovered = WeeklyRequestBudget(reopened, "world")
+        assert recovered.reconcile(now=restart_monday) == 3
+        assert recovered.reconcile(now=restart_monday) == 0
+        old_status = recovered.status(now=old_sunday)
+        assert old_status["states"]["uncertain"] == 1
+        assert old_status["states"]["abandoned"] == 1
+        assert old_status["consumed"] == 1
+        assert recovered.status(now=recent_sunday)["states"]["uncertain"] == 1
+        assert recovered.status(now=restart_monday)["remaining"] == 2
+        assert WeeklyRequestBudget(reopened, "other-world").status(now=old_sunday)["states"]["dispatched"] == 1
+    finally:
+        reopened.close()
+
+
 def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
     from types import SimpleNamespace as Row
     from pulse_harness.core.scope import HarnessScope
