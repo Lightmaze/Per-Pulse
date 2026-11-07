@@ -175,6 +175,7 @@ def test_restart_reconciles_unfinished_requests_across_multiple_weeks(tmp_path):
     old_sunday = datetime(2026, 9, 27, 23, tzinfo=timezone.utc)
     recent_sunday = datetime(2026, 11, 8, 23, tzinfo=timezone.utc)
     restart_monday = datetime(2026, 11, 9, 0, tzinfo=timezone.utc)
+    future_monday = datetime(2026, 11, 16, 0, tzinfo=timezone.utc)
     store = Storage(store_path)
     try:
         budget = WeeklyRequestBudget(store, "world")
@@ -184,9 +185,10 @@ def test_restart_reconciles_unfinished_requests_across_multiple_weeks(tmp_path):
         budget.reserve(source_event_id="SELF-unsent", now=old_sunday)
         recent_send = budget.reserve(source_event_id="SELF-recent", now=recent_sunday)
         budget.dispatch(recent_send, now=recent_sunday)
+        budget.reserve(source_event_id="SELF-future", now=future_monday)
 
-        # A separate World sharing the storage is never reconciled by this one.
-        other = WeeklyRequestBudget(store, "other-world")
+        # A nested-looking World ID must not be captured by the "world:" prefix.
+        other = WeeklyRequestBudget(store, "world:child")
         other.configure(enabled=True, weekly_limit=1)
         foreign = other.reserve(source_event_id="SELF-other", now=old_sunday)
         other.dispatch(foreign, now=old_sunday)
@@ -204,7 +206,8 @@ def test_restart_reconciles_unfinished_requests_across_multiple_weeks(tmp_path):
         assert old_status["consumed"] == 1
         assert recovered.status(now=recent_sunday)["states"]["uncertain"] == 1
         assert recovered.status(now=restart_monday)["remaining"] == 2
-        assert WeeklyRequestBudget(reopened, "other-world").status(now=old_sunday)["states"]["dispatched"] == 1
+        assert recovered.status(now=future_monday)["held"] == 1
+        assert WeeklyRequestBudget(reopened, "world:child").status(now=old_sunday)["states"]["dispatched"] == 1
     finally:
         reopened.close()
 
