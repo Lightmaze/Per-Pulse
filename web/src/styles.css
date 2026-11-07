@@ -40,6 +40,12 @@ button, a, input, textarea { outline-offset: 4px; }
 .pages-label .icon-button { width: 32px; height: 32px; }
 .pages-label .icon-button:hover { opacity: 1; }
 .page-nav { display: flex; flex-direction: column; gap: 5px; min-height: 0; overflow-y: auto; padding-bottom: 16px; scrollbar-width: thin; }
+.sidebar-page-filter { display: flex; gap: 8px; align-items: center; color: var(--muted); margin: 0 8px 8px 13px; border-bottom: 1px solid var(--border); }
+.sidebar-page-filter input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 12px; padding: 7px 0; color: var(--text); }
+.sidebar-page-filter:focus-within { border-color: var(--accent); }
+.sidebar-more-pages { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 13px; font-size: 12px; color: var(--muted); }
+.sidebar-more-pages button { padding: 6px 0; color: var(--accent); font-size: 12px; }
+.sidebar-more-pages button:hover { text-decoration: underline; }
 .empty-pages { color: var(--muted); font-size: 12px; text-align: left; line-height: 1.6; padding: 7px 13px; }
 .sidebar-footer { margin-top: auto; padding-top: 22px; }
 .workspace-label { color: var(--muted); font-size: 12px; line-height: 18px; padding: 0 13px; }
