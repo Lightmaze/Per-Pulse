@@ -190,20 +190,31 @@ class WeeklyRequestBudget:
         """On restart, classify old in-flight dispatches as uncertain (not free)."""
         stamp = _utc(now)
         with self._write() as (transaction, _fence):
-            state = self._load_week(_week(stamp), transaction)
             changed = 0
-            for entry in state["attempts"].values():
-                if entry["status"] == "dispatched":
-                    entry["status"] = "uncertain"
+            current_week = _week(stamp)
+            # A stopped World may come back weeks later. Reconcile every past
+            # week with unfinished tickets, not just the week of the restart.
+            # The same fenced transaction protects these changes as admission.
+            for key in transaction.list_component_state_keys(self._key_prefix):
+                week = key[len(self._key_prefix):]
+                if week > current_week:
+                    continue  # Do not mutate future weeks if the host clock moved back.
+                state = self._load_week(week, transaction)
+                week_changed = False
+                for entry in state["attempts"].values():
+                    if entry["status"] == "dispatched":
+                        entry["status"] = "uncertain"
+                        week_changed = True
+                    elif entry["status"] == "reserved":
+                        # The send path commits dispatch before calling HTTP.
+                        entry["status"] = "abandoned"
+                        week_changed = True
+                    else:
+                        continue
                     entry["settled_at"] = stamp.isoformat()
                     changed += 1
-                elif entry["status"] == "reserved":
-                    # The send path always commits dispatch *before* calling HTTP.
-                    entry["status"] = "abandoned"
-                    entry["settled_at"] = stamp.isoformat()
-                    changed += 1
-            if changed:
-                self._save_week(state, transaction)
+                if week_changed:
+                    self._save_week(state, transaction)
             return changed
 
 
