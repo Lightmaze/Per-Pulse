@@ -83,7 +83,9 @@ def descriptor() -> ToolDescriptor:
     return ToolDescriptor(
         NAME,
         "Keep lessons from this page's work and the user's later feedback. list shows "
-        "recent experiences, newest first, with recent message IDs. find(query) matches "
+        "recent experiences, newest first, with recent message IDs. When list returns "
+        "next_after_experience_id, call list(after_experience_id) to read older "
+        "experiences. find(query) matches "
         "literal text in experiences' titles, lessons, conditions, decision shifts and kept"
         " passages; when next_after_experience_id is returned, repeat find with it as "
         "after_experience_id for older matches. A match shown only as a reference because "
@@ -127,7 +129,11 @@ def validate(arguments: Mapping[str, Any]) -> dict:
     if not isinstance(arguments, Mapping):
         raise ValueError("posture arguments must be an object")
     values = deepcopy(dict(arguments))
-    if values == {"op": "list"}:
+    if values.get("op") == "list" and set(values) in ({"op"}, {"op", "after_experience_id"}):
+        after = values.get("after_experience_id")
+        if after is not None and (not isinstance(after, str) or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", after)):
+            raise ValueError("invalid after_experience_id")
         return values
     if values.get("op") == "find" and set(values) in (
         {"op", "query"}, {"op", "query", "after_experience_id"}
@@ -646,59 +652,57 @@ class NativePosture:
                             "material_too_large": not bool(packed["episodes"]),
                             "scope": "current_context_and_explicit_subject_transfers",
                             "semantic_applicability": "not_yet_assessed"}
-                if values["op"] == "find":
+                is_find = values["op"] == "find"
+                eligible = materials["episodes"]
+                if is_find:
                     needle = values["query"].casefold()
-                    eligible = [item for item in materials["episodes"]
+                    eligible = [item for item in eligible
                                 if needle in experience_search_text(item).casefold()]
-                    # The order is the journal's newest-first (updated_at, id) order.
-                    # A cursor is accepted only if it is still in this caller's
-                    # *matching and accessible* results, so it cannot probe another
-                    # Work's private IDs or jump across unrelated searches.
-                    start = 0
-                    after = values.get("after_experience_id")
-                    if after is not None:
-                        positions = [index for index, item in enumerate(eligible)
-                                     if item["id"] == after]
-                        if not positions:
-                            raise ScopeConflict("experience cursor is not active or accessible for this query")
-                        start = positions[0] + 1
-                    selected, visible = [], []
-                    for item in eligible[start:]:
-                        if len(visible) == 8:
+                # The host journal already filters inaccessible contexts and inactive
+                # experiences. A cursor must belong to exactly that visible sequence.
+                start = 0
+                after = values.get("after_experience_id")
+                if after is not None:
+                    positions = [index for index, item in enumerate(eligible)
+                                 if item["id"] == after]
+                    if not positions:
+                        raise ScopeConflict("experience cursor is not active or accessible for this query")
+                    start = positions[0] + 1
+
+                # Do not discard old lessons at the 8-item/16KiB window. Page
+                # both operations by stable experience ID; never offer a partial
+                # lesson as usable guidance when one item exceeds the limit.
+                selected, visible = [], []
+                for item in eligible[start:]:
+                    if len(visible) == 8:
+                        break
+                    packed = pack_posture_materials(
+                        {"episodes": [*selected, item]}, byte_budget=16000,
+                    )
+                    if len(packed["episodes"]) != len(selected) + 1:
+                        if visible:
                             break
-                        packed = pack_posture_materials(
-                            {"episodes": [*selected, item]}, byte_budget=16000,
-                        )
-                        if len(packed["episodes"]) != len(selected) + 1:
-                            if visible:
-                                # Do not jump past an omitted record: the next
-                                # request must start with the first one not seen.
-                                break
-                            # An individually oversized record is still
-                            # discoverable by ID, but its partial conditions
-                            # cannot safely be offered as usable guidance.
-                            visible.append({"id": item["id"], "revision": item["revision"],
-                                            "title": item["title"], "material_too_large": True})
-                            break
-                        selected.append(item)
-                        visible.append(packed["episodes"][-1])
-                    consumed = start + len(visible)
-                    remaining = max(0, len(eligible) - consumed)
-                    return {"experiences": visible, "matching_count": len(eligible),
-                            "more_experiences": remaining > 0,
-                            "omitted_experience_count": remaining,
-                            "next_after_experience_id": visible[-1]["id"] if remaining and visible else None,
-                            "retrieval": "literal_casefold_on_eligible_content_only",
-                            "scope": "current_context_and_explicit_subject_transfers",
-                            "semantic_applicability": "not_yet_assessed"}
-                packed = pack_posture_materials(materials, byte_budget=16000)
-                visible = packed["episodes"][:8]
-                return {"experiences": visible,
-                        "more_experiences": len(materials["episodes"]) > len(visible),
-                        "omitted_experience_count": len(materials["episodes"]) - len(visible),
-                        "recent_sources": self._recent_sources(scope, turn),
-                        "scope": "current_context_and_explicit_subject_transfers",
-                        "semantic_applicability": "not_yet_assessed"}
+                        visible.append({"id": item["id"], "revision": item["revision"],
+                                        "title": item["title"], "material_too_large": True})
+                        break
+                    selected.append(item)
+                    visible.append(packed["episodes"][-1])
+
+                consumed = start + len(visible)
+                remaining = max(0, len(eligible) - consumed)
+                result = {
+                    "experiences": visible, "more_experiences": remaining > 0,
+                    "omitted_experience_count": remaining,
+                    "next_after_experience_id": visible[-1]["id"] if remaining and visible else None,
+                    "scope": "current_context_and_explicit_subject_transfers",
+                    "semantic_applicability": "not_yet_assessed",
+                }
+                if is_find:
+                    result["matching_count"] = len(eligible)
+                    result["retrieval"] = "literal_casefold_on_eligible_content_only"
+                else:
+                    result["recent_sources"] = self._recent_sources(scope, turn)
+                return result
             if not isinstance(action_request_id, str) or not action_request_id:
                 raise ScopeConflict("remember requires its native action identity")
             key = PREFIX + _digest({"scope": scope.as_dict(), "action": action_request_id})
