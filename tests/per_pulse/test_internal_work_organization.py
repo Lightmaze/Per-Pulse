@@ -399,3 +399,18 @@ def test_home_search_finds_older_owned_works_without_crawling(local):
                       {"op": "list", "query": "Expedition"}):
         with pytest.raises(ValueError):
             validate(arguments)
+
+    # This is a durable World search, not an in-memory cache of the first list.
+    pages.runtime.close()
+    reopened = PageService(pages.data_dir, model_factory=fixture.factory,
+                           posture=False, allow_workspace_actions=False,
+                           pulse=PulseSettings(enabled=False))
+    try:
+        home(reopened, fixture, [("work", {"op": "search", "query": "Expedition"})])
+        assert fixture.outcomes[0]["status"] == "succeeded"
+        recovered = fixture.outcomes[0]["output"]
+        assert len(recovered["works"]) == 32
+        assert {work["id"] for work in recovered["works"]} == {
+            work["id"] for work in first["works"]}
+    finally:
+        reopened.runtime.close()
