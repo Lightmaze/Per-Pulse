@@ -364,7 +364,7 @@ def test_native_find_pages_all_old_matching_records_without_exposing_private_cur
     for invalid in (private["id"], "nonexistent-id"):
         with pytest.raises(ScopeConflict, match="not active or accessible"):
             read({"op": "list", "after_experience_id": invalid})
-    for invalid in ("", "line\\nbreak", "another/work", 123):
+    for invalid in (None, "", "line\\nbreak", "another/work", 123):
         with pytest.raises(ValueError):
             validate({"op": "list", "after_experience_id": invalid})
     assert native.tool._requests() == []  # Pure reads do not stage learning.
