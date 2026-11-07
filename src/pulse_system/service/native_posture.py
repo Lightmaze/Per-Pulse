@@ -82,14 +82,11 @@ SCHEMA["properties"]["changes"] = {
 def descriptor() -> ToolDescriptor:
     return ToolDescriptor(
         NAME,
-        "Keep lessons from this page's work and the user's later feedback. list shows "
-        "recent experiences, newest first, with recent message IDs. When list returns "
-        "next_after_experience_id, call list(after_experience_id) to read older "
-        "experiences. find(query) matches "
-        "literal text in experiences' titles, lessons, conditions, decision shifts and kept"
-        " passages; when next_after_experience_id is returned, repeat find with it as "
-        "after_experience_id for older matches. A match shown only as a reference because "
-        "it is too large is not advice. get(experience_id) reads one experience. "
+        "Keep lessons and later feedback. list shows newest experiences and recent "
+        "message IDs; when next_after_experience_id appears, page older ones with "
+        "list(after_experience_id). find(query) searches titles, lessons, conditions, "
+        "shifts and passages; page older matches with find(query, after_experience_id). "
+        "An oversized reference is not advice. get(experience_id) reads one experience. "
         "remember(source_message_id, feedback_message_id, title, lesson, conditions, "
         "counterexamples, shift) keeps a lesson from the user's later feedback on an "
         "earlier assistant reply: say what the feedback changes in understanding, "
