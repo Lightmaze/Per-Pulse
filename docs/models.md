@@ -11,6 +11,68 @@ per-pulse
 
 Replace the placeholders with your provider's values. The endpoint is a complete URL, not a base URL. Credentials stay in the server environment; the browser never receives them. You can use `P_PULSE_CREDENTIAL_ENV` to name a different environment variable containing the key.
 
+## Provider compatibility
+
+The same Kernel and streaming Chat Completions adapter handle these provider
+profiles. The default `P_PULSE_CHAT_PROFILE=auto` recognizes the official hosts;
+other hosts use `compatible`. Select a profile explicitly for a proxy, keeping
+the endpoint and model chosen by you:
+
+```sh
+export P_PULSE_CHAT_PROFILE='anthropic'
+```
+
+| Provider | Complete endpoint | Profile and wire behavior |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1/chat/completions` | `openai`: sends `max_completion_tokens`, including for reasoning models |
+| Azure OpenAI | Your resource's complete Chat Completions URL | `openai` on `*.openai.azure.com`; accepts prompt/output filter annotations, including after the final text; keep the authentication setting below |
+| Anthropic | `https://api.anthropic.com/v1/chat/completions` | `anthropic`: uses Claude's OpenAI compatibility endpoint and object-root tool schemas |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions` | `gemini`: returns Google tool thought signatures with the same tool call, including after a workspace restart |
+| DeepSeek | `https://api.deepseek.com/chat/completions` | `deepseek`: returns retained `reasoning_content` with assistant tool calls |
+| OpenRouter | `https://openrouter.ai/api/v1/chat/completions` | `openrouter`: retains signed/encrypted `reasoning_details` for tool continuation; keep `P_PULSE_PROVIDER_NAMESPACE=openrouter` for its usage lookup |
+| Other compatible or local servers | Your complete Chat Completions URL | `compatible`: sends `max_tokens`; use an explicit provider profile when the server needs its conventions |
+
+Set `P_PULSE_CREDENTIAL_ENV` to `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY`, or `DEEPSEEK_API_KEY` to reuse that provider's server-side
+environment key. Profiles never change the destination, select a model, or
+copy credentials between providers. No sampling parameters or forced tool
+choice are added. Per Pulse uses best-effort function calling and validates file
+arguments locally before an edit or approval: supply exactly one of `content`
+and `patch`. Tool schemas avoid root `oneOf`, `anyOf`, and `allOf`, which
+Anthropic rejects. Streaming accepts ordinary `usage: null` chunks and records
+the service's final usage report.
+
+These settings target the providers' **Chat Completions compatibility APIs**.
+Use `/chat/completions`, rather than the native Anthropic `/messages`, Gemini
+`generateContent`, or OpenAI `/responses` routes. `doctor` remains a local
+configuration check. Verify a selected model by writing a small file in a
+fresh Work, continuing after the tool result, then reopening that Work after
+restart. A proxy or model may support a different subset of the API.
+
+For a repeatable live check from a source checkout with development dependencies,
+using your configured endpoint, run:
+
+```sh
+python -m pytest -m real -s tests/per_pulse/test_provider_compatibility.py::test_configured_provider_writes_a_file_and_continues
+```
+
+It makes at most two model requests, with retries disabled, and writes only
+inside a temporary test workspace. It checks the full native tool catalog,
+a real file effect, the next model reply and reported usage. Ordinary test
+runs exclude this paid-provider check.
+
+Protocol references: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling),
+[OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
+[Anthropic compatibility](https://platform.claude.com/docs/en/api/openai-sdk),
+[Gemini compatibility](https://ai.google.dev/gemini-api/docs/openai),
+[Gemini thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures),
+and [DeepSeek thinking and tool calls](https://api-docs.deepseek.com/guides/thinking_mode/).
+Azure annotations follow [Microsoft's streaming examples](https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/content-streaming);
+OpenRouter tool continuation follows its [reasoning format](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)
+and [official SDK accumulation](https://github.com/OpenRouterTeam/ai-sdk-provider/blob/main/src/chat/index.ts).
+
+## Authentication and local servers
+
 For Azure OpenAI Chat Completions API-key endpoints, select the complete
 versioned HTTPS endpoint, keep the key in the environment and choose the
 provider's `api-key` header:

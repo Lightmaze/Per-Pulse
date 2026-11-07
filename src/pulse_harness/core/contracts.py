@@ -298,6 +298,8 @@ class ToolCall:
     tool_call_id: str
     name: str
     arguments: Mapping[str, Any]
+    # Opaque provider continuation data, separate from tool arguments/authority.
+    provider_metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

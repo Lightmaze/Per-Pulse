@@ -1590,7 +1590,8 @@ class TurnRunner:
         if not isinstance(arguments, Mapping):  # pragma: no cover - defensive
             raise ProviderProtocolError("tool-call arguments are not canonical")
         self._require_mapping_payload(arguments, "tool-call arguments")
-        return ToolCall(call.tool_call_id, call.name, dict(arguments))
+        metadata = self._require_mapping_payload(call.provider_metadata, "tool-call provider metadata")
+        return ToolCall(call.tool_call_id, call.name, dict(arguments), metadata)
 
     @staticmethod
     def _assistant_payload(
@@ -1604,6 +1605,8 @@ class TurnRunner:
                     "action_request_id": item.action_request_id,
                     "name": item.call.name,
                     "arguments": dict(item.call.arguments),
+                    **({"provider_metadata": dict(item.call.provider_metadata)}
+                       if item.call.provider_metadata else {}),
                 }
                 for item in calls
             ],
@@ -1634,6 +1637,8 @@ class TurnRunner:
                         "tool_call_id": delta.tool_call.tool_call_id,
                         "name": delta.tool_call.name,
                         "arguments": dict(delta.tool_call.arguments),
+                        **({"provider_metadata": dict(delta.tool_call.provider_metadata)}
+                           if delta.tool_call.provider_metadata else {}),
                     },
                     "model tool-call delta",
                 )
@@ -1703,7 +1708,11 @@ class TurnRunner:
                     "durable tool continuation arguments are malformed",
                     code="continuation_authority_mismatch",
                 )
-            call = self._canonical_tool_call(ToolCall(tool_call_id, name, dict(arguments)))
+            metadata = raw.get("provider_metadata", {})
+            if not isinstance(metadata, Mapping):
+                raise ProviderProtocolError("durable tool provider metadata is malformed",
+                                            code="continuation_authority_mismatch")
+            call = self._canonical_tool_call(ToolCall(tool_call_id, name, dict(arguments), metadata))
             if action_id != _action_request_id(scope, call):
                 raise ProviderProtocolError(
                     "durable tool continuation scope is invalid",

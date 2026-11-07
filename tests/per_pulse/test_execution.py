@@ -564,7 +564,7 @@ def test_completed_effect_is_not_reported_as_rejected_when_continuation_fails(tm
     }))
     with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
         path = tmp_path / "workspace" / "report.txt"
-        path.write_text(before)
+        path.write_bytes(before.encode("utf-8"))
         pages = client.app.state.pages
         page_id = _new_page(client, "Update the report heading. FAIL_AFTER_TOOL")
         waiting = _wait(pages.execution, page_id, lambda p: bool(p["pendingActions"]) and p["pendingActions"][0]["canResolve"])
