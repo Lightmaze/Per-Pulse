@@ -134,6 +134,9 @@ jobs:
       - name: Verify exact native file downloads in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_DOWNLOAD_SCREENSHOTS="$RUNNER_TEMP/per-pulse-download-screenshots" node tests/browser/download_flow.mjs
+      - name: Verify failed browser draft writes remain recoverable
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python node tests/browser/draft_storage_flow.mjs
       - name: Verify Work completion remains visible from idle Home
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_STATUS_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/workspace_status_flow.mjs

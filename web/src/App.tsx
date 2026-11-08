@@ -47,6 +47,7 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [sourceNotice, setSourceNotice] = useState('');
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [draftSaveFailures, setDraftSaveFailures] = useState<Record<string, boolean>>({});
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
   const main = useRef<HTMLElement>(null);
@@ -78,14 +79,26 @@ export default function App() {
 
   const openModal = (next: Modal) => { setModalError(''); setModal(next); setPulseOpen(false); setSidebarOpen(false); };
   const closeModal = () => { if (!busy) { setModal(null); setModalError(''); } };
+  const persistDraft = useCallback((pageId: string, next: Draft) => {
+    if (!workspaceId) return;
+    const saved = saveDraft(workspaceId, pageId, next);
+    const key = `${workspaceId}/${pageId}`;
+    setDraftSaveFailures(previous => {
+      if (saved && !previous[key]) return previous;
+      const updated = { ...previous };
+      if (saved) delete updated[key];
+      else updated[key] = true;
+      return updated;
+    });
+  }, [workspaceId]);
   const changeDraft = useCallback((next: Draft) => {
     if (!workspaceId) return;
     interacted.current = `${workspaceId}-${route.id}-${route.serial}`;
     const updated = { ...draftsRef.current, [draftKey]: next };
     draftsRef.current = updated;
     setDrafts(updated);
-    saveDraft(workspaceId, route.id, next);
-  }, [route.id, route.serial, workspaceId, draftKey]);
+    persistDraft(route.id, next);
+  }, [route.id, route.serial, workspaceId, draftKey, persistDraft]);
 
   useEffect(() => {
     document.title = view?.page.kind === 'work' ? `${view.page.title} · Per Pulse` : 'Per Pulse';
@@ -176,7 +189,7 @@ export default function App() {
       const updated = { ...draftsRef.current, [draftKey]: nextDraft };
       draftsRef.current = updated;
       setDrafts(updated);
-      saveDraft(workspaceId, id, nextDraft);
+      persistDraft(id, nextDraft);
       if (currentPage.current === id) {
         const messageId = 'messageId' in response ? response.messageId : null;
         if (messageId) requestAnimationFrame(() => { if (currentPage.current === id) document.getElementById(`message-${messageId}`)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });
@@ -264,7 +277,7 @@ export default function App() {
           const updated = { ...draftsRef.current, [targetKey]: next };
           draftsRef.current = updated;
           setDrafts(updated);
-          saveDraft(workspaceId, page.id, next);
+          persistDraft(page.id, next);
         }
         // A late native answer may update that Work, never hijack a newer
         // route or close another dialog the user has since opened.
@@ -358,7 +371,7 @@ export default function App() {
       const updated = { ...draftsRef.current, [homeKey]: next };
       draftsRef.current = updated;
       setDrafts(updated);
-      saveDraft(workspaceId, 'home', next);
+      persistDraft('home', next);
     }
     // Never steal the user's focus if they navigated elsewhere during I/O.
     if (currentPage.current === sourceId && currentRouteSerial.current === sourceSerial) {
@@ -488,7 +501,7 @@ export default function App() {
                 .catch(problem => setSendErrors(previous => ({ ...previous, [draftKey]: errorText(problem) })));
             }}>{t('tick.stop')}</button>
           </div> : null}
-          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onInspectMaterial={materialId => openModal({ kind: 'materials', materialId, pageId: route.id })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
+          {view && workspaceId ? <Composer draft={draft} draftSaveFailed={draftSaveFailures[draftKey] === true} retryDraftSave={() => persistDraft(route.id, draft)} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onInspectMaterial={materialId => openModal({ kind: 'materials', materialId, pageId: route.id })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
     </div>
