@@ -80,6 +80,67 @@ def test_default_context_and_explicit_transfer_have_different_disclosure():
         storage.close()
 
 
+
+def test_single_cited_experience_lookup_is_bounded_private_and_revisable():
+    """A known source remains cheap to revisit after a lifelong journal grows."""
+    storage = Storage()
+    memory = PostureMemory(
+        storage, "world",
+        history_lineage=lambda subject: ("ancestor",) if subject == "successor" else (),
+    )
+    try:
+        for i in range(80):
+            memory.add_experience(**episode(
+                experience_id=f"older-{i:03d}", subject_id="ancestor", scope="subject",
+            ))
+        target = memory.add_experience(**episode(
+            experience_id="cited-source", subject_id="ancestor", scope="subject",
+        ))
+        memory.add_experience(**episode(
+            experience_id="private-work", subject_id="ancestor", scope="context",
+        ))
+        memory.add_experience(**episode(
+            experience_id="other-subject", subject_id="outsider", scope="subject",
+        ))
+        seen_sql = []
+        with storage._lock:
+            storage._conn.set_trace_callback(seen_sql.append)
+        selected = memory.material_experience(
+            subject_id="successor", context_id="later-work", experience_id="cited-source",
+        )
+        with storage._lock:
+            storage._conn.set_trace_callback(None)
+        statements = [sql for sql in seen_sql if sql.lstrip().upper().startswith("SELECT")]
+        assert len(statements) <= 5, statements
+        assert selected == next(item for item in memory.materials(
+            subject_id="successor", context_id="later-work")["episodes"]
+            if item["id"] == "cited-source")
+        assert "PRIVATE_" not in json.dumps(selected)
+        assert selected["encounter_available"] is False
+        assert memory.material_experience(
+            subject_id="successor", context_id="later-work",
+            experience_id="private-work") is None
+        assert memory.material_experience(
+            subject_id="successor", context_id="later-work",
+            experience_id="other-subject") is None
+        assert memory.material_experience(
+            subject_id="successor", context_id="later-work",
+            experience_id="no-such-source") is None
+        local = memory.material_experience(
+            subject_id="ancestor", context_id="origin", experience_id="cited-source")
+        assert local["encounter"] == target["encounter"]
+        assert local["source"]["evidence"] == target["source"]
+        memory.revise_experience("cited-source", expected_revision=1,
+                                 changes={"active": False})
+        assert memory.material_experience(
+            subject_id="successor", context_id="later-work",
+            experience_id="cited-source") is None
+    finally:
+        with storage._lock:
+            storage._conn.set_trace_callback(None)
+        storage.close()
+
+
 def test_native_empty_home_context_can_retain_and_reuse_experience():
     storage = Storage()
     memory = PostureMemory(storage, "world")
