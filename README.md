@@ -45,13 +45,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a8-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a8)
+[`per_pulse-0.1.0a9-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a9)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a8-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a9-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -96,9 +96,10 @@ per-pulse
 
 The endpoint is a complete URL. The key stays in the server environment; the
 browser never receives it. `per-pulse doctor` checks the local configuration
-without contacting the provider. A model server on your own computer works too.
-See [Connect a model](docs/models.md) for local models, PowerShell and the
-other provider options.
+without contacting the provider. A model server on this computer or at a literal private LAN IP works too.
+Private LAN HTTP must be explicitly enabled; it sends the model your task and
+file context without transport encryption. See [Connect a model](docs/models.md)
+for the required settings, PowerShell and other provider options.
 
 ## Let pages continue
 

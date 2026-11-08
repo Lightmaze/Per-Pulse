@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a9
+
+- Connect to an operator-selected OpenAI-compatible model server at a literal private LAN IPv4 or ULA IPv6 address, using the existing World, Kernel and model transport.
+- Add bilingual Settings commands for POSIX and PowerShell. Require explicit private HTTP and separate no-auth opt-ins; warn that unencrypted LAN model calls transmit task and file context.
+- Keep hosted and local provider modes unchanged. Verify address restrictions, synthetic streaming transport and the installed disconnected browser setup path; a real LAN model remains a user-configured service.
+
 ## 0.1.0a8
 
 - Browse beyond the first 200 files in a large Materials directory with bounded continuation, change detection and a visible refresh path, while keeping the original file access boundary.
