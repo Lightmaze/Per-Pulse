@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from pulse_harness.adapters import command_output
 from pulse_harness.core.contracts import ActionStatus
 from pulse_harness.core.errors import ScopeConflict
-from pulse_harness.core.replay import bound_text
+from .posture import _text
 
 
 def _own_action(runtime, scope, action_id):
@@ -106,9 +106,13 @@ def capture_command_example(runtime, scope, receipt_id: str, excerpt: str,
     if (not isinstance(content, str) or not isinstance(excerpt, str)
             or not excerpt.strip() or excerpt not in content):
         raise ScopeConflict("the example must be an exact part of the delivered command passage")
-    clean, redacted, truncated = bound_text(excerpt, 8000)
-    if redacted or truncated or clean != excerpt:
-        raise ScopeConflict("select a shorter command passage without credentials")
+    # Preserve exactly what the model actually saw in its verified receipt.
+    # Receipt redaction/completeness remains attached to the observation;
+    # literal marker-shaped output is not a new redaction event.
+    try:
+        _text(excerpt, "example excerpt", 8000)
+    except ValueError as exc:
+        raise ScopeConflict("select a command passage within 8000 UTF-8 bytes") from exc
     start = content.index(excerpt)
     observation = {"stream": stream, "exit_code": facts["exit_code"],
                    "capture_complete": output["capture_complete"], "redacted": output["redacted"]}

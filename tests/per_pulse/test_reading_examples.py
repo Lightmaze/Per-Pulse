@@ -236,3 +236,28 @@ def test_committed_generation_and_cold_copy_keep_a_reading_example(tmp_path, mon
     image.restore(archive, restored)
     with client_for(restored, posture=True, model_factory=None) as client:
         assert client.get(f"/api/pages/{page_id}/posture").json()["experiences"] == [saved]
+
+
+@pytest.mark.parametrize("selected", [
+    "[REDACTED]",
+    "[TRUNCATED sha256=" + "b" * 64 + " redacted=1 preview=quoted log]",
+])
+def test_reading_retains_literal_markers_from_delivered_source(tmp_path, monkeypatch, selected):
+    fixture = ReadingExampleFixture(monkeypatch.setenv)
+    with client_for(tmp_path, posture=True, model_factory=fixture.factory) as client:
+        page_id = work(client)
+        path = tmp_path / "workspace" / "quoted-marker.txt"
+        path.write_text("A quoted diagnostic is " + selected + " in this document.\n")
+        results = choose(
+            client, page_id, fixture, op="open", path=path.name,
+            retain={"title": "Observed literal marker", "excerpt": selected},
+        )
+        assert [item["status"] for item in results] == ["succeeded", "succeeded"]
+        observed = results[0]["output"]
+        saved, = client.get(f"/api/pages/{page_id}/posture").json()["experiences"]
+        assert saved["excerpt"] == selected
+        assert saved["source"]["reading_receipt_id"] == observed["receipt_id"]
+        coordinates = saved["source"]["selected_excerpt"]
+        assert observed["content"][coordinates["start"]:coordinates["end"]] == selected
+        assert coordinates["sha256"] == hashlib.sha256(selected.encode()).hexdigest()
+        assert saved["source"]["current_file_checked"] is False
