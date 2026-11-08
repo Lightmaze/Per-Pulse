@@ -77,6 +77,21 @@ try {
   const homeDraft = 'Keep this Home draft while reviewing the background answer.';
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).fill(homeDraft);
   await page.locator('.home-continuation-open').waitFor();
+  // A failed background read must not turn a known result into an empty Home,
+  // or leave an unverified source link actionable. Refresh is read-only.
+  await page.route('**/api/pulse/observation', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: '{"error":"explicit observation outage"}',
+  }), { times: 1 });
+  await page.waitForResponse(response => new URL(response.url()).pathname === '/api/pulse/observation'
+    && response.status() === 503, { timeout: 18000 });
+  await page.getByRole('heading', { name: 'Recent updates unavailable', exact: true }).waitFor();
+  assert.equal(await page.locator('.home-continuation-open').count(), 0);
+  assert.equal(await page.locator('.home-continuation-source').count(), 0);
+  await page.getByText('Last known work (read-only)', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await page.locator('.home-continuation-open').waitFor();
+  assert.equal(await page.getByRole('heading', { name: 'Recent updates unavailable' }).count(), 0);
+  checks.push('A failed native Home observation shows read-only last-known work and recovers with explicit refresh, without a model request.');
   if (screenshots) await page.screenshot({ path: join(screenshots, 'background-result-home.png') });
   await page.locator('.home-continuation-source').click();
   await wait(() => new URL(page.url()).hash === '#message-' + activation.sourceEventId, 'exact original source');
