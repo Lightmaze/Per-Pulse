@@ -61,6 +61,16 @@ try {
   assert.match(await settled.innerText(), /Read the notes\.[\s\S]*Write the summary\./);
   checks.push('the saved reply replaces it, once, when the model finishes');
 
+  await page.getByRole('textbox', { name: /^Message / }).fill('REFUSAL_FIXTURE');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  const refusal = page.locator('.message-assistant').getByText(
+    'Synthetic refusal fixture. I cannot complete this request.', { exact: true });
+  await refusal.waitFor();
+  checks.push('the service refusal appears as a readable reply');
+  await page.reload();
+  await refusal.waitFor();
+  checks.push('the saved refusal remains readable after reopening the page');
+
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks, provider: 'explicit synthetic HTTP fixture' }));
 } finally {
