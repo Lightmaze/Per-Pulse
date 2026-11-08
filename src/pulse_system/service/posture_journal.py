@@ -62,6 +62,30 @@ class PostureJournal:
         self.guard()
         return self.storage._posture_journal_read(read)
 
+    def get_visible(self, identity, *, subjects, context_id):
+        """Authorize active subject/context access before loading the record."""
+        def read(conn):
+            if not subjects:
+                return None
+            if not self._ready(conn):
+                record = self.legacy()["experiences"].get(identity)
+                if (record is None or record["subject_id"] not in subjects
+                        or not record["active"]
+                        or (record["context_id"] != context_id and record["scope"] != "subject")):
+                    return None
+                return deepcopy(record)
+            members = sorted(subjects)
+            marks = ",".join("?" for _ in members)
+            visible = conn.execute(
+                "SELECT 1 FROM posture_experiences WHERE world_id=? AND experience_id=?"
+                f" AND subject_id IN ({marks}) AND active=1"
+                " AND (context_id=? OR scope='subject')",
+                (self.world_id, identity, *members, context_id),
+            ).fetchone()
+            return self._get(conn, identity, history=False)[0] if visible else None
+        self.guard()
+        return self.storage._posture_journal_read(read)
+
     def list(self, *, subjects, context_id, include_inactive, history=True):
         def read(conn):
             if not self._ready(conn):

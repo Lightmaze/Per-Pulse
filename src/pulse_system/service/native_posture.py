@@ -688,10 +688,11 @@ class NativePosture:
             turn = self._live_turn(scope)
             if values["op"] in {"list", "find", "get"}:
                 from pulse_harness.plugins.posture import pack_posture_materials
-                materials = memory.materials(subject_id=scope.engram_id, context_id=scope.context_id)
                 if values["op"] == "get":
-                    eligible = [item for item in materials["episodes"]
-                                if item["id"] == values["experience_id"]]
+                    item = memory.material_experience(
+                        subject_id=scope.engram_id, context_id=scope.context_id,
+                        experience_id=values["experience_id"])
+                    eligible = [] if item is None else [item]
                     if not eligible:
                         # Same error for nonexistent, inactive and private IDs.
                         raise ScopeConflict("experience is not active or accessible from this context")
@@ -702,6 +703,7 @@ class NativePosture:
                             "material_too_large": not bool(packed["episodes"]),
                             "scope": "current_context_and_explicit_subject_transfers",
                             "semantic_applicability": "not_yet_assessed"}
+                materials = memory.materials(subject_id=scope.engram_id, context_id=scope.context_id)
                 is_find = values["op"] == "find"
                 eligible = materials["episodes"]
                 if is_find:
