@@ -336,6 +336,37 @@ def test_native_find_pages_all_old_matching_records_without_exposing_private_cur
         with pytest.raises(ValueError):
             validate({"op": "find", "query": "Routine",
                       "after_experience_id": after})
+
+    # list must also reach old lessons when the agent does not already know
+    # their keywords. Retain the exact eligibility and byte bounds of find.
+    first_list = read({"op": "list"})
+    assert first_list["experiences"] == [{
+        "id": huge["id"], "revision": 1, "title": "Routine oversized conditions",
+        "material_too_large": True,
+    }]
+    assert first_list["next_after_experience_id"] == huge["id"]
+    assert first_list["more_experiences"]
+    assert isinstance(first_list["recent_sources"], list)
+    second_list = read({"op": "list",
+                        "after_experience_id": first_list["next_after_experience_id"]})
+    assert len(second_list["experiences"]) == 8
+    assert second_list["more_experiences"]
+    third_list = read({"op": "list",
+                       "after_experience_id": second_list["next_after_experience_id"]})
+    assert len(third_list["experiences"]) == 4
+    assert not third_list["more_experiences"]
+    assert third_list["next_after_experience_id"] is None
+    list_ids = [item["id"] for page in (first_list, second_list, third_list)
+                for item in page["experiences"]]
+    assert len(list_ids) == len(set(list_ids)) == 13
+    assert set(list_ids) == {huge["id"], *(item["id"] for item in ordinary)}
+    assert private["id"] not in list_ids
+    for invalid in (private["id"], "nonexistent-id"):
+        with pytest.raises(ScopeConflict, match="not active or accessible"):
+            read({"op": "list", "after_experience_id": invalid})
+    for invalid in (None, "", "line\\nbreak", "another/work", 123):
+        with pytest.raises(ValueError):
+            validate({"op": "list", "after_experience_id": invalid})
     assert native.tool._requests() == []  # Pure reads do not stage learning.
 
 
