@@ -313,16 +313,16 @@ class PageArtifacts:
         return response
 
     def download(self, page_id: str, artifact_id: str) -> dict:
-        """Return complete verified UTF-8 bytes, never a reconstructed preview.
+        """Return verified original bytes, never an encoded document preview.
 
-        Read once through the existing no-follow descriptor path. Encoding its
-        lossless UTF-8 text back to bytes preserves BOM, CRLF and all whitespace.
+        Read once through the existing no-follow descriptor path. The
+        validated preview and original bytes share the same snapshot.
         The returned bytes have the receipt's digest even if a writer replaces
         the filesystem path after this read. No pathname is reopened by HTTP.
         """
         item = self._resolve(page_id, artifact_id)
         try:
-            current = WorkspaceFiles(self.execution._kernel.workspace_root).read(item["path"])
+            current, data = WorkspaceFiles(self.execution._kernel.workspace_root).read_with_bytes(item["path"])
         except FileAccessError as error:
             raise ArtifactError(error.code, "This recorded file version is not available for download.", error.status) from error
         if current["sha256"] != item["sha256"]:
@@ -331,4 +331,4 @@ class PageArtifacts:
         # not a basis for claiming an exact original file download.
         if any(_stored_markers(current["content"])):
             raise ArtifactError("artifact_download_redacted", "This file holds an incomplete stored result and cannot be downloaded as an original result.", 422)
-        return {"artifact": item, "content": current["content"].encode("utf-8")}
+        return {"artifact": item, "content": data}
