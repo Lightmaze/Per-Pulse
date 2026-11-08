@@ -61,7 +61,8 @@ def test_refusal_survives_native_restart_and_the_next_user_message(tmp_path, mon
         def respond(request):
             body = json.loads(request.content)
             requests.append(body)
-            if body["messages"][-1]["content"] == "FOLLOWUP":
+            latest_user = next(m for m in reversed(body["messages"]) if m["role"] == "user")
+            if latest_user["content"] == "FOLLOWUP":
                 assert any(m["role"] == "assistant" and m["content"] == REFUSAL for m in body["messages"])
                 delta = {"content": "Ready for another task."}
             else:
