@@ -80,6 +80,21 @@ def remember(env, values=None, action="synthetic-action"):
                             CancellationToken(), action_request_id=action)
 
 
+def test_lesson_literal_markers_keep_exact_content_and_real_size_limits(native):
+    values = deepcopy(native.values)
+    values["lesson"] = "Keep literal [REDACTED] in a source example."
+    native.states.arguments = values
+    receipt = remember(native, values)
+    settle(native)
+    native.tool.drain()
+    saved = native.memory.list_experiences(subject_id=native.scope.engram_id)
+    assert len(saved) == 1 and saved[0]["lesson"] == values["lesson"]
+    from pulse_system.service.posture import _text
+    assert _text("[REDACTED]", "example", 128) == "[REDACTED]"
+    with pytest.raises(ValueError, match="too large"):
+        _text("\U0001f4c4" * 33, "example", 128)
+
+
 def settle(env):
     env.runtime.causal_ledger.settle_turn(
         env.current.id, "I changed the first interaction and retained the relevant lesson.",

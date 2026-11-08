@@ -2555,7 +2555,10 @@ class HarnessStore:
                         scope,
                         role="assistant",
                         clean_content=clean_content,
-                        redacted=False,
+                        # The legacy storage flag records marker presence. Keep
+                        # it consistent with replay validation even for literal
+                        # markers in complete model-authored tool arguments.
+                        redacted=_redacted,
                         truncated=False,
                         message_id=assistant_item_id,
                         parent_item_id=None,
@@ -2566,7 +2569,7 @@ class HarnessStore:
                         scope,
                         role="system",
                         clean_content=review_context,
-                        redacted=False,
+                        redacted=_review_redacted,
                         truncated=False,
                         message_id=review_item_id,
                         # Source identity is durable in the envelope; a parent
