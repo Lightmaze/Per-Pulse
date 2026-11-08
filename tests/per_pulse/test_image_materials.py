@@ -146,7 +146,7 @@ def source(tmp_path):
 
 
 def request_for(scope, result, tool="read_file", suffix=()):
-    messages = ({"role": "assistant", "content": json.dumps({"text": "", "tool_calls": [
+    messages = ({"role": "assistant", "tool_call_count": 1, "content": json.dumps({"text": "", "tool_calls": [
         {"tool_call_id": "image-read", "name": tool, "arguments": {"path": "picture.png"}}]})},
         {"role": "tool", "content": json.dumps({"tool_call_id": "image-read", "status": "succeeded", "output": result})})
     return ModelRequest(scope, messages + tuple(suffix), (), 0)
@@ -226,7 +226,7 @@ def test_five_image_limit_is_explicit_and_encoded_images_obey_default_request_bo
         result = provider.read_file(scope, path)
         calls.append({"tool_call_id": str(index), "name": "read_file", "arguments": {"path": path}})
         results.append({"role": "tool", "content": json.dumps({"tool_call_id": str(index), "status": "succeeded", "output": result})})
-    messages = ({"role": "assistant", "content": json.dumps({"text": "", "tool_calls": calls})}, *results)
+    messages = ({"role": "assistant", "tool_call_count": len(calls), "content": json.dumps({"text": "", "tool_calls": calls})}, *results)
     request = ModelRequest(scope, messages, (), 0)
     sent = []
     adapter = ChatHTTPModelAdapter(ChatHTTPConfig("http://127.0.0.1:9/chat", "fixture", allow_local_http=True,

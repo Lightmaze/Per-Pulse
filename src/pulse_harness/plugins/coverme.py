@@ -325,15 +325,17 @@ def build_review_prompt(request: ModelRequest, response_text: str, matched: tupl
     for message in reversed(request.messages):
         role, content = message.get("role"), message.get("content")
         if role in {"user", "assistant"} and isinstance(content, str):
-            if role == "assistant":
-                try:
-                    envelope = _load_json(content)
-                except CoverMeValidationError:
-                    envelope = None
-                if isinstance(envelope, dict) and "tool_calls" in envelope:
-                    content = envelope.get("text", "")
-                    if not isinstance(content, str):
-                        content = ""
+            if role == "assistant" and message.get("tool_call_count", 0):
+                # Only completed-round authority identifies an internal envelope.
+                # Ordinary JSON examples remain exact conversation excerpts.
+                envelope = _load_json(content)
+                if (not isinstance(envelope, dict)
+                        or set(envelope) != {"text", "tool_calls"}
+                        or not isinstance(envelope["text"], str)
+                        or not isinstance(envelope["tool_calls"], list)
+                        or len(envelope["tool_calls"]) != message["tool_call_count"]):
+                    raise CoverMeValidationError("invalid assistant tool transcript")
+                content = envelope["text"]
             recent.append({"role": role, "content": content})
             if len(recent) == _RECENT_MESSAGES:
                 break
