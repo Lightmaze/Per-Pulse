@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a6-py3-none-any.whl` from the
-[v0.1.0a6 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a6).
+Download `per_pulse-0.1.0a8-py3-none-any.whl` from the
+[v0.1.0a8 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a8).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a6-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a8-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a6-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a8-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -75,9 +75,9 @@ Your workspace is outside the installation, in
 `~/.local/share/per-pulse` by default, or your chosen `--data-dir`.
 Before upgrading, stop the service and copy the complete data directory to a
 backup, then install the new wheel in the same environment.
-The first start of a7 upgrades the World database to schema v13 for the durable
-experience journal. The migration process first saves a database backup beside
-it. Existing experience is imported on its first ordinary update, retaining the
+A first upgrade from a version older than a7 migrates the World database to
+schema v13 for the durable experience journal and first saves a database backup.
+Upgrading from a7 to a8 keeps that schema. Existing experience is imported on its first ordinary update, retaining the
 original components, sources and revision history. For a move, see
 [workspace images](image.md); restore an older image with its matching
 implementation before upgrading the restored directory.
@@ -90,7 +90,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a6-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a8-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
