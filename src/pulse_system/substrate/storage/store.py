@@ -61,6 +61,10 @@ _STORAGE_BOOTSTRAP_TABLES = (
     "local_notices",
     "messages",
     "projects",
+    "posture_journals",
+    "posture_experiences",
+    "posture_experience_revisions",
+    "posture_experience_feedback",
     "runtime_leases",
     "task_fronts",
     "task_offer_revisions",
@@ -7112,6 +7116,37 @@ class Storage:
         self._conn.commit()
 
     # ── Component state (delegation router/Claustrum modulator weight persistence) ─────────────
+
+    def _posture_journal_read(self, callback):
+        """Read the experience journal under the World's existing storage lock."""
+        with self._lock:
+            self._conn.execute("BEGIN")
+            try:
+                return callback(self._conn)
+            finally:
+                self._conn.rollback()
+
+    def _posture_journal_write(self, callback, *, guard):
+        """Serialize experience revisions across connections and fence publication."""
+        def check(conn):
+            self._assert_runtime_publication()
+            lease = self._get_runtime_lease_uncommitted(conn)
+            if lease is not None:
+                permit = self._runtime_publication_permit
+                if permit is None:
+                    raise RuntimeLeaseLostError(owner_id="unbound-posture", epoch=0,
+                                                reason="lease_binding_required", lease=lease)
+                self._assert_runtime_lease_uncommitted(permit.owner_id, permit.epoch, _now(), conn)
+        with self._lock:
+            # A native guard can renew/check its lease in a transaction of its
+            # own. Run it before BEGIN; recheck the exact permit and lease in
+            # this transaction before publication instead of nesting BEGIN.
+            guard()
+            with self._immediate_transaction() as conn:
+                check(conn)
+                result = callback(conn)
+                check(conn)
+                return result
 
     @_locked
     def save_component_state(self, component: str, state: dict) -> None:

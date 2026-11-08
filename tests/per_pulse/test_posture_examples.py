@@ -76,19 +76,17 @@ def test_existing_v1_lessons_upgrade_in_the_same_journal_without_rewriting_histo
     storage = Storage()
     memory = PostureMemory(storage, "world")
     try:
-        lesson = memory.add_experience(**episode())
-        state = storage.load_component_state(memory.component)
-        state["schema"] = LEGACY_SCHEMA
-        state["experiences"][lesson["id"]].pop("representation")
-        before = deepcopy(state["experiences"][lesson["id"]])
+        lesson = PostureMemory.validate_experience(**episode())
+        lesson.pop("representation")
+        state = {"schema": LEGACY_SCHEMA, "world_id": "world", "experiences": {lesson["id"]: lesson}}
+        before = deepcopy(lesson)
         storage.save_component_state(memory.component, state)
         assert memory.get_experience(lesson["id"]) == before
         assert storage.load_component_state(memory.component)["schema"] == LEGACY_SCHEMA
         saved = memory.add_experience(**example())
-        after = storage.load_component_state(memory.component)
-        assert after["schema"] == SCHEMA
-        assert after["experiences"][lesson["id"]] == before
-        assert len(after["experiences"]) == 2
+        assert storage.load_component_state(memory.component) == state
+        assert memory.get_experience(lesson["id"]) == before
+        assert len(memory.list_experiences(subject_id="subject")) == 2
         offered = memory.materials(subject_id="subject", context_id="origin")["episodes"]
         assert {item["representation"] for item in offered} == {"lesson", "example"}
         assert {item["id"] for item in offered} == {lesson["id"], saved["id"]}

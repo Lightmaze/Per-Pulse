@@ -189,28 +189,26 @@ an excerpt remains intact or the whole record is explicitly omitted. The
 existing packet budget can therefore omit a large example. `find` and `get`
 retain their bounded, explicitly reported omission behavior.
 
-A workspace's main experience journal holds at most 128 records and 4 MiB of
-stored JSON, including original encounters, feedback, and revision history.
-These limits cover all its pages and generations, including paused records.
-An addition or ordinary revision that exceeds either applicable limit is
-rejected without changing the stored journal. There is no silent eviction.
+Experience lives in the existing World SQLite database. Current records,
+immutable prior revisions and feedback occupy separate rows. Feedback is stored
+once, and historical revisions retain the exact feedback prefix visible then.
+The former aggregate limits of 128 records and 4 MiB do not apply to this durable
+journal. Paused experience and old revisions remain available without consuming
+a lifetime record quota. Individual input limits and the bounded model-material
+packet still apply; saving more experience does not expand a model request.
 
-Stopping an active lesson remains possible when the main journal is full.
-A separate World control component holds at most 128 stop records within
-6 MiB, preserving the full new negative feedback and its revision. A pure
-`active: false` update, or `harmful`/`withdrawn` feedback, can use this bounded
-path. Reads reconstruct the prior history without rewriting or deleting it.
-Combining a pause with other edits still requires the ordinary journal write
-to fit. Reactivation also requires an ordinary revision and can be refused at
-capacity; an old revision cannot undo a later stop.
+Old v1/v2 component JSON, including full-journal stop controls, is read in place
+until the first ordinary mutation. That mutation imports all records and the
+requested change in one fenced SQLite transaction. The original components stay
+unchanged. A failed import or change rolls back both, so a restart can retry.
+After a committed import, only the row journal is authoritative. Sources, IDs,
+revision numbers, scopes, feedback and prior snapshots retain their values.
 
-Pausing does not release record slots or storage. The product does not yet
-provide a workflow to reclaim journal capacity through deliberate archival or
-compaction. A long-running workspace can therefore reach a point where new
-learning and further edits are refused, while existing eligible lessons and
-the ability to stop them remain available. Capacity visibility and a deliberate
-history-preserving archival workflow are further lifecycle work, not behavior
-implemented by this version.
+Stopping, correcting and deliberately reactivating an experience use the same
+revision check and transaction. Disk or publication failures leave the previous
+revision intact; they cannot silently save only the pause or only its feedback.
+The source-page API still returns full revision history on explicit inspection;
+normal model material reads current eligible records without loading that history.
 
 ## API workflow
 

@@ -1069,17 +1069,27 @@ def test_native_revision_recovers_receipt_crash_without_reapplying_over_later_ed
     assert receipt["status"] == "revised" and receipt["revision"] == 2
 
 
-def test_native_revision_journal_capacity_failure_is_atomic(native, monkeypatch):
-    import pulse_system.service.posture as posture_module
+def test_native_revision_journal_write_failure_is_atomic_and_retryable(native):
+    import sqlite3
 
     before, values, _ = revision_turn(native)
     staged = remember(native, values, action="revision-at-capacity")
     settle(native)
-    monkeypatch.setattr(posture_module, "MAX_STATE_BYTES", 1)
-    native.tool.drain()
+    connection = native.runtime.storage._conn
+    connection.execute("CREATE TRIGGER reject_experience_write BEFORE UPDATE ON posture_experiences "
+                       "BEGIN SELECT RAISE(ABORT, 'synthetic disk write fault'); END")
+    connection.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="synthetic disk write fault"):
+        native.tool.drain()
     assert native.memory.get_experience(before["id"]) == before
     receipt = native.runtime.storage.load_component_state(staged["request_id"])
-    assert receipt["status"] == "blocked" and receipt["error_code"] == "experience_not_admitted"
+    assert receipt["status"] == "prepared"
+    connection.execute("DROP TRIGGER reject_experience_write")
+    connection.commit()
+    native.tool.drain()
+    native.tool.drain()
+    assert native.memory.get_experience(before["id"])["revision"] == 2
+    assert native.runtime.storage.load_component_state(staged["request_id"])["status"] == "revised"
 
 
 def test_native_revision_staged_content_cannot_differ_from_actual_action(native):

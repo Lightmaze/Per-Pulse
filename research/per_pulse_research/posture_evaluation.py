@@ -295,6 +295,20 @@ def _audit_request(request) -> dict:
             "scope": request.scope.as_dict(), "posture_exposures": exposures}
 
 
+def _native_posture_journal(world: sqlite3.Connection, world_id: str) -> dict:
+    """Read either native format without upgrading an archived trial database."""
+    from pulse_system.service.posture_journal import read_experience_record
+
+    has_rows = world.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='posture_journals'").fetchone()
+    if has_rows and world.execute("SELECT 1 FROM posture_journals WHERE world_id=?", (world_id,)).fetchone():
+        identities = [row[0] for row in world.execute(
+            "SELECT experience_id FROM posture_experiences WHERE world_id=?", (world_id,))]
+        return {identity: read_experience_record(world, world_id, identity)[0] for identity in identities}
+    state = world.execute("SELECT state FROM component_state WHERE component=?",
+                          ("per-pulse-posture-v1:" + world_id,)).fetchone()
+    return json.loads(state[0])["experiences"] if state else {}
+
+
 def _readonly_trace(path: Path) -> sqlite3.Connection:
     if not path.is_file() or any(part.is_symlink() for part in (path, *path.parents)):
         raise ValueError("native trace must be a regular file without symlinks")
@@ -879,8 +893,7 @@ def audit_transfer_trial(output: Path) -> dict:
             native_requests.extend(row["request_digest"] for row in rounds)
             completed_requests.extend(row["request_digest"] for row in rounds if row["status"] == "completed")
             origin_flags.extend(json.loads(row["provider_evidence_json"]).get("test_only") for row in rounds)
-            state = world.execute("SELECT state FROM component_state WHERE component=?", ("per-pulse-posture-v1:" + record["world_id"],)).fetchone()
-            journal = json.loads(state["state"])["experiences"] if state else {}
+            journal = _native_posture_journal(world, record["world_id"])
             for experience in record.get("experiences", []):
                 if journal.get(experience["id"]) != experience:
                     errors.append("native_experience_export_mismatch")
