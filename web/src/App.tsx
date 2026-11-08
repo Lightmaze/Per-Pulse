@@ -196,12 +196,12 @@ export default function App() {
     }
   };
 
-  const createPage = async (title: string, instruction: string) => {
+  const createPage = async (title: string, instruction: string, sourceExcerpt?: string) => {
     const sourceId = route.id;
     const message = modal?.kind === 'create' ? modal.message : undefined;
     setBusy(true); setModalError('');
     try {
-      const response = await api.createPage({ title, instruction, sourcePageId: sourceId, sourceMessageId: message?.id });
+      const response = await api.createPage({ title, instruction, sourcePageId: sourceId, sourceMessageId: message?.id, sourceExcerpt });
       applyView(response.view);
       refreshPage(sourceId).catch(() => {});
       navigate(response.page.id, { pageId: sourceId, messageId: message?.id, referenceId: response.reference.id });

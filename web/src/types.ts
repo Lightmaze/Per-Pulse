@@ -30,7 +30,10 @@ export type PageReference = {
   createdAt: string;
 };
 
+export type PageSource = { role: 'user' | 'assistant' | 'system'; excerpt: string; instruction: string; edited: boolean };
+
 export type Message = {
+  pageSource?: PageSource | null;
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;

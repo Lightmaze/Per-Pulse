@@ -102,6 +102,9 @@ jobs:
       - name: Verify plain JSON replies through continuation and restart
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python node tests/browser/plain_json_reply_flow.mjs
+      - name: Verify original authorship when opening a sourced page
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python node tests/browser/page_source_flow.mjs
       - name: Verify clipped original tool-result recall, restart and Work isolation in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TOOL_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-history-screenshots/tool-results" node tests/browser/tool_history_flow.mjs
