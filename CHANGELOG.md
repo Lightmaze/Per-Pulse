@@ -6,6 +6,10 @@
   fitting, optional review and workspace restart. Decode internal tool
   envelopes using the saved model round's authority.
 
+- Download verified local file results containing literal omission markers,
+  without mistaking their text for permission or provenance metadata. Source
+  previews report actual local clipping rather than inferred redaction.
+
 ## 0.1.0a6
 
 - Keep long-lived Works reachable: browse native histories beyond 32 entries,

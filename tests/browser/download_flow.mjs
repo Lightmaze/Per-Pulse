@@ -138,6 +138,17 @@ try {
   assert.equal(executedHtml, 0);
   checks.push('HTML remains inert in the preview and is delivered only as an attachment');
 
+  await create('Literal marker source', 'WRITE_LITERAL_MARKER');
+  await page.getByRole('button', { name: /literal-markers\.txt/ }).click();
+  await artifacts.getByText('[REDACTED] is literal source text.', { exact: false }).waitFor();
+  const literalDownload = page.waitForEvent('download');
+  await artifacts.getByRole('button', { name: 'Download file', exact: true }).click();
+  const literalFile = await literalDownload;
+  await literalFile.saveAs(join(directory, 'literal.txt'));
+  assert.equal((await readFile(join(directory, 'literal.txt'))).toString(),
+    'Final heading.\n[REDACTED] is literal source text.\n');
+  checks.push('literal omission markers stay visible and download as exact source bytes');
+
   await create('Report with a password line', 'WRITE_REDACTED');
   await page.getByRole('button', { name: /redacted\.txt/ }).click();
   // Your own file is shown and downloadable as it is.

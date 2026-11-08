@@ -493,9 +493,10 @@ durable-content limit remain unchanged. Download does not create a model turn.
 
 An overwritten file returns `409 artifact_version_changed`. Unavailable,
 binary, oversized or protected files preserve the native file error code and
-status. Files containing a stored `[REDACTED]` or truncation marker return
-`422 artifact_download_redacted`. Wrong-page and unconfirmed
-action IDs remain `404 artifact_not_found`. The response also carries the exact
+status. Literal `[REDACTED]` or truncation-shaped text remains part of the
+verified file; only an actually clipped preview is marked truncated.
+Wrong-page and unconfirmed action IDs remain `404 artifact_not_found`.
+The response also carries the exact
 digest as an ETag; the browser checks the received bytes before saving them.
 
 File and uncertainty observation follows only the native committed generation

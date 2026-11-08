@@ -244,7 +244,7 @@ class PageMaterials:
             current = self._current(record)
             # The user's own uploaded source: shown as it is, bounded in length.
             content, truncated = clip_text(current["content"], MAX_PREVIEW_BYTES)
-            return {"material": record, "content": content, "redacted": "[REDACTED]" in current["content"],
+            return {"material": record, "content": content, "redacted": False,
                     "truncated": truncated, "previewLimitBytes": (MAX_IMAGE_BYTES if current.get("format") == "image" else MAX_PREVIEW_BYTES),
                     "downloadable": True,
                     **{key: current[key] for key in ("format", "complete", "image", "imageDataUrl") if key in current}}
