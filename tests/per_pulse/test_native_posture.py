@@ -260,6 +260,117 @@ def test_native_lookup_finds_older_lesson_without_cross_context_or_raw_transfer(
 
 
 
+def test_large_experience_details_can_be_read_completely_with_stable_identity(native):
+    import hashlib
+    import json
+    record = native.memory.add_experience(
+        experience_id="large-detail", subject_id=native.scope.engram_id, context_id="", scope="context",
+        record_type="constructed_fixture", title="A lesson with complete boundaries",
+        lesson="Keep every boundary together.", conditions="A concrete task",
+        counterexamples=[("Exception %d: " % index) + '\U0001f4c4"\\' * 280 for index in range(8)],
+        shift={"understanding": "Read all conditions.", "candidates": "Compare the actual alternatives.",
+               "delivery": "Keep the source intact."},
+        encounter={"situation": "Situation", "action": "Original approach", "outcome": "Feedback"},
+        source={"kind": "test_large_detail"},
+    )
+    before = native.memory.get_experience(record["id"])
+    def read(arguments):
+        return native.tool.execute(native.scope, ToolCall("detail", "posture", arguments),
+            CancellationToken(), action_request_id="read-only-detail")
+    args = {"op": "get", "experience_id": record["id"]}
+    parts, digest = [], None
+    while args is not None:
+        result = read(args)
+        assert result["experience"] is None and result["material_too_large"]
+        assert len(json.dumps(result, ensure_ascii=False).encode()) <= 16000
+        detail = result["detail"]
+        assert detail["format"] == "experience_json_fragment"
+        assert detail["offset"] == sum(len(part) for part in parts)
+        assert detail["digest"] == (digest or detail["digest"])
+        digest = detail["digest"]
+        parts.append(detail["content"])
+        args = detail["next"]
+    text = ''.join(parts)
+    complete = json.loads(text)
+    assert len(parts) > 1
+    assert complete["counterexamples"] == record["counterexamples"]
+    assert complete["source"]["evidence"] == record["source"]
+    assert hashlib.sha256(text.encode()).hexdigest() == digest
+    assert native.memory.get_experience(record["id"]) == before
+    assert native.tool._requests() == []
+
+    end = read({"op": "get", "experience_id": record["id"], "offset": len(text), "expected_digest": digest})
+    assert end["detail"]["eof"] and end["detail"]["content"] == '' and end["detail"]["next"] is None
+    with pytest.raises(ScopeConflict, match="offset exceeds"):
+        read({"op": "get", "experience_id": record["id"], "offset": len(text) + 1, "expected_digest": digest})
+    native.memory.revise_experience(record["id"], expected_revision=1, changes={"lesson": "A revised lesson."})
+    with pytest.raises(ScopeConflict, match="experience changed"):
+        read({"op": "get", "experience_id": record["id"], "offset": 100, "expected_digest": digest})
+    assert read({"op": "get", "experience_id": record["id"]})["detail"]["revision"] == 2
+    private = {key: deepcopy(record[key]) for key in ("subject_id", "title", "lesson", "conditions",
+        "counterexamples", "shift", "encounter", "source", "record_type")}
+    native.memory.add_experience(**private, experience_id="private-large-detail",
+                                 context_id="work:private-detail", scope="context")
+    for identity in ("private-large-detail", "missing-detail"):
+        with pytest.raises(ScopeConflict, match="not active or accessible"):
+            read({"op": "get", "experience_id": identity, "offset": 10, "expected_digest": digest})
+    native.memory.revise_experience(record["id"], expected_revision=2, changes={"active": False})
+    with pytest.raises(ScopeConflict, match="not active or accessible"):
+        read({"op": "get", "experience_id": record["id"]})
+
+
+@pytest.mark.parametrize('extra', [{'offset': True}, {'offset': -1}, {'offset': 1},
+    {'max_chars': 0}, {'max_chars': 8193}, {'expected_digest': 'invalid'}])
+def test_experience_detail_arguments_reject_invalid_ranges(extra):
+    with pytest.raises(ValueError):
+        validate({'op': 'get', 'experience_id': 'detail', **extra})
+
+
+def test_native_http_get_follows_large_experience_details_to_the_original_tail(tmp_path, monkeypatch):
+    import json
+    from material_fixture import MaterialFixture
+    from test_pages import client_for, send, wait_for
+
+    class DetailFixture(MaterialFixture):
+        def __init__(self):
+            super().__init__(monkeypatch.setenv)
+            self.fragments = []
+
+        def handler(self, request):
+            body = json.loads(request.content)
+            self.requests.append(body)
+            messages = body['messages']
+            start = max(i for i, row in enumerate(messages) if row['role'] == 'user')
+            delivered = [json.loads(row['content']) for row in messages[start + 1:] if row['role'] == 'tool']
+            if not delivered:
+                return self.response(tool='posture', arguments={'op': 'get', 'experience_id': 'native-large-detail'})
+            assert delivered[-1]['status'] == 'succeeded', delivered[-1]
+            detail = delivered[-1]['output']['detail']
+            self.fragments.append(detail['content'])
+            if detail['next']:
+                return self.response(tool='posture', arguments=detail['next'], sequence=len(delivered))
+            return self.response('Read every original exception. [Explicit synthetic fixture]')
+
+    fixture = DetailFixture()
+    with client_for(tmp_path, model_factory=fixture.factory, posture=True) as client:
+        runtime = client.app.state.pages.runtime
+        record = runtime.harness.posture_memory.add_experience(
+            experience_id='native-large-detail', subject_id=runtime.continuity_engram_id,
+            context_id='', scope='context', record_type='constructed_fixture', title='Large original detail',
+            lesson='L' * 4000, conditions='C' * 1000, counterexamples=['E' * 1880 + str(i) for i in range(8)],
+            shift={'understanding': 'Read details.', 'candidates': 'Compare options.', 'delivery': 'Preserve all exceptions.'},
+            encounter={'situation': 'Task', 'action': 'Approach', 'outcome': 'Observation'},
+            source={'kind': 'synthetic_native_detail_fixture'},
+        )
+        send(client, 'home', 'Read the full original experience details. [Explicit synthetic fixture]')
+        wait_for(client, 'home', lambda view: any(row['content'].startswith('Read every original exception.')
+            for row in view['messages'] if row['role'] == 'assistant'), timeout=20)
+        assert len(fixture.fragments) > 1
+        complete = json.loads(''.join(fixture.fragments))
+        assert complete['counterexamples'] == record['counterexamples']
+        assert complete['source']['evidence'] == record['source']
+
+
 def test_native_find_pages_all_old_matching_records_without_exposing_private_cursors(native):
     """Broad lexical matches must not become trapped behind an 8-item or byte window."""
     from pulse_system.service.native_posture import validate
