@@ -5593,6 +5593,35 @@ class HarnessStore:
             self._assert_action_scope(row, scope)
             return self._action_from_row(row)
 
+    def action_arguments_match_model_call(self, scope: HarnessScope, action_request_id: str) -> bool:
+        """Whether saved arguments exactly match their completed original model call.
+
+        Historical omission flags alone cannot distinguish a literal marker.
+        An action without complete model authority remains unproven.
+        """
+        with self._lock:
+            action = self.get_action(scope, action_request_id)
+            rows = self._db.execute(
+                "SELECT r.response_digest, r.tool_call_count, t.content FROM model_rounds r "
+                "JOIN transcript_messages t ON t.session_id=r.session_id AND t.item_id=r.assistant_item_id "
+                "WHERE r.session_id=? AND r.turn_id=? AND r.status=? AND r.tool_call_count>0",
+                (scope.session_id, scope.turn_id, ModelRoundStatus.COMPLETED.value),
+            ).fetchall()
+            matches = []
+            for row in rows:
+                payload = json.loads(row["content"])
+                if (not isinstance(payload, dict) or set(payload) != {"text", "tool_calls"}
+                        or not isinstance(payload["tool_calls"], list)
+                        or len(payload["tool_calls"]) != row["tool_call_count"]
+                        or digest_json(payload) != row["response_digest"]):
+                    raise StoreUnavailable("model call authority is incomplete")
+                matches.extend(call for call in payload["tool_calls"]
+                               if call.get("action_request_id") == action_request_id)
+            return bool(len(matches) == 1
+                        and matches[0].get("name") == action.tool_name
+                        and matches[0].get("arguments") == dict(action.arguments)
+                        and action_request_id == f"{scope.digest}:{matches[0].get('tool_call_id')}")
+
     def action_scope_for_session(
         self,
         session_scope: HarnessScope,
