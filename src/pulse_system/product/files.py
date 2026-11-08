@@ -191,16 +191,20 @@ class WorkspaceFiles:
 
     def read(self, path: str) -> dict:
         """Text, PDF text, or a transient original-image preview with source identity."""
+        return self.read_with_bytes(path)[0]
+
+    def read_with_bytes(self, path: str) -> tuple[dict, bytes]:
+        """Validated preview and original bytes from one bounded, anchored read."""
         data = self.read_bytes(path)
         result = {"path": path, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         if is_image_path(path):
             metadata = _image(data)
-            return {**result, "content": "", "format": "image",
-                    "image": metadata, "imageDataUrl": image_data_url(data, metadata["mime"])}
+            return ({**result, "content": "", "format": "image",
+                     "image": metadata, "imageDataUrl": image_data_url(data, metadata["mime"])}, data)
         if not is_pdf_path(path):
-            return {**result, "content": _text(data)}
+            return {**result, "content": _text(data)}, data
         pdf = _pdf_text(data)
-        return {**result, "content": pdf.text, "format": "pdf_text", "complete": pdf.complete}
+        return {**result, "content": pdf.text, "format": "pdf_text", "complete": pdf.complete}, data
 
     def upload(self, name: str, data: bytes) -> dict:
         parts = _parts(name)
