@@ -7,6 +7,7 @@ and special files. Raw model/tool content is never rendered as executable HTML.
 from __future__ import annotations
 
 import base64
+import binascii
 from contextlib import contextmanager
 import json
 import hashlib
@@ -105,7 +106,7 @@ def _page_start(cursor: str | None, path: str, revision: list[int]) -> int:
     try:
         raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
         value = json.loads(raw)
-    except (ValueError, UnicodeError):
+    except (ValueError, UnicodeError, binascii.Error):
         raise FileAccessError("invalid_directory_cursor") from None
     if (not isinstance(value, dict) or value.get("v") != 1 or value.get("path") != path
             or type(value.get("offset")) is not int or value["offset"] < 1):
