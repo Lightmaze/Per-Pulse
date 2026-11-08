@@ -27,6 +27,7 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
   serviceInstance.current = serviceInstanceId;
   const [showAllPending, setShowAllPending] = useState(false);
   const [showAllResults, setShowAllResults] = useState(false);
+  const [refreshRequest, setRefreshRequest] = useState(0);
   const [visited, setVisited] = useState<{ workspaceId: string; eventIds: string[] }>(() => ({
     workspaceId, eventIds: readVisitedLocalEvents(workspaceId),
   }));
@@ -35,13 +36,19 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
   // A restart can happen between the requests even within one polling tick.
   const [snapshot, setSnapshot] = useState<{
     workspaceId: string; observation: PulseObservation | null; bootstrap: Bootstrap | null;
+    pulseUnavailable: boolean; workspaceUnavailable: boolean;
   } | null>(null);
   const currentSnapshot = snapshot?.workspaceId === workspaceId ? snapshot : null;
-  const freshBootstrap = currentSnapshot?.bootstrap?.workspaceId === workspaceId
+  // A previous read is useful for a disabled preview, never for an approval
+  // or a navigable result. Both World and service identity must still match.
+  const lastKnownBootstrap = currentSnapshot?.bootstrap?.workspaceId === workspaceId
     && currentSnapshot.bootstrap.serviceInstanceId === serviceInstanceId
     ? currentSnapshot.bootstrap : null;
-  const pulse = verifiedHomePulse(workspaceId, freshBootstrap, currentSnapshot?.observation ?? null);
+  const freshBootstrap = currentSnapshot?.workspaceUnavailable ? null : lastKnownBootstrap;
+  const pulse = verifiedHomePulse(workspaceId, freshBootstrap,
+    currentSnapshot?.pulseUnavailable ? null : currentSnapshot?.observation ?? null);
   const freshPages = freshBootstrap?.pages ?? null;
+  const unavailable = Boolean(currentSnapshot?.pulseUnavailable || currentSnapshot?.workspaceUnavailable);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -54,14 +61,22 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
       readingPulse = true;
       try {
         const latest = await api.pulseObservation(controller.signal);
-        if (!controller.signal.aborted) setSnapshot(previous => ({
-          workspaceId, bootstrap: previous?.workspaceId === workspaceId ? previous.bootstrap : null,
-          observation: latest.workspaceId === workspaceId ? latest : null,
-        }));
+        if (!controller.signal.aborted) setSnapshot(previous => {
+          const sameWorld = previous?.workspaceId === workspaceId;
+          const verified = latest.workspaceId === workspaceId
+            && latest.serviceInstanceId === serviceInstance.current;
+          return {
+            workspaceId, bootstrap: sameWorld ? previous.bootstrap : null,
+            observation: verified ? latest : sameWorld ? previous.observation : null,
+            pulseUnavailable: !verified, workspaceUnavailable: sameWorld ? previous.workspaceUnavailable : false,
+          };
+        });
       } catch {
         if (!controller.signal.aborted) setSnapshot(previous => ({
           workspaceId, bootstrap: previous?.workspaceId === workspaceId ? previous.bootstrap : null,
-          observation: null,
+          observation: previous?.workspaceId === workspaceId ? previous.observation : null,
+          pulseUnavailable: true,
+          workspaceUnavailable: previous?.workspaceId === workspaceId ? previous.workspaceUnavailable : false,
         }));
       } finally {
         readingPulse = false;
@@ -74,14 +89,23 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
         // The existing Home observation also updates shared page summaries.
         // Its reader preserves newer local views and fences service changes.
         const latest = await readWorkspace(controller.signal, { workspaceId, serviceInstanceId: serviceInstance.current });
-        if (!controller.signal.aborted) setSnapshot(previous => ({
-          workspaceId, observation: previous?.workspaceId === workspaceId ? previous.observation : null,
-          bootstrap: latest.workspaceId === workspaceId ? latest : null,
-        }));
+        if (!controller.signal.aborted) setSnapshot(previous => {
+          const sameWorld = previous?.workspaceId === workspaceId;
+          const verified = latest.workspaceId === workspaceId
+            && latest.serviceInstanceId === serviceInstance.current;
+          return {
+            workspaceId, observation: sameWorld ? previous.observation : null,
+            bootstrap: verified ? latest : sameWorld ? previous.bootstrap : null,
+            pulseUnavailable: sameWorld ? previous.pulseUnavailable : false,
+            workspaceUnavailable: !verified,
+          };
+        });
       } catch {
         if (!controller.signal.aborted) setSnapshot(previous => ({
           workspaceId, observation: previous?.workspaceId === workspaceId ? previous.observation : null,
-          bootstrap: null,
+          bootstrap: previous?.workspaceId === workspaceId ? previous.bootstrap : null,
+          pulseUnavailable: previous?.workspaceId === workspaceId ? previous.pulseUnavailable : false,
+          workspaceUnavailable: true,
         }));
       } finally {
         readingWorkspace = false;
@@ -94,7 +118,7 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
       void refreshWorkspace();
     }, 12000);
     return () => { controller.abort(); window.clearInterval(interval); };
-  }, [workspaceId, readWorkspace]);
+  }, [workspaceId, serviceInstanceId, readWorkspace, refreshRequest]);
 
   // Verify page ownership against the fresh native World before producing
   // exact-source Pulse links or actionable Work status.
@@ -112,7 +136,17 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
   // Expansion uses the same live, World-verified bootstrap; never cached page names.
   const pending = homeWorkNeedsAttention(freshPages ?? [], freshPages?.length ?? 0);
   const needAttention = showAllPending ? pending : pending.slice(0, 3);
-  if (!items.length && !needAttention.length) return null;
+  // Keep only a same-service, read-only last-known preview during an outage.
+  // In particular, stale action/approval and exact-source links disappear.
+  const lastKnownPages = lastKnownBootstrap?.pages ?? [];
+  const lastKnownPulse = verifiedHomePulse(workspaceId, lastKnownBootstrap,
+    currentSnapshot?.observation ?? null);
+  const staleResults = unavailable ? homeContinuations(
+    lastKnownPulse, lastKnownPages, lastKnownPages.length, new Set(visitedIds),
+  ).slice(0, 3) : [];
+  const stalePending = currentSnapshot?.workspaceUnavailable
+    ? homeWorkNeedsAttention(lastKnownPages, lastKnownPages.length).slice(0, 3) : [];
+  if (!items.length && !needAttention.length && !unavailable) return null;
 
   const titleOf = (id: string) => id === 'home' ? t('app.home')
     : currentPages.find(page => page.id === id)?.title ?? '';
@@ -126,6 +160,20 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
   };
 
   return <>
+    {unavailable ? <section className="home-continuations" aria-label={t('pulse.home.unavailableTitle')}>
+      <h2>{t('pulse.home.unavailableTitle')}</h2>
+      <p role="status" className="home-continuations-intro">{t('pulse.home.unavailableInfo')}</p>
+      <button type="button" className="text-button" onClick={() => setRefreshRequest(value => value + 1)}>
+        {t('pulse.refresh')}
+      </button>
+      {stalePending.length || staleResults.length ? <>
+        <p className="home-continuations-intro">{t('pulse.home.lastKnown')}</p>
+        <ul className="home-continuations-list">
+          {stalePending.map(page => <li key={`pending-${page.id}`}>{pageTitle(page)}</li>)}
+          {staleResults.map(({ event, page }) => <li key={`result-${event.eventId}`}>{pageTitle(page)}</li>)}
+        </ul>
+      </> : null}
+    </section> : null}
     {needAttention.length ? <section className="home-continuations" aria-label={t('pulse.homeReview.title')}>
       <h2>{t('pulse.homeReview.title')}</h2>
       <p className="home-continuations-intro">{t('pulse.homeReview.info')}</p>
