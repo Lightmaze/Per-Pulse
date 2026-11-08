@@ -51,7 +51,7 @@ export type Message = {
 export type ProviderState = {
   configured: boolean;
   model: string | null;
-  label: 'AI connected' | 'AI disconnected';
+  label: 'Model configured' | 'No model configured';
   detail: string;
   workspaceActions: boolean;
   autoApplyEdits?: boolean;

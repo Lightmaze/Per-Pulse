@@ -150,7 +150,7 @@ try {
   await navigate('Home');
   assert.equal((await (await restartRead).json()).serviceInstanceId, restarted.serviceInstanceId);
   await page.locator('.sync-notice').waitFor();
-  assert.equal(await page.locator('.provider-indicator').innerText(), 'AI connected', 'background reads cannot silently adopt another process');
+  assert.equal(await page.locator('.provider-indicator').innerText(), 'Model configured', 'background reads cannot silently adopt another process');
   let reconnectCaptured;
   const reconnectCapturedRead = new Promise(done => { reconnectCaptured = done; });
   const reconnectHeld = new Promise(done => { releaseReconnect = done; });
@@ -172,12 +172,12 @@ try {
   await navigate('Home');
   assert.equal((await (await overlappingRead).json()).serviceInstanceId, restarted.serviceInstanceId);
   await page.waitForTimeout(100);
-  assert.equal(await page.locator('.provider-indicator').innerText(), 'AI connected');
+  assert.equal(await page.locator('.provider-indicator').innerText(), 'Model configured');
   const reconnectedRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/bootstrap');
   releaseReconnect(); await reconnectedRead;
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
   await page.getByText('The held Home reply finished. [Explicit synthetic fixture]', { exact: true }).waitFor();
-  await wait(async () => (await page.locator('.provider-indicator').innerText()) === 'AI disconnected', 'explicit reconnect adopts the restarted service');
+  await wait(async () => (await page.locator('.provider-indicator').innerText()) === 'No model configured', 'explicit reconnect adopts the restarted service');
   await wait(async () => await page.locator('.sync-notice').count() === 0, 'reconnect recovers the current page view and clears the notice');
   assert.equal(await composer.inputValue(), homeDraft);
   // Removing the final interceptor can stall an unrelated request starting

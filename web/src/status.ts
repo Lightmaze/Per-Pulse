@@ -55,7 +55,7 @@ export function getPageActivity(status: PageSummary['status'], configured: boole
   }
   if (stale) return activity('neutral', 'status.updatesPaused', 'Updates paused', 'status.updatesPausedDetail', 'The latest status could not be checked. Refresh to try again.');
   if (status === 'queued' || status === 'working') {
-    if (!configured) return activity('neutral', 'status.savedDisconnected', 'Saved · AI disconnected', 'status.savedDisconnectedDetail', 'Your message is saved. Connect a model to continue this turn.');
+    if (!configured) return activity('neutral', 'status.savedDisconnected', 'Saved · No model configured', 'status.savedDisconnectedDetail', 'Your message is saved. Connect a model to continue this turn.');
     return status === 'working'
       ? activity('active', 'status.working', 'Working', 'status.workingDetail', 'Per Pulse is working in this conversation.')
       : activity('neutral', 'status.queued', 'Queued', 'status.queuedDetail', 'Your message is saved and waiting for its turn.');
