@@ -19,7 +19,7 @@ import threading
 import time
 
 from .posture_evaluation import (
-    _audit_request, _canonical, _digest, _read_artifact, _readonly_trace, _record_digest,
+    _audit_request, _canonical, _digest, _read_artifact, _readonly_trace, _record_digest, _native_posture_journal,
 )
 
 
@@ -535,8 +535,7 @@ def audit_ordinary_transfer(output: Path) -> dict:
             native_requests.extend(row["request_digest"] for row in rows)
             completed_requests.extend(row["request_digest"] for row in rows if row["status"] == "completed")
             flags.extend(json.loads(row["provider_evidence_json"]).get("test_only") for row in rows)
-            state = world.execute("SELECT state FROM component_state WHERE component=?", ("per-pulse-posture-v1:" + record["world_id"],)).fetchone()
-            journal = json.loads(state["state"])["experiences"] if state else {}
+            journal = _native_posture_journal(world, record["world_id"])
             lessons = record["learned_lessons"]
             # Preserve read-only audit of pre-default-sharing trial exports:
             # those captures were genuinely Work-local at revision 1. A new

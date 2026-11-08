@@ -8,7 +8,6 @@ interprets the conditions and counterexamples against the current task.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
@@ -22,12 +21,7 @@ from uuid import uuid4
 SCHEMA = "per-pulse.posture.v2"
 LEGACY_SCHEMA = "per-pulse.posture.v1"
 CONTROL_SCHEMA = "per-pulse.posture-controls.v1"
-MAX_EXPERIENCES = 128
-MAX_STATE_BYTES = 4 * 1024 * 1024
-# 128 * (6000 evidence bytes * 6 worst-case JSON escaping + 8192 source
-# bytes + 1024 identity/transition metadata) + 4096 world/schema bytes fits.
-# The source bound already includes its canonical JSON escaping.
-MAX_CONTROL_STATE_BYTES = 6 * 1024 * 1024
+LEGACY_MAX_STOP_CONTROLS = 128
 _LESSON_FIELDS = ("title", "lesson", "conditions", "counterexamples", "shift")
 _EXAMPLE_FIELDS = ("title", "excerpt", "note")
 _EDITABLE = frozenset({*_LESSON_FIELDS, "note", "scope", "active"})
@@ -145,7 +139,7 @@ def _check_changes(record: dict, changes: dict) -> None:
 
 
 class PostureMemory:
-    """One world's bounded experience journal, sharing Storage's write lock.
+    """One world's durable experience journal, sharing Storage's transactions.
 
     The host validates that ``source`` actually belongs to an observed native
     turn before recording an observed episode. This class preserves that
@@ -162,6 +156,10 @@ class PostureMemory:
         self.history_lineage = history_lineage
         self.component = f"per-pulse-posture-v1:{world_id}"
         self.control_component = f"per-pulse-posture-controls-v1:{world_id}"
+        from .posture_journal import PostureJournal
+        self._journal = PostureJournal(storage, world_id, legacy=self._legacy_state,
+                                       guard=guard, content_time=self._content_revision_time,
+                                       content_fields=experience_content_fields)
 
     def _subjects(self, subject_id: str) -> set[str]:
         _text(subject_id, "subject_id", 512)
@@ -178,14 +176,7 @@ class PostureMemory:
         self.guard()
         return record_subject_id in self._subjects(current_subject_id)
 
-    @contextmanager
-    def _locked(self):
-        self.guard()
-        with self.storage._lock:
-            self.guard()
-            yield
-
-    def _load(self) -> dict:
+    def _legacy_state(self) -> dict:
         state = self.storage.load_component_state(self.component)
         if state is None:
             state = {"schema": SCHEMA, "world_id": self.world_id, "experiences": {}}
@@ -194,8 +185,8 @@ class PostureMemory:
         if state["schema"] == LEGACY_SCHEMA:
             if any(record.get("representation", "lesson") != "lesson" for record in state["experiences"].values()):
                 raise ValueError("legacy posture state contains an unsupported representation")
-            # Read old lessons in place; the next ordinary journal mutation
-            # saves v2 in the same World component, preserving IDs and history.
+            # Read old lessons in place. The next ordinary mutation imports
+            # this view into World journal rows, preserving IDs and history.
             state["schema"] = SCHEMA
         controls = self._load_controls()
         for identity, control in controls["stops"].items():
@@ -222,45 +213,15 @@ class PostureMemory:
         if controls is None:
             return {"schema": CONTROL_SCHEMA, "world_id": self.world_id, "stops": {}}
         if (controls.get("schema") != CONTROL_SCHEMA or controls.get("world_id") != self.world_id
-                or not isinstance(controls.get("stops"), dict) or len(controls["stops"]) > MAX_EXPERIENCES):
+                or not isinstance(controls.get("stops"), dict) or len(controls["stops"]) > LEGACY_MAX_STOP_CONTROLS):
             raise ValueError("unsupported or mismatched posture stop controls")
         return controls
-
-    def _save(self, state: dict, *, stop_control: dict | None = None) -> None:
-        if len(_canonical(state).encode()) > MAX_STATE_BYTES:
-            if stop_control is None:
-                raise ValueError("posture journal exceeds its bound; no update was saved")
-            # Disabling must remain possible at capacity. This bounded control
-            # component retains one transition per experience, with its complete
-            # new negative evidence. Prior history stays in the original World
-            # component. It is merged by revision, never silently discarded.
-            controls = self._load_controls()
-            controls["stops"][stop_control["id"]] = stop_control
-            if (len(controls["stops"]) > MAX_EXPERIENCES
-                    or len(_canonical(controls).encode()) > MAX_CONTROL_STATE_BYTES):
-                raise ValueError("posture stop controls exceed their bound; no update was saved")
-            self.guard()
-            self.storage.save_component_state(self.control_component, controls)
-            return
-        self.guard()
-        self.storage.save_component_state(self.component, state)
-
-    @staticmethod
-    def _stop_control(record: dict, *, feedback: dict | None = None) -> dict:
-        return {"id": record["id"], "base_revision": record["revision"] - 1,
-                "revision": record["revision"], "updated_at": record["updated_at"],
-                "feedback": deepcopy(feedback)}
 
     @staticmethod
     def _record(state, experience_id) -> dict:
         if experience_id not in state["experiences"]:
             raise ValueError("unknown posture experience")
         return state["experiences"][experience_id]
-
-    @staticmethod
-    def _revision(record: dict, expected_revision: int) -> None:
-        if type(expected_revision) is not int or record["revision"] != expected_revision:
-            raise ValueError("posture revision conflict; read the latest experience")
 
     @staticmethod
     def _advance(record: dict) -> None:
@@ -320,31 +281,18 @@ class PostureMemory:
 
     def add_experience(self, **kwargs) -> dict:
         record = self.validate_experience(**kwargs)
-        experience_id = record["id"]
-        with self._locked():
-            state = self._load()
-            if experience_id in state["experiences"]:
-                raise ValueError("posture identity already exists; revise it explicitly")
-            if len(state["experiences"]) >= MAX_EXPERIENCES:
-                raise ValueError("posture journal has reached its experience bound")
-            state["experiences"][experience_id] = record
-            self._save(state)
-        return deepcopy(record)
+        self.guard()
+        return self._journal.add(record)
 
     def get_experience(self, experience_id: str) -> dict:
-        with self._locked():
-            return deepcopy(self._record(self._load(), experience_id))
+        self.guard()
+        return self._journal.get(experience_id)
 
     def list_experiences(self, *, subject_id: str, context_id: str | None = None,
                          include_inactive: bool = False) -> list[dict]:
-        with self._locked():
-            subjects = self._subjects(subject_id)
-            values = self._load()["experiences"].values()
-            records = [deepcopy(value) for value in values
-                       if value["subject_id"] in subjects
-                       and (include_inactive or value["active"])
-                       and (context_id is None or value["context_id"] == context_id
-                            or value["scope"] == "subject")]
+        self.guard()
+        records = [record for record, _ in self._journal.list(subjects=self._subjects(subject_id),
+                   context_id=context_id, include_inactive=include_inactive)]
         return sorted(records, key=lambda value: (value["updated_at"], value["id"]), reverse=True)
 
     def revise_experience(self, experience_id: str, *, expected_revision: int,
@@ -359,23 +307,18 @@ class PostureMemory:
             raise ValueError("posture revision contains unsupported fields")
         if revision_source is not None:
             revision_source = _source(revision_source)
-        with self._locked():
-            state = self._load()
-            record = self._record(state, experience_id)
-            self._revision(record, expected_revision)
+        def update(record):
             _check_changes(record, changes)
             if revision_source is not None and (record.get("representation") != "example"
                                                 or set(changes) - {"title", "note"}):
                 raise ValueError("an attributed interpretation can change only an example title or note")
-            was_active = record["active"]
             self._advance(record)
             record.update(deepcopy(changes))
             if revision_source is not None:
                 record["revision_source"] = revision_source
             _validate_content(record)
-            control = self._stop_control(record) if was_active and changes == {"active": False} else None
-            self._save(state, stop_control=control)
-            return deepcopy(record)
+        self.guard()
+        return self._journal.revise(experience_id, expected_revision, update)
 
     def revise_from_feedback(self, experience_id: str, *, expected_revision: int,
                              changes: dict, evidence: str, source: dict) -> dict:
@@ -390,10 +333,7 @@ class PostureMemory:
             raise ValueError("learned revision contains unsupported fields")
         _text(evidence, "revision evidence", 6000)
         source = _source(source)
-        with self._locked():
-            state = self._load()
-            record = self._record(state, experience_id)
-            self._revision(record, expected_revision)
+        def update(record):
             _check_changes(record, changes)
             self._advance(record)
             record.update(deepcopy(changes))
@@ -403,8 +343,8 @@ class PostureMemory:
                 "verdict": "revised", "evidence": evidence, "source": source,
                 "created_at": record["updated_at"],
             })
-            self._save(state)
-            return deepcopy(record)
+        self.guard()
+        return self._journal.revise(experience_id, expected_revision, update)
 
     def record_feedback(self, experience_id: str, *, expected_revision: int,
                         verdict: str, evidence: str, source: dict | None = None) -> dict:
@@ -413,11 +353,7 @@ class PostureMemory:
         _text(evidence, "feedback evidence", 6000)
         if source is not None:
             source = _source(source)
-        with self._locked():
-            state = self._load()
-            record = self._record(state, experience_id)
-            self._revision(record, expected_revision)
-            was_active = record["active"]
+        def update(record):
             self._advance(record)
             record["feedback"].append({
                 "id": "feedback-" + uuid4().hex, "revision": expected_revision,
@@ -427,10 +363,8 @@ class PostureMemory:
             })
             if verdict in {"harmful", "withdrawn"}:
                 record["active"] = False
-            control = (self._stop_control(record, feedback=record["feedback"][-1])
-                       if was_active and verdict in {"harmful", "withdrawn"} else None)
-            self._save(state, stop_control=control)
-            return deepcopy(record)
+        self.guard()
+        return self._journal.revise(experience_id, expected_revision, update)
 
     @staticmethod
     def _content_revision_time(record: dict) -> str:
@@ -439,7 +373,8 @@ class PostureMemory:
         The journal itself stays newest-update-first. For limited automatic
         work material, use the last change to content or eligibility. A report
         is still included as evidence, but does not acquire attention priority
-        merely by being recent. Compare existing snapshots; persist no index.
+        merely by being recent. Legacy imports derive this time from snapshots;
+        subsequent journal writes retain it alongside the current record.
         """
         fields = (*experience_content_fields(record), "scope", "active")
         content_version = record
@@ -462,10 +397,12 @@ class PostureMemory:
         edit, so an unchanged lesson's new feedback does not displace newer
         candidates under the bounded prompt budget.
         """
-        records = self.list_experiences(subject_id=subject_id, context_id=context_id)
-        if prioritize_content:
-            records.sort(key=lambda item: (self._content_revision_time(item), item["id"]),
-                         reverse=True)
+        self.guard()
+        rows = self._journal.list(subjects=self._subjects(subject_id), context_id=context_id,
+                                  include_inactive=False, history=False)
+        rows.sort(key=lambda item: (item[1] if prioritize_content else item[0]["updated_at"],
+                                   item[0]["id"]), reverse=True)
+        records = [record for record, _ in rows]
         episodes = []
         for record in records:
             local = record["context_id"] == context_id

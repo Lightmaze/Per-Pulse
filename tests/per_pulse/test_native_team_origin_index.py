@@ -90,9 +90,12 @@ def test_precise_origin_preserves_order_limits_and_generic_listing(tmp_path):
 
 def as_version_11(path):
     # Reconstruct v11's exact schema from the populated real World: v12 only
-    # adds this index and migration receipt, so no business row is rewritten.
+    # adds this index; remove the later empty experience tables as well.
+    # No business row is rewritten.
     with sqlite3.connect(path) as connection:
         connection.execute(f"DROP INDEX IF EXISTS {INDEX}")
+        for table in ("posture_experience_feedback", "posture_experience_revisions", "posture_experiences", "posture_journals"):
+            connection.execute(f"DROP TABLE IF EXISTS {table}")
         connection.execute("DELETE FROM schema_migrations WHERE version > 11")
         connection.execute("PRAGMA user_version = 11")
 
@@ -115,7 +118,7 @@ def test_v11_migration_keeps_invalid_json_and_valid_outbox_bytes(tmp_path):
     migrated = Storage(path)
     try:
         receipt = migrated.schema_migration_result
-        assert (receipt.from_version, receipt.to_version, receipt.applied_versions) == (11, 12, (12,))
+        assert (receipt.from_version, receipt.to_version, receipt.applied_versions) == (11, 13, (12, 13))
         assert receipt.backup_path is not None
         with sqlite3.connect(receipt.backup_path) as backup:
             assert backup.execute("PRAGMA user_version").fetchone()[0] == 11
@@ -204,7 +207,7 @@ def test_native_origin_survives_upgrade_image_restore_and_rejects_unverified_rec
         try:
             assert runtime.world_id == retained_world
             migration = runtime.storage.schema_migration_result
-            assert migration.applied_versions == (12,)
+            assert migration.applied_versions == (12, 13)
             assert runtime.storage._conn.execute("SELECT * FROM causal_events ORDER BY seq").fetchall() == causal_rows
             assert runtime.storage._conn.execute("SELECT * FROM harness_turns ORDER BY id").fetchall() == turn_rows
             assert runtime.storage.load_component_state(key) == record

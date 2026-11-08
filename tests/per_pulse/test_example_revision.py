@@ -86,9 +86,15 @@ def test_lesson_title_still_requires_later_user_feedback(native):
 @pytest.mark.parametrize("foreign", ["context", "subject"])
 def test_native_interpretation_cannot_edit_shared_receiver_or_foreign_subject(native, foreign):
     before, values = revision(native)
-    stored = native.runtime.storage.load_component_state(native.memory.component)
-    stored["experiences"][before["id"]]["context_id" if foreign == "context" else "subject_id"] = "work:other" if foreign == "context" else "other-subject"
-    native.runtime.storage.save_component_state(native.memory.component, stored)
+    field = "context_id" if foreign == "context" else "subject_id"
+    value = "work:other" if foreign == "context" else "other-subject"
+    # Deliberately corrupt both the current row and its lookup column to
+    # exercise the scope check at the new persistence boundary.
+    connection = native.runtime.storage._conn
+    connection.execute(f"UPDATE posture_experiences SET {field}=?,record=json_set(record,?,?) "
+                       "WHERE world_id=? AND experience_id=?",
+                       (value, "$." + field, value, native.runtime.world_id, before["id"]))
+    connection.commit()
     with pytest.raises(ScopeConflict, match="this context's own"):
         remember(native, values)
 
@@ -169,9 +175,11 @@ def test_receipt_recovery_rejects_a_different_applied_snapshot(native, monkeypat
     monkeypatch.setattr(native.tool, "_finish", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("receipt crash")))
     with pytest.raises(RuntimeError, match="receipt crash"):
         native.tool.drain()
-    state = native.runtime.storage.load_component_state(native.memory.component)
-    state["experiences"][before["id"]]["note"] = "Different applied content"
-    native.runtime.storage.save_component_state(native.memory.component, state)
+    connection = native.runtime.storage._conn
+    connection.execute("UPDATE posture_experiences SET record=json_set(record,'$.note',?) "
+                       "WHERE world_id=? AND experience_id=?",
+                       ("Different applied content", native.runtime.world_id, before["id"]))
+    connection.commit()
     recovered = NativePosture(native.runtime)
     recovered.drain()
     assert native.runtime.storage.load_component_state(receipt["request_id"])["error_code"] == "revision_identity_conflict"

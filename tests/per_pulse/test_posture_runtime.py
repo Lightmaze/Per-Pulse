@@ -679,7 +679,7 @@ def test_fence_between_read_and_write_does_not_save_prepared_revision():
     def guard():
         nonlocal calls
         calls += 1
-        if calls >= 3:
+        if calls >= 2:
             raise LeaseFenced("The host writer lease was revoked before persistence.")
 
     fenced = PostureMemory(storage, "world", guard=guard)
@@ -687,23 +687,21 @@ def test_fence_between_read_and_write_does_not_save_prepared_revision():
         with pytest.raises(LeaseFenced):
             fenced.record_feedback(saved["id"], expected_revision=1, verdict="withdrawn",
                                    evidence="A correction prepared by a now-fenced turn.")
-        assert calls == 3
+        assert calls == 2
         assert memory.get_experience(saved["id"]) == saved
     finally:
         storage.close()
 
 
-@pytest.mark.parametrize("at_capacity", [False, True])
-def test_world_publication_revoke_before_physical_commit_rolls_back_posture(monkeypatch, at_capacity):
+@pytest.mark.parametrize("record_count", [1, 129])
+def test_world_publication_revoke_before_physical_commit_rolls_back_posture(monkeypatch, record_count):
     from pulse_system.core.runtime.publication import RuntimePublicationError, RuntimePublicationGate
 
     storage = Storage()
     memory = PostureMemory(storage, "world")
     saved = memory.add_experience(**episode())
-    if at_capacity:
-        size = len(json.dumps(storage.load_component_state(memory.component), ensure_ascii=False,
-                              sort_keys=True, separators=(",", ":")).encode())
-        monkeypatch.setattr("pulse_system.service.posture.MAX_STATE_BYTES", size + 1)
+    for index in range(record_count - 1):
+        memory.add_experience(**episode(experience_id=f"additional-{index}"))
     gate = RuntimePublicationGate("owner", 1)
     storage.bind_runtime_publication_permit(gate.publication_permit)
     ready, proceed = Event(), Event()
@@ -958,77 +956,4 @@ def test_unfit_complete_prompt_skips_both_checkpoints_without_provider_call(tmp_
         expert.close()
         model.close()
         store.close()
-        storage.close()
-
-
-def test_full_journal_still_pauses_with_history_cas_and_restart(tmp_path, monkeypatch):
-    path = tmp_path / "world.db"
-    storage = Storage(path)
-    memory = PostureMemory(storage, "world")
-    records = [memory.add_experience(**episode(experience_id=f"full-{index}")) for index in range(4)]
-    original = storage.load_component_state(memory.component)
-    size = len(json.dumps(original, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode())
-    try:
-        with monkeypatch.context() as capacity:
-            capacity.setattr("pulse_system.service.posture.MAX_STATE_BYTES", size + 1)
-            paused = memory.revise_experience(records[0]["id"], expected_revision=1, changes={"active": False})
-            harmful = memory.record_feedback(records[1]["id"], expected_revision=1, verdict="harmful",
-                                             evidence="An actual user correction must remain possible at capacity.",
-                                             source={"kind": "operator_report", "message_id": "later-feedback"})
-            withdrawn = memory.record_feedback(records[2]["id"], expected_revision=1, verdict="withdrawn",
-                                               evidence="Stop using the old generalization.")
-            with pytest.raises(ValueError, match="exceeds its bound"):
-                memory.revise_experience(records[3]["id"], expected_revision=1,
-                                         changes={"active": False, "lesson": "This combined change must not be partly saved."})
-            assert memory.get_experience(records[3]["id"]) == records[3]
-            assert storage.load_component_state(memory.component) == original
-            assert len(storage.load_component_state(memory.control_component)["stops"]) == 3
-            storage.close()
-            storage = Storage(path)
-            memory = PostureMemory(storage, "world")
-            for previous, result in zip(records, (paused, harmful, withdrawn)):
-                assert memory.get_experience(previous["id"]) == result
-                assert result["revision"] == 2 and not result["active"]
-                assert result["history"] == [{key: value for key, value in previous.items() if key != "history"}]
-                with pytest.raises(ValueError, match="revision conflict"):
-                    memory.revise_experience(previous["id"], expected_revision=1, changes={"active": True})
-            with pytest.raises(ValueError, match="exceeds its bound"):
-                memory.revise_experience(records[0]["id"], expected_revision=2, changes={"active": True})
-            assert [entry["id"] for entry in memory.materials(subject_id="subject", context_id="origin")["episodes"]] == [records[3]["id"]]
-        # When the primary journal can hold a deliberate later revision, that
-        # one durable write absorbs the control and its full evidence/history.
-        resumed = memory.revise_experience(records[1]["id"], expected_revision=2, changes={"active": True})
-        assert resumed["revision"] == 3 and resumed["active"]
-        assert memory.get_experience(records[1]["id"]) == resumed
-        assert resumed["feedback"] == harmful["feedback"]
-        assert resumed["history"][-1]["active"] is False
-        assert storage.load_component_state(memory.control_component)["stops"][records[1]["id"]]["revision"] == 2
-    finally:
-        storage.close()
-
-
-def test_stop_control_capacity_covers_all_128_maximal_feedback_records(monkeypatch):
-    from pulse_system.service.posture import MAX_CONTROL_STATE_BYTES, MAX_EXPERIENCES
-
-    storage = Storage()
-    memory = PostureMemory(storage, "world")
-    try:
-        records = [memory.add_experience(**episode(experience_id=f"p{index:03d}" + "x" * 156))
-                   for index in range(MAX_EXPERIENCES)]
-        original = storage.load_component_state(memory.component)
-        size = len(json.dumps(original, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode())
-        monkeypatch.setattr("pulse_system.service.posture.MAX_STATE_BYTES", size + 1)
-        source = {"kind": "operator_report", "evidence": ""}
-        source["evidence"] = "s" * (8192 - len(json.dumps(source, sort_keys=True, separators=(",", ":")).encode()))
-        for record in records:
-            result = memory.record_feedback(record["id"], expected_revision=1, verdict="withdrawn",
-                                            evidence="\x00" * 6000, source=source)
-            assert result["revision"] == 2 and not result["active"]
-        controls = storage.load_component_state(memory.control_component)
-        assert len(controls["stops"]) == MAX_EXPERIENCES
-        assert MAX_EXPERIENCES * (6000 * 6 + 8192 + 1024) + 4096 < MAX_CONTROL_STATE_BYTES
-        assert len(json.dumps(controls, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()) <= MAX_CONTROL_STATE_BYTES
-        assert storage.load_component_state(memory.component) == original
-        assert memory.materials(subject_id="subject", context_id="origin")["episodes"] == []
-    finally:
         storage.close()
