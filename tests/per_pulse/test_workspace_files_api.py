@@ -321,7 +321,13 @@ def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
         assert "not-visible.key" not in names
         assert ".pulse" not in names
         assert page["nextCursor"] is None and page["truncated"] is False
-        assert client.get("/api/workspace/files", params={"cursor": "bad!"}, headers=identity).status_code == 400
+        # urlsafe_b64decode can raise binascii.Error for legal-looking but malformed strings.
+        # An untrusted cursor must return a 400 rather than a server error.
+        for malformed in ("bad!", "a", "aaaaa", "-"):
+            invalid = client.get("/api/workspace/files",
+                                 params={"cursor": malformed}, headers=identity)
+            assert invalid.status_code == 400, (malformed, invalid.text)
+            assert invalid.json()["error"]["code"] == "invalid_directory_cursor"
         assert client.get("/api/workspace/files", params={"path": "ordinary-folder",
             "cursor": saved_cursor}, headers=identity).status_code == 400
 
