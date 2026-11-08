@@ -126,8 +126,11 @@ try {
   await writeFile(join(longFolder, 'new-entry.txt'), 'Newer source\n');
   await more.click();
   await materialDialog.getByRole('alert').getByText('This folder changed. Refresh to browse it again.', { exact: true }).waitFor();
+  const refreshed = page.waitForResponse(response => response.url().includes('/api/workspace/files?path=many-notes')
+    && !response.url().includes('&cursor=') && response.status() === 200);
   await materialDialog.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await more.waitFor();
+  await refreshed;
+  await wait(() => more.isEnabled(), 'directory listing refreshed');
   await more.click();
   await materialDialog.locator('.material-list button').filter({ hasText: missingName }).waitFor();
   await materialDialog.locator('.material-list button').filter({ hasText: missingName }).click();
