@@ -363,8 +363,6 @@ def test_a_fresh_self_activation_remains_admissible_after_hundreds_of_prior_puls
     assert world_source_for_scope(Ledger(), "world", scope) == "pulse-299"
 
 
-
-
 def test_long_work_causal_lineage_keeps_original_pool_and_rejects_cycles():
     """A long tool/Work history must not lose its trustworthy request source."""
     from types import SimpleNamespace as Row
