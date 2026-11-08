@@ -114,7 +114,9 @@ def handler(request):
     chunks = [{'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}], 'usage': None},
               {'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish}], 'usage': None},
               {'choices': [], 'usage': {'prompt_tokens': 120, 'completion_tokens': 8, 'total_tokens': 128}}]
-    stream = ''.join('data: ' + json.dumps(c) + '\n\n' for c in chunks) + 'data: [DONE]\n\n'
+    # Exercise standard CR-only framing and a leading BOM through the browser's
+    # approval, file effect, tool continuation and source-return journey.
+    stream = '\ufeff' + ''.join('data: ' + json.dumps(c) + '\r\r' for c in chunks) + 'data: [DONE]\r\r'
     return httpx.Response(200, headers={'content-type':'text/event-stream'}, content=stream)
 
 def factory(scope):
