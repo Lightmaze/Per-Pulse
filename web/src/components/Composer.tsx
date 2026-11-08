@@ -2,12 +2,15 @@ import { useId, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { Draft, ProviderState } from '../types';
 import { Icon } from './Icon';
 import { useLanguage } from '../i18n';
+import { CopyButton } from './CopyButton';
 
-export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, onInspectMaterial, inputRef, pageTitle, pageKind = 'home', provider, onSettings }: {
+export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, onInspectMaterial, inputRef, pageTitle, pageKind = 'home', provider, onSettings, draftSaveFailed = false, retryDraftSave }: {
   draft: Draft; changeDraft: (draft: Draft) => void; send: () => void; busy: boolean; onLink: () => void; inputRef: RefObject<HTMLTextAreaElement | null>;
   pageTitle?: string; pageKind?: 'home' | 'work'; provider?: ProviderState; onSettings?: () => void;
   onMaterials?: () => void;
   onInspectMaterial?: (materialId: string) => void;
+  draftSaveFailed?: boolean;
+  retryDraftSave?: () => void;
 }) {
   const { t, pageTitle: localizedPageTitle } = useLanguage();
   const composing = useRef(false);
@@ -32,6 +35,11 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
         <button className="send-button" type="submit" aria-label={t('composer.send')} disabled={busy || !canSend}><Icon name="send" size={21} /></button>
       </div>
     </form>
+    {draftSaveFailed ? <div className="composer-connection composer-draft-notice" role="status">
+      <span>{t(draft.text || draft.references.length || draft.materials?.length ? 'composer.draftNotSaved' : 'composer.draftNotCleared')}</span>{' '}
+      {draft.text ? <CopyButton text={draft.text} label={t('composer.copyDraftText')} /> : null}{' '}
+      {retryDraftSave ? <button type="button" className="text-button" onClick={retryDraftSave}>{t('composer.retryDraftSave')}</button> : null}
+    </div> : null}
     {disconnected ? <p id={connectionId} className="composer-connection">{t('composer.disconnected')}{onSettings ? <button type="button" className="text-button composer-connection-action" onClick={onSettings}>{t('composer.connectionSettings')}</button> : null}</p> : null}
     <p className="composer-hint">{busy ? t('composer.saving') : t('composer.hint')}</p>
   </div>;

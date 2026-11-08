@@ -1,5 +1,9 @@
 /** Interface text only: original work, events and filenames remain verbatim. */
 export const continuityEnglish = {
+  "composer.draftNotSaved": "This draft is only in this tab. Copy the text or save it before refreshing.",
+  "composer.draftNotCleared": "The saved browser draft could not be cleared. An older draft may reappear after refreshing.",
+  "composer.copyDraftText": "Copy draft text",
+  "composer.retryDraftSave": "Try saving again",
   "webSources.title": "Web sources",
   "status.failureWeb": "The webpage could not be read. Check that the source is a public HTTPS text page, or try another source.",
   "webSources.scope": "Saved observations of extracted text. Open a source to see its current page, including images and layout.",
@@ -140,7 +144,7 @@ export const continuityEnglish = {
   "settings.learningOff": "Off. Your conversations are saved; they are not automatically treated as lessons.",
   "settings.lessons": "View this page’s experience",
   "settings.auto": "Follow the conversation",
-  "settings.savedDraft": "Your unsent drafts and reading position stay in this browser.",
+  "settings.savedDraft": "Unsent drafts and reading position are saved in this browser when browser storage is available.",
   "execution.reviewFile": "Review a file change",
   "execution.reviewCommand": "Review a command",
   "execution.reviewWork": "Review a work action",
@@ -280,6 +284,10 @@ export const continuityEnglish = {
   "status.sendAgain": "Send again",
 } as const;
 export const continuityChinese: Record<keyof typeof continuityEnglish, string> = {
+  "composer.draftNotSaved": "This draft is only in this tab. Copy the text or save it before refreshing.",
+  "composer.draftNotCleared": "The saved browser draft could not be cleared. An older draft may reappear after refreshing.",
+  "composer.copyDraftText": "Copy draft text",
+  "composer.retryDraftSave": "Try saving again",
   "webSources.title": "网页来源",
   "status.failureWeb": "无法读取这个网页。请确认来源是公开的 HTTPS 文本网页，或尝试其他来源。",
   "webSources.scope": "已保存提取文本的阅读记录。打开来源可查看当前网页，包括图片和排版。",
@@ -420,7 +428,7 @@ export const continuityChinese: Record<keyof typeof continuityEnglish, string> =
   "settings.learningOff": "未启用。对话仍然保存，但不会自动转化成经验。",
   "settings.lessons": "查看此页面的经验",
   "settings.auto": "跟随对话",
-  "settings.savedDraft": "未发送的草稿与阅读位置保留在此浏览器中。",
+  "settings.savedDraft": "浏览器存储可用时，未发送的草稿与阅读位置会保存在此浏览器中。",
   "execution.reviewFile": "审批文件更改",
   "execution.reviewCommand": "审批命令",
   "execution.reviewWork": "审批工作操作",
