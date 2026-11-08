@@ -11,7 +11,6 @@ never changed.
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -36,13 +35,9 @@ def _final_assistant(message: Mapping[str, Any]) -> bool:
     """An assistant message that ends a turn (no tool calls follow it)."""
     if message.get("role") != "assistant":
         return False
-    content = message.get("content")
-    try:
-        payload = json.loads(content) if isinstance(content, str) else None
-    except ValueError:
-        return True
-    return not (isinstance(payload, dict) and set(payload) == {"text", "tool_calls"}
-                and payload.get("tool_calls"))
+    # This host-only count comes from the completed model round. A textual
+    # JSON example must not turn separate replies into one endless exchange.
+    return not message.get("tool_call_count", 0)
 
 
 def _boundaries(messages: Sequence[Mapping[str, Any]]) -> list[int]:
