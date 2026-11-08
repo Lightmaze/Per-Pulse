@@ -128,11 +128,11 @@ def _provider_usage(value: Mapping[str, Any]) -> ProviderUsage:
                 "model usage prompt token details must be an object",
                 code="provider_usage_invalid",
             )
-        if "cached_tokens" in details:
+        if details.get("cached_tokens") is not None:
             cached_candidates.append(
                 _usage_count(details["cached_tokens"], "prompt_tokens_details.cached_tokens")
             )
-    if "prompt_cache_hit_tokens" in value:
+    if value.get("prompt_cache_hit_tokens") is not None:
         cached_candidates.append(
             _usage_count(value["prompt_cache_hit_tokens"], "prompt_cache_hit_tokens")
         )
@@ -144,7 +144,7 @@ def _provider_usage(value: Mapping[str, Any]) -> ProviderUsage:
     cached_tokens = cached_candidates[0] if cached_candidates else 0
     cache_write_tokens = (
         _usage_count(value["cache_creation_input_tokens"], "cache_creation_input_tokens")
-        if "cache_creation_input_tokens" in value
+        if value.get("cache_creation_input_tokens") is not None
         else 0
     )
     try:
@@ -832,7 +832,8 @@ class _ChatStream:
                 self.usage = _provider_usage(raw_usage)
             if not choices:
                 continue
-            if len(choices) != 1 or not isinstance(choices[0], dict) or choices[0].get("index") != 0:
+            if (len(choices) != 1 or not isinstance(choices[0], dict)
+                    or type(choices[0].get("index")) is not int or choices[0]["index"] != 0):
                 raise ProviderProtocolError("only one completion choice is supported")
             choice = choices[0]
             if annotation:
@@ -858,13 +859,15 @@ class _ChatStream:
                     raise ProviderProtocolError("model content must be text")
                 if value:
                     yield ModelDelta(kind, text=value)
-            tool_deltas = delta.get("tool_calls") or []
+            tool_deltas = delta.get("tool_calls")
+            if tool_deltas is None:
+                tool_deltas = []
             if not isinstance(tool_deltas, list):
                 raise ProviderProtocolError("model tool deltas must be an array")
             for fragment in tool_deltas:
                 if not isinstance(fragment, dict) or type(fragment.get("index")) is not int or fragment["index"] < 0:
                     raise ProviderProtocolError("model tool index is invalid")
-                if fragment.get("type", "function") != "function":
+                if fragment.get("type") is not None and fragment["type"] != "function":
                     raise ProviderProtocolError("unsupported tool-call type")
                 call = calls.setdefault(fragment["index"], {
                     "id": "", "name": "", "arguments": "", "provider_metadata": {},
@@ -874,7 +877,9 @@ class _ChatStream:
                     if call["provider_metadata"] and call["provider_metadata"] != metadata:
                         raise ProviderProtocolError("model tool continuation metadata changed midstream")
                     call["provider_metadata"] = metadata
-                function = fragment.get("function") or {}
+                function = fragment.get("function")
+                if function is None:
+                    function = {}
                 if not isinstance(function, dict):
                     raise ProviderProtocolError("model function delta is invalid")
                 for key, value in (("id", fragment.get("id")), ("name", function.get("name")), ("arguments", function.get("arguments"))):
@@ -884,6 +889,8 @@ class _ChatStream:
                         call[key] += value
             reason = choice.get("finish_reason")
             if reason is not None:
+                if not isinstance(reason, str):
+                    raise ProviderProtocolError("model finish reason must be text")
                 if reason == "length" and not calls:
                     # Keep a reply cut at the output limit, and say so, rather
                     # than discard it. A cut tool call has incomplete arguments.
