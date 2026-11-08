@@ -396,9 +396,9 @@ def create_app(
         return service
 
     @app.get("/api/workspace/files")
-    def list_files(request: Request, path: str = ""):
+    def list_files(request: Request, path: str = "", cursor: str | None = None):
         service = file_service(request)
-        return service.file_response(service.files.list(path))
+        return service.file_response(service.files.list(path, cursor=cursor))
 
     @app.get("/api/workspace/files/content")
     def read_file(request: Request, path: str):
