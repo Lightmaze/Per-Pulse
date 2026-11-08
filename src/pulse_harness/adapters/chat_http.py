@@ -879,7 +879,8 @@ class _ChatStream:
                 _append_reasoning_details(reasoning_details, delta["reasoning_details"])
                 has_reasoning_details = True
             reasoning_field = "reasoning_content" if delta.get("reasoning_content") is not None else "reasoning"
-            for field, kind in (("content", ModelDeltaKind.TEXT), (reasoning_field, ModelDeltaKind.REASONING)):
+            for field, kind in (("content", ModelDeltaKind.TEXT), ("refusal", ModelDeltaKind.TEXT),
+                                (reasoning_field, ModelDeltaKind.REASONING)):
                 value = delta.get(field)
                 if value is not None and not isinstance(value, str):
                     raise ProviderProtocolError("model content must be text")
