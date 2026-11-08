@@ -1375,9 +1375,10 @@ class StructuredWorkspaceToolProvider:
 
         def set_end(end: int) -> None:
             content = text[offset:end]
-            redacted, previously_truncated = stored_text_flags(content)
-            output.update(content=content, redacted=redacted,
-                          truncated=end < len(text) or previously_truncated, eof=end == len(text))
+            # This passage comes from the verified file snapshot. Its spelling
+            # cannot tell us whether the host omitted or transformed anything.
+            output.update(content=content, redacted=False,
+                          truncated=end < len(text), eof=end == len(text))
             output["position"]["end_char"] = end
             output["next"] = ({"path": relative_path, "offset": end, "expected_digest": snapshot.digest,
                                **({"max_chars": maximum} if "max_chars" in arguments else {})}

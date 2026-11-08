@@ -17,7 +17,6 @@ import re
 from typing import Any
 from uuid import uuid4
 
-from pulse_harness.core.replay import bound_text
 
 
 SCHEMA = "per-pulse.posture.v2"
@@ -51,10 +50,10 @@ def _text(value: Any, name: str, limit: int) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be nonempty text")
     try:
-        clean, redacted, truncated = bound_text(value, limit)
+        size = len(value.encode("utf-8"))
     except (UnicodeError, TypeError) as exc:
         raise ValueError(f"{name} must be valid Unicode text") from exc
-    if redacted or truncated or clean != value:
+    if size > limit:
         raise ValueError(f"{name} is too large")
     return value
 

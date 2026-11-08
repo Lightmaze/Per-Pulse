@@ -44,6 +44,24 @@ class ReadFileFixture(MaterialFixture):
         return self.response("Recorded file passages. [Explicit synthetic fixture]")
 
 
+@pytest.mark.parametrize("text", ["[REDACTED] is source text.",
+    "[TRUNCATED sha256=" + "a" * 64 + " redacted=1 preview=literal]\nActual tail."])
+def test_literal_markers_do_not_change_actual_file_passage_completeness(tmp_path, monkeypatch, text):
+    fixture = ReadFileFixture(monkeypatch.setenv)
+    with client_for(tmp_path, model_factory=fixture.factory) as client:
+        (tmp_path / "workspace" / "literal.txt").write_text(text, encoding="utf-8")
+        passages = [row["output"] for row in read(client, fixture,
+            {"path": "literal.txt", "max_chars": 12}, continuation=True)]
+        assert "".join(row["content"] for row in passages) == text
+        assert all(not row["redacted"] for row in passages)
+        assert all(row["truncated"] is (not row["eof"]) for row in passages)
+        assert passages[-1]["next"] is None
+    with client_for(tmp_path, model_factory=fixture.factory) as client:
+        result, = read(client, fixture, {"path": "literal.txt"})
+        assert result["output"]["content"] == text
+        assert result["output"]["redacted"] is result["output"]["truncated"] is False
+
+
 def read(client, fixture, arguments, *, continuation=False):
     start = len(fixture.outcomes)
     sent = send(client, "home", "EXPLICIT_READ_FILE_FIXTURE:" + json.dumps({
