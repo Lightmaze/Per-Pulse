@@ -252,7 +252,7 @@ export const continuityEnglish = {
   "status.approvalDetail": "Approval is needed before this turn can continue.",
   "status.updatesPaused": "Updates paused",
   "status.updatesPausedDetail": "The latest status could not be checked. Refresh to try again.",
-  "status.savedDisconnected": "Saved · AI disconnected",
+  "status.savedDisconnected": "Saved · No model configured",
   "status.savedDisconnectedDetail": "Your message is saved. Connect a model to continue this turn.",
   "status.working": "Working",
   "status.workingDetail": "Per Pulse is working in this conversation.",

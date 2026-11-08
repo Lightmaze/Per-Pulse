@@ -99,8 +99,8 @@ try {
   // The current sidebar lists its last workspace snapshot. Use the existing
   // read-only refresh control to discover a Work created by the model.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Check connection', exact: true }).click();
-  await page.getByText('Connection checked.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Refresh configuration', exact: true }).click();
+  await page.getByText('Configuration refreshed.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   assert.equal(await composer.inputValue(), homeDraft);
   await navigate(title);

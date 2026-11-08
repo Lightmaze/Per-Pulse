@@ -45,7 +45,7 @@ test('return focus only targets a reference in the destination page', () => {
 test('disconnected saved messages never claim active work', () => {
   for (const status of ['queued', 'working']) {
     assert.equal(getPageActivity(status, false).tone, 'neutral');
-    assert.equal(getPageActivity(status, false).label, 'Saved · AI disconnected');
+    assert.equal(getPageActivity(status, false).label, 'Saved · No model configured');
   }
   assert.equal(getPageActivity('working', true).tone, 'active');
   assert.equal(getPageActivity('idle', true).label, 'Ready');

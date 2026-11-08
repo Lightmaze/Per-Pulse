@@ -247,7 +247,7 @@ class PageService:
             "model": self.model,
             "workspaceActions": self.allow_workspace_actions,
             "autoApplyEdits": self.auto_apply_edits,
-            "label": "AI connected" if self.configured else "AI disconnected",
+            "label": "Model configured" if self.configured else "No model configured",
             "detail": (
                 "Your configured model handles messages in each page's own context."
                 if self.configured else
