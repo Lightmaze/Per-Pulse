@@ -109,6 +109,38 @@ per-pulse
 
 On Windows PowerShell use `$env:NAME = 'value'` for each environment assignment. The disconnected **Settings → How to connect a model** also provides both terminal variants in the *Model server on this computer* option. Credential-free mode is refused unless both flags are set and the endpoint is explicitly loopback HTTP; it never bypasses credentials for remote HTTPS providers. Requests have no `Authorization` header in this mode. It remains one native Kernel and one World; no additional proxy or model runtime is created.
 
+### Connect to a model on another computer in your LAN
+
+A trusted model server on a different computer can share the same native
+World/Kernel experience path. Start an OpenAI-compatible Chat Completions
+server on that computer, then set its **literal private IP** and actual port
+on the computer running Per Pulse:
+
+```sh
+export P_PULSE_CHAT_ENDPOINT='http://192.168.1.24:11434/v1/chat/completions'
+export P_PULSE_CHAT_MODEL='your-lan-model-id'
+export P_PULSE_ALLOW_PRIVATE_HTTP='1'
+export P_PULSE_LOCAL_NO_AUTH='1'
+per-pulse doctor
+per-pulse
+```
+
+Replace the example IP, port and model ID. Settings offers the same terminal
+template in English and Chinese for POSIX and PowerShell. Explicit opt-in
+accepts only literal private IPv4 (10/8, 172.16/12, 192.168/16) and local
+IPv6 ULA (fc00::/7) addresses; hostnames, public, link-local and loopback IPs
+are not unlocked by this flag. The existing `P_PULSE_ALLOW_LOCAL_HTTP=1`
+switch separately controls loopback.
+
+LAN HTTP is unencrypted. Your model request text, images and tool context
+travel to the selected computer, so choose a server and network you trust.
+Credentials are not silently disabled: `P_PULSE_LOCAL_NO_AUTH=1` is a
+separate opt-in for servers that require no API key. Omit it and supply an
+API key for a LAN server that authenticates. Per Pulse stays bound to the
+local browser loopback; this enables outbound model calls, not remote browser
+access. `per-pulse doctor` confirms configuration only, without connecting
+or judging the remote model.
+
 `doctor` checks only the local configuration, **not** whether the local server is running, supports streaming/tool calls/usage, or provides good judgments. Local models may not implement the required OpenAI-compatible SSE and usage fields; incompatible responses fail normally, with no scripted fallback or learning claims. Per Pulse's background token budget remains an admission envelope rather than a hard GPU/billing cap. Run a real Work and inspect its outcome before depending on it for later actions.
 
 If neither endpoint nor model is set, the workspace runs disconnected. Setting only one is a configuration error. Restart after changing provider configuration. Queued input from the ordinary workspace can be processed after connecting a model, so use a separate data directory when you want a fresh conversation.

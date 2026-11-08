@@ -99,7 +99,22 @@ try {
   const localPosix = await setup.locator('code').innerText();
   assert.ok(localPosix.includes('export P_PULSE_LOCAL_NO_AUTH'));
   assert.ok(!localPosix.includes('$env:'));
+  // Test the actual disconnected Settings journey, not just the template helper.
+  await page.locator('#provider-connection-mode').selectOption('lan');
+  const lanPosix = await setup.locator('code').innerText();
+  assert.ok(lanPosix.includes('192.168.1.24:11434/v1/chat/completions'));
+  assert.ok(lanPosix.includes("export P_PULSE_ALLOW_PRIVATE_HTTP='1'"));
+  assert.ok(lanPosix.includes("export P_PULSE_LOCAL_NO_AUTH='1'"));
+  assert.ok(!lanPosix.includes('P_PULSE_API_KEY'));
+  await setup.getByText('Private-network HTTP is unencrypted:', { exact: false }).waitFor();
+  await page.locator('#provider-terminal-shell').selectOption('powershell');
+  const lanWindows = await setup.locator('code').innerText();
+  assert.ok(lanWindows.includes("$env:P_PULSE_ALLOW_PRIVATE_HTTP = '1'"));
+  assert.ok(!lanWindows.includes('export '));
   await page.locator('#interface-language').selectOption('zh-CN');
+  assert.equal(await page.locator('#provider-connection-mode option:checked').innerText(), '局域网内的模型服务');
+  await setup.getByText('局域网 HTTP 不加密：', { exact: false }).waitFor();
+  await page.locator('#provider-connection-mode').selectOption('loopback');
   assert.equal(await page.locator('#provider-connection-mode option:checked').innerText(),
     '本机模型服务（无需 API 密钥）');
   await page.locator('#provider-connection-mode').selectOption('azure');

@@ -189,8 +189,10 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
           <option value="keyed">{t('settings.modeKeyed')}</option>
           <option value="azure">{t('settings.modeAzure')}</option>
           <option value="loopback">{t('settings.modeLoopback')}</option>
+          <option value="lan">{t('settings.modeLan')}</option>
         </select>
         {setupMode === 'loopback' ? <p className="settings-detail">{t('settings.localModelHint')}</p> : null}
+        {setupMode === 'lan' ? <p className="settings-detail">{t('settings.lanModelHint')}</p> : null}
         {setupMode === 'azure' ? <p className="settings-detail">{t('settings.azureModelHint')}</p> : null}
         <label className="field-label" htmlFor="provider-terminal-shell">{t('settings.terminalShell')}</label>
         <select id="provider-terminal-shell" value={setupShell}
@@ -201,7 +203,7 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
         <pre aria-label={t('settings.connectCommand')}><code>{setupCommand}</code></pre>
         <CopyButton text={setupCommand} label={t('settings.copySetup')} />
         <p className="settings-detail">{t('settings.doctorHint')}</p>
-        <p>{t(setupMode === 'loopback' ? 'settings.localModelSafety' : 'settings.connectionSafety')}</p>
+        <p>{t(setupMode === 'loopback' ? 'settings.localModelSafety' : setupMode === 'lan' ? 'settings.lanModelSafety' : 'settings.connectionSafety')}</p>
       </details> : null}</div>
     <div className="settings-section">
       <h3>{t('settings.languageHeading')}</h3>
