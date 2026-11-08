@@ -75,9 +75,10 @@ Your workspace is outside the installation, in
 `~/.local/share/per-pulse` by default, or your chosen `--data-dir`.
 Before upgrading, stop the service and copy the complete data directory to a
 backup, then install the new wheel in the same environment.
-The first start of a4 upgrades the World database to schema v12 by
-adding a consultation-source index, preserving stored records. The existing
-migration process first saves a database backup beside it. For a move, see
+The first start of a7 upgrades the World database to schema v13 for the durable
+experience journal. The migration process first saves a database backup beside
+it. Existing experience is imported on its first ordinary update, retaining the
+original components, sources and revision history. For a move, see
 [workspace images](image.md); restore an older image with its matching
 implementation before upgrading the restored directory.
 There is no in-place data downgrade guarantee; keep a backup before an upgrade.

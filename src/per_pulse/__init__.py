@@ -3,4 +3,4 @@
 Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 
-__version__ = "0.1.0a6"
+__version__ = "0.1.0a7"

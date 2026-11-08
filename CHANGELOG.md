@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.1.0a7
+
+- Keep experience growing beyond the aggregate 128-record / 4 MiB lifetime
+  quota, preserving original sources, old revisions, feedback and stop controls
+  in the existing World database. Keep offline research readers compatible.
+- Continue older experience lists and oversized experience details through
+  bounded source-checked pages. Read the rest of a long public webpage through
+  explicit ranges that verify the observed text and resolved source.
+- Accept nullable optional provider fields, standard SSE BOM/CR/CRLF framing,
+  and streamed refusal text while retaining protocol validation and restart.
+- Keep complete literal file-action arguments reviewable through the original
+  model-call authority, and download verified outputs as their original bytes.
+- Preserve native file, Notice and lesson text containing literal omission
+  markers. Correct Windows UTF-16 path lengths for non-BMP filenames.
+- Bound diagnostic backlog and retry failed writes without interrupting native
+  work. Keep draft save failures visible, editable, copyable and recoverable.
+- Present a new page's source author separately from the user's request across
+  conversation, history and search. Label local configuration refresh accurately.
+
 - Preserve ordinary JSON replies as text through later messages, context
   fitting, optional review and workspace restart. Decode internal tool
   envelopes using the saved model round's authority.
