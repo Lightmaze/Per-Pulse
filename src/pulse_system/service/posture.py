@@ -384,6 +384,52 @@ class PostureMemory:
             content_version = previous
         return content_version["updated_at"]
 
+    @staticmethod
+    def _material_record(record: dict, context_id: str) -> dict:
+        """Project one already-visible experience using the normal privacy rules."""
+        local = record["context_id"] == context_id
+        item = {key: deepcopy(record[key]) for key in (
+            "id", "revision", "record_type", "scope", "context_id",
+            *experience_content_fields(record),
+        )}
+        item["representation"] = record.get("representation", "lesson")
+        item["source"] = {"experience_id": record["id"], "revision": record["revision"],
+                          "context_id": record["context_id"]}
+        if record["source"].get("kind") == "native_reading_example":
+            item["source"]["kind"] = "native_reading_example"
+            item["source"]["meaning"] = "retained_reading_observation_not_verified_source_or_outcome"
+        if record["source"].get("kind") == "native_command_example":
+            item["source"].update(kind="native_command_example",
+                                  meaning="retained_command_observation_not_quality_rating",
+                                  command_observation=deepcopy(record["source"]["command_observation"]))
+        if record["source"].get("execution_regime") == "replay":
+            # Share the meaning, not the original page's selected sources.
+            item["source"]["execution_regime"] = "replay"
+            item["source"]["meaning"] = "replay_interpretation_not_new_external_observation"
+        item["encounter_available"] = local
+        if local:
+            item["encounter"] = deepcopy(record["encounter"])
+            item["source"]["evidence"] = deepcopy(record["source"])
+            item["feedback"] = deepcopy(record["feedback"][-4:])
+            if "revision_source" in record:
+                item["revision_source"] = deepcopy(record["revision_source"])
+        else:
+            item["feedback"] = [{"verdict": entry["verdict"], "revision": entry["revision"]}
+                                for entry in record["feedback"][-4:]]
+            if "revision_source" in record:
+                item["revision_source"] = {key: record["revision_source"][key]
+                                           for key in ("kind", "selector_evidence_class")
+                                           if key in record["revision_source"]}
+        return item
+
+    def material_experience(self, *, subject_id: str, context_id: str,
+                            experience_id: str) -> dict | None:
+        """Read one eligible record without enumerating the growing journal."""
+        self.guard()
+        record = self._journal.get_visible(
+            experience_id, subjects=self._subjects(subject_id), context_id=context_id)
+        return None if record is None else self._material_record(record, context_id)
+
     def materials(self, *, subject_id: str, context_id: str,
                   prioritize_content: bool = False) -> dict:
         """Offer eligible experiences, not allegedly relevant experiences.
@@ -403,41 +449,6 @@ class PostureMemory:
         rows.sort(key=lambda item: (item[1] if prioritize_content else item[0]["updated_at"],
                                    item[0]["id"]), reverse=True)
         records = [record for record, _ in rows]
-        episodes = []
-        for record in records:
-            local = record["context_id"] == context_id
-            item = {key: deepcopy(record[key]) for key in (
-                "id", "revision", "record_type", "scope", "context_id",
-                *experience_content_fields(record),
-            )}
-            item["representation"] = record.get("representation", "lesson")
-            item["source"] = {"experience_id": record["id"], "revision": record["revision"],
-                              "context_id": record["context_id"]}
-            if record["source"].get("kind") == "native_reading_example":
-                item["source"]["kind"] = "native_reading_example"
-                item["source"]["meaning"] = "retained_reading_observation_not_verified_source_or_outcome"
-            if record["source"].get("kind") == "native_command_example":
-                item["source"].update(kind="native_command_example",
-                                      meaning="retained_command_observation_not_quality_rating",
-                                      command_observation=deepcopy(record["source"]["command_observation"]))
-            if record["source"].get("execution_regime") == "replay":
-                # Share the meaning, not the original page's selected sources.
-                item["source"]["execution_regime"] = "replay"
-                item["source"]["meaning"] = "replay_interpretation_not_new_external_observation"
-            item["encounter_available"] = local
-            if local:
-                item["encounter"] = deepcopy(record["encounter"])
-                item["source"]["evidence"] = deepcopy(record["source"])
-                item["feedback"] = deepcopy(record["feedback"][-4:])
-                if "revision_source" in record:
-                    item["revision_source"] = deepcopy(record["revision_source"])
-            else:
-                item["feedback"] = [{"verdict": entry["verdict"], "revision": entry["revision"]}
-                                    for entry in record["feedback"][-4:]]
-                if "revision_source" in record:
-                    item["revision_source"] = {key: record["revision_source"][key]
-                                               for key in ("kind", "selector_evidence_class")
-                                               if key in record["revision_source"]}
-            episodes.append(item)
+        episodes = [self._material_record(record, context_id) for record in records]
         return {"schema": SCHEMA, "episodes": episodes, "eligibility": "subject_scope_and_active_only",
                 "semantic_applicability": "not_yet_assessed", "source_context_id": context_id}
