@@ -40,14 +40,24 @@ def test_growth_beyond_lifetime_count_and_aggregate_bytes_survives_restart(tmp_p
         corrected = memory.revise_experience("long-1", expected_revision=1, changes={"lesson": "A later complete correction."})
         for index in range(132, 260):
             memory.add_experience(**episode(experience_id=f"long-{index}"))
-        assert len(memory.list_experiences(subject_id="subject", include_inactive=True)) == 260
+        all_records = memory.list_experiences(subject_id="subject", include_inactive=True)
+        assert len(all_records) == 260
+        by_id = {value["id"]: value for value in all_records}
+        assert by_id["long-0"] == paused
+        assert by_id["long-1"] == corrected
         assert len(memory.list_experiences(subject_id="subject")) == 259
-        # Normal materials never fetch old revision rows.
+        # The ordinary material read must not issue two SQL queries *per*
+        # experience, or scan revision rows, as the lifelong journal grows.
         statements = []
         storage._conn.set_trace_callback(statements.append)
-        packet = memory.materials(subject_id="subject", context_id="origin", prioritize_content=True)
-        storage._conn.set_trace_callback(None)
+        try:
+            packet = memory.materials(subject_id="subject", context_id="origin", prioritize_content=True)
+        finally:
+            storage._conn.set_trace_callback(None)
+        selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
+        assert len(selects) <= 4, selects
         assert all("posture_experience_revisions" not in sql for sql in statements)
+        assert len(packet["episodes"]) == 259
         assert "long-0" not in {item["id"] for item in packet["episodes"]}
         assert PostureMemory(storage, "other-world").list_experiences(subject_id="subject") == []
         storage.close()
