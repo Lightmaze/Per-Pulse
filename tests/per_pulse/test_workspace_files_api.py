@@ -294,7 +294,7 @@ def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
         for index in range(425):
             (root / f"note-{index:04d}.txt").write_text(f"Native note {index}", encoding="utf-8")
         (root / "not-visible.key").write_text("Protected name", encoding="utf-8")
-        (root / ".pulse").mkdir()
+        (root / ".pulse").mkdir(exist_ok=True)
         (root / "ordinary-folder").mkdir()
 
         first = client.get("/api/workspace/files", headers=identity)
