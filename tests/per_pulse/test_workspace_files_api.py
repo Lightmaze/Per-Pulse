@@ -284,3 +284,86 @@ def test_a_file_with_a_key_in_it_uploads_and_reads_back_unchanged(tmp_path):
                           headers=_identity(client))
         assert read.status_code == 200, read.text
         assert read.json()["content"] == data.decode("utf-8")
+
+
+def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
+    """A long-lived workspace must not make file 201 permanently unreachable."""
+    with _client(tmp_path) as client:
+        identity = _identity(client)
+        root = tmp_path / "workspace"
+        for index in range(425):
+            (root / f"note-{index:04d}.txt").write_text(f"Native note {index}", encoding="utf-8")
+        (root / "not-visible.key").write_text("Protected name", encoding="utf-8")
+        (root / ".pulse").mkdir(exist_ok=True)
+        (root / "ordinary-folder").mkdir()
+
+        first = client.get("/api/workspace/files", headers=identity)
+        assert first.status_code == 200, first.text
+        page = first.json()
+        assert len(page["entries"]) == 200
+        assert page["truncated"] is True
+        assert page["nextCursor"]
+        saved_cursor = page["nextCursor"]
+        names = [entry["name"] for entry in page["entries"]]
+        for _ in range(10):
+            if not page["nextCursor"]:
+                break
+            response = client.get("/api/workspace/files",
+                                  params={"cursor": page["nextCursor"]}, headers=identity)
+            assert response.status_code == 200, response.text
+            page = response.json()
+            names.extend(entry["name"] for entry in page["entries"])
+        else:
+            pytest.fail("Directory continuation never finished")
+        assert len(names) == len(set(names)) == 426
+        assert {f"note-{index:04d}.txt" for index in range(425)} <= set(names)
+        assert "ordinary-folder" in names
+        assert "not-visible.key" not in names
+        assert ".pulse" not in names
+        assert page["nextCursor"] is None and page["truncated"] is False
+        # urlsafe_b64decode can raise binascii.Error for legal-looking but malformed strings.
+        # An untrusted cursor must return a 400 rather than a server error.
+        for malformed in ("bad!", "a", "aaaaa", "-"):
+            invalid = client.get("/api/workspace/files",
+                                 params={"cursor": malformed}, headers=identity)
+            assert invalid.status_code == 400, (malformed, invalid.text)
+            assert invalid.json()["error"]["code"] == "invalid_directory_cursor"
+        assert client.get("/api/workspace/files", params={"path": "ordinary-folder",
+            "cursor": saved_cursor}, headers=identity).status_code == 400
+
+    # Directory state, unlike a process-local listing cache, survives restart.
+    with _client(tmp_path) as client:
+        result = client.get("/api/workspace/files", params={"cursor": saved_cursor},
+                            headers=_identity(client))
+        assert result.status_code == 200, result.text
+        assert result.json()["entries"]
+        (tmp_path / "workspace" / "late-note.txt").write_text("New note", encoding="utf-8")
+        changed = client.get("/api/workspace/files", params={"cursor": saved_cursor},
+                             headers=_identity(client))
+        assert changed.status_code == 409
+        assert changed.json()["error"]["code"] == "directory_changed_retry"
+
+
+def test_directory_cursor_continues_after_bounded_scan_of_protected_entries(tmp_path, monkeypatch):
+    """A scan bound is a per-page bound, not an irreversible directory cutoff."""
+    import pulse_system.product.files as files_module
+
+    monkeypatch.setattr(files_module, "MAX_SCAN_ENTRIES", 3)
+    with _client(tmp_path) as client:
+        identity = _identity(client)
+        root = tmp_path / "workspace"
+        for index in range(7):
+            (root / f"hidden-{index}.key").write_text("Do not list", encoding="utf-8")
+        (root / "visible.txt").write_text("Can be reached", encoding="utf-8")
+        page = client.get("/api/workspace/files", headers=identity).json()
+        found = [row["name"] for row in page["entries"]]
+        for _ in range(8):
+            if not page["nextCursor"]:
+                break
+            response = client.get("/api/workspace/files",
+                                  params={"cursor": page["nextCursor"]}, headers=identity)
+            assert response.status_code == 200, response.text
+            page = response.json()
+            found.extend(row["name"] for row in page["entries"])
+        assert found == ["visible.txt"]
+        assert page["truncated"] is False

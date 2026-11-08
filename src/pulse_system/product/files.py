@@ -6,7 +6,10 @@ and special files. Raw model/tool content is never rendered as executable HTML.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 from contextlib import contextmanager
+import json
 import hashlib
 import os
 from pathlib import Path
@@ -85,6 +88,40 @@ def _text(data: bytes) -> str:
     return text
 
 
+def _directory_revision(directory: int) -> list[int]:
+    """Identity and entry-change stamp, read from the already anchored handle."""
+    if _WINDOWS:
+        info = winfiles.attributes(directory)
+        return [int(info.volume), int(info.index_high), int(info.index_low),
+                int(info.write.high), int(info.write.low)]
+    info = os.fstat(directory)
+    return [int(info.st_dev), int(info.st_ino), int(info.st_mtime_ns), int(info.st_ctime_ns)]
+
+
+def _page_start(cursor: str | None, path: str, revision: list[int]) -> int:
+    if cursor is None:
+        return 0
+    if not isinstance(cursor, str) or len(cursor) > 4096 or not re.fullmatch(r"[A-Za-z0-9_-]+", cursor):
+        raise FileAccessError("invalid_directory_cursor")
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+        value = json.loads(raw)
+    except (ValueError, UnicodeError, binascii.Error):
+        raise FileAccessError("invalid_directory_cursor") from None
+    if (not isinstance(value, dict) or value.get("v") != 1 or value.get("path") != path
+            or type(value.get("offset")) is not int or value["offset"] < 1):
+        raise FileAccessError("invalid_directory_cursor")
+    if value.get("revision") != revision:
+        raise FileAccessError("directory_changed_retry", 409)
+    return value["offset"]
+
+
+def _page_cursor(path: str, offset: int, revision: list[int]) -> str:
+    body = json.dumps({"v": 1, "path": path, "offset": offset, "revision": revision},
+                      separators=(",", ":"), ensure_ascii=True)
+    return base64.urlsafe_b64encode(body.encode("utf-8")).decode("ascii").rstrip("=")
+
+
 class WorkspaceFiles:
     def __init__(self, root: Path):
         self.root = Path(root).absolute()
@@ -117,17 +154,28 @@ class WorkspaceFiles:
             if fd >= 0:
                 os.close(fd)
 
-    def list(self, path: str = "") -> dict:
-        rows = []
-        truncated = False
+    def list(self, path: str = "", *, cursor: str | None = None) -> dict:
         if _WINDOWS:
-            return self._list_windows(path)
+            return self._list_windows(path, cursor=cursor)
         with self.directory(path) as directory:
+            revision = _directory_revision(directory)
+            start = _page_start(cursor, path, revision)
+            rows = []
+            next_offset = start
+            scanned_this_page = 0
+            has_more = False
             with os.scandir(directory) as entries:
-                for scanned, entry in enumerate(entries):
-                    if scanned >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
-                        truncated = True
+                # Cursor counts raw directory entries, including protected ones.
+                # This retains a bounded page without persisting a second index
+                # or ever treating the first 4,000 entries as a lifetime cap.
+                for offset, entry in enumerate(entries):
+                    if offset < start:
+                        continue
+                    if scanned_this_page >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
+                        has_more = True
                         break
+                    scanned_this_page += 1
+                    next_offset = offset + 1
                     relative = f"{path}/{entry.name}" if path else entry.name
                     try:
                         _parts(relative)
@@ -139,21 +187,32 @@ class WorkspaceFiles:
                                      "bytes": info.st_size if stat.S_ISREG(info.st_mode) else None})
                     except (OSError, FileAccessError):
                         continue
-        rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold()))
-        return {"path": path, "entries": rows, "truncated": truncated,
+            if _directory_revision(directory) != revision:
+                raise FileAccessError("directory_changed_retry", 409)
+        rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold(), row["name"]))
+        return {"path": path, "entries": rows, "truncated": has_more,
+                "nextCursor": _page_cursor(path, next_offset, revision) if has_more else None,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
-    def _list_windows(self, path: str) -> dict:
-        rows = []
-        truncated = False
+    def _list_windows(self, path: str, *, cursor: str | None = None) -> dict:
         with self.directory(path) as directory:
-            for scanned, (name, is_directory, size, reparse) in enumerate(winfiles.list_directory(directory)):
-                if scanned >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
-                    truncated = True
+            revision = _directory_revision(directory)
+            start = _page_start(cursor, path, revision)
+            rows = []
+            next_offset = start
+            scanned_this_page = 0
+            has_more = False
+            for offset, (name, is_directory, size, reparse) in enumerate(winfiles.list_directory(directory)):
+                if offset < start:
+                    continue
+                if scanned_this_page >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
+                    has_more = True
                     break
+                scanned_this_page += 1
+                next_offset = offset + 1
                 relative = f"{path}/{name}" if path else name
                 if reparse:
-                    continue  # symlinks and junctions are not workspace entries
+                    continue
                 try:
                     _parts(relative)
                 except FileAccessError:
@@ -161,8 +220,11 @@ class WorkspaceFiles:
                 rows.append({"name": name, "path": relative,
                              "kind": "directory" if is_directory else "file",
                              "bytes": None if is_directory else size})
-        rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold()))
-        return {"path": path, "entries": rows, "truncated": truncated,
+            if _directory_revision(directory) != revision:
+                raise FileAccessError("directory_changed_retry", 409)
+        rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold(), row["name"]))
+        return {"path": path, "entries": rows, "truncated": has_more,
+                "nextCursor": _page_cursor(path, next_offset, revision) if has_more else None,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
     def read_bytes(self, path: str) -> bytes:

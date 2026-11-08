@@ -61,8 +61,8 @@ const pulseWriteHeaders = (identity: PulseWriteIdentity) => ({
 });
 
 export const api = {
-  files: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
-    request<WorkspaceFileList>(`/workspace/files?path=${encodeURIComponent(path)}`, { headers: pulseWriteHeaders(identity), signal }),
+  files: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal, cursor?: string) =>
+    request<WorkspaceFileList>(`/workspace/files?path=${encodeURIComponent(path)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: pulseWriteHeaders(identity), signal }),
   file: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
     request<WorkspaceFile>(`/workspace/files/content?path=${encodeURIComponent(path)}`, { headers: pulseWriteHeaders(identity), signal }),
   upload: (file: File, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
