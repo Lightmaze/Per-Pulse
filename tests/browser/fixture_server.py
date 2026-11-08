@@ -20,6 +20,7 @@ release = threading.Event()
 entered = threading.Event()
 requests = []
 before = 'Draft heading.\npassword=abc\nOrdinary report content.\n'
+literal_before = 'Draft heading.\n[REDACTED] is literal source text.\n'
 large_before = 'DRAFT ' + 'An explicitly synthetic long report. ' * 1_400 + '\n'
 rewrite_before = 'Original report.\n'
 rewrite_after = 'A complete rewritten line: "quoted", café and source text.\r\n' * 4_000
@@ -53,7 +54,7 @@ This **confirmed file** keeps its source available for later work.
 '''
 document_revision = '# A later version\n\nPRIVATE_LATER_WORK_RESULT belongs to its own original receipt.\n'
 (state / 'workspace').mkdir(exist_ok=True)
-for filename, content in [('redacted.txt', before), ('large-report.txt', large_before),
+for filename, content in [('redacted.txt', before), ('literal-markers.txt', literal_before), ('large-report.txt', large_before),
                           ('rewritten-report.txt', rewrite_before)]:
     if not (state / 'workspace' / filename).exists():
         (state / 'workspace' / filename).write_bytes(content.encode('utf-8'))
@@ -87,7 +88,9 @@ def handler(request):
     if not has_tool and 'WRITE_' in text:
         name = 'slow.txt' if 'SLOW_AFTER_APPROVAL' in text else 'declined.txt' if 'WRITE_DECLINE' in text else 'approved.txt'
         arguments = {'path': name, 'expected_digest': None, 'content': 'A real file from a synthetic model fixture.\n'}
-        if 'WRITE_REDACTED' in text:
+        if 'WRITE_LITERAL_MARKER' in text:
+            arguments = {'path': 'literal-markers.txt', 'expected_digest': hashlib.sha256(literal_before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'Draft heading.', 'new': 'Final heading.'}]}}
+        elif 'WRITE_REDACTED' in text:
             arguments = {'path': 'redacted.txt', 'expected_digest': hashlib.sha256(before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'Draft heading.', 'new': 'Final heading.'}]}}
         if 'WRITE_LARGE' in text:
             arguments = {'path': 'large-report.txt', 'expected_digest': hashlib.sha256(large_before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'DRAFT', 'new': 'FINAL'}]}}

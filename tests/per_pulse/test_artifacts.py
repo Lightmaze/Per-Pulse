@@ -459,8 +459,8 @@ def test_preview_shows_the_users_own_text_bounded_after_verifying_original_bytes
         assert download.status_code == 200
         assert download.content == after.encode("utf-8")
 
-def test_preview_rejects_hidden_marker_beyond_bounded_prefix(tmp_path, monkeypatch):
-    """A safe-looking preview cannot authorize carrying an unsafe complete file."""
+def test_literal_marker_beyond_preview_does_not_block_verified_file_download(tmp_path, monkeypatch):
+    """A local file's text is data, including outside the displayed preview."""
     import per_pulse.artifacts as module
 
     monkeypatch.setattr(module, "MAX_PREVIEW_BYTES", 256)
@@ -486,13 +486,12 @@ def test_preview_rejects_hidden_marker_beyond_bounded_prefix(tmp_path, monkeypat
         assert preview["observedSha256"] == _sha(after)
         assert preview["truncated"]
         assert "[REDACTED]" not in preview["content"]
-        # The entire file contains a persisted redaction marker *after* the
-        # displayed portion. Both actions must agree it is not transferable.
-        assert preview["redacted"]
-        assert preview["downloadable"] is False
-        denied = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
-        assert denied.status_code == 422
-        assert denied.json()["error"]["code"] == "artifact_download_redacted"
+        assert preview["redacted"] is False
+        assert preview["downloadable"] is True
+        downloaded = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert downloaded.status_code == 200
+        assert downloaded.content == after.encode("utf-8")
+        assert downloaded.headers["ETag"] == '"' + _sha(after) + '"'
 
 
 def test_download_keeps_complete_utf8_bytes_and_filename_after_restart(tmp_path, monkeypatch):
