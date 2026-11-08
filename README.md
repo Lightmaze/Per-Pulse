@@ -39,19 +39,19 @@ Kernel implementation.
 - Browse and search the whole history, and move a stopped workspace to another
   directory.
 
-When no model is configured, the interface says **AI disconnected** and keeps
+When no model is configured, the interface says **No model configured** and keeps
 your messages as queued input. It never substitutes a scripted reply for a model.
 
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a6-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a6)
+[`per_pulse-0.1.0a7-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a7)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a6-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a7-py3-none-any.whl
 per-pulse --example
 ```
 
