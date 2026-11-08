@@ -50,6 +50,9 @@ SCHEMA = {
         "query": {"type": "string", "minLength": 2, "maxLength": 160},
         "after_experience_id": {"type": "string", "maxLength": 160},
         "experience_id": {"type": "string", "maxLength": 160},
+        "offset": {"type": "integer", "minimum": 0},
+        "max_chars": {"type": "integer", "minimum": 1, "maximum": 8192},
+        "expected_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "expected_revision": {"type": "integer", "minimum": 1},
         "verdict": {"type": "string", "enum": sorted(_NATIVE_VERDICTS)},
         "source_message_id": {"type": "string", "maxLength": 160},
@@ -86,7 +89,8 @@ def descriptor() -> ToolDescriptor:
         "message IDs; when next_after_experience_id appears, page older ones with "
         "list(after_experience_id). find(query) searches titles, lessons, conditions, "
         "shifts and passages; page older matches with find(query, after_experience_id). "
-        "An oversized reference is not advice. get(experience_id) reads one experience. "
+        "An oversized reference is not advice. get(experience_id) reads details; follow "
+        "detail.next for large JSON records. "
         "remember(source_message_id, feedback_message_id, title, lesson, conditions, "
         "counterexamples, shift) keeps a lesson from the user's later feedback on an "
         "earlier assistant reply: say what the feedback changes in understanding, "
@@ -147,11 +151,20 @@ def validate(arguments: Mapping[str, Any]) -> dict:
                 raise ValueError("invalid after_experience_id")
             result["after_experience_id"] = after
         return result
-    if values.get("op") == "get" and set(values) == {"op", "experience_id"}:
+    if (values.get("op") == "get" and {"op", "experience_id"} <= set(values)
+            <= {"op", "experience_id", "offset", "max_chars", "expected_digest"}):
         identity = values["experience_id"]
         if (not isinstance(identity, str) or not identity.strip()
                 or len(identity) > 160 or any(ord(character) < 32 for character in identity)):
             raise ValueError("invalid experience_id")
+        for key, minimum, maximum in (("offset", 0, 2**31 - 1), ("max_chars", 1, 8192)):
+            if key in values and (type(values[key]) is not int or not minimum <= values[key] <= maximum):
+                raise ValueError("invalid " + key)
+        if "expected_digest" in values and (not isinstance(values["expected_digest"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", values["expected_digest"]) is None):
+            raise ValueError("invalid expected_digest")
+        if values.get("offset", 0) and "expected_digest" not in values:
+            raise ValueError("continued experience details require expected_digest")
         return values
     if values.get("op") in ("feedback", "revise"):
         fields = _FEEDBACK_FIELDS if values["op"] == "feedback" else _REVISION_FIELDS
@@ -626,6 +639,38 @@ class NativePosture:
         )} | {"scope": "subject", "effect": "experience_not_proven_ability",
              "admission": "after_successful_native_turn"}
 
+    @staticmethod
+    def _detail(record, values, *, too_large):
+        """Addressable original material; fragments are not partial advice."""
+        text = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        digest = _digest(record)
+        if values.get("expected_digest", digest) != digest:
+            raise ScopeConflict("experience changed; restart get without expected_digest")
+        offset = values.get("offset", 0)
+        if offset > len(text):
+            raise ScopeConflict("experience detail offset exceeds the original material")
+        maximum = values.get("max_chars", 4000)
+
+        def render(end):
+            return {"experience": None, "material_too_large": too_large,
+                    "scope": "current_context_and_explicit_subject_transfers",
+                    "semantic_applicability": "not_yet_assessed",
+                    "detail": {"experience_id": record["id"], "revision": record["revision"],
+                        "format": "experience_json_fragment", "digest": digest,
+                        "content": text[offset:end], "offset": offset, "end": end,
+                        "total_chars": len(text), "offset_unit": "unicode_characters", "eof": end == len(text),
+                        "next": ({"op": "get", "experience_id": record["id"], "offset": end,
+                                  "max_chars": maximum, "expected_digest": digest} if end < len(text) else None)}}
+
+        low, high = offset, min(len(text), offset + maximum)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if len(json.dumps(render(middle), ensure_ascii=False).encode("utf-8")) <= 16000:
+                low = middle
+            else:
+                high = middle - 1
+        return render(low)
+
     def execute(self, scope, call, cancellation, *, action_request_id=None):
         r = self.runtime
         with self._lock:
@@ -646,6 +691,8 @@ class NativePosture:
                         # Same error for nonexistent, inactive and private IDs.
                         raise ScopeConflict("experience is not active or accessible from this context")
                     packed = pack_posture_materials({"episodes": eligible}, byte_budget=16000)
+                    if not packed["episodes"] or any(key in values for key in ("offset", "max_chars", "expected_digest")):
+                        return self._detail(eligible[0], values, too_large=not bool(packed["episodes"]))
                     return {"experience": packed["episodes"][0] if packed["episodes"] else None,
                             "material_too_large": not bool(packed["episodes"]),
                             "scope": "current_context_and_explicit_subject_transfers",

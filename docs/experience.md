@@ -60,3 +60,16 @@ Linking a result establishes where to inspect it, not that the experience caused
 it. Saving an example does not certify its success or future applicability.
 Real-provider learning benefits still need output comparison and review.
 Example mode remains model-free and does not enable experience learning.
+
+### Reading large experience details
+
+The native `posture.get(experience_id)` tool keeps small records in its normal
+structured response. For a record above the response budget, `detail` carries
+an `experience_json_fragment` and `detail.next` contains the next get arguments.
+Concatenate these fragments to read the original eligible record, including
+all its conditions, exceptions and source fields. Every response stays within
+16,000 UTF-8 bytes.
+
+Offsets count Unicode characters. Continuation binds the record's digest;
+if it changes, start get again without the old digest. Each page checks the
+same active-record and context visibility rules as the first get.
