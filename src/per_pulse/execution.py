@@ -133,7 +133,7 @@ class PageExecution:
                     break
         actions = []
         for action in records[:_MAX_ACTIONS]:
-            arguments, redacted, truncated = self._arguments(action.arguments)
+            arguments, redacted, truncated = self._arguments(action.arguments, action=action)
             actions.append({
                 "actionId": action.action_request_id, "turnId": action.scope.turn_id,
                 "toolName": action.tool_name, "arguments": arguments,
@@ -158,11 +158,15 @@ class PageExecution:
         with harness._lock:
             return harness._active.get((scope.engram_id, scope.context_id)) == scope
 
-    def _arguments(self, arguments: Any) -> tuple[dict, bool, bool]:
+    def _arguments(self, arguments: Any, *, action=None) -> tuple[dict, bool, bool]:
         # Show the action exactly as the model asked for it, keys included:
         # this is the person's own local approval screen.
         clean = dict(arguments) if isinstance(arguments, dict) else {"value": arguments}
         stored_redacted, stored_truncated = stored_payload_flags(clean)
+        if ((stored_redacted or stored_truncated) and action is not None
+                and self._kernel.store.action_arguments_match_model_call(action.scope, action.action_request_id)):
+            # Complete original model arguments are data, including markers.
+            stored_redacted = stored_truncated = False
         encoded = json.dumps(clean, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         # Use the same envelope as durable action admission. A separate small
         # preview limit must not strand an otherwise complete pending edit.
@@ -356,7 +360,7 @@ class PageExecution:
             actions = []
             for action in pending:
                 approval = kernel.store.get_approval_for_action(action.scope, action.action_request_id)
-                arguments, redacted, truncated = self._arguments(action.arguments)
+                arguments, redacted, truncated = self._arguments(action.arguments, action=action)
                 attached = self._attached(action.scope)
                 same_turn = turn is not None and action.scope == turn.scope
                 expires_at = approval.expires_at if approval else None
@@ -506,7 +510,7 @@ class PageExecution:
                 turn = kernel.store.get_turn(scope)
                 if action.status is not ActionStatus.APPROVAL_PENDING or turn.status is not TurnStatus.WAITING_APPROVAL:
                     raise ExecutionError("approval_not_pending", "This action is no longer waiting for approval.")
-                _, redacted, truncated = self._arguments(action.arguments)
+                _, redacted, truncated = self._arguments(action.arguments, action=action)
                 if choice is ApprovalDecision.ALLOW_ONCE and (redacted or truncated):
                     raise ExecutionError("approval_details_incomplete", "The complete action details are unavailable. Stop this turn and request a new action.")
                 # Native ownership/expiry checks remain authoritative, including

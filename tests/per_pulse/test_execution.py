@@ -516,6 +516,50 @@ def test_recovered_turn_can_stop_offline_without_constructing_model_or_tools(tmp
             assert execution.snapshot("home")["uncertainActions"] == []
 
 
+@pytest.mark.parametrize('content', ['Literal [REDACTED] text.',
+    '[TRUNCATED sha256=' + 'a' * 64 + ' redacted=1 preview=literal]'])
+def test_complete_literal_marker_arguments_can_be_approved_once(tmp_path, monkeypatch, content):
+    factory = _factory(monkeypatch, [], tool=('mutate_file', {
+        'path': 'literal.txt', 'expected_digest': None, 'content': content,
+    }))
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        page = _new_page(client)
+        execution = client.app.state.pages.execution
+        view = _wait(execution, page, lambda row: bool(row['pendingActions'])
+                     and row['pendingActions'][0]['canResolve'])
+        pending = view['pendingActions'][0]
+        assert pending['canResolve'] and not pending['argumentsRedacted'] and not pending['argumentsTruncated']
+        assert not (tmp_path / 'workspace' / 'literal.txt').exists()
+        action_id = pending['actionId']
+        result = execution.resolve_approval(page, action_id, 'allow_once')
+        assert result['accepted']
+        _wait(execution, page, lambda row: row['status'] == 'idle')
+        assert (tmp_path / 'workspace' / 'literal.txt').read_text() == content
+        repeated = execution.resolve_approval(page, action_id, 'allow_once')
+        assert repeated['repeated'] and repeated['accepted']
+        assert (tmp_path / 'workspace' / 'literal.txt').read_text() == content
+
+
+@pytest.mark.parametrize('arguments', [{'content': '[REDACTED]'}, {
+    '_truncated': True, '_redacted': False, 'original_sha256': 'a' * 64, 'preview': 'partial',
+}])
+def test_omitted_arguments_without_original_model_authority_stay_incomplete(tmp_path, arguments):
+    from pulse_harness.core.contracts import ActionClassification
+    with _client(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        page = _new_page(client, 'Retain old incomplete action details.')
+        scope = pages.execution._scope(page).for_turn('synthetic-old-action')
+        store = pages.runtime.kernel_service.store
+        store.create_session(scope.session_scope())
+        store.create_turn(scope, 'Synthetic legacy action')
+        action = store.create_action(scope, action_request_id='synthetic-omitted-action',
+            tool_name='fixture_read', arguments=arguments,
+            requires_approval=True, classification=ActionClassification.READ_ONLY_NOT_REQUIRED)
+        assert not store.action_arguments_match_model_call(scope, action.action_request_id)
+        _, redacted, truncated = pages.execution._arguments(action.arguments, action=action)
+        assert redacted or truncated
+
+
 def test_uncertain_action_projection_is_bounded_and_observation_only(tmp_path, monkeypatch):
     """Use native action transitions, including retained old terminal records.
 

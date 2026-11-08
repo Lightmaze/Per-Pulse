@@ -54,6 +54,7 @@ jobs:
       - name: Verify native Harness approvals and artifacts in Chromium
         run: |
           PER_PULSE_PLAYWRIGHT_PATH="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_TEST_PYTHON=python PER_PULSE_QA_OUTPUT="$RUNNER_TEMP/per-pulse-harness-screenshots" node tests/browser/harness_smoke.mjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python node tests/browser/literal_approval_flow.mjs
       - name: Verify native Home and Work organization with file actions disabled
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_WORK_ORGANIZATION_SCREENSHOTS="$RUNNER_TEMP/per-pulse-harness-screenshots/work-organization" node tests/browser/work_organization_flow.mjs
