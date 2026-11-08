@@ -320,7 +320,10 @@ def world_source_for_event(ledger, world_id: str, event_id: str, *, explicit_for
     event = ledger.get_event(event_id)
     seen: set[str] = set()
     autonomous_root: str | None = None
-    for _ in range(256):
+    # A long-lived Work can accumulate more than 256 causal hops before the
+    # original source. Do not turn a valid history into an admission failure:
+    # missing/foreign events and cycles still fail closed through `seen`.
+    while True:
         if (event is None or event.world_id != world_id or event.id in seen):
             raise unknown()
         seen.add(event.id)
@@ -393,4 +396,3 @@ def world_source_for_event(ledger, world_id: str, event_id: str, *, explicit_for
             # foreground attribution by falling through the source resolver.
             raise unknown()
         event = ledger.get_event(event.parent_event_id)
-    raise unknown()
