@@ -12,8 +12,8 @@ from collections.abc import Mapping
 
 from pulse_harness.core.contracts import ActionStatus
 from pulse_harness.core.errors import ScopeConflict
-from pulse_harness.core.replay import bound_text
 
+from .posture import _text
 from .workspace_reading import KIND, NAME
 
 
@@ -39,9 +39,13 @@ def capture_reading_example(runtime, scope, receipt_id: str, excerpt: str) -> di
     if (not isinstance(content, str) or not isinstance(excerpt, str)
             or not excerpt.strip() or excerpt not in content):
         raise ScopeConflict("the example must be an exact part of the exposed reading passage")
-    clean, redacted, truncated = bound_text(excerpt, 8000)
-    if redacted or truncated or clean != excerpt:
-        raise ScopeConflict("select a shorter example passage without credentials")
+    # A delivered receipt is host-proven. Its exact words may literally
+    # contain [REDACTED] or a truncation-looking string; the receipt's own
+    # redacted/source fields, not those words, describe its observation.
+    try:
+        _text(excerpt, "example excerpt", 8000)
+    except ValueError as exc:
+        raise ScopeConflict("select an example passage within 8000 UTF-8 bytes") from exc
     # Retain only the selected text. Full source files and the rest of a large
     # passage do not become hidden context merely because one example was saved.
     offset = content.index(excerpt)
