@@ -363,6 +363,51 @@ def test_a_fresh_self_activation_remains_admissible_after_hundreds_of_prior_puls
     assert world_source_for_scope(Ledger(), "world", scope) == "pulse-299"
 
 
+def test_long_work_causal_lineage_keeps_original_pool_and_rejects_cycles():
+    """A long tool/Work history must not lose its trustworthy request source."""
+    from types import SimpleNamespace as Row
+    from pulse_harness.core.errors import ProviderUnavailable
+    from pulse_system.core.types import CausalEventKind as Kind, CausalEventSource as Source
+    from pulse_system.service.weekly_requests import world_source_for_event
+
+    class Ledger:
+        def __init__(self, events):
+            self.events = events
+
+        def get_event(self, event_id):
+            return self.events.get(event_id)
+
+    for root_source, root_kind, expected in (
+        (Source.USER, Kind.STIMULUS, None),
+        (Source.SELF, Kind.SPONTANEOUS, "root"),
+    ):
+        events = {"root": Row(id="root", world_id="world", kind=root_kind,
+                              source=root_source, parent_event_id=None)}
+        parent = "root"
+        # Earlier this valid original source was rejected at hop 256. Deep
+        # ordinary tool and delegated chains must retain their proper pool.
+        for index in range(360):
+            identity = f"tool-{index}"
+            events[identity] = Row(id=identity, world_id="world",
+                                   kind=Kind.TOOL_CALL, source=Source.SELF,
+                                   parent_event_id=parent)
+            parent = identity
+        ledger = Ledger(events)
+        assert world_source_for_event(ledger, "world", parent) == expected
+
+        # Removing the hard hop cap must not give cycles or foreign histories
+        # permission to charge the user's foreground pool.
+        events["tool-5"].parent_event_id = "tool-355"
+        with pytest.raises(ProviderUnavailable) as cycle:
+            world_source_for_event(ledger, "world", parent)
+        assert cycle.value.code == "autonomous_request_source_unverified"
+        events["tool-5"].parent_event_id = "tool-4"
+        events["tool-4"].world_id = "different-world"
+        with pytest.raises(ProviderUnavailable) as foreign:
+            world_source_for_event(ledger, "world", parent)
+        assert foreign.value.code == "autonomous_request_source_unverified"
+
+
 def test_lowered_weekly_limit_fences_reserved_tickets_at_dispatch():
     ledger = WeeklyRequestBudget(_Storage(), "world")
     ledger.configure(enabled=True, weekly_limit=3)
