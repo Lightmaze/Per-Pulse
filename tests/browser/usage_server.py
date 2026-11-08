@@ -23,7 +23,7 @@ state = Path(temporary.name)
 
 
 def event(delta, finish=None):
-    return ('data: ' + json.dumps({'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}]}) + '\n\n').encode()
+    return ('data: ' + json.dumps({'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}], 'usage': None}) + '\n\n').encode()
 
 
 def handler(request):
@@ -31,7 +31,7 @@ def handler(request):
             + event({}, 'stop')
             + ('data: ' + json.dumps({'choices': [], 'usage': {
                 'prompt_tokens': 1200, 'completion_tokens': 300, 'total_tokens': 1500,
-                'prompt_tokens_details': {'cached_tokens': 1000}}}) + '\n\n').encode()
+                'prompt_tokens_details': {'cached_tokens': None}, 'prompt_cache_hit_tokens': 1000}}) + '\n\n').encode()
             + b'data: [DONE]\n\n')
     return httpx.Response(200, headers={'content-type': 'text/event-stream'}, content=body)
 

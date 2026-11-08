@@ -95,6 +95,124 @@ def test_invalid_or_duplicate_non_null_usage_still_fails(monkeypatch, reports):
         adapter.close()
 
 
+@pytest.mark.parametrize("extra,cached,written", [
+    ({"prompt_tokens_details": {"cached_tokens": None}}, 0, 0),
+    ({"prompt_tokens_details": None}, 0, 0),
+    ({"prompt_cache_hit_tokens": None}, 0, 0),
+    ({"cache_creation_input_tokens": None}, 0, 0),
+    ({"prompt_tokens_details": {"cached_tokens": None}, "prompt_cache_hit_tokens": 96}, 96, 0),
+    ({"prompt_tokens_details": {"cached_tokens": 96}, "prompt_cache_hit_tokens": None,
+      "cache_creation_input_tokens": 12}, 96, 12),
+])
+def test_nullable_optional_usage_details_preserve_reported_totals(monkeypatch, extra, cached, written):
+    monkeypatch.setenv("PER_PULSE_COMPAT_KEY", "synthetic-credential")
+    events = [_chunk({"content": "A complete reply."}), _chunk({}, "stop"),
+              {"choices": [], "usage": {**USAGE, **extra}}]
+    adapter = ChatHTTPModelAdapter(ChatHTTPConfig("https://provider.example/v1/chat/completions", "model",
+        credential_env="PER_PULSE_COMPAT_KEY"), transport=httpx.MockTransport(lambda _: _sse(events)))
+    try:
+        final = list(adapter.stream(_request()))[-1]
+        assert final.kind is ModelDeltaKind.DONE
+        assert (final.usage.input_tokens, final.usage.output_tokens) == (120, 8)
+        assert (final.usage.cached_tokens, final.usage.cache_write_tokens) == (cached, written)
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("extra", [
+    {"prompt_tokens": None},
+    {"completion_tokens": None},
+    *({"prompt_tokens_details": {"cached_tokens": value}} for value in (False, -1, 1.5, "2", [], {})),
+    {"prompt_tokens_details": {"cached_tokens": 80}, "prompt_cache_hit_tokens": 81},
+    {"prompt_tokens_details": {"cached_tokens": 121}},
+    {"prompt_cache_hit_tokens": False},
+    {"cache_creation_input_tokens": False},
+])
+def test_required_or_malformed_usage_counters_still_fail(monkeypatch, extra):
+    monkeypatch.setenv("PER_PULSE_COMPAT_KEY", "synthetic-credential")
+    events = [_chunk({"content": "Reply."}), _chunk({}, "stop"),
+              {"choices": [], "usage": {**USAGE, **extra}}]
+    adapter = ChatHTTPModelAdapter(ChatHTTPConfig("https://provider.example/v1/chat/completions", "model",
+        credential_env="PER_PULSE_COMPAT_KEY"), transport=httpx.MockTransport(lambda _: _sse(events)))
+    try:
+        with pytest.raises(ProviderProtocolError) as failure:
+            list(adapter.stream(_request()))
+        assert failure.value.code == "provider_usage_invalid"
+    finally:
+        adapter.close()
+
+
+def test_nullable_tool_fragments_reassemble_one_complete_call(monkeypatch):
+    monkeypatch.setenv("PER_PULSE_COMPAT_KEY", "synthetic-credential")
+    events = [
+        _chunk({"content": None, "tool_calls": None}),
+        _chunk({"tool_calls": [{"index": 0, "id": "nullable-call", "type": "function", "function": None}]}),
+        _chunk({"tool_calls": [{"index": 0, "id": None, "type": None,
+                               "function": {"name": "mutate_file", "arguments": '{"path":"note.txt",'}}]}),
+        _chunk({"tool_calls": [{"index": 0, "type": None,
+                               "function": {"name": None, "arguments": '"expected_digest":null,"content":"Hello."}'}}]}),
+        _chunk({}, "tool_calls"), {"choices": [], "usage": USAGE},
+    ]
+    adapter = ChatHTTPModelAdapter(ChatHTTPConfig("https://provider.example/v1/chat/completions", "model",
+        credential_env="PER_PULSE_COMPAT_KEY"), transport=httpx.MockTransport(lambda _: _sse(events)))
+    try:
+        deltas = list(adapter.stream(_request()))
+        calls = [delta.tool_call for delta in deltas if delta.kind is ModelDeltaKind.TOOL_CALL]
+        assert len(calls) == 1
+        assert calls[0].tool_call_id == "nullable-call"
+        assert calls[0].name == "mutate_file"
+        assert calls[0].arguments == {"path": "note.txt", "expected_digest": None, "content": "Hello."}
+        assert deltas[-1].finish_reason == "tool_calls"
+        assert deltas[-1].usage.input_tokens == 120
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("delta", [
+    *({"tool_calls": value} for value in (False, 0, "", {})),
+    *({"tool_calls": [{"index": 0, "function": value}]} for value in (False, 0, "", [])),
+    *({"tool_calls": [{"index": 0, "type": value}]} for value in (False, 0, "", [], {})),
+])
+def test_falsey_tool_fields_are_invalid_rather_than_missing(monkeypatch, delta):
+    monkeypatch.setenv("PER_PULSE_COMPAT_KEY", "synthetic-credential")
+    events = [_chunk(delta), _chunk({}, "stop")]
+    adapter = ChatHTTPModelAdapter(ChatHTTPConfig("https://provider.example/v1/chat/completions", "model",
+        credential_env="PER_PULSE_COMPAT_KEY"), transport=httpx.MockTransport(lambda _: _sse(events)))
+    try:
+        with pytest.raises(ProviderProtocolError):
+            list(adapter.stream(_request()))
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("index", [False, 0.0, "0"])
+def test_completion_choice_index_must_be_an_integer(monkeypatch, index):
+    monkeypatch.setenv("PER_PULSE_COMPAT_KEY", "synthetic-credential")
+    event = _chunk({"content": "Reply."})
+    event["choices"][0]["index"] = index
+    adapter = ChatHTTPModelAdapter(ChatHTTPConfig("https://provider.example/v1/chat/completions", "model",
+        credential_env="PER_PULSE_COMPAT_KEY"),
+        transport=httpx.MockTransport(lambda _: _sse([event, _chunk({}, "stop")])))
+    try:
+        with pytest.raises(ProviderProtocolError):
+            list(adapter.stream(_request()))
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("reason", [[], {}, False, 0])
+def test_malformed_finish_reason_is_a_provider_protocol_error(monkeypatch, reason):
+    monkeypatch.setenv("PER_PULSE_COMPAT_KEY", "synthetic-credential")
+    adapter = ChatHTTPModelAdapter(ChatHTTPConfig("https://provider.example/v1/chat/completions", "model",
+        credential_env="PER_PULSE_COMPAT_KEY"),
+        transport=httpx.MockTransport(lambda _: _sse([_chunk({"content": "Reply."}, reason)])))
+    try:
+        with pytest.raises(ProviderProtocolError):
+            list(adapter.stream(_request()))
+    finally:
+        adapter.close()
+
+
 @pytest.mark.parametrize("endpoint,profile,token_field", [
     ("https://api.openai.com/v1/chat/completions", "openai", "max_completion_tokens"),
     ("https://unit.openai.azure.com/openai/v1/chat/completions", "openai", "max_completion_tokens"),
@@ -210,10 +328,14 @@ def test_provider_signature_survives_native_approval_and_sqlite_restart(tmp_path
                 assert assistant["reasoning_details"] == details
             events = [_chunk({"content": "Synthetic signed tool continuation finished."}), _chunk({}, "stop")]
         else:
-            events = [_chunk({"tool_calls": [{"index": 0, "id": "signed-write", "type": "function",
-                "function": {"name": "mutate_file", "arguments": json.dumps({
-                    "path": "signed.txt", "expected_digest": None, "content": "A real native file.\n"})},
-                "extra_content": {"google": {"thought_signature": SIGNATURE}}}]}), _chunk({}, "tool_calls")]
+            events = [
+                _chunk({"tool_calls": [{"index": 0, "id": "signed-write", "type": "function", "function": None}]}),
+                _chunk({"tool_calls": [{"index": 0, "id": None, "type": None,
+                    "function": {"name": "mutate_file", "arguments": json.dumps({
+                        "path": "signed.txt", "expected_digest": None, "content": "A real native file.\n"})},
+                    "extra_content": {"google": {"thought_signature": SIGNATURE}}}]}),
+                _chunk({}, "tool_calls"),
+            ]
         if profile == "openrouter" and not any(m["role"] == "tool" for m in body["messages"]):
             events.insert(0, _chunk({"reasoning_details": details}))
         return _sse([*events, {"choices": [], "usage": USAGE}])
