@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a8
+
+- Browse beyond the first 200 files in a large Materials directory with bounded continuation, change detection and a visible refresh path, while keeping the original file access boundary.
+- Load growing experience journals in batches rather than executing a SQL query for every experience and its feedback/history; retain attribution and Work privacy.
+- Keep exact source passages containing literal omission markers in examples, readings and command-output memories; genuine incomplete sources remain incomplete.
+- On temporary Home observation failures, preserve previously verified Work names as read-only context and offer a refresh. Recheck source links before enabling them again.
+
 ## 0.1.0a7
 
 - Keep experience growing beyond the aggregate 128-record / 4 MiB lifetime
