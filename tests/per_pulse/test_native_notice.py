@@ -346,7 +346,7 @@ def test_invalid_notice_arguments(arguments):
 
 def test_auxiliary_memory_does_not_hide_current_life_frame():
     scope = HarnessScope("world", "subject", "session", 0, "owner", turn_id="turn")
-    tool_call = {"role": "assistant", "content": json.dumps({"text": "", "tool_calls": [
+    tool_call = {"role": "assistant", "tool_call_count": 1, "content": json.dumps({"text": "", "tool_calls": [
         {"tool_call_id": "frame", "name": "life_frame", "arguments": {}}]})}
     tool_result = {"role": "tool", "content": json.dumps({"tool_call_id": "frame", "status": "succeeded",
         "output": {"life_image": {"kind": "pulse_life_image.v1"}}})}

@@ -178,7 +178,13 @@ class ProviderEvidence:
 
 @dataclass(frozen=True, slots=True)
 class ModelRequest:
-    """Canonical input to one model adapter invocation."""
+    """Canonical input to one model adapter invocation.
+
+    Assistant messages carry a host-only ``tool_call_count`` projected from
+    their completed model round. A positive count authorizes decoding the
+    internal tool envelope; absent or zero means exact plain text, even JSON.
+    Adapters must not send this authority field to the model.
+    """
 
     scope: HarnessScope
     messages: tuple[Mapping[str, Any], ...]

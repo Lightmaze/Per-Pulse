@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve ordinary JSON replies as text through later messages, context
+  fitting, optional review and workspace restart. Decode internal tool
+  envelopes using the saved model round's authority.
+
 ## 0.1.0a6
 
 - Keep long-lived Works reachable: browse native histories beyond 32 entries,
