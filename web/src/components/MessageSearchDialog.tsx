@@ -5,6 +5,7 @@ import type { MessageHistory } from '../types';
 import { Dialog } from './Dialog';
 import { ReplayOrigin } from './ReplayOrigin';
 import { messageBody } from '../messageBody';
+import { PageSourceContent } from './PageSourceContent';
 import type { Navigate } from './SessionLink';
 
 export function MessageSearchDialog({ pageId, close, navigate }: {
@@ -64,9 +65,10 @@ export function MessageSearchDialog({ pageId, close, navigate }: {
       {error ? <div className="error-notice" role="alert"><span>{errorText(error)}</span><button onClick={() => setRetry(value => value + 1)}>{t('app.retry')}</button></div> : null}
       {result && !result.messages.length ? <p role="status">{t('find.empty', { query })}</p> : null}
       {result?.messages.map(message => <article className="history-message" key={message.id} data-search-message-id={message.id}>
-        <div className="history-message-heading"><strong>{message.role === 'assistant' ? 'Per Pulse' : t(message.role === 'user' ? 'conversation.you' : 'conversation.workspace')}</strong><time dateTime={message.createdAt}>{date.format(new Date(message.createdAt))}</time></div>
+        <div className="history-message-heading"><strong>{message.pageSource ? t('source.heading') : message.role === 'assistant' ? 'Per Pulse' : t(message.role === 'user' ? 'conversation.you' : 'conversation.workspace')}</strong><time dateTime={message.createdAt}>{date.format(new Date(message.createdAt))}</time></div>
         <ReplayOrigin message={message} pageId={pageId} navigate={navigate} />
-        <p className="history-message-content">{messageBody(message)}</p>
+        <PageSourceContent message={message} pageId={pageId} navigate={navigate} />
+        {!message.pageSource ? <p className="history-message-content">{messageBody(message)}</p> : null}
         {message.materials?.length ? <p className="lesson-note">{t('materials.attached')}: {message.materials.map(item => item.name).join(', ')}</p> : null}
         <button className="text-button" onClick={() => navigate(pageId, undefined, message.id)}>{t('history.open')}</button>
       </article>)}
