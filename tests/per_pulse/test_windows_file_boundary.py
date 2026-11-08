@@ -22,6 +22,23 @@ def _junction(target: Path, at: Path) -> None:
     _winapi.CreateJunction(str(target), str(at))
 
 
+@pytest.mark.parametrize("relative", ["notes/\U0001f4c4report.txt", "\U0001f4c1notes/report.txt",
+                                     "\U0001f4c1notes/\U0001f4c4report.txt"])
+def test_non_bmp_directory_and_file_names_open_the_exact_original(tmp_path, relative):
+    from pulse_system.product.files import WorkspaceFiles
+    workspace = tmp_path / "workspace"
+    target = workspace / relative
+    target.parent.mkdir(parents=True)
+    data = "Exact original: caf\u00e9 and \U0001f4c4.\r\n".encode("utf-8")
+    target.write_bytes(data)
+    files = WorkspaceFiles(workspace)
+    assert files.read_bytes(relative) == data
+    assert files.read(relative)["content"] == data.decode("utf-8")
+    assert relative.rsplit("/", 1)[-1] in {
+        entry["name"] for entry in files.list(relative.rsplit("/", 1)[0])["entries"]
+    }
+
+
 @pytest.fixture
 def layout(tmp_path):
     workspace, outside = tmp_path / "workspace", tmp_path / "outside"

@@ -124,6 +124,7 @@ class _TranscriptCache:
     upto: int = 0
     messages: list[TranscriptMessage] = field(default_factory=list)
     validated_upto: int = 0
+    assistant_tool_call_counts: dict[str, int] = field(default_factory=dict)
 
 
 def _action_request_id(scope: HarnessScope, call: ToolCall) -> str:
@@ -1666,14 +1667,25 @@ class TurnRunner:
             raise StoreUnavailable("durable provider evidence is invalid") from exc
 
     def _parse_assistant_message(
-        self, scope: HarnessScope, content: str
+        self, scope: HarnessScope, content: str, *, tool_call_count: int,
     ) -> tuple[str, tuple[_PersistedToolCall, ...]]:
+        # Content is not a discriminator: a plain reply can be any JSON,
+        # including an exact copy of the internal continuation envelope.
+        # Only the completed model round authorizes unwrapping that envelope.
+        if tool_call_count == 0:
+            return content, ()
         try:
             decoded = json.loads(content)
-        except (TypeError, ValueError):
-            return content, ()
-        if not isinstance(decoded, Mapping) or "tool_calls" not in decoded:
-            return content, ()
+        except (TypeError, ValueError) as exc:
+            raise ProviderProtocolError(
+                "durable assistant continuation is malformed",
+                code="continuation_authority_mismatch",
+            ) from exc
+        if not isinstance(decoded, Mapping) or set(decoded) != {"text", "tool_calls"}:
+            raise ProviderProtocolError(
+                "durable assistant continuation is malformed",
+                code="continuation_authority_mismatch",
+            )
         text = decoded.get("text", "")
         raw_calls = decoded.get("tool_calls")
         if not isinstance(text, str) or not isinstance(raw_calls, list):
@@ -1720,6 +1732,11 @@ class TurnRunner:
                 )
             seen.add(tool_call_id)
             calls.append(_PersistedToolCall(call, action_id))
+        if len(calls) != tool_call_count:
+            raise ProviderProtocolError(
+                "durable assistant continuation count differs from authority",
+                code="continuation_authority_mismatch",
+            )
         return text, tuple(calls)
 
     def _session_messages(self, scope: HarnessScope) -> tuple[TranscriptMessage, ...]:
@@ -1749,7 +1766,7 @@ class TurnRunner:
                 cache.upto = cache.messages[-1].transcript_seq
             return tuple(cache.messages)
 
-    def _validate_assistant_transcript_authority(self, scope: HarnessScope) -> None:
+    def _validate_assistant_transcript_authority(self, scope: HarnessScope) -> dict[str, int]:
         """Every assistant message must match its completed model round.
 
         Each message is checked once: transcript rows and completed rounds do
@@ -1761,22 +1778,25 @@ class TurnRunner:
         with self._transcript_lock:
             cache = self._transcripts.get(session.session_id)
             validated = cache.validated_upto if cache is not None else 0
+            counts = cache.assistant_tool_call_counts if cache is not None else {}
         pending = [m for m in messages if m.role == "assistant" and m.transcript_seq > validated]
-        if pending:
-            self._validate_assistant_messages(session, pending)
+        new_counts = self._validate_assistant_messages(session, pending) if pending else {}
         with self._transcript_lock:
+            counts.update(new_counts)
             if cache is not None and self._transcripts.get(session.session_id) is cache and messages:
                 cache.validated_upto = max(cache.validated_upto, messages[-1].transcript_seq)
+        return counts
 
     def _validate_assistant_messages(
         self, scope: HarnessScope, messages: list[TranscriptMessage],
-    ) -> None:
+    ) -> dict[str, int]:
         rounds = self.store.model_rounds_for_session(scope)
         by_item = {
             round_record.assistant_item_id: round_record
             for round_record in rounds
             if round_record.assistant_item_id
         }
+        counts: dict[str, int] = {}
         for message in messages:
             if message.role != "assistant":
                 continue
@@ -1791,7 +1811,9 @@ class TurnRunner:
                     "assistant transcript is backed by a non-terminal model round",
                     code="missing_model_terminal",
                 )
-            text, calls = self._parse_assistant_message(message.scope, message.content)
+            text, calls = self._parse_assistant_message(
+                message.scope, message.content, tool_call_count=round_record.tool_call_count,
+            )
             payload = self._assistant_payload(text, calls)
             if digest_json(payload) != round_record.response_digest:
                 raise ProviderProtocolError(
@@ -1803,14 +1825,18 @@ class TurnRunner:
                     "assistant transcript tool-call count differs from authority",
                     code="continuation_authority_mismatch",
                 )
+            counts[message.item_id] = round_record.tool_call_count
+        return counts
 
     def _known_tool_call_ids(self, scope: HarnessScope) -> set[str]:
-        self._validate_assistant_transcript_authority(scope.session_scope())
+        counts = self._validate_assistant_transcript_authority(scope.session_scope())
         known: set[str] = set()
         for message in self._session_messages(scope):
             if message.role != "assistant" or (scope.turn_id and message.scope.turn_id != scope.turn_id):
                 continue
-            _, calls = self._parse_assistant_message(message.scope, message.content)
+            _, calls = self._parse_assistant_message(
+                message.scope, message.content, tool_call_count=counts[message.item_id],
+            )
             for persisted in calls:
                 if persisted.call.tool_call_id in known:
                     raise ProviderProtocolError(
@@ -1828,7 +1854,7 @@ class TurnRunner:
         continuation_of: tuple[ToolCall, ...],
         tool_results: tuple[ToolResult, ...],
     ) -> ModelRequest:
-        self._validate_assistant_transcript_authority(scope.session_scope())
+        counts = self._validate_assistant_transcript_authority(scope.session_scope())
         messages_list: list[dict[str, Any]] = []
         for message in self._session_messages(scope):
             content = message.content
@@ -1854,12 +1880,17 @@ class TurnRunner:
                 if review["context"] is None:
                     continue
                 content = review["context"]
-            messages_list.append({
+            record: dict[str, Any] = {
                 "role": message.role,
                 "content": content,
                 "item_id": message.item_id,
                 "transcript_seq": message.transcript_seq,
-            })
+            }
+            if message.role == "assistant":
+                # Host-only projection of existing durable terminal authority.
+                # Adapters and context fitting must never infer calls from text.
+                record["tool_call_count"] = counts[message.item_id]
+            messages_list.append(record)
         messages = tuple(messages_list)
         # A native regime may narrow model input without replacing durable
         # history. Advice, review and the adapter consume this same projection.
@@ -2128,7 +2159,9 @@ class TurnRunner:
                 "model terminal authority has no assistant continuation",
                 code="missing_model_terminal",
             )
-        _, calls = self._parse_assistant_message(message.scope, message.content)
+        _, calls = self._parse_assistant_message(
+            message.scope, message.content, tool_call_count=latest.tool_call_count,
+        )
         if len(calls) != latest.tool_call_count:
             raise ProviderProtocolError(
                 "model terminal authority tool-call count is inconsistent",
@@ -2393,6 +2426,7 @@ class TurnRunner:
 
     def _assistant_text(self, scope: HarnessScope) -> str:
         text: list[str] = []
+        counts = self._validate_assistant_transcript_authority(scope.session_scope())
         for message in TranscriptStore(self.store).messages(scope):
             if message.role != "assistant":
                 continue
@@ -2400,7 +2434,9 @@ class TurnRunner:
             # the existing canonical tool-continuation envelope has a text
             # field to unwrap; selector objects, arrays and JSON strings must
             # survive terminal-turn replay without being dropped or decoded.
-            response_text, _ = self._parse_assistant_message(message.scope, message.content)
+            response_text, _ = self._parse_assistant_message(
+                message.scope, message.content, tool_call_count=counts[message.item_id],
+            )
             text.append(response_text)
         return "".join(text)
 

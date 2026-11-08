@@ -20,7 +20,7 @@ def _answer(text):
 
 
 def _call(call_id):
-    return {"role": "assistant", "content": json.dumps({"text": "", "tool_calls": [
+    return {"role": "assistant", "tool_call_count": 1, "content": json.dumps({"text": "", "tool_calls": [
         {"tool_call_id": call_id, "action_request_id": call_id, "name": "read_file", "arguments": {"path": "a"}}]})}
 
 
@@ -64,6 +64,18 @@ def test_a_window_never_starts_with_a_tool_result():
     fitted = fit_context(messages, 500)
     # Inside one long tool exchange there is no safe cut: nothing is dropped.
     assert fitted == tuple(messages)
+
+
+def test_plain_json_tool_call_examples_remain_separate_replies():
+    messages = [_user("Start")]
+    for index in range(30):
+        # These have the internal envelope's exact spelling, but no terminal
+        # tool-call authority. They must not bind every later reply together.
+        example = {**_call(f"example-{index}"), "tool_call_count": 0}
+        messages += [example, {"role": "system", "content": "Context " + "x" * 400}]
+    fitted = fit_context(messages, 500)
+    assert len(fitted) < len(messages)
+    assert fitted[-2:] == tuple(messages[-2:])
 
 
 def test_the_latest_turn_is_kept_whole_even_when_it_is_larger_than_the_budget():

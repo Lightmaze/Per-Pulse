@@ -258,7 +258,7 @@ def test_deepseek_returns_reasoning_with_its_original_assistant_tool_message():
         messages = (
             {"role": "user", "content": "Write a note."},
             {"role": "reasoning", "content": "Synthetic reasoning retained exactly."},
-            {"role": "assistant", "content": json.dumps({"text": "", "tool_calls": [{
+            {"role": "assistant", "tool_call_count": 1, "content": json.dumps({"text": "", "tool_calls": [{
                 "tool_call_id": "call-1", "name": "mutate_file", "arguments": {
                     "path": "note.txt", "expected_digest": None, "content": "Hello."}}]})},
             {"role": "tool", "content": json.dumps({"tool_call_id": "call-1", "status": "succeeded", "output": {}})},
@@ -288,7 +288,7 @@ def test_gemini_tool_signature_is_carried_separately_from_executable_arguments(m
         assert call.provider_metadata == {"google": {"thought_signature": SIGNATURE}}
         payload = {"text": "", "tool_calls": [{"tool_call_id": call.tool_call_id, "name": call.name,
             "arguments": dict(call.arguments), "provider_metadata": dict(call.provider_metadata)}]}
-        wire = adapter.request_body(_request(messages=({"role": "assistant", "content": json.dumps(payload)},)))
+        wire = adapter.request_body(_request(messages=({"role": "assistant", "tool_call_count": 1, "content": json.dumps(payload)},)))
         assert wire["messages"][0]["tool_calls"][0]["extra_content"] == call.provider_metadata
     finally:
         adapter.close()
@@ -430,7 +430,7 @@ def test_openrouter_reassembles_reasoning_blocks_and_keeps_encrypted_data_opaque
         assert call.provider_metadata["openrouter"]["reasoning_details"] == expected
         content = json.dumps({"text": "", "tool_calls": [{"tool_call_id": call.tool_call_id, "name": call.name,
             "arguments": dict(call.arguments), "provider_metadata": dict(call.provider_metadata)}]})
-        wire = adapter.request_body(_request(messages=({"role": "assistant", "content": content},)))
+        wire = adapter.request_body(_request(messages=({"role": "assistant", "tool_call_count": 1, "content": content},)))
         assert wire["messages"][0]["reasoning_details"] == expected
     finally:
         adapter.close()
