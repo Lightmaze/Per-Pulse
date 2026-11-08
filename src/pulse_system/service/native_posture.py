@@ -26,7 +26,7 @@ from pulse_system.core.types import (
     EngramStatus, HarnessTurnState,
 )
 
-from .posture import PostureMemory, experience_search_text
+from .posture import PostureMemory, _text, experience_search_text
 
 NAME = "posture"
 PREFIX = "native-posture-v1:"
@@ -431,9 +431,14 @@ def capture_example(runtime, subject_id: str, context_id: str, source_message_id
     original, prior_turn = _settled_result(runtime, subject_id, context_id, source_message_id)
     if not isinstance(excerpt, str) or not excerpt.strip() or excerpt not in original.content:
         raise ScopeConflict("the example must be an exact passage from the original result")
-    clean, redacted, truncated = _source_text(excerpt, 8000)
-    if redacted or truncated or clean != excerpt:
-        raise ScopeConflict("select a shorter example passage without credentials")
+    # This is a verbatim slice of an actual committed result. Literal marker
+    # strings in that result are data, not evidence that this slice was clipped.
+    # Validate the real UTF-8 size; source identity and passage equality were
+    # checked above, while surrounding encounter material remains bounded.
+    try:
+        _text(excerpt, "example excerpt", 8000)
+    except ValueError as exc:
+        raise ScopeConflict("select an example passage within 8000 UTF-8 bytes") from exc
     learning_trigger = {}
     if latest_input_id is not None:
         latest, _, learning_trigger = _input_situation(runtime, subject_id, context_id, latest_input_id)
