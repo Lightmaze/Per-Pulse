@@ -715,8 +715,10 @@ class _ChatStream:
                 self.close()
 
     def _events(self, response: httpx.Response) -> Iterator[str]:
-        pending = b""
+        pending = bytearray()
         parts: list[str] = []
+        skip_lf = False
+        first_line = True
         count = 0
         start = time.monotonic()
         for chunk in response.iter_bytes():
@@ -729,19 +731,36 @@ class _ChatStream:
             count += len(chunk)
             if count > self.adapter.config.max_response_bytes:
                 raise ProviderProtocolError("model response exceeded configured byte bound", code="provider_response_too_large")
-            pending += chunk
-            while b"\n" in pending:
-                raw, pending = pending.split(b"\n", 1)
+            offset = 0
+            view = memoryview(chunk)
+            # SSE permits CR, LF and CRLF. A CR ends the line immediately;
+            # consume its optional LF even when it arrives in the next chunk.
+            for ending in re.finditer(b"\r|\n", chunk):
+                position = ending.start()
+                if skip_lf and position == offset and chunk[position] == 10:
+                    skip_lf = False
+                    offset = position + 1
+                    continue
+                pending.extend(view[offset:position])
                 try:
-                    line = raw.rstrip(b"\r").decode("utf-8")
+                    line = pending.decode("utf-8")
                 except UnicodeError:
                     raise ProviderProtocolError("model stream contains invalid UTF-8") from None
+                pending.clear()
+                skip_lf = chunk[position] == 13
+                offset = position + 1
+                if first_line:
+                    line = line.removeprefix("\ufeff")
+                    first_line = False
                 if not line:
                     if parts:
                         yield "\n".join(parts)
                         parts.clear()
                 elif line.startswith("data:"):
                     parts.append(line[5:].removeprefix(" "))
+            if offset < len(chunk):
+                skip_lf = False
+                pending.extend(view[offset:])
         if pending or parts:
             raise ProviderProtocolError("model stream ended inside an SSE event", code="provider_stream_incomplete")
 
