@@ -175,7 +175,13 @@ def test_nullable_tool_fragments_reassemble_one_complete_call(monkeypatch):
 ])
 def test_falsey_tool_fields_are_invalid_rather_than_missing(monkeypatch, delta):
     monkeypatch.setenv("PER_PULSE_COMPAT_KEY", "synthetic-credential")
-    events = [_chunk(delta), _chunk({}, "stop")]
+    # Surround the invalid fragment with a valid call: silently treating the
+    # falsey value as absent would otherwise execute this complete call.
+    events = [
+        _chunk({"tool_calls": [{"index": 0, "id": "valid-call", "type": "function",
+                               "function": {"name": "mutate_file", "arguments": "{}"}}]}),
+        _chunk(delta), _chunk({}, "tool_calls"),
+    ]
     adapter = ChatHTTPModelAdapter(ChatHTTPConfig("https://provider.example/v1/chat/completions", "model",
         credential_env="PER_PULSE_COMPAT_KEY"), transport=httpx.MockTransport(lambda _: _sse(events)))
     try:
