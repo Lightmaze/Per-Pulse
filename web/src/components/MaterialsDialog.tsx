@@ -194,7 +194,7 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
           <Icon name={entry.kind === 'directory' ? 'chevron' : 'page'} size={16} /><span>{entry.name}{entry.kind === 'directory' ? '/' : ''}</span>
           {entry.bytes !== null ? <small>{entry.bytes.toLocaleString()} {t('library.bytes')}</small> : null}
         </button>
-      </li>)}</ul> : listing ? <p className="material-hint">{t('library.empty')}</p> : null}
+      </li>)}</ul> : listing && !listing.nextCursor ? <p className="material-hint">{t('library.empty')}</p> : null}
       {listing?.nextCursor ? <button type="button" className="secondary-button" disabled={disabled} onClick={() => browse(directory, listing.nextCursor!)}>{t('library.loadMore')}</button> : null}
       {listing?.truncated && !listing?.nextCursor ? <p className="material-hint">{t('library.listLimited')}</p> : null}
     </section>
