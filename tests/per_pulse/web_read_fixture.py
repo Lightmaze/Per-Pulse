@@ -16,8 +16,8 @@ ORIGINAL = "Original field observation: café 山川 🌍."
 ANSWER = "The sourced reading is saved in expedition.txt."
 
 
-def response(content=None, tool=None, arguments=None):
-    deltas = ([{"tool_calls": [{"index": 0, "id": "fixture-" + tool,
+def response(content=None, tool=None, arguments=None, tool_id=None):
+    deltas = ([{"tool_calls": [{"index": 0, "id": tool_id or "fixture-" + tool,
         "type": "function", "function": {"name": tool, "arguments": json.dumps(arguments)}}]}]
         if tool else [{"content": character} for character in content])
     frames = [{"choices": [{"index": 0, "delta": delta, "finish_reason": None}]} for delta in deltas]
@@ -39,6 +39,7 @@ class WebFixture:
     def __init__(self, monkeypatch):
         monkeypatch.setenv("PER_PULSE_WEB_FIXTURE_KEY", "explicit-synthetic-credential")
         self.requests, self.web_requests = [], []
+        self.follow_all = False
         self.body = '<title>Field observations</title><script>not evidence</script><p>' + ORIGINAL + '</p>'
         monkeypatch.setattr(web_read, "_resolve", lambda host, token, deadline: ("8.8.8.8",))
         def website(request):
@@ -81,13 +82,18 @@ class WebFixture:
             if scope.context_id.startswith("work:"):
                 if not results:
                     return response(tool="read_web", arguments={"url": URL})
-                if len(results) == 1:
-                    observation = results[0]["output"]
+                observations = [row["output"] for row in results if row.get("output", {}).get("kind") == web_read.KIND]
+                if self.follow_all and observations and observations[-1]["next"]:
+                    return response(tool="read_web", arguments=observations[-1]["next"],
+                                    tool_id="fixture-read_web-" + str(observations[-1]["next"]["offset"]))
+                if len(results) == len(observations):
+                    observation = observations[-1]
                     assert observation["source"]["scope"] == "extracted_text"
-                    assert ORIGINAL in observation["content"]
+                    text = "".join(row["content"] for row in observations)
+                    assert ORIGINAL in text
                     return response(tool="mutate_file", arguments={"path": "expedition.txt", "expected_digest": None,
-                        "content": observation["content"] + "\nSource: " + observation["source"]["url"] + "\n"})
-                if len(results) == 2:
+                        "content": text + "\nSource: " + observation["source"]["url"] + "\n"})
+                if len(results) == len(observations) + 1:
                     return response(tool="work", arguments={"op": "report", "kind": "result", "note": ANSWER})
                 return response(ANSWER)
             if FIRST_DEPARTURE_ORIENTATION in task and not results:

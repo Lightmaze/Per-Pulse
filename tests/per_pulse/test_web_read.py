@@ -171,6 +171,77 @@ def test_large_decoded_text_and_wire_bytes_are_explicitly_partial(monkeypatch):
     assert result["source"]["truncated"] is True
 
 
+def test_long_unicode_text_can_be_read_completely_in_bound_ranges(monkeypatch):
+    original = "Original café 山川 🌍.\n" * 3500 + "ONLY_AT_THE_REAL_END"
+    calls = network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "text/plain; charset=utf-8"}, stream=Chunks([original.encode()])))
+    arguments = {"url": "https://page.example/long", "max_chars": 8191}
+    pieces, observations = [], []
+    while arguments is not None:
+        result = web.read(arguments, CancellationToken(), action_request_id=f"range-{len(pieces)}")
+        pieces.append(result["content"])
+        observations.append(result)
+        assert len(result["content"]) <= 8191
+        assert result["source"]["text_end"] - result["source"]["text_start"] == len(result["content"])
+        assert not result["source"]["network_truncated"]
+        arguments = result["next"]
+    assert "".join(pieces) == original
+    assert "ONLY_AT_THE_REAL_END" not in pieces[0] and pieces[-1].endswith("ONLY_AT_THE_REAL_END")
+    assert len({result["source"]["observation_sha256"] for result in observations}) == 1
+    assert all(result["source"]["truncated"] for result in observations)
+    assert observations[-1]["available_eof"] and len(calls) == len(pieces)
+    end = web.read({"url": "https://page.example/long", "offset": len(original),
+                    "expected_digest": observations[0]["source"]["observation_sha256"]},
+                   CancellationToken(), action_request_id="eof")
+    assert end["content"] == "" and end["available_eof"] and end["next"] is None
+
+
+def test_continuation_does_not_mix_changed_text_or_resolved_source(monkeypatch):
+    state = {"body": "First complete observed text " * 1200, "destination": "/one"}
+    def respond(request):
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"location": state["destination"]})
+        return html(state["body"])
+    network(monkeypatch, respond)
+    first = read()
+    assert first["next"] is not None
+    state["body"] += "A late revision."
+    with pytest.raises(web.WebReadError) as error:
+        web.read(first["next"], CancellationToken(), action_request_id="changed")
+    assert error.value.code == "web_observation_changed"
+    state["body"] = state["body"].removesuffix("A late revision.")
+    state["destination"] = "/two"
+    with pytest.raises(web.WebReadError) as error:
+        web.read(first["next"], CancellationToken(), action_request_id="redirected")
+    assert error.value.code == "web_observation_changed"
+
+
+def test_network_bound_tail_is_not_claimed_as_the_original_page_end(monkeypatch):
+    monkeypatch.setattr(web, "MAX_BYTES", 100)
+    monkeypatch.setattr(web, "MAX_CHARS", 30)
+    calls = network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "text/plain"}, stream=Chunks([b"x" * 100, b"UNOBSERVED_TAIL"])))
+    arguments, pieces = {"url": "https://page.example/partial"}, []
+    while arguments is not None:
+        result = web.read(arguments, CancellationToken(), action_request_id="bounded")
+        assert result["source"]["truncated"] and result["source"]["network_truncated"]
+        pieces.append(result["content"])
+        arguments = result["next"]
+    assert "".join(pieces) == "x" * 100
+    assert result["available_eof"] and "unknown" in result["reading_note"]
+    assert len(calls) == 4
+
+
+@pytest.mark.parametrize("arguments", [{"offset": 1}, {"offset": -1}, {"offset": True},
+    {"max_chars": 0}, {"max_chars": web.MAX_CHARS + 1},
+    {"max_chars": True}, {"expected_digest": None}, {"expected_digest": "wrong"}, {"extra": 1}])
+def test_invalid_ranges_never_start_a_network_request(monkeypatch, arguments):
+    calls = network(monkeypatch, lambda request: html("should not fetch"))
+    with pytest.raises(web.WebReadError):
+        web.read({"url": "https://page.example/long", **arguments}, CancellationToken(), action_request_id="invalid")
+    assert calls == []
+
+
 def test_body_cancellation_and_network_timeout_are_bounded(monkeypatch):
     token = CancellationToken()
     def body():

@@ -128,3 +128,42 @@ def test_large_web_observation_fits_actual_native_budget_and_continues(tmp_path,
         assert len(fixture.web_requests) == 1
     finally:
         pages.runtime.close()
+
+
+def test_native_model_follows_long_page_ranges_and_keeps_each_observation_after_restart(tmp_path, monkeypatch):
+    fixture = WebFixture(monkeypatch)
+    fixture.follow_all = True
+    fixture.body += "<p>" + "Further original observations. " * 1400 + "THE_ORIGINAL_TAIL_山川🌍</p>"
+    def open_pages():
+        return PageService(tmp_path, model_factory=fixture.factory, posture=True,
+            allow_workspace_actions=True, auto_apply_edits=True,
+            pulse=PulseSettings(enabled=True, spontaneous_rate=0))
+    pages = open_pages()
+    try:
+        created = pages.create_page(TITLE, "Read the entire " + URL + " and save every observed text range.")
+        page = created["page"]["id"]
+        scope = pages.execution._scope(page)
+        pages.runtime._mgr.pulse(pages.runtime.continuity_engram_id,
+            pulse_event=pages.runtime.causal_ledger.get_event(created["initialMessageId"]),
+            execution_context=scope.context_id, runtime_fence=pages.runtime._current_runtime_fence())
+        actions = [row for row in pages.runtime.kernel_service.store.actions_for_session(scope)
+                   if row.tool_name == web_read.NAME]
+        outputs = [row.result["output"] for row in actions]
+        assert len(outputs) == 2 and all(row.status is ActionStatus.SUCCEEDED and row.result_delivered for row in actions)
+        assert outputs[0]["next"] and outputs[1]["available_eof"] and outputs[1]["next"] is None
+        assert outputs[0]["source"]["text_end"] == outputs[1]["source"]["text_start"]
+        assert outputs[0]["source"]["observation_sha256"] == outputs[1]["source"]["observation_sha256"]
+        assert all(web_read.source_from_action(row) is not None for row in actions)
+        written = (tmp_path / "workspace/expedition.txt").read_text()
+        assert written == "".join(row["content"] for row in outputs) + "\nSource: " + URL + "\n"
+        assert "THE_ORIGINAL_TAIL_山川🌍" in written
+        assert len(fixture.web_requests) == 2 and pages.view(page)["page"]["status"] == "idle"
+        pages.runtime.close()
+        fixture.body = "<p>A changed live website.</p>"
+        pages = open_pages()
+        saved = [row.result["output"] for row in pages.runtime.kernel_service.store.actions_for_session(pages.execution._scope(page))
+                 if row.tool_name == web_read.NAME]
+        assert saved == outputs
+        assert len(fixture.web_requests) == 2
+    finally:
+        pages.runtime.close()
