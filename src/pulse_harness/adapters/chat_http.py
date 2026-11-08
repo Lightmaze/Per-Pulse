@@ -458,12 +458,19 @@ class ChatHTTPModelAdapter:
                 continue
             message: dict[str, Any] = {"role": role, "content": content}
             if role == "assistant":
-                try:
-                    payload = _decode(content)
-                except ValueError:
-                    payload = None
-                if isinstance(payload, dict) and set(payload) == {"text", "tool_calls"} and payload["tool_calls"]:
-                    if not isinstance(payload["text"], str) or not isinstance(payload["tool_calls"], list):
+                # Only the Kernel's projection of completed round authority
+                # can identify tool envelopes. Untagged JSON is ordinary text.
+                count = record.get("tool_call_count", 0)
+                if type(count) is not int or count < 0:
+                    raise ProviderProtocolError("invalid assistant tool-call authority")
+                if count:
+                    try:
+                        payload = _decode(content)
+                    except ValueError as exc:
+                        raise ProviderProtocolError("invalid assistant tool transcript") from exc
+                    if (not isinstance(payload, dict) or set(payload) != {"text", "tool_calls"}
+                            or not isinstance(payload["text"], str) or not isinstance(payload["tool_calls"], list)
+                            or len(payload["tool_calls"]) != count):
                         raise ProviderProtocolError("invalid assistant tool transcript")
                     message["content"] = payload["text"] or None
                     message["tool_calls"] = []

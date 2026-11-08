@@ -3342,14 +3342,22 @@ class HarnessStore:
                     ).fetchone()
                     if assistant is None:
                         raise StoreUnavailable("model round assistant authority item is missing")
-                    try:
-                        decoded_assistant = json.loads(assistant["content"])
-                    except (TypeError, ValueError):
+                    # The round, not its reply's spelling, determines whether
+                    # content is text or an internal tool envelope. This also
+                    # restores existing plain-JSON replies without rewriting
+                    # their original bytes, response digests or identities.
+                    if int(row["tool_call_count"]) == 0:
                         response_payload["text"] = assistant["content"]
                     else:
+                        try:
+                            decoded_assistant = json.loads(assistant["content"])
+                        except (TypeError, ValueError) as exc:
+                            raise StoreUnavailable(
+                                "model round assistant authority payload is malformed"
+                            ) from exc
                         if (
                             isinstance(decoded_assistant, Mapping)
-                            and "tool_calls" in decoded_assistant
+                            and set(decoded_assistant) == {"text", "tool_calls"}
                         ):
                             text_value = decoded_assistant.get("text")
                             raw_calls = decoded_assistant.get("tool_calls")
@@ -3393,7 +3401,9 @@ class HarnessStore:
                                 "tool_calls": canonical_calls,
                             }
                         else:
-                            response_payload["text"] = assistant["content"]
+                            raise StoreUnavailable(
+                                "model round assistant authority payload is malformed"
+                            )
                 if row["response_digest"] != digest_json(response_payload):
                     raise StoreUnavailable(
                         "model round response digest does not match assistant authority"

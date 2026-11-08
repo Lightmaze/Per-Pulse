@@ -158,7 +158,9 @@ def _open_relative(parent: int, name: str, access: int, disposition: int, option
     if not name or "\\" in name or "/" in name or name in {".", ".."}:
         raise OSError(123, "invalid name")  # ERROR_INVALID_NAME
     buffer = ctypes.create_unicode_buffer(name)
-    text = _UnicodeString(len(name) * 2, len(name) * 2 + 2, ctypes.cast(buffer, wintypes.LPWSTR))
+    # UNICODE_STRING counts UTF-16 bytes, including both surrogates of emoji.
+    length = len(name.encode("utf-16-le", errors="surrogatepass"))
+    text = _UnicodeString(length, length + 2, ctypes.cast(buffer, wintypes.LPWSTR))
     attrs = _ObjectAttributes(ctypes.sizeof(_ObjectAttributes), parent, ctypes.pointer(text),
                               _OBJ_CASE_INSENSITIVE, None, None)
     handle, io = wintypes.HANDLE(), _IoStatusBlock()

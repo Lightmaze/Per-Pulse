@@ -4,8 +4,8 @@ The data side of the observability interface. Runtime observations pass
 through this recorder so measurement remains independent of presentation.
 
 Design constraints:
-- Zero blocking on the tick path: record() appends to an in-memory deque;
-  file flushing is batched.
+- Recent observations and pending writes have separate bounds. Failed disk
+  writes back off; explicit flush can retry immediately after repair.
 - Optional persistence: pass a path to also append JSONL; None keeps
   everything in memory (tests, casual CLI runs).
 - This is runtime-sideband observability data (the free-context rule): it never enters
@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import threading
+import time
 from collections import Counter, deque
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -55,7 +56,9 @@ class MetricsRecorder:
     A single encoded event larger than ``max_bytes`` remains available through
     the in-memory recorder but is refused from persistence.  Letting one
     observability event silently defeat the storage bound would be worse than
-    dropping that sideband record and warning.
+    dropping that sideband record and reporting the count in summary(). Pending
+    diagnostics retain at most memory_cap events and pending_bytes encoded
+    bytes (4 MiB by default); oldest queued diagnostics are retired first.
     """
 
     def __init__(
@@ -66,6 +69,7 @@ class MetricsRecorder:
         flush_every: int = _FLUSH_EVERY,
         max_bytes: int = DEFAULT_MAX_BYTES,
         archive_count: int = DEFAULT_ARCHIVE_COUNT,
+        pending_bytes: int = 4 * 1024 * 1024,
         publication_permit: RuntimePublicationPermit | None = None,
     ):
         if memory_cap <= 0:
@@ -74,6 +78,8 @@ class MetricsRecorder:
             raise ValueError("max_bytes must be positive")
         if archive_count < 0:
             raise ValueError("archive_count must be non-negative")
+        if pending_bytes <= 0:
+            raise ValueError("pending_bytes must be positive")
         if (
             publication_permit is not None
             and type(publication_permit) is not RuntimePublicationPermit
@@ -84,7 +90,17 @@ class MetricsRecorder:
         self._path = Path(path) if path is not None else None
         self._publication_permit = publication_permit
         self._events: deque[dict] = deque(maxlen=memory_cap)
-        self._unflushed: list[dict] = []
+        # This is a lossy diagnostic queue, separate from business receipts.
+        # Encode once so an unavailable disk cannot cause repeated serialization.
+        self._unflushed: deque[bytes] = deque()
+        self._pending_bytes = 0
+        self._pending_byte_limit = pending_bytes
+        self._pending_event_limit = memory_cap
+        self._dropped = 0
+        self._last_error: str | None = None
+        self._retry_at = 0.0
+        self._retry_delay = 1.0
+        self._persistence_revoked = False
         self._counts: Counter = Counter()
         self._lock = threading.Lock()
         # 1 = per-event durability, for runs meant to be watched live by the
@@ -102,8 +118,23 @@ class MetricsRecorder:
             self._events.append(event)
             self._counts[event_type] += 1
             if self._path is not None:
-                self._unflushed.append(event)
-                if len(self._unflushed) >= self._flush_every:
+                if self._persistence_revoked:
+                    self._dropped += 1
+                    return
+                line = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
+                if len(line) > min(self._pending_byte_limit, self._max_bytes):
+                    self._dropped += 1
+                    return
+                while self._unflushed and (
+                    len(self._unflushed) >= self._pending_event_limit
+                    or self._pending_bytes + len(line) > self._pending_byte_limit
+                ):
+                    self._pending_bytes -= len(self._unflushed.popleft())
+                    self._dropped += 1
+                self._unflushed.append(line)
+                self._pending_bytes += len(line)
+                if (len(self._unflushed) >= min(self._flush_every, self._pending_event_limit)
+                        and time.monotonic() >= self._retry_at):
                     self._flush_locked()
 
     def flush(self) -> None:
@@ -130,10 +161,7 @@ class MetricsRecorder:
     def _flush_locked(self) -> None:
         if self._path is None or not self._unflushed:
             return
-        encoded = [
-            (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
-            for event in self._unflushed
-        ]
+        encoded = list(self._unflushed)
         committed = 0
         try:
             with self._persistence_guard():
@@ -147,7 +175,8 @@ class MetricsRecorder:
                             self._max_bytes,
                         )
                         committed += 1
-                        del self._unflushed[:1]
+                        self._pending_bytes -= len(self._unflushed.popleft())
+                        self._dropped += 1
                         continue
 
                     current_size = self._file_size(self._path)
@@ -175,12 +204,27 @@ class MetricsRecorder:
                         f.write(b"".join(encoded[committed:end]))
                     written = end - committed
                     committed = end
-                    del self._unflushed[:written]
-        except (OSError, RuntimePublicationError) as e:
+                    for _ in range(written):
+                        self._pending_bytes -= len(self._unflushed.popleft())
+            self._last_error = None
+            self._retry_at = 0.0
+            self._retry_delay = 1.0
+        except RuntimePublicationError as e:
+            # Revocation is permanent for this recorder. Keep recent in-memory
+            # observations, but never queue another durable publication.
+            self._persistence_revoked = True
+            self._last_error = e.code
+            self._dropped += len(self._unflushed)
+            self._unflushed.clear()
+            self._pending_bytes = 0
+        except OSError as e:
             # Observability must never take the engine down.  In particular,
             # a revoked Runtime retains the event in memory and performs no
             # fallback persistence outside its lifecycle gate.
             _logger.warning("metrics flush failed: %s", e)
+            self._last_error = type(e).__name__
+            self._retry_at = time.monotonic() + self._retry_delay
+            self._retry_delay = min(self._retry_delay * 2, 30.0)
 
     @staticmethod
     def _file_size(path: Path) -> int:
@@ -278,7 +322,13 @@ class MetricsRecorder:
     def summary(self) -> dict:
         """Counts per event type plus latest heartbeat, for /status and observability interface."""
         with self._lock:
-            out: dict = {"event_counts": dict(self._counts)}
+            out: dict = {"event_counts": dict(self._counts), "persistence": {
+                "pending_events": len(self._unflushed),
+                "pending_bytes": self._pending_bytes,
+                "dropped_events": self._dropped,
+                "last_error": self._last_error,
+                "revoked": self._persistence_revoked,
+            }}
             for e in reversed(self._events):
                 if e["type"] == "heartbeat":
                     out["heartbeat"] = {
