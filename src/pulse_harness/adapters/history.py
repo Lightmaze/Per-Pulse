@@ -77,7 +77,7 @@ class ConversationHistoryTools:
                 "recall-tool copies are excluded. Omit role for discussion, or select user/assistant. "
                 "Use read_history with the same role to expand a result. Current-turn messages are excluded.",
                 capability="history.read", source="pulse_harness.history"),
-            ToolDescriptor("read_history", "Read a saved conversation passage by message_id. "
+            ToolDescriptor("read_history", "Read a saved conversation passage by message_id, including a settled tool result from this turn. "
                 "Use next_offset for the remaining original stored text. "
                 "Pass role=tool for a tool-result source; omit role for discussion. "
                 "This reads history; it does not replay actions or create a new user message. Redaction and prior "
@@ -125,9 +125,12 @@ class ConversationHistoryTools:
             result = self._search(scope, scopes, args, cancellation)
         else:
             result = self._read(scope, scopes, args, cancellation)
-        # Never let wrapper truncation silently destroy a continuation cursor.
+        # A direct tool-result lookup can read a settled result in the active
+        # turn. Search still excludes this turn to prevent recursive recall.
+        current_excluded = not (call.name == "read_history" and role == "tool")
         result["coverage"] = {"available_sessions": len(scopes), "unavailable_sessions": missing,
-                              "roles": [role] if role else ["user", "assistant"], "current_turn_excluded": True}
+                              "roles": [role] if role else ["user", "assistant"],
+                              "current_turn_excluded": current_excluded}
         if role == "tool":
             result["coverage"]["excluded_tool_names"] = list(RECALL_TOOL_NAMES)
         result["kind"] = "historical_reference"
