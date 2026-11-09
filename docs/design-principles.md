@@ -576,6 +576,13 @@ untrusted input, private data and unconfirmed outward actions.
   instruction appended to a sent message would have exposed old footers,
   because saved messages are recognized by an exact suffix. Leave saved text
   alone, or recognize both forms.
+- **One working tree, one test run.** Switching a worktree to another branch
+  while its full suite was still running produced a passing result for neither
+  branch. Give each branch under test its own worktree, and rerun when in doubt.
+- **A search for old wording is not a list of its uses.** Changing a limit's
+  message, a search for the old sentence missed a browser journey that checked
+  only a fragment of it; CI found it. Search for each distinctive fragment, and
+  let the full browser run decide.
 - **A local failure that also fails on `main` is the environment.** A browser
   journey timed out at its first step on the branch and on unmodified `main`,
   while `main`'s CI passed. Record it and let CI decide; do not change the
