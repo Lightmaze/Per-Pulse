@@ -327,6 +327,8 @@ jobs:
           npm --prefix web run build
       - name: Install native World/Kernel service
         run: python -m pip install -e '.[dev]'
+      - name: Verify focused Habitat Kernel authority before browser
+        run: python -m pytest -q tests/per_pulse/test_native_habitat.py
       - name: Verify the same user correction-to-artifact journey in Chromium
         run: |
           npm install --prefix "$RUNNER_TEMP/per-pulse-browser-tools" playwright@1.62.1 --no-audit --no-fund
