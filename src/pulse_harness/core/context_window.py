@@ -11,6 +11,7 @@ never changed.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -51,14 +52,52 @@ def _boundaries(messages: Sequence[Mapping[str, Any]]) -> list[int]:
     return starts
 
 
+
+def _project_saved_tool_result(message: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Keep a tool's terminal identity while paging its saved output on demand.
+
+    Only the host's durable message_id makes the record addressable. Do not
+    parse a tool's prose for an identifier or truncate a current user message.
+    """
+    if message.get("role") != "tool":
+        return None
+    message_id = message.get("message_id")
+    content = message.get("content")
+    if not isinstance(message_id, str) or not message_id or not isinstance(content, str):
+        return None
+    try:
+        payload = json.loads(content)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("tool_call_id"), str) or not isinstance(payload.get("status"), str):
+        return None
+    reference = {
+        "tool_call_id": payload["tool_call_id"],
+        "action_request_id": payload.get("action_request_id"),
+        "status": payload["status"],
+        "output": {
+            "context_window": {
+                "state": "saved_result_available_by_page",
+                "message_id": message_id,
+                "original_chars": len(content),
+                "next_step": "Call read_history with role='tool', this message_id, offset=0 and max_chars=4096. Follow next_offset to read further saved text.",
+            }
+        },
+        "error_code": payload.get("error_code"),
+    }
+    projected = {**message, "content": json.dumps(reference, ensure_ascii=False, separators=(",", ":"))}
+    return projected if estimate_tokens(projected) < estimate_tokens(message) else None
+
+
 def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple[Mapping[str, Any], ...]:
     """Return ``messages`` or a shorter projection whose estimate fits ``max_tokens``.
 
     The opening user message is kept when it fits beside the latest complete
     exchange. The window always starts at a turn or user-message boundary, so
     an assistant tool call is never separated from its results. If even the
-    latest turn is larger than the budget, the projection starts at that turn;
-    nothing inside the current exchange is dropped.
+    latest turn exceeds the budget, the projection may replace a large, saved
+    tool result with a reference retrievable using read_history(role='tool').
+    Tool calls and the current user input remain intact.
     """
     if max_tokens < 1:
         raise ValueError("max_tokens must be positive")
@@ -69,8 +108,27 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
     starts = _boundaries(messages)
     if not starts:
         return messages
-    pinned = (messages[0],) if messages[0].get("role") == "user" else ()
+    # A long tool result in the *current* exchange can by itself make every
+    # subsequent provider request too large. Keep the tool-call/result pair
+    # and the real terminal status, but replace large result text in this
+    # model-request projection with a durable, page-readable reference.
+    # Neither the original transcript nor the action is touched or replayed.
     note = {"role": "system", "content": OMITTED_NOTE, "item_id": "context-window:omitted"}
+    latest = starts[-1]
+    latest_cost = sum(estimate_tokens(message) for message in messages[latest:])
+    if latest_cost + estimate_tokens(note) > max_tokens:
+        projected = list(messages)
+        for index in sorted(range(latest, len(projected)),
+                            key=lambda i: estimate_tokens(projected[i]), reverse=True):
+            replacement = _project_saved_tool_result(projected[index])
+            if replacement is None:
+                continue
+            latest_cost += estimate_tokens(replacement) - estimate_tokens(projected[index])
+            projected[index] = replacement
+            if latest_cost + estimate_tokens(note) <= max_tokens:
+                break
+        messages = tuple(projected)
+    pinned = (messages[0],) if messages[0].get("role") == "user" else ()
     fixed = sum(estimate_tokens(message) for message in pinned) + estimate_tokens(note)
     suffix = [0] * (len(messages) + 1)
     for index in range(len(messages) - 1, -1, -1):
