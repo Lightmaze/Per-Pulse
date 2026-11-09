@@ -324,7 +324,8 @@ def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
         root = tmp_path / "workspace"
         for index in range(425):
             (root / f"note-{index:04d}.txt").write_text(f"Native note {index}", encoding="utf-8")
-        (root / "not-visible.key").write_text("Protected name", encoding="utf-8")
+        # .pem remains protected; .key is ordinary user-owned source text.
+        (root / "not-visible.pem").write_text("Protected name", encoding="utf-8")
         (root / ".pulse").mkdir(exist_ok=True)
         (root / "ordinary-folder").mkdir()
 
@@ -349,7 +350,7 @@ def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
         assert len(names) == len(set(names)) == 426
         assert {f"note-{index:04d}.txt" for index in range(425)} <= set(names)
         assert "ordinary-folder" in names
-        assert "not-visible.key" not in names
+        assert "not-visible.pem" not in names
         assert ".pulse" not in names
         assert page["nextCursor"] is None and page["truncated"] is False
         # urlsafe_b64decode can raise binascii.Error for legal-looking but malformed strings.
@@ -383,8 +384,9 @@ def test_directory_cursor_continues_after_bounded_scan_of_protected_entries(tmp_
     with _client(tmp_path) as client:
         identity = _identity(client)
         root = tmp_path / "workspace"
+        # Still exercise a page filled with truly protected entries.
         for index in range(7):
-            (root / f"hidden-{index}.key").write_text("Do not list", encoding="utf-8")
+            (root / f"hidden-{index}.pem").write_text("Do not list", encoding="utf-8")
         (root / "visible.txt").write_text("Can be reached", encoding="utf-8")
         page = client.get("/api/workspace/files", headers=identity).json()
         found = [row["name"] for row in page["entries"]]
