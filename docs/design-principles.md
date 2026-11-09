@@ -576,6 +576,11 @@ untrusted input, private data and unconfirmed outward actions.
   instruction appended to a sent message would have exposed old footers,
   because saved messages are recognized by an exact suffix. Leave saved text
   alone, or recognize both forms.
+- **Learning from a result before it is complete.** The image-free retry
+  recorded "this model refuses images" on HTTP 200, before its stream had a
+  valid end. A broken reply then failed the turn and still disabled images for
+  the session. Commit what a request teaches only after the request has
+  completed; review caught it (#237).
 - **One working tree, one test run.** Switching a worktree to another branch
   while its full suite was still running produced a passing result for neither
   branch. Give each branch under test its own worktree, and rerun when in doubt.
