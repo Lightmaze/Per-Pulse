@@ -115,7 +115,7 @@ export const api = {
     return verifiedDownload(response, material.sha256, 'material_download_unverified');
   },
   uploadMaterial: async (pageId: string, identity: WorkspaceFileIdentity, uploadId: string, file: File, signal?: AbortSignal) => {
-    if (file.size > uploadLimit(file.name)) throw new ApiError('Choose text or a PNG/JPEG image of at most 1 MiB, or a PDF of at most 32 MiB.', 'material_too_large', 413);
+    if (file.size > uploadLimit(file.name)) throw new ApiError('Choose text of at most 1 MiB, or a PNG/JPEG image or PDF of at most 32 MiB.', 'material_too_large', 413);
     const bytes = await file.arrayBuffer();
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), value => value.toString(16).padStart(2, '0')).join('');
     const result = await request<WorkspaceFileIdentity & { material: Material; repeated: boolean }>(`${pagePath(pageId)}/materials?name=${encodeURIComponent(file.name)}`, {

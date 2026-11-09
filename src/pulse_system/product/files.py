@@ -18,7 +18,9 @@ import stat
 from typing import Iterator
 from uuid import uuid4
 
-from pulse_harness.adapters.image_input import ImageInputError, image_metadata, image_data_url, is_image_path
+from pulse_harness.adapters.image_input import (
+    MAX_IMAGE_BYTES, ImageInputError, image_metadata, image_data_url, is_image_path, model_image,
+)
 from pulse_harness.adapters.document_text import (
     MAX_PDF_BYTES, DocumentTextError, PdfText, is_pdf_path, read_pdf,
 )
@@ -60,8 +62,10 @@ def _parts(path: str, *, root_ok: bool = False) -> list[str]:
 
 
 def upload_limit(name: str) -> int:
-    """Largest accepted upload: text files are small; PDFs are usually larger."""
-    return MAX_PDF_BYTES if is_pdf_path(name) else MAX_FILE_BYTES
+    """Largest accepted upload: text files are small; PDFs and photos are usually larger."""
+    if is_pdf_path(name):
+        return MAX_PDF_BYTES
+    return MAX_IMAGE_BYTES if is_image_path(name) else MAX_FILE_BYTES
 
 
 def _pdf_text(data: bytes) -> PdfText:
@@ -261,8 +265,11 @@ class WorkspaceFiles:
         result = {"path": path, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         if is_image_path(path):
             metadata = _image(data)
-            return ({**result, "content": "", "format": "image",
-                     "image": metadata, "imageDataUrl": image_data_url(data, metadata["mime"])}, data)
+            # The preview is what a model receives: the original, or a scaled copy of a large one.
+            view = model_image(data, metadata)
+            return ({**result, "content": "", "format": "image", "image": metadata,
+                     **({"previewImage": {"width": view.width, "height": view.height}} if view.scaled else {}),
+                     "imageDataUrl": image_data_url(view.data, view.mime)}, data)
         if not is_pdf_path(path):
             return {**result, "content": _text(data)}, data
         pdf = _pdf_text(data)

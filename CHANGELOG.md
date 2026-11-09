@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Attach full-size phone photos and screenshots (PNG/JPEG up to 32 MiB and 50 megapixels) instead of refusing anything over 1 MiB or 8 megapixels. The original is kept and downloadable; a model receives it unchanged when it fits 1 MiB and 2048 px, otherwise an upright scaled copy, and is told so. The Materials preview shows that same copy.
+
 ## 0.1.0a10
 
 - Open a previously cited experience directly from the persistent World journal without rescanning the full history, preserving original and shared-Work visibility rules.

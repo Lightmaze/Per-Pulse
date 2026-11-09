@@ -203,7 +203,7 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
       {preview.format === 'pdf_text' ? <p className="material-hint">{t(pdfHasText(preview.content) ? 'materials.pdfText' : 'materials.pdfNoText')}</p> : null}
       {preview.format === 'pdf_text' && preview.complete === false ? <p className="material-hint">{t('materials.pdfPartial')}</p> : null}
       {preview.format === 'image'
-        ? <ImagePreview name={preview.path.split('/').at(-1) ?? preview.path} image={preview.image} source={preview.imageDataUrl} />
+        ? <ImagePreview name={preview.path.split('/').at(-1) ?? preview.path} image={preview.image} scaled={preview.previewImage} source={preview.imageDataUrl} />
         : <TextDocument key={`${preview.path}/${preview.sha256}`} path={preview.path} content={preview.content.slice(0, PREVIEW_CHARS)} truncated={preview.content.length > PREVIEW_CHARS} />}
       {preview.content.length > PREVIEW_CHARS ? <p className="material-hint">{t('library.previewLimited')}</p> : null}
       <details><summary>{t('library.details')}</summary><p>{preview.path}</p><p>SHA-256: {preview.sha256}</p></details>
