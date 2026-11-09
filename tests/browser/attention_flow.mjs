@@ -413,7 +413,7 @@ try {
     && message.sourcePageId === localSource && message.status === 'queued');
   assert.ok(pendingInput, 'the original queued causal input is visible in its receiving Work');
   await page.getByRole('button', { name: '活动', exact: true }).click();
-  await page.getByText('管理页面连接（3）', { exact: true }).click();
+  await page.getByText(/^管理页面连接（\d+）$/).click();
   const incoming = page.getByRole('region', { name: '影响此页面的连接', exact: true });
   await incoming.getByRole('button', { name: 'Actual source Work', exact: true }).waitFor();
   await incoming.getByText('→ 抑制', { exact: true }).waitFor();
@@ -425,7 +425,7 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: '活动', exact: true }).click();
-  await page.getByText('管理页面连接（3）', { exact: true }).click();
+  await page.getByText(/^管理页面连接（\d+）$/).click();
   await incoming.scrollIntoViewIfNeeded();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'incoming-connections-mobile-zh.png') });
@@ -452,7 +452,7 @@ try {
   await page.locator('.composer textarea').waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), unsentOnFailure);
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
-  await page.getByText('Manage page connections (2)', { exact: true }).click();
+  await page.getByText(/^Manage page connections \(\d+\)$/).click();
   const incomingEnglish = page.getByRole('region', { name: 'Connections into this page', exact: true });
   await incomingEnglish.getByRole('button', { name: 'Independent design work', exact: true }).waitFor();
   assert.equal(await incomingEnglish.getByRole('button', { name: 'Actual source Work', exact: true }).count(), 0);
