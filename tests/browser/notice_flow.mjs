@@ -119,7 +119,7 @@ try {
   // keeps the original large reading exchange intact. Multiple later UI turns
   // then make the registered Notice a genuine historical (omitted) source.
   for (let index = 0; index < 4; index++) {
-    await send(owner, 'FILL_NOTICE_HISTORY_' + index + ': ' + 'x'.repeat(12000),
+    await send(owner, 'FILL_NOTICE_HISTORY_' + index + ': ' + 'Further context for the active Work. '.repeat(400),
       'Ready for this local Work.');
   }
   checks.push('later complete Work turns move the original Notice registration out of the model context');
