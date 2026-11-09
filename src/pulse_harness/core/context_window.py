@@ -128,11 +128,11 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
                 break
         messages = tuple(projected)
     if not starts:
-        # In the first tool exchange there is no later turn boundary. The
-        # authorized tool result is still page-readable; add the projection
-        # note without removing the current input or its tool-call envelope.
-        if messages != original and sum(map(estimate_tokens, messages)) + estimate_tokens(note) <= max_tokens:
-            return (note, *messages)
+        # In the first tool exchange there is no earlier turn to omit.
+        # The projected tool response already points to its source, so do not
+        # invent an "earlier messages omitted" system note.
+        if messages != original and sum(map(estimate_tokens, messages)) <= max_tokens:
+            return messages
         return original
     pinned = (messages[0],) if messages[0].get("role") == "user" else ()
     fixed = sum(estimate_tokens(message) for message in pinned) + estimate_tokens(note)
