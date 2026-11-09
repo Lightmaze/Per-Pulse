@@ -617,6 +617,7 @@ untrusted input, private data and unconfirmed outward actions.
 | Unknown tool names and unreadable arguments ended the turn; failures hid their reason from the model | Model mistakes as protocol failures | Fixed (#234) |
 | Each command needs its own Allow once, and commands need a Docker image | Over-defense, off by default | Open. Current tools sandbox commands and approve patterns; see section 7 |
 | Old turns are dropped, not summarized | Outdated practice | Open |
+| A World holds at most 1,024 material receipts for life, with no way to remove one; each pasted screenshot uses one | Over-defense, dead end | Open: receipts live in the pages state blob; give each its own record, then lift the cap |
 | OpenAI and Anthropic go through Chat Completions | Outdated practice | Open; see section 7 |
 | About 180 SQL reads through `Storage._conn`, three hidden import cycles, one upward import | Decoupling on disk only | Open; see 2.10 |
 | Library defaults differ from the CLI's (ask before edits, Pulse off), so many tests exercise an unshipped flow | Tests pinning old behavior | Open |
