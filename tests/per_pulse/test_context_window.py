@@ -122,6 +122,35 @@ def test_a_current_exchange_stays_whole_after_an_oversized_opening_is_omitted():
     assert tuple(fitted[-len(current):]) == tuple(current)
 
 
+
+def test_large_current_tool_result_is_addressable_without_replaying_the_action():
+    result = {**_result("current", 18_000), "message_id": "saved-tool-message-7",
+              "item_id": "tool-result:current", "transcript_seq": 7}
+    messages = [_user("Opening goal"), _answer("Previous answer"),
+                _user("Read and continue."), _call("current"), result]
+    original = tuple(dict(message) for message in messages)
+    fitted = fit_context(messages, 1_000)
+    assert sum(estimate_tokens(message) for message in fitted) <= 1_000
+    assert fitted[-3]["role"] == "user"
+    assert fitted[-2] == messages[-2]  # tool-call authority stays intact
+    note = json.loads(fitted[-1]["content"])
+    assert note["tool_call_id"] == "current"
+    assert note["status"] == "succeeded"
+    reference = note["output"]["context_window"]
+    assert reference["message_id"] == "saved-tool-message-7"
+    assert reference["original_chars"] == len(result["content"])
+    assert "read_history" in reference["next_step"]
+    assert "x" * 18_000 not in fitted[-1]["content"]
+    assert tuple(messages) == original  # saved original is unchanged
+
+
+def test_unaddressable_current_tool_result_is_not_silently_discarded():
+    messages = [_user("Read"), _call("current"), _result("current", 18_000)]
+    fitted = fit_context(messages, 1_000)
+    assert fitted[-1] == messages[-1]  # no trusted message_id, no false pointer
+    assert sum(estimate_tokens(message) for message in fitted) > 1_000
+
+
 def test_budget_must_be_positive():
     with pytest.raises(ValueError):
         fit_context([], 0)
