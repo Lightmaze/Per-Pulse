@@ -177,6 +177,33 @@ MAX_RETRY_SECONDS = 8.0
 MAX_RETRY_AFTER_SECONDS = 60.0
 
 
+# Refusals that are not about the content of a request. A request carrying an
+# image that fails with any other status is tried once more without the image:
+# text-only models (common on local servers) refuse image parts outright.
+_NOT_ABOUT_CONTENT = frozenset({401, 403, 404, 408, 409, 429})
+
+
+def _images_refused_note(status: int, *, earlier: bool = False) -> str:
+    when = "refused an earlier request" if earlier else "refused this request"
+    return (f"The configured model {when} while it carried an image (HTTP {status}), so no pixels "
+            "accompany this image reference. Do not claim to have seen it. Tell the person this model "
+            "did not accept the image; reading it needs a model that accepts image input.")
+
+
+def _without_images(body: dict[str, Any], note: str) -> int:
+    """Remove image parts from a request body in place, leaving one note per message."""
+    removed = 0
+    for message in body.get("messages", ()):
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        kept = [part for part in content if not (isinstance(part, dict) and part.get("type") == "image_url")]
+        if len(kept) != len(content):
+            removed += len(content) - len(kept)
+            message["content"] = [*kept, {"type": "text", "text": note}]
+    return removed
+
+
 def _retryable(response: httpx.Response) -> bool:
     should = response.headers.get("x-should-retry", "").strip().lower()
     if should in {"true", "false"}:
@@ -398,6 +425,9 @@ class ChatHTTPModelAdapter:
                  attempt_accounting=None) -> None:
         self.workspace_image_resolver = None
         self.life_image_resolver = None  # native runtime may bind a scoped, ephemeral observation renderer
+        # The status with which this model refused a request only because it
+        # carried an image; later requests leave images out and say why.
+        self.images_refused: int | None = None
         self.config = config
         self._schemas = _decode(_json(dict(WORKSPACE_SCHEMAS if tool_schemas is None else tool_schemas)))
         self._client = httpx.Client(timeout=config.timeout_seconds, follow_redirects=False,
@@ -586,6 +616,8 @@ class ChatHTTPModelAdapter:
                     "or this round exceeded five images. Use read_file again for the required source."}])
             if visual:
                 messages.append({"role": "user", "content": visual})
+        if self.images_refused is not None:
+            _without_images(body, _images_refused_note(self.images_refused, earlier=True))
         # continuation_of/tool_results already exist in the durable transcript.
         # Appending them here would replay a tool exchange twice on resume.
         return body
@@ -669,6 +701,7 @@ class _ChatStream:
                 return
             retries = self.adapter.config.max_retries
             attempt = 0
+            images_refused: int | None = None
             while True:
                 attempt += 1
                 # Each *physical* HTTP attempt, including transport and HTTP
@@ -708,11 +741,23 @@ class _ChatStream:
                 if cancelled:
                     return
                 if response.status_code == 200:
+                    if images_refused is not None:
+                        self.adapter.images_refused = images_refused
                     break
                 if active_ticket is not None:
                     accounting.settle(active_ticket, "rejected")
                     active_ticket = None
                 if attempt > retries or not _retryable(response):
+                    status = response.status_code
+                    if (images_refused is None and status not in _NOT_ABOUT_CONTENT
+                            and _without_images(self.body, _images_refused_note(status))):
+                        # Try once more without the pixels, at once; the model is told why.
+                        images_refused = status
+                        response.close()
+                        response = None
+                        request = self.adapter._client.build_request("POST", self.adapter.config.endpoint,
+                            headers=headers, json=self.body)
+                        continue
                     # Never persist a remote body, URL, request headers or credentials.
                     tries = f" after {attempt} attempts" if attempt > 1 else ""
                     raise ProviderUnavailable(f"model endpoint returned HTTP {response.status_code}{tries}",

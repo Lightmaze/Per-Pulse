@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- When a text-only model refuses a request that carries an image, send it once more without the image and tell the model why, instead of failing the turn with an unrelated hint about conversation length. Later images in the session are left out with the same note.
+
 ## 0.1.0a10
 
 - Open a previously cited experience directly from the persistent World journal without rescanning the full history, preserving original and shared-Work visibility rules.
