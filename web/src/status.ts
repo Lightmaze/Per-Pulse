@@ -35,6 +35,10 @@ export function failureReason(code: string | null | undefined): { key: MessageKe
   if (code === 'provider_generation_incomplete') return { key: 'status.failureIncomplete', text: 'The model service ended the reply early. Send again.' };
   if (code === 'model_loop_limit') return { key: 'status.failureStepLimit', text: 'This turn reached its step limit. Send a message to continue.' };
   if (code === 'world_turn_timeout') return { key: 'status.failureTimeout', text: 'This turn ran out of time.' };
+  if (code === 'autonomous_weekly_requests_exhausted' || code === 'autonomous_weekly_requests_paused') {
+    return { key: 'status.failureAllowance', text: 'Background model requests are paused or used up for this week. Open Activity to resume them or raise the allowance, or send a message to continue now.' };
+  }
+  if (code === 'autonomous_request_source_unverified') return { key: 'status.failureSourceUnverified', text: 'Per Pulse could not confirm what started this background request, so it was not sent. Send a message to continue.' };
   return { key: 'status.failureOther', text: 'This turn stopped ({code}).', params: { code } };
 }
 
