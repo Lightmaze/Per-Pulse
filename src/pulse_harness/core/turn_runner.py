@@ -14,6 +14,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from .contracts import (
+    ARGUMENT_ERROR_KEY,
     ActionClassification,
     ActionRecord,
     ActionStatus,
@@ -134,6 +135,9 @@ def _action_request_id(scope: HarnessScope, call: ToolCall) -> str:
 
 
 _MODEL_STREAM_CLEANUP_UNCERTAIN = "model_stream_cleanup_uncertain"
+# A call the model must correct is answered as a failed read-only action.
+_REJECTED_CALL_CAPABILITY = "harness.rejected_call"
+_MAX_TOOL_ERROR_CHARS = 1000
 _COALESCED_DELTA_KINDS = frozenset({ModelDeltaKind.TEXT, ModelDeltaKind.REASONING})
 _COALESCED_DELTA_BYTES = 8 * 1024
 
@@ -326,7 +330,7 @@ class TurnRunner:
 
             results: list[ToolResult] = []
             for persisted_call in persisted:
-                descriptor = self._descriptor(descriptors, persisted_call.call.name)
+                descriptor, rejection = self._resolve_call(descriptors, persisted_call.call)
                 try:
                     action, authority = self._create_action_for_call(
                         scope, persisted_call.call, descriptor
@@ -393,7 +397,8 @@ class TurnRunner:
                         )
                     try:
                         result = self._execute_action(
-                            scope, persisted_call.call, action, context, authority
+                            scope, persisted_call.call, action, context, authority,
+                            rejection=rejection,
                         )
                     except EffectUnknown as exc:
                         return self._block_or_fail(scope, exc, evidence=evidence)
@@ -725,6 +730,50 @@ class TurnRunner:
                 return descriptor
         raise ProviderProtocolError(f"model requested an unregistered tool: {name}")
 
+    @staticmethod
+    def _resolve_call(
+        descriptors: tuple[ToolDescriptor, ...], call: ToolCall
+    ) -> tuple[ToolDescriptor, HarnessError | None]:
+        """The call's tool, or why the model must correct the call.
+
+        A name no tool has, or arguments a model adapter could not read as one
+        JSON object, is the model's mistake rather than a broken turn. It is
+        recorded as a failed read-only action and answered like any failed
+        tool call, so the model can see why and try again.
+        """
+        problem = call.provider_metadata.get(ARGUMENT_ERROR_KEY) if call.provider_metadata else None
+        for descriptor in descriptors:
+            if descriptor.name == call.name and problem is None:
+                return descriptor, None
+        rejected = ToolDescriptor(name=call.name, description="", capability=_REJECTED_CALL_CAPABILITY,
+                                  source="pulse_harness.turn_runner")
+        if problem is not None:
+            return rejected, ProviderProtocolError(
+                f"The arguments for {call.name} could not be read as one JSON object ({problem}). "
+                "Send the arguments again as a single JSON object.",
+                code="tool_arguments_invalid",
+            )
+        names = ", ".join(sorted(descriptor.name for descriptor in descriptors)) or "none"
+        return rejected, ProviderProtocolError(
+            f"No tool named {call.name!r} is available in this turn. Available tools: {names}.",
+            code="unknown_tool",
+        )
+
+    def _error_result(self, error: HarnessError) -> Mapping[str, Any]:
+        """Say why a tool call failed, so the model can correct it.
+
+        The message is bounded; it is left out only if it cannot be stored.
+        """
+        message = " ".join(str(error).split())[:_MAX_TOOL_ERROR_CHARS]
+        if not message:
+            return {}
+        result = {"output": {"error": message}}
+        try:
+            self._require_mapping_payload(result, "tool result")
+        except HarnessError:
+            return {}
+        return result
+
     def _requires_approval(self, descriptor: ToolDescriptor) -> bool:
         if descriptor.capability in self.auto_apply_capabilities:
             return False
@@ -984,7 +1033,6 @@ class TurnRunner:
                             code="duplicate_tool_call_id",
                         )
                     seen_call_ids.add(model_call.tool_call_id)
-                    self._descriptor(descriptors, model_call.name)
                 text = "".join(text_parts)
                 reasoning = "".join(reasoning_parts)
                 persisted_calls = tuple(
@@ -1221,7 +1269,7 @@ class TurnRunner:
                 )
             results: list[ToolResult] = []
             for persisted_call in durable_calls:
-                descriptor = self._descriptor(descriptors, persisted_call.call.name)
+                descriptor, rejection = self._resolve_call(descriptors, persisted_call.call)
 
                 try:
                     action, authority = self._create_action_for_call(
@@ -1272,7 +1320,8 @@ class TurnRunner:
                     )
                 try:
                     result = self._execute_action(
-                        scope, persisted_call.call, action, context, authority
+                        scope, persisted_call.call, action, context, authority,
+                        rejection=rejection,
                     )
                 except EffectUnknown as exc:
                     return self._block_or_fail(scope, exc, evidence=evidence)
@@ -1948,6 +1997,8 @@ class TurnRunner:
         action: ActionRecord,
         context: _RunContext,
         authority: Mapping[str, Any] | None,
+        *,
+        rejection: HarnessError | None = None,
     ) -> ToolResult:
         action = self.store.claim_action_start(
             scope,
@@ -1982,6 +2033,8 @@ class TurnRunner:
                 context.active_token = None
             return self._tool_result(call, current)
         try:
+            if rejection is not None:
+                raise rejection
             scoped_execute = getattr(self.tool_provider, "execute_for_scope", None)
             if callable(scoped_execute):
                 output = scoped_execute(
@@ -2057,7 +2110,7 @@ class TurnRunner:
                 scope,
                 action.action_request_id,
                 TerminalOutcome.FAILED,
-                result={},
+                result=self._error_result(exc),
                 error_code=exc.code,
             )
         except Exception:

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let the model correct a mistaken tool call. An unknown tool name or arguments that are not one JSON object no longer end the turn; like any failed call, the model is told why (and which tools are available) instead of receiving only an error code.
+
 ## 0.1.0a10
 
 - Open a previously cited experience directly from the persistent World journal without rescanning the full history, preserving original and shared-Work visibility rules.

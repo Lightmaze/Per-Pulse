@@ -293,6 +293,12 @@ class ToolDescriptor:
     source: str = "core"
 
 
+# Set in ToolCall.provider_metadata by a model adapter when the model's
+# arguments could not be read as one JSON object; the call's arguments are then
+# empty and the runner answers it as a failed call the model can correct.
+ARGUMENT_ERROR_KEY = "argument_error"
+
+
 @dataclass(frozen=True, slots=True)
 class ToolCall:
     tool_call_id: str
