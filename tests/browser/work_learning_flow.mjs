@@ -84,6 +84,7 @@ try {
   await page.locator('.message-assistant').first().waitFor();
   await composer.fill('Keep this draft while inspecting activity.');
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await page.getByText(/^Manage page connections \(\d+\)$/).click();
   let outgoing = page.getByRole('region', { name: 'Connections from this page', exact: true });
   await outgoing.getByText('Learned from activity', { exact: true }).waitFor();
   await outgoing.getByRole('button', { name: 'Learning receiver', exact: true }).waitFor();
@@ -101,6 +102,7 @@ try {
   checks.push('Activity labels the learned edge; its next output reaches the receiver model with only the receiver history');
 
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  await page.getByText(/^Manage page connections \(\d+\)$/).click();
   await outgoing.getByRole('button', { name: 'Remove', exact: true }).click();
   await wait(async () => !(await json('/api/pulse')).connections.some(isEdge), 'operator removal');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
@@ -126,6 +128,7 @@ try {
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: '活动', exact: true }).click();
+  await page.getByText(/^管理页面连接（\d+）$/).click();
   outgoing = page.getByRole('region', { name: '此页面的计算连接', exact: true });
   await outgoing.getByText('页面可以从活动中学到连接。移除的连接会保持关闭，直到你重新连接。', { exact: true }).waitFor();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
