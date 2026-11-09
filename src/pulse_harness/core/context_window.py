@@ -106,15 +106,14 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
     if total <= max_tokens:
         return messages
     starts = _boundaries(messages)
-    if not starts:
-        return messages
+    original = messages
     # A long tool result in the *current* exchange can by itself make every
     # subsequent provider request too large. Keep the tool-call/result pair
     # and the real terminal status, but replace large result text in this
     # model-request projection with a durable, page-readable reference.
     # Neither the original transcript nor the action is touched or replayed.
     note = {"role": "system", "content": OMITTED_NOTE, "item_id": "context-window:omitted"}
-    latest = starts[-1]
+    latest = starts[-1] if starts else 0
     latest_cost = sum(estimate_tokens(message) for message in messages[latest:])
     if latest_cost + estimate_tokens(note) > max_tokens:
         projected = list(messages)
@@ -128,6 +127,13 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
             if latest_cost + estimate_tokens(note) <= max_tokens:
                 break
         messages = tuple(projected)
+    if not starts:
+        # In the first tool exchange there is no later turn boundary. The
+        # authorized tool result is still page-readable; add the projection
+        # note without removing the current input or its tool-call envelope.
+        if messages != original and sum(map(estimate_tokens, messages)) + estimate_tokens(note) <= max_tokens:
+            return (note, *messages)
+        return original
     pinned = (messages[0],) if messages[0].get("role") == "user" else ()
     fixed = sum(estimate_tokens(message) for message in pinned) + estimate_tokens(note)
     suffix = [0] * (len(messages) + 1)
