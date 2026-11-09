@@ -38,7 +38,9 @@ if _WINDOWS:
 MAX_FILE_BYTES = 1024 * 1024
 MAX_LIST_ENTRIES = 200
 MAX_SCAN_ENTRIES = 4000
-_SECRET_SUFFIXES = (".pem", ".key", ".db", ".db-wal", ".db-shm", ".sqlite", ".sqlite3")
+# A filename extension does not establish a secret. User-selected .key text
+# is handled like .env; internal state and symlink restrictions still apply.
+_SECRET_SUFFIXES = (".pem", ".db", ".db-wal", ".db-shm", ".sqlite", ".sqlite3")
 
 
 class FileAccessError(ValueError):
