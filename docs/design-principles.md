@@ -620,6 +620,14 @@ untrusted input, private data and unconfirmed outward actions.
 | A World holds at most 1,024 material receipts for life, with no way to remove one; each pasted screenshot uses one | Over-defense, dead end | Open: receipts live in the pages state blob; give each its own record, then lift the cap |
 | OpenAI and Anthropic go through Chat Completions | Outdated practice | Open; see section 7 |
 | About 180 SQL reads through `Storage._conn`, three hidden import cycles, one upward import | Decoupling on disk only | Open; see 2.10 |
+| Background work is opt-in: the weekly allowance starts disabled (#179), while the CLI banner says "up to 12 background turns per hour" | Off by default, claim mismatch | Owner's decision; the banner should match it |
+| A stopped background turn showed only its allowance code | Silent failure | Fixed (#236) |
+| A text-only model refusing an image failed the turn with a hint about conversation length | Silent failure | Fixed (#237) |
+| The 100 ms scheduler walks each pending event's ancestry every tick, and the weekly record is rewritten three times per request | Slower over time | Open: cache per event, keep counts in rows |
+| Every foreground turn loads and serializes the whole experience journal to fill a 16 KB budget | Slower over time | Open: order and limit in SQL |
+| Folder browsing returns 409 whenever the folder changes; web-page continuations refetch and fail on any change; a slow page discards what was read | Over-defense | Open: resume after the last entry; serve continuations from the first read; return partial text marked partial |
+| Dropping several images attaches only the first; other dropped files are refused although uploads accept them | Silent failure | Open |
+| About 27 English strings in the Chinese locale, and a prefilled English request on source pages | Copy | Open |
 | Library defaults differ from the CLI's (ask before edits, Pulse off), so many tests exercise an unshipped flow | Tests pinning old behavior | Open |
 | Internal terms in the Activity panel | Internal concepts | Reduced (#228); not recounted |
 | The provider's class path is part of the action digest | Durable data | Open |
