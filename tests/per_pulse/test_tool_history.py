@@ -194,7 +194,7 @@ def test_model_itself_reads_a_projected_current_result_without_rerunning_file(tm
         event = {"choices": [{"index": 0, "delta": delta,
                               "finish_reason": "tool_calls" if name else "stop"}]}
         return httpx.Response(200, headers={"content-type": "text/event-stream"},
-            content="data: " + json.dumps(event) + "\\n\\ndata: [DONE]\\n\\n")
+            content="data: " + json.dumps(event) + "\n\ndata: [DONE]\n\n")
 
     def factory(_scope):
         return ChatHTTPModelAdapter(ChatHTTPConfig(
