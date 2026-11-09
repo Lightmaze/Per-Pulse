@@ -284,6 +284,12 @@ button, a, input, textarea { outline-offset: 4px; }
 @keyframes pulse { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
 .pulse-activity-trigger { margin-left: auto; min-height: 34px; padding: 3px 8px; }
 .pulse-activity-dialog { max-width: 590px; }
+.pulse-activity-disclosure { margin-top: 12px; }
+.pulse-activity-disclosure > summary { cursor: pointer; padding: 7px 0; font-size: 12px; font-weight: 600; color: var(--text); }
+.pulse-activity-disclosure > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.pulse-activity-disclosure[open] > summary { margin-bottom: 6px; }
+.pulse-activity-connections { margin-top: 21px; padding-top: 14px; border-top: 1px solid var(--border); }
+.pulse-activity-connections > .pulse-activity-section:first-of-type { margin-top: 6px; padding-top: 0; border-top: 0; }
 .pulse-activity-section { margin-top: 21px; padding-top: 20px; border-top: 1px solid var(--border); }
 .pulse-activity-section h3 { font-size: 13px; font-weight: 600; margin: 0 0 11px; }
 .pulse-activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }

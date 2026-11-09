@@ -226,8 +226,10 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
         {localBacklog?.oldestQueuedDeferredReason ? <p className="pulse-activity-detail">
           {t('pulse.waiting', { reason: pulseActivityLabel(t, 'reason', localBacklog.oldestQueuedDeferredReason) })}
         </p> : null}
-        <p className="pulse-activity-detail">{t('pulse.budget', { remaining: pulse.budget.remaining, limit: pulse.budget.limit })}</p>
         {admissionHold ? <p className="pulse-activity-detail">{t(admissionHold === 'hourly_count' ? 'pulse.admissionCountHeld' : 'pulse.admissionTokensHeld')}</p> : null}
+        <details className="pulse-activity-disclosure">
+          <summary>{t('pulse.hourlyDetails')}</summary>
+          <p className="pulse-activity-detail">{t('pulse.budget', { remaining: pulse.budget.remaining, limit: pulse.budget.limit })}</p>
         {pulse.providerTokenBudget ? <>
           <p className="pulse-activity-detail">{t('pulse.tokens', {
             charged: pulse.providerTokenBudget.charged,
@@ -243,6 +245,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
             <p className="pulse-activity-detail">{t('pulse.tokensOverrun', { overrun: pulse.providerTokenBudget.overrunTokens })}</p> : null}
           <p className="pulse-activity-detail">{t('pulse.tokensCaveat')}</p>
         </> : null}
+        </details>
         {pulse.queue.oldestQueuedAt ? <p className="pulse-activity-detail">{t('pulse.oldest', { time: eventTime(pulse.queue.oldestQueuedAt) })}</p> : null}
         {!pulse.providerConfigured ? <p className="pulse-activity-detail">{t('pulse.noProvider')}</p> : null}
       </section>
@@ -321,6 +324,8 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
             </li>;
           })}</ul>}
       </section>
+      <details className="pulse-activity-disclosure pulse-activity-connections">
+        <summary>{t('pulse.manageConnections', { count: incoming.length + edges.length })}</summary>
       <section className="pulse-activity-section" aria-label={t('pulse.incomingConnections')}>
         <h3>{t('pulse.incomingConnections')}</h3>
         <p className="pulse-activity-detail">{t('pulse.incomingInfo')}</p>
@@ -369,6 +374,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
           <button className="secondary-button" type="submit" disabled={busy || !target}>{t('pulse.connect')}</button>
         </form> : null}
       </section>
+      </details>
       <section className="pulse-activity-section" aria-label={t('pulse.recent')}>
         <h3>{t('pulse.recent')}</h3>
         {!recent.length ? <p className="pulse-activity-empty">{t('pulse.none')}</p> : <ol className="pulse-activity-list">
