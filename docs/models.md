@@ -42,6 +42,12 @@ and `patch`. Tool schemas avoid root `oneOf`, `anyOf`, and `allOf`, which
 Anthropic rejects. Streaming accepts ordinary `usage: null` chunks and records
 the service's final usage report.
 
+A model's tool-call mistakes do not end the turn. A call to a tool that is not
+available, or with arguments that are not one JSON object, is answered as a
+failed call that says why and lists the available tools; any failed call
+carries its reason. The model can then correct the call within the turn's
+usual round limit.
+
 These settings target the providers' **Chat Completions compatibility APIs**.
 Use `/chat/completions`, rather than the native Anthropic `/messages`, Gemini
 `generateContent`, or OpenAI `/responses` routes. `doctor` remains a local
