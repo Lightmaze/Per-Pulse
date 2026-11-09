@@ -285,6 +285,8 @@ export const continuityEnglish = {
   "status.failureIncomplete": "The model service ended the reply early. Send again.",
   "status.failureStepLimit": "This turn reached its step limit. Send a message to continue.",
   "status.failureTimeout": "This turn ran out of time.",
+  "status.failureAllowance": "Background model requests are paused or used up for this week. Open Activity to resume them or raise the allowance, or send a message to continue now.",
+  "status.failureSourceUnverified": "Per Pulse could not confirm what started this background request, so it was not sent. Send a message to continue.",
   "status.failureOther": "This turn stopped ({code}).",
   "status.sendAgain": "Send again",
 } as const;
@@ -574,6 +576,8 @@ export const continuityChinese: Record<keyof typeof continuityEnglish, string> =
   "status.failureIncomplete": "模型服务提前结束了这条回复。请再发送一次。",
   "status.failureStepLimit": "本轮已达到步数上限。发送一条消息即可继续。",
   "status.failureTimeout": "本轮超时了。",
+  "status.failureAllowance": "本周的后台模型请求已暂停或用完。打开活动以恢复或提高额度，或直接发送消息继续。",
+  "status.failureSourceUnverified": "无法确认这次后台请求由什么发起，因此没有发送。发送一条消息即可继续。",
   "status.failureOther": "本轮已停止（{code}）。",
   "status.sendAgain": "再发送一次",
 };

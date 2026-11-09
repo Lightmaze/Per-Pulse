@@ -137,6 +137,12 @@ test('a failed turn explains its cause from the Kernel error code', () => {
   assert.equal(failureReason('provider_stream_too_long').key, 'status.failureStreamTooLong');
   assert.equal(failureReason('provider_generation_incomplete').key, 'status.failureIncomplete');
   assert.deepEqual(failureReason('something_new').params, { code: 'something_new' });
+  // A background request stopped by the weekly allowance says where to resume it.
+  for (const code of ['autonomous_weekly_requests_exhausted', 'autonomous_weekly_requests_paused']) {
+    assert.equal(failureReason(code).key, 'status.failureAllowance');
+    assert.match(failureReason(code).text, /Open Activity/);
+  }
+  assert.equal(failureReason('autonomous_request_source_unverified').key, 'status.failureSourceUnverified');
   const page = getPageActivity('error', true, false, 'provider_http_401');
   assert.equal(page.labelKey, 'status.interrupted');
   assert.equal(page.detailKey, 'status.failureAuth');

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Explain a background turn stopped by the weekly allowance, or one whose start could not be confirmed, with a next step (Activity, or send a message) instead of showing only its code.
 - When a text-only model refuses a request that carries an image, send it once more without the image and tell the model why, instead of failing the turn with an unrelated hint about conversation length. Later images in the session are left out with the same note.
 
 ## 0.1.0a10
