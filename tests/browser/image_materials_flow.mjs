@@ -220,6 +220,54 @@ try {
   assert.ok(sentImage, 'Pasted image retains its source on the saved message');
   checks.push('Clipboard image paste: no auto-send, persisted draft after reload, original pixels and source on explicit Send');
 
+  // Dragging an image onto the Home composer uses the same durable draft
+  // upload as paste. Dragging a non-image does not attach it or navigate away.
+  await page.evaluate(() => {
+    const target = document.querySelector('.composer textarea');
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['hello'], 'notes.txt', { type: 'text/plain' }));
+    const event = new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true });
+    if (target.dispatchEvent(event)) throw new Error('File drop should not navigate away');
+  });
+  await page.locator('.composer-hint').getByText('Drop a PNG or JPEG image.', { exact: false }).waitFor();
+  assert.equal(await page.locator('.composer-materials li').count(), 0, 'Non-image drops do not change the draft');
+
+  const droppedBytes = examples.get('JPEG');
+  const beforeDrop = seenPixels.length;
+  await page.locator('.composer textarea').fill('Inspect the dropped photograph.');
+  await page.locator('.composer-hint').getByText('Paste or drop a PNG/JPEG', { exact: false }).waitFor();
+  const droppedUpload = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/materials?'));
+  await page.evaluate(encoded => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'Dropped photo.jpg', { type: 'image/jpeg' }));
+    const target = document.querySelector('.composer textarea');
+    const event = new DragEvent('dragover', { dataTransfer: transfer, bubbles: true, cancelable: true });
+    if (target.dispatchEvent(event)) throw new Error('Image dragover must be accepted');
+  }, droppedBytes.toString('base64'));
+  await page.locator('.composer.composer-drag-target').waitFor();
+  await page.locator('.composer-hint').getByText('Drop a PNG or JPEG to attach', { exact: false }).waitFor();
+  await page.evaluate(encoded => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'Dropped photo.jpg', { type: 'image/jpeg' }));
+    const target = document.querySelector('.composer textarea');
+    const event = new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true });
+    if (target.dispatchEvent(event)) throw new Error('Image drop must not navigate away');
+  }, droppedBytes.toString('base64'));
+  const droppedReceipt = await (await droppedUpload).json();
+  assert.equal(droppedReceipt.material.sha256, createHash('sha256').update(droppedBytes).digest('hex'));
+  await page.getByRole('button', { name: 'Inspect Dropped photo.jpg before sending' }).waitFor();
+  assert.equal(seenPixels.length, beforeDrop, 'Dropping an image cannot send a model turn');
+  await page.reload();
+  await page.getByRole('button', { name: 'Inspect Dropped photo.jpg before sending' }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Inspect the dropped photograph.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => seenPixels.length === beforeDrop + 1 &&
+    (await view()).messages.at(-1)?.role === 'assistant', 'dropped image reaches native model request');
+  assert.ok(seenPixels.at(-1).equals(droppedBytes));
+  checks.push('Home image drag/drop: visible target, non-image feedback, durable unsent draft, exact image bytes only on Send');
+
   // The same composer path works inside a Work. Its attachment must not
   // appear in Home merely because their files share the World workspace.
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();

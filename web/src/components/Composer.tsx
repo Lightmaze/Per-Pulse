@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, type RefObject } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { Draft, ProviderState } from '../types';
 import { Icon } from './Icon';
 import { useLanguage } from '../i18n';
@@ -16,6 +16,8 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
 }) {
   const { t, pageTitle: localizedPageTitle } = useLanguage();
   const composing = useRef(false);
+  const [draggingFile, setDraggingFile] = useState(false);
+  const [unsupportedDrop, setUnsupportedDrop] = useState(false);
   const connectionId = useId();
   const destination = pageKind === 'home' ? localizedPageTitle({ id: 'home', title: 'Home' }) : pageTitle || t('composer.thisPage');
   const disconnected = provider && !provider.configured;
@@ -25,13 +27,36 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
     if (input) { input.style.height = 'auto'; input.style.height = `${Math.min(220, Math.max(38, input.scrollHeight))}px`; }
   }, [draft.text, inputRef]);
   return <div className="composer-wrap">
-    <form className="composer" onSubmit={event => { event.preventDefault(); if (canSend && !busy && !pastingImage) send(); }}>
+    <form className={`composer${draggingFile ? ' composer-drag-target' : ''}`}
+      onDragOver={event => {
+        if (!onPasteImage || !event.dataTransfer.types.includes('Files')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        if (!draggingFile) setDraggingFile(true);
+      }}
+      onDragLeave={event => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingFile(false);
+      }}
+      onDrop={event => {
+        if (!onPasteImage || !event.dataTransfer.files.length) return;
+        event.preventDefault(); // Do not navigate away when a file is dropped on the composer.
+        setDraggingFile(false);
+        const image = Array.from(event.dataTransfer.files)
+          .find(file => file.type === 'image/png' || file.type === 'image/jpeg');
+        if (image) {
+          setUnsupportedDrop(false);
+          onPasteImage(image); // Same durable, unsent Home/Work draft path as clipboard paste.
+        } else {
+          setUnsupportedDrop(true);
+        }
+      }}
+      onSubmit={event => { event.preventDefault(); if (canSend && !busy && !pastingImage) send(); }}>
       {draft.materials?.length ? <ul className="composer-materials" aria-label={t('materials.forMessage')}>{draft.materials.map(material => <li key={material.id}>{onInspectMaterial ? <button type="button" className="composer-material-inspect" aria-label={t('materials.inspectDraft', { name: material.name })} onClick={() => onInspectMaterial(material.id)}>{material.name}</button> : <span>{material.name}</span>}<button type="button" className="composer-material-remove" aria-label={t('materials.remove', { name: material.name })} onClick={() => changeDraft({ ...draft, materials: draft.materials?.filter(item => item.id !== material.id) })}><Icon name="close" size={14} /></button></li>)}</ul> : null}
-      <textarea ref={inputRef} value={draft.text} onChange={event => changeDraft({ ...draft, text: event.target.value })} onPaste={event => {
+      <textarea ref={inputRef} value={draft.text} onChange={event => { setUnsupportedDrop(false); changeDraft({ ...draft, text: event.target.value }); }} onPaste={event => {
         if (!onPasteImage) return;
         const image = Array.from(event.clipboardData.items)
           .find(item => item.kind === 'file' && (item.type === 'image/png' || item.type === 'image/jpeg'))?.getAsFile();
-        if (image) { event.preventDefault(); onPasteImage(image); }
+        if (image) { event.preventDefault(); setUnsupportedDrop(false); onPasteImage(image); }
       }} placeholder={pageKind === 'work' ? t('composer.continueIn', { destination }) : t('composer.placeholder')} aria-label={t('composer.messageTo', { destination })} aria-describedby={disconnected ? connectionId : undefined} rows={1} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => {
         if (event.key === 'Enter' && !event.shiftKey && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); if (canSend && !busy && !pastingImage) send(); }
       }} />
@@ -48,6 +73,6 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
       {retryDraftSave ? <button type="button" className="text-button" onClick={retryDraftSave}>{t('composer.retryDraftSave')}</button> : null}
     </div> : null}
     {disconnected ? <p id={connectionId} className="composer-connection">{t('composer.disconnected')}{onSettings ? <button type="button" className="text-button composer-connection-action" onClick={onSettings}>{t('composer.connectionSettings')}</button> : null}</p> : null}
-    <p className="composer-hint" role="status">{pastingImage ? t('composer.pastingImage') : busy ? t('composer.saving') : t('composer.hint')}</p>
+    <p className="composer-hint" role="status">{pastingImage ? t('composer.pastingImage') : draggingFile ? t('composer.dropImage') : unsupportedDrop ? t('composer.dropUnsupported') : busy ? t('composer.saving') : t('composer.hint')}</p>
   </div>;
 }

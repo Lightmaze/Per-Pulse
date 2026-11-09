@@ -191,6 +191,7 @@ button, a, input, textarea { outline-offset: 4px; }
 .composer-wrap { margin-top: auto; padding-top: 64px; }
 .composer { padding: 17px 20px 14px; border: 1px solid #d7d9d3; border-radius: 12px; background: white; min-height: 112px; transition: border-color .15s ease; }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.composer.composer-drag-target { border-color: var(--accent); background: #f5f8f3; box-shadow: 0 0 0 2px var(--accent); }
 .composer textarea { display: block; padding: 0 2px; min-height: 38px; width: 100%; resize: none; border: 0; outline: none; background: transparent; font-size: 16px; line-height: 1.65; max-height: 220px; scrollbar-width: thin; }
 .composer textarea::placeholder { color: var(--muted); opacity: 1; }
 .composer-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 36px; margin-top: 7px; }
