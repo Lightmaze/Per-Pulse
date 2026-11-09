@@ -108,7 +108,7 @@ class NativeHabitat:
         return "native-habitat:v1:" + world_id + ":" + hashlib.sha256(
             location.encode("utf-8")).hexdigest()
 
-    def execute(self, scope, call, cancellation, *, action_request_id=None):
+    def execute(self, scope, call, cancellation, *, action_request_id=None, authority_claim=None):
         runtime = self.runtime
         values = validate(call.name, call.arguments)
         if call.name == WRITE and not runtime.harness._allow_mutations:
@@ -193,8 +193,14 @@ class NativeHabitat:
             return answer
 
         if call.name == WRITE:
+            if authority_claim is None:
+                raise ScopeConflict("Habitat mutation requires provider-bound Kernel authority")
             with runtime.harness._mutation_guard():
                 runtime.harness.authorize_habitat(scope, action_request_id, call)
                 cancellation.raise_if_cancelled()
+                # Inside the publication fence, consume a single process-local
+                # permission bound before approval to this exact persisted action.
+                # The ManagedHabitat effect journal owns physical crash replay.
+                authority_claim(scope, call, action_request_id)
                 return act()
         return act()
