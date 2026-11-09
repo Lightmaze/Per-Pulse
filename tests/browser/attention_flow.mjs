@@ -125,6 +125,7 @@ try {
   await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await page.getByRole('button', { name: '活动', exact: true }).click();
   await page.getByRole('heading', { name: '此页面保留的思考', exact: true }).waitFor();
+  await page.getByText('每小时限额与用量', { exact: true }).click();
   await page.getByText(/本小时后台 token/).waitFor();
   await page.getByText(thought.note, { exact: true }).waitFor();
   await page.getByRole('button', { name: '打开原始消息', exact: true }).click();
