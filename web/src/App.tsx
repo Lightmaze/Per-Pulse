@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { api } from './api';
+import { api, ApiError } from './api';
+import { uploadLimit } from './uploadLimits';
 import { messageBody } from './messageBody';
 import { retryMessageInput } from './retryMessage';
 import { parseTickCommand } from './tickCommand';
@@ -48,6 +49,8 @@ export default function App() {
   const [sourceNotice, setSourceNotice] = useState('');
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [draftSaveFailures, setDraftSaveFailures] = useState<Record<string, boolean>>({});
+  const [pastingPages, setPastingPages] = useState<Record<string, boolean>>({});
+  const pendingPastes = useRef(new Set<string>());
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
   const main = useRef<HTMLElement>(null);
@@ -57,6 +60,8 @@ export default function App() {
   const scrollTimer = useRef<number | undefined>(undefined);
   const composerSelection = useRef({ start: 0, end: 0 });
   const workspaceId = bootstrap?.workspaceId;
+  const latestBootstrap = useRef(bootstrap);
+  latestBootstrap.current = bootstrap;
   const currentPage = useRef(route.id);
   currentPage.current = route.id;
   const currentRouteSerial = useRef(route.serial);
@@ -99,6 +104,65 @@ export default function App() {
     setDrafts(updated);
     persistDraft(route.id, next);
   }, [route.id, route.serial, workspaceId, draftKey, persistDraft]);
+
+  const pasteImage = async (image: File) => {
+    const identity = bootstrap;
+    const worldId = workspaceId;
+    const pageId = route.id;
+    const key = draftKey;
+    const serial = route.serial;
+    if (!identity || !worldId || pendingPastes.current.has(key)) return;
+    const extension = image.type === 'image/png' ? 'png' : 'jpg';
+    const name = /\.(png|jpe?g)$/i.test(image.name) ? image.name : `Pasted image.${extension}`;
+    const file = name === image.name ? image : new File([image], name, { type: image.type });
+    if (!file.size) { setToast(t('library.emptyFile')); return; }
+    if (file.size > uploadLimit(name)) { setToast(t('library.tooLarge')); return; }
+    const before = readCurrentDraft(worldId, pageId, draftsRef.current[key] ?? EMPTY_DRAFT);
+    if ((before.materials?.length ?? 0) >= 5) { setToast(t('materials.selectionFull')); return; }
+
+    pendingPastes.current.add(key);
+    setPastingPages(previous => ({ ...previous, [key]: true }));
+    try {
+      // Reuse the same durable workspace upload receipt as Materials. Pasting
+      // never sends a model turn or grants a file action.
+      const uploadId = crypto.randomUUID().replace(/-/g, '');
+      const response = await api.uploadMaterial(pageId, identity, uploadId, file);
+      if (response.workspaceId !== worldId || response.serviceInstanceId !== identity.serviceInstanceId
+          || response.material.pageId !== pageId || response.material.id !== uploadId) {
+        throw new Error(t('library.referenceUnconfirmed'));
+      }
+      // A reload or workspace switch must not attach an old server's response
+      // to the new World. Navigation within this World is fine: update the
+      // original page's draft without stealing focus from the current page.
+      if (latestBootstrap.current?.workspaceId !== worldId
+          || latestBootstrap.current.serviceInstanceId !== identity.serviceInstanceId) return;
+      const current = readCurrentDraft(worldId, pageId, draftsRef.current[key] ?? EMPTY_DRAFT);
+      if ((current.materials?.length ?? 0) >= 5) {
+        if (currentPage.current === pageId && currentRouteSerial.current === serial) setToast(t('composer.pastedImageSaved'));
+        return;
+      }
+      const next: Draft = { ...current, materials: [
+        ...(current.materials ?? []), { id: response.material.id, name: response.material.name },
+      ] };
+      const updated = { ...draftsRef.current, [key]: next };
+      draftsRef.current = updated;
+      setDrafts(updated);
+      persistDraft(pageId, next);
+      if (currentPage.current === pageId && currentRouteSerial.current === serial) setToast(t('composer.pastedImageReady'));
+    } catch (problem) {
+      if (currentPage.current === pageId && currentRouteSerial.current === serial) {
+        setToast(problem instanceof ApiError && (problem.code === 'network_error' || problem.code === 'material_upload_unconfirmed')
+          ? t('library.uploadUnconfirmed') : errorText(problem));
+      }
+    } finally {
+      pendingPastes.current.delete(key);
+      setPastingPages(previous => {
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     document.title = view?.page.kind === 'work' ? `${view.page.title} · Per Pulse` : 'Per Pulse';
@@ -501,7 +565,7 @@ export default function App() {
                 .catch(problem => setSendErrors(previous => ({ ...previous, [draftKey]: errorText(problem) })));
             }}>{t('tick.stop')}</button>
           </div> : null}
-          {view && workspaceId ? <Composer draft={draft} draftSaveFailed={draftSaveFailures[draftKey] === true} retryDraftSave={() => persistDraft(route.id, draft)} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onInspectMaterial={materialId => openModal({ kind: 'materials', materialId, pageId: route.id })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
+          {view && workspaceId ? <Composer draft={draft} onPasteImage={pasteImage} pastingImage={pastingPages[draftKey] === true} draftSaveFailed={draftSaveFailures[draftKey] === true} retryDraftSave={() => persistDraft(route.id, draft)} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onInspectMaterial={materialId => openModal({ kind: 'materials', materialId, pageId: route.id })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
     </div>
