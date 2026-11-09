@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Explain a background turn stopped by the weekly allowance, or one whose start could not be confirmed, with a next step (Activity, or send a message) instead of showing only its code.
+
 ## 0.1.0a10
 
 - Open a previously cited experience directly from the persistent World journal without rescanning the full history, preserving original and shared-Work visibility rules.
