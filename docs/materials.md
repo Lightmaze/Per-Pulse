@@ -62,11 +62,13 @@ separate image-model setting. For compatible models, see the providers'
 [OpenAI vision](https://developers.openai.com/api/docs/guides/images-vision) and
 [DeepSeek vision](https://api-docs.deepseek.com/guides/vision/) documentation.
 Image input is part of normal provider usage. Up to five images can accompany one
-request, within the existing request-size bound. A text-only model refuses image input: if
-the service refuses a request that carries an image, Per Pulse sends it once more
-without the image and tells the model why, so the reply can say so. Later image
-reads in the same session are sent without pixels and with the same note. If the model needs an image
+request, within the existing request-size bound. If the model needs an image
 again in a later turn or after a restart, it reads the source again.
+
+A text-only model refuses image input. If the service refuses a request that
+carries an image, Per Pulse sends it once more without the image and tells the
+model why, so the reply can say so. Later image reads in the same session are
+sent without pixels and with the same note.
 
 ## Carry a file result from another Work
 
