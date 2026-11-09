@@ -91,10 +91,13 @@ def test_clipped_tool_result_is_read_in_original_text_pages_without_reopening_th
         store, history = pages.runtime.kernel_service.store, reader(pages)
         saved = next(row for row in store.transcript_rows(original_scope) if row["role"] == "tool")
         original_action = store.actions_for_turn(original_scope)[0]
-        # The current turn remains excluded, even after its tool action completed.
+        # Browsing excludes current-turn tool copies, but direct, authorized
+        # lookup of its settled result is available for context continuation.
         assert recall(history, original_scope, query="", role="tool")["matches"] == []
-        with pytest.raises(ScopeConflict):
-            recall(history, original_scope, "read_history", message_id=saved["message_id"], role="tool")
+        current = recall(history, original_scope, "read_history",
+                         message_id=saved["message_id"], role="tool")
+        assert current["content"] == saved["content"]
+        assert current["coverage"]["current_turn_excluded"] is False
         for _ in range(4):
             current, _ = activate(pages, page_id, text="Continue the local discussion. " + "detail " * 360)
         last = fixture.requests[-1][1]["messages"]
@@ -130,6 +133,34 @@ def test_clipped_tool_result_is_read_in_original_text_pages_without_reopening_th
         assert ORIGINAL in "".join(parts) and "REVISED_CURRENT_FILE" not in "".join(parts)
         assert tuple(store._db.iterdump()) == before
         assert len(fixture.requests) == request_count
+    finally:
+        pages.runtime.close()
+
+
+
+def test_one_large_tool_result_can_be_recalled_in_the_same_turn(tmp_path, monkeypatch):
+    monkeypatch.setenv("P_PULSE_CONTEXT_TOKENS", "2048")
+    fixture = HistoryFixture(monkeypatch)
+    pages = PageService(tmp_path, model_factory=fixture.factory)
+    try:
+        source = tmp_path / "workspace" / "large.txt"
+        source.write_text("CURRENT_TOOL_SOURCE_MARKER:" + "z" * 18_000)
+        _, scope, result = create(pages, operations=[("read_file", {"path": "large.txt"})])
+        assert result.status.value == "succeeded"
+        store = pages.runtime.kernel_service.store
+        saved = next(row for row in store.transcript_rows(scope) if row["role"] == "tool")
+        latest = fixture.requests[-1][1]["messages"]
+        projected = next(row for row in latest if row["role"] == "tool")
+        reference = json.loads(projected["content"])["output"]["context_window"]
+        assert reference["message_id"] == saved["message_id"]
+        assert "CURRENT_TOOL_SOURCE_MARKER" not in projected["content"]
+        assert "CURRENT_TOOL_SOURCE_MARKER" in saved["content"]
+        history = reader(pages)
+        original = recall(history, scope, "read_history",
+                          message_id=saved["message_id"], role="tool", max_chars=120)
+        assert "CURRENT_TOOL_SOURCE_MARKER" in original["content"]
+        assert original["next_offset"] is not None
+        assert original["coverage"]["current_turn_excluded"] is False
     finally:
         pages.runtime.close()
 
