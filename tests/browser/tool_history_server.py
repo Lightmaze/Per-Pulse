@@ -134,7 +134,7 @@ class ToolHistoryFixture:
             return streamed("Read the file and kept the original tool receipt." + LABEL)
 
         if "HISTORY_WINDOW_FILLER" in task:
-            assert all(OLD not in message.get("content", "") for message in messages
+            assert all(OLD not in (message.get("content") or "") for message in messages
                        if message["role"] in {"user", "assistant"}), "no discussion summary may leak the old marker"
             return streamed("Continuation received. " + "Keep the current discussion readable. " * 48 + LABEL)
 
