@@ -111,7 +111,7 @@ try {
   };
   const fillWindow = async id => {
     for (let index = 0; index < 4; index++) {
-      await send(id, `HISTORY_WINDOW_FILLER ${index}: ` + 'Continue the current field discussion. '.repeat(24), 'Continuation received.');
+      await send(id, `HISTORY_WINDOW_FILLER ${index}: ` + 'Continue the current field discussion. '.repeat(48), 'Continuation received.');
     }
   };
 
