@@ -1,6 +1,6 @@
 # Bring source material into a conversation
 
-Open **Materials**, choose UTF-8 text or a PNG/JPEG image up to 1 MiB, or a PDF up to 32 MiB,
+Open **Materials**, choose UTF-8 text up to 1 MiB, or a PNG/JPEG image or PDF up to 32 MiB,
 and select **Upload file**. A PDF is kept as the original file; its preview and
 what Per Pulse reads is its text, with a `[Page N]` line before each page. A
 password-protected PDF must be unlocked first. A page with no selectable
@@ -50,12 +50,14 @@ The **Add to draft** action stays visible while reading a long material.
 ## Read an image
 
 Upload a still PNG or JPEG in **Materials**, inspect its image preview, then choose
-**Add to draft** and send your question. Images can contain up to 8 megapixels
-(8,388,608 pixels); corrupt or animated images are refused with a reason. The
-original file stays unchanged, with its exact source version and download.
+**Add to draft** and send your question. Images can contain up to 50 megapixels;
+corrupt or animated images are refused with a reason. The original file stays
+unchanged, with its exact source version and download.
 
 With an image-compatible model configured, Per Pulse reads the image through
-`read_file` and sends its original pixels in the next model request. There is no
+`read_file` and sends it in the next model request: the original when it is at
+most 1 MiB and 2048 px on its long edge, otherwise an upright copy scaled to fit,
+which the model is told about. The preview shows what the model receives. There is no
 separate image-model setting. For compatible models, see the providers'
 [OpenAI vision](https://developers.openai.com/api/docs/guides/images-vision) and
 [DeepSeek vision](https://api-docs.deepseek.com/guides/vision/) documentation.
