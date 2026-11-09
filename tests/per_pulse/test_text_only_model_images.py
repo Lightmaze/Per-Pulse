@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
-from pulse_harness.core.errors import ProviderUnavailable
+from pulse_harness.core.errors import ProviderProtocolError, ProviderUnavailable
 from pulse_harness.core.provider import ModelDeltaKind
 from test_image_materials import pixels, request_for, source  # noqa: F401  (pytest fixture)
 
@@ -109,5 +109,35 @@ def test_the_image_is_only_left_out_when_the_retry_succeeds(source):
         assert error.value.code == "provider_http_400" and len(bodies) == 2
         assert pixels(bodies[0]) and not pixels(bodies[1])
         assert adapter.images_refused is None
+    finally:
+        adapter.close()
+
+
+def test_a_broken_reply_without_the_image_is_not_remembered(source, monkeypatch):
+    """A refused image, then an image-free reply that never completes: nothing is learned."""
+    provider, scope, result, data = source
+    bodies = []
+    broken = "data: " + json.dumps({"choices": [{"index": 0, "delta": {"content": "I cannot"},
+                                                   "finish_reason": None}]}) + "\n\n"
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if pixels(body):
+            return httpx.Response(400, json={"error": {"message": "image input is not supported"}})
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=broken)
+
+    adapter = ChatHTTPModelAdapter(ChatHTTPConfig("http://127.0.0.1:9/chat", "text-only", allow_local_http=True,
+        no_auth_local=True), transport=httpx.MockTransport(handler))
+    adapter.workspace_image_resolver = provider.resolve_image
+    try:
+        with pytest.raises(ProviderProtocolError) as error:
+            list(adapter.stream(request_for(scope, result)))
+        assert error.value.code == "provider_stream_incomplete"
+        assert len(bodies) == 2 and pixels(bodies[0]) == [data] and not pixels(bodies[1])
+        assert adapter.images_refused is None
+        # The next request with a fresh image read still carries its pixels.
+        fresh = provider.read_file(scope, "picture.png")
+        assert pixels(adapter.request_body(request_for(scope, fresh))) == [data]
     finally:
         adapter.close()

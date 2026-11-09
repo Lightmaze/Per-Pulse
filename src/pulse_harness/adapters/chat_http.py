@@ -741,8 +741,6 @@ class _ChatStream:
                 if cancelled:
                     return
                 if response.status_code == 200:
-                    if images_refused is not None:
-                        self.adapter.images_refused = images_refused
                     break
                 if active_ticket is not None:
                     accounting.settle(active_ticket, "rejected")
@@ -770,6 +768,10 @@ class _ChatStream:
             if "text/event-stream" not in response.headers.get("content-type", "").lower():
                 raise ProviderProtocolError("model endpoint did not return an SSE stream")
             yield from self._deltas(response)
+            if images_refused is not None and self._done:
+                # Remember only after a complete reply without the image: a
+                # stream that breaks proves nothing about image support.
+                self.adapter.images_refused = images_refused
         except httpx.HTTPError:
             if not self._cancelled():
                 raise ProviderUnavailable("model transport failed", code="provider_transport_error") from None
