@@ -1933,6 +1933,7 @@ class TurnRunner:
                 "role": message.role,
                 "content": content,
                 "item_id": message.item_id,
+                "message_id": message.message_id,
                 "transcript_seq": message.transcript_seq,
             }
             if message.role == "assistant":
