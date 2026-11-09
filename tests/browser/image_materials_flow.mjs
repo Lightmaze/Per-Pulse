@@ -220,6 +220,44 @@ try {
   assert.ok(sentImage, 'Pasted image retains its source on the saved message');
   checks.push('Clipboard image paste: no auto-send, persisted draft after reload, original pixels and source on explicit Send');
 
+  // The same composer path works inside a Work. Its attachment must not
+  // appear in Home merely because their files share the World workspace.
+  await page.getByRole('button', { name: 'Create a page', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Screenshot follow-up');
+  await page.getByRole('textbox', { name: 'Where should we begin?', exact: true }).fill('Inspect an image in this Work.');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Screenshot follow-up', exact: true }).waitFor();
+  const workId = new URL(page.url()).pathname.split('/').pop();
+  const workCount = seenPixels.length;
+  await page.locator('.composer textarea').fill('Explain this screenshot in the Work.');
+  const workUpload = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/materials?'));
+  await page.evaluate(encoded => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const clipboard = new DataTransfer();
+    clipboard.items.add(new File([bytes], 'Work image.png', { type: 'image/png' }));
+    document.querySelector('.composer textarea').dispatchEvent(new ClipboardEvent('paste', {
+      clipboardData: clipboard, bubbles: true, cancelable: true,
+    }));
+  }, pastedBytes.toString('base64'));
+  const workReceipt = await (await workUpload).json();
+  assert.equal(workReceipt.material.pageId, workId);
+  await page.getByRole('button', { name: 'Inspect Work image.png before sending' }).waitFor();
+  assert.equal(seenPixels.length, workCount, 'Work paste must not submit a model turn');
+  await page.goto(base);
+  await page.locator('.composer textarea').waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Inspect Work image.png before sending' }).count(), 0,
+    'Home does not inherit the Work draft');
+  await page.goto(base + '/page/' + workId);
+  await page.getByRole('button', { name: 'Inspect Work image.png before sending' }).waitFor();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => seenPixels.length === workCount + 1 &&
+    (await fetch(base + '/api/pages/' + workId).then(response => response.json())).messages.at(-1)?.role === 'assistant',
+    'Work image reaches native model request');
+  assert.ok(seenPixels.at(-1).equals(pastedBytes));
+  checks.push('Work paste: original Work draft survives navigation; Home isolation; original image only on explicit Send');
+  await page.goto(base);
+  await page.locator('.composer textarea').waitFor();
+
   await open();
   const picker = page.getByLabel('Choose a file', { exact: true });
   await picker.setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('broken image') });
