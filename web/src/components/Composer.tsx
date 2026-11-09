@@ -52,7 +52,7 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
       }}
       onSubmit={event => { event.preventDefault(); if (canSend && !busy && !pastingImage) send(); }}>
       {draft.materials?.length ? <ul className="composer-materials" aria-label={t('materials.forMessage')}>{draft.materials.map(material => <li key={material.id}>{onInspectMaterial ? <button type="button" className="composer-material-inspect" aria-label={t('materials.inspectDraft', { name: material.name })} onClick={() => onInspectMaterial(material.id)}>{material.name}</button> : <span>{material.name}</span>}<button type="button" className="composer-material-remove" aria-label={t('materials.remove', { name: material.name })} onClick={() => changeDraft({ ...draft, materials: draft.materials?.filter(item => item.id !== material.id) })}><Icon name="close" size={14} /></button></li>)}</ul> : null}
-      <textarea ref={inputRef} value={draft.text} onChange={event => changeDraft({ ...draft, text: event.target.value })} onPaste={event => {
+      <textarea ref={inputRef} value={draft.text} onChange={event => { setUnsupportedDrop(false); changeDraft({ ...draft, text: event.target.value }); }} onPaste={event => {
         if (!onPasteImage) return;
         const image = Array.from(event.clipboardData.items)
           .find(item => item.kind === 'file' && (item.type === 'image/png' || item.type === 'image/jpeg'))?.getAsFile();
