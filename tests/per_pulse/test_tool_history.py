@@ -157,9 +157,23 @@ def test_one_large_tool_result_can_be_recalled_in_the_same_turn(tmp_path, monkey
         history = reader(pages)
         original = recall(history, scope, "read_history",
                           message_id=saved["message_id"], role="tool", max_chars=120)
-        assert "CURRENT_TOOL_SOURCE_MARKER" in original["content"]
-        assert original["next_offset"] is not None
+        # The stored result is a JSON tool envelope; the first page contains
+        # the action metadata, not necessarily the file bytes. Follow the
+        # actual cursor instead of assuming a marker at offset zero.
+        passages = [original["content"]]
+        offset = original["next_offset"]
+        assert offset is not None
         assert original["coverage"]["current_turn_excluded"] is False
+        while offset is not None:
+            page = recall(history, scope, "read_history",
+                          message_id=saved["message_id"], role="tool",
+                          offset=offset, max_chars=4096)
+            assert page["offset"] == offset
+            assert page["source"] == original["source"]
+            passages.append(page["content"])
+            offset = page["next_offset"]
+        assert "".join(passages) == saved["content"]
+        assert "CURRENT_TOOL_SOURCE_MARKER" in "".join(passages)
     finally:
         pages.runtime.close()
 
