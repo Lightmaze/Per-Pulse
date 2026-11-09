@@ -192,8 +192,14 @@ class ConversationHistoryTools:
         count = _integer(args.get("max_chars", 4000), 1, 4096)
         for source in scopes:
             cancellation.raise_if_cancelled()
+            # A terminal tool result from the active turn is already durable,
+            # and its explicit message_id may be needed when its large body is
+            # projected out of the next model request. Original user/assistant
+            # messages still obey current-turn exclusion; recall tool copies
+            # remain excluded by the store's authoritative action join.
+            exclude_current = args.get("role") != "tool"
             row = self.store.read_transcript_message(source, message_id,
-                exclude_turn_id=scope.turn_id if source == scope.session_scope() else "",
+                exclude_turn_id=scope.turn_id if exclude_current and source == scope.session_scope() else "",
                 role=args.get("role"), excluded_tool_names=RECALL_TOOL_NAMES)
             if row is None:
                 continue
