@@ -3,7 +3,7 @@
  * The PDFs are synthetic; uploads, the workspace and the page service are real. No model is used.
  */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -83,17 +83,61 @@ try {
   await picker.setInputFiles({ name: 'Q3 report.pdf', mimeType: 'application/pdf', buffer: report });
   await dialog.getByRole('button', { name: 'Upload file', exact: true }).click();
   const preview = dialog.locator('.material-preview');
-  await preview.getByText('The text of this PDF, page by page.', { exact: true }).waitFor();
+  const scopeHint = 'Selectable text from this PDF, page by page. For images and visual details, download the original.';
+  const waitForReadablePreview = () => page.waitForFunction(() => {
+    const body = document.querySelector('.materials-dialog .material-body');
+    const pre = body?.querySelector('.material-preview pre');
+    if (!body || !pre) return false;
+    const viewport = body.getBoundingClientRect(), passage = pre.getBoundingClientRect();
+    const center = document.elementFromPoint(passage.x + passage.width / 2, passage.y + passage.height / 2);
+    return passage.height > 20 && passage.top >= viewport.top
+      && passage.bottom <= Math.min(viewport.bottom, window.innerHeight)
+      && center?.closest('pre') === pre;
+  });
+  await preview.getByText(scopeHint, { exact: true }).waitFor();
   assert.equal(await preview.locator('pre').innerText(),
     '[Page 1]\nQuarterly revenue grew 12 percent.\n\n[Page 2]\nCosts fell in the second half.');
   const [stored] = await files();
   assert.deepEqual(await readFile(join(directory, 'workspace/uploads', stored)), report);
   checks.push('an uploaded PDF is kept as the original file and previewed as its text, page by page');
+
+  // Reuse the native fixture: a text caption and a raster SCAN label share a page.
+  const mixed = spawnSync(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'),
+    ['-c', 'from pdf_samples import synthetic_pdf; import sys; sys.stdout.buffer.write(synthetic_pdf(["Selectable caption."], scan_marker=True))'],
+    { cwd: join(root, 'tests/per_pulse'), env });
+  assert.equal(mixed.status, 0, mixed.stderr.toString());
+  await picker.setInputFiles({ name: 'mixed.pdf', mimeType: 'application/pdf', buffer: mixed.stdout });
+  await dialog.getByRole('button', { name: 'Upload file', exact: true }).click();
+  await preview.getByRole('heading', { name: /mixed\.pdf$/ }).waitFor();
+  await preview.getByText(scopeHint, { exact: true }).waitFor();
+  assert.equal(await preview.locator('pre').innerText(), '[Page 1]\nSelectable caption.');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  await preview.getByText(scopeHint, { exact: true }).waitFor();
+  // A resize can put the preview below the outer body's viewport. Exercise
+  // actual scrolling and check readable geometry, not just hidden innerText.
+  const body = await dialog.locator('.material-body').boundingBox();
+  await page.mouse.move(body.x + body.width - 8, body.y + body.height - 20);
+  await page.mouse.wheel(0, 400);
+  await waitForReadablePreview();
+  checks.push('mixed-page text and its scope remain readable by scrolling after resizing to phone width');
   if (screenshots) { await mkdir(screenshots, { recursive: true }); await page.screenshot({ path: join(screenshots, 'pdf-preview.png') }); }
 
   await dialog.getByRole('button', { name: 'Add to draft', exact: true }).click();
-  await page.getByRole('button', { name: 'Remove Q3 report.pdf from this message', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Remove mixed.pdf from this message', exact: true }).waitFor();
   checks.push('the PDF can be attached to a message');
+
+  // Open and select the existing source at phone width. The product's focus
+  // and scroll path should bring the actual passage into view on its own.
+  await page.getByRole('button', { name: 'Materials', exact: true }).click();
+  await dialog.getByRole('button', { name: 'uploads/', exact: true }).click();
+  await dialog.getByRole('button', { name: /mixed\.pdf/ }).click();
+  await preview.getByRole('heading', { name: /mixed\.pdf$/ }).waitFor();
+  await waitForReadablePreview();
+  assert.equal(await preview.locator('pre').innerText(), '[Page 1]\nSelectable caption.');
+  await preview.getByText(scopeHint, { exact: true }).waitFor();
+  checks.push('opening the existing mixed PDF on a phone brings the passage into the visible reading area');
+  if (screenshots) await page.screenshot({ path: join(screenshots, 'pdf-mobile-reopened.png') });
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks }));

@@ -108,7 +108,7 @@ def test_literal_omission_marker_is_part_of_the_original_uploaded_bytes(tmp_path
     with client_for(tmp_path, model_factory=None) as client:
         record = upload(client, "home", "limited-source.txt", content).json()["material"]
         preview = client.get(f"/api/pages/home/materials/{record['id']}").json()
-        assert preview["redacted"] and preview["downloadable"]
+        assert not preview["redacted"] and preview["downloadable"]
         response = download(client, "home", record)
         assert response.status_code == 200 and response.content == content
 

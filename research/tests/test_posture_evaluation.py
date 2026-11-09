@@ -77,6 +77,39 @@ def experience():
     }
 
 
+@pytest.mark.parametrize("row_format", [False, True])
+def test_native_journal_audit_reads_both_formats_without_modifying_archived_world(tmp_path, row_format):
+    from contextlib import closing
+    import sqlite3
+    from per_pulse_research.posture_evaluation import _native_posture_journal, _readonly_trace
+    from pulse_system.service.posture import PostureMemory, SCHEMA
+    from pulse_system.substrate.storage import Storage
+
+    path = tmp_path / "world.db"
+    storage = Storage(path)
+    memory = PostureMemory(storage, "world")
+    original = PostureMemory.validate_experience(subject_id="subject", context_id="source",
+                                                 experience_id="original", **experience())
+    storage.save_component_state(memory.component,
+                                 {"schema": SCHEMA, "world_id": "world", "experiences": {"original": original}})
+    expected = original
+    if row_format:
+        memory.revise_experience("original", expected_revision=1, changes={"title": "Later interpretation"})
+        expected = memory.record_feedback("original", expected_revision=2, verdict="harmful", evidence="Original correction.")
+    storage.close()
+    if not row_format:
+        with sqlite3.connect(path) as old:
+            for table in ("posture_experience_feedback", "posture_experience_revisions", "posture_experiences", "posture_journals"):
+                old.execute(f"DROP TABLE {table}")
+            old.execute("DELETE FROM schema_migrations WHERE version=13")
+            old.execute("PRAGMA user_version=12")
+    before = path.read_bytes()
+    with closing(_readonly_trace(path)) as source:
+        assert _native_posture_journal(source, "world") == {"original": expected}
+        assert _native_posture_journal(source, "other-world") == {}
+    assert path.read_bytes() == before
+
+
 def test_ux_slogans_and_model_self_report_do_not_pass_a_form(tmp_path):
     record = record_for(tmp_path, "experience_entry", {"prototype.html": "<form><input name='profile'></form>"})
     record["assistant_text"] = "UX-centered. I performed a UX review and a reflection. All tests passed."

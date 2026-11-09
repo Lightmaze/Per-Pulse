@@ -89,9 +89,8 @@ def validate(arguments: Mapping) -> dict:
         content = values["content"]
         if not isinstance(content, str) or not content.strip() or "\x00" in content:
             raise ValueError("notice content must be nonblank text")
-        clean, redacted, truncated = bound_text(content, MAX_CONTENT_BYTES)
-        if redacted or truncated or clean != content:
-            raise ValueError("notice content must fit 2048 UTF-8 bytes without credentials")
+        if len(content.encode("utf-8")) > MAX_CONTENT_BYTES:
+            raise ValueError("notice content must fit 2048 UTF-8 bytes")
     return values
 
 

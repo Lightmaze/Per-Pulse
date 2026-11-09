@@ -168,6 +168,50 @@ def test_native_world_sqlite_survives_process_reopen(tmp_path):
         second_store.close()
 
 
+def test_restart_reconciles_unfinished_requests_across_multiple_weeks(tmp_path):
+    # A World can be stopped for longer than one week. Its old dispatched
+    # attempts must never be mistaken for settled or made free on restart.
+    store_path = tmp_path / "world.db"
+    old_sunday = datetime(2026, 9, 27, 23, tzinfo=timezone.utc)
+    recent_sunday = datetime(2026, 11, 8, 23, tzinfo=timezone.utc)
+    restart_monday = datetime(2026, 11, 9, 0, tzinfo=timezone.utc)
+    future_monday = datetime(2026, 11, 16, 0, tzinfo=timezone.utc)
+    store = Storage(store_path)
+    try:
+        budget = WeeklyRequestBudget(store, "world")
+        budget.configure(enabled=True, weekly_limit=2)
+        old_send = budget.reserve(source_event_id="SELF-old", now=old_sunday)
+        budget.dispatch(old_send, now=old_sunday)
+        budget.reserve(source_event_id="SELF-unsent", now=old_sunday)
+        recent_send = budget.reserve(source_event_id="SELF-recent", now=recent_sunday)
+        budget.dispatch(recent_send, now=recent_sunday)
+        budget.reserve(source_event_id="SELF-future", now=future_monday)
+
+        # A nested-looking World ID must not be captured by the "world:" prefix.
+        other = WeeklyRequestBudget(store, "world:child")
+        other.configure(enabled=True, weekly_limit=1)
+        foreign = other.reserve(source_event_id="SELF-other", now=old_sunday)
+        other.dispatch(foreign, now=old_sunday)
+    finally:
+        store.close()
+
+    reopened = Storage(store_path)
+    try:
+        recovered = WeeklyRequestBudget(reopened, "world")
+        assert recovered.reconcile(now=restart_monday) == 3
+        assert recovered.reconcile(now=restart_monday) == 0
+        old_status = recovered.status(now=old_sunday)
+        assert old_status["states"]["uncertain"] == 1
+        assert old_status["states"]["abandoned"] == 1
+        assert old_status["consumed"] == 1
+        assert recovered.status(now=recent_sunday)["states"]["uncertain"] == 1
+        assert recovered.status(now=restart_monday)["remaining"] == 2
+        assert recovered.status(now=future_monday)["held"] == 1
+        assert WeeklyRequestBudget(reopened, "world:child").status(now=old_sunday)["states"]["dispatched"] == 1
+    finally:
+        reopened.close()
+
+
 def test_trusted_world_ancestry_follows_autonomous_descendants_not_labels():
     from types import SimpleNamespace as Row
     from pulse_harness.core.scope import HarnessScope
@@ -317,6 +361,51 @@ def test_a_fresh_self_activation_remains_admissible_after_hundreds_of_prior_puls
             return events.get(event_id)
     scope = HarnessScope("world", "engram", "session", 0, "owner", turn_id="turn")
     assert world_source_for_scope(Ledger(), "world", scope) == "pulse-299"
+
+
+def test_long_work_causal_lineage_keeps_original_pool_and_rejects_cycles():
+    """A long tool/Work history must not lose its trustworthy request source."""
+    from types import SimpleNamespace as Row
+    from pulse_harness.core.errors import ProviderUnavailable
+    from pulse_system.core.types import CausalEventKind as Kind, CausalEventSource as Source
+    from pulse_system.service.weekly_requests import world_source_for_event
+
+    class Ledger:
+        def __init__(self, events):
+            self.events = events
+
+        def get_event(self, event_id):
+            return self.events.get(event_id)
+
+    for root_source, root_kind, expected in (
+        (Source.USER, Kind.STIMULUS, None),
+        (Source.SELF, Kind.SPONTANEOUS, "root"),
+    ):
+        events = {"root": Row(id="root", world_id="world", kind=root_kind,
+                              source=root_source, parent_event_id=None)}
+        parent = "root"
+        # Earlier this valid original source was rejected at hop 256. Deep
+        # ordinary tool and delegated chains must retain their proper pool.
+        for index in range(360):
+            identity = f"tool-{index}"
+            events[identity] = Row(id=identity, world_id="world",
+                                   kind=Kind.TOOL_CALL, source=Source.SELF,
+                                   parent_event_id=parent)
+            parent = identity
+        ledger = Ledger(events)
+        assert world_source_for_event(ledger, "world", parent) == expected
+
+        # Removing the hard hop cap must not give cycles or foreign histories
+        # permission to charge the user's foreground pool.
+        events["tool-5"].parent_event_id = "tool-355"
+        with pytest.raises(ProviderUnavailable) as cycle:
+            world_source_for_event(ledger, "world", parent)
+        assert cycle.value.code == "autonomous_request_source_unverified"
+        events["tool-5"].parent_event_id = "tool-4"
+        events["tool-4"].world_id = "different-world"
+        with pytest.raises(ProviderUnavailable) as foreign:
+            world_source_for_event(ledger, "world", parent)
+        assert foreign.value.code == "autonomous_request_source_unverified"
 
 
 def test_lowered_weekly_limit_fences_reserved_tickets_at_dispatch():

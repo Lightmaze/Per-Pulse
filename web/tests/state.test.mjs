@@ -45,7 +45,7 @@ test('return focus only targets a reference in the destination page', () => {
 test('disconnected saved messages never claim active work', () => {
   for (const status of ['queued', 'working']) {
     assert.equal(getPageActivity(status, false).tone, 'neutral');
-    assert.equal(getPageActivity(status, false).label, 'Saved · AI disconnected');
+    assert.equal(getPageActivity(status, false).label, 'Saved · No model configured');
   }
   assert.equal(getPageActivity('working', true).tone, 'active');
   assert.equal(getPageActivity('idle', true).label, 'Ready');
@@ -83,6 +83,39 @@ test('drafts remain scoped and restricted storage does not break editing', () =>
   }
 });
 
+test('failed draft writes report failure and keep current edits ahead of readable old storage', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map();
+  let fail = false;
+  try {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+      getItem: key => values.get(key) ?? null,
+      setItem: (key, value) => { if (fail) throw new Error('Quota exceeded'); values.set(key, value); },
+      removeItem: key => { if (fail) throw new Error('Storage blocked'); values.delete(key); },
+    } });
+    const old = { text: 'Older stored draft', references: [] };
+    const edited = { text: 'New unsaved draft', references: [{ targetPageId: 'work', label: 'Source' }],
+      materials: [{ id: 'a'.repeat(32), name: 'Original.txt' }] };
+    assert.equal(storage.saveDraft('write-failure', 'home', old), true);
+    fail = true;
+    assert.equal(storage.saveDraft('write-failure', 'home', edited), false);
+    assert.equal(storage.readDraft('write-failure', 'home').text, old.text);
+    assert.deepEqual(storage.readCurrentDraft('write-failure', 'home', edited), edited);
+    assert.deepEqual(storage.readCurrentDraft('different-world', 'home', edited), storage.EMPTY_DRAFT);
+    const empty = { text: '', references: [] };
+    assert.equal(storage.saveDraft('write-failure', 'home', empty), false);
+    assert.deepEqual(storage.readCurrentDraft('write-failure', 'home', empty), empty);
+    fail = false;
+    assert.equal(storage.saveDraft('write-failure', 'home', edited), true);
+    assert.deepEqual(storage.readDraft('write-failure', 'home'), edited);
+    assert.equal(storage.saveDraft('write-failure', 'home', empty), true);
+    assert.deepEqual(storage.readDraft('write-failure', 'home'), empty);
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else delete globalThis.localStorage;
+  }
+});
+
 test('a failed turn explains its cause from the Kernel error code', () => {
   const { failureReason } = statusModule;
   assert.equal(failureReason(null), null);
@@ -91,6 +124,11 @@ test('a failed turn explains its cause from the Kernel error code', () => {
   assert.equal(failureReason('provider_http_503').key, 'status.failureService');
   assert.equal(failureReason('provider_http_400').key, 'status.failureRejected');
   assert.equal(failureReason('provider_timeout').key, 'status.failureUnreachable');
+  for (const code of ['web_url_invalid', 'web_address_blocked', 'web_dns_failed', 'web_read_timeout',
+    'web_redirect_failed', 'web_content_unsupported', 'web_http_failed', 'web_connection_failed']) {
+    assert.equal(failureReason(code).key, 'status.failureWeb');
+    assert.match(failureReason(code).text, /public HTTPS text page/);
+  }
   assert.equal(failureReason('provider_output_limit').key, 'status.failureOutputLimit');
   assert.equal(failureReason('payload_too_large').key, 'status.failurePayloadTooLarge');
   assert.match(failureReason('payload_too_large').text, /Review completed work/);

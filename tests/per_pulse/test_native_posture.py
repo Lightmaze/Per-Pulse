@@ -80,6 +80,21 @@ def remember(env, values=None, action="synthetic-action"):
                             CancellationToken(), action_request_id=action)
 
 
+def test_lesson_literal_markers_keep_exact_content_and_real_size_limits(native):
+    values = deepcopy(native.values)
+    values["lesson"] = "Keep literal [REDACTED] in a source example."
+    native.states.arguments = values
+    receipt = remember(native, values)
+    settle(native)
+    native.tool.drain()
+    saved = native.memory.list_experiences(subject_id=native.scope.engram_id)
+    assert len(saved) == 1 and saved[0]["lesson"] == values["lesson"]
+    from pulse_system.service.posture import _text
+    assert _text("[REDACTED]", "example", 128) == "[REDACTED]"
+    with pytest.raises(ValueError, match="too large"):
+        _text("\U0001f4c4" * 33, "example", 128)
+
+
 def settle(env):
     env.runtime.causal_ledger.settle_turn(
         env.current.id, "I changed the first interaction and retained the relevant lesson.",
@@ -260,6 +275,117 @@ def test_native_lookup_finds_older_lesson_without_cross_context_or_raw_transfer(
 
 
 
+def test_large_experience_details_can_be_read_completely_with_stable_identity(native):
+    import hashlib
+    import json
+    record = native.memory.add_experience(
+        experience_id="large-detail", subject_id=native.scope.engram_id, context_id="", scope="context",
+        record_type="constructed_fixture", title="A lesson with complete boundaries",
+        lesson="Keep every boundary together.", conditions="A concrete task",
+        counterexamples=[("Exception %d: " % index) + '\U0001f4c4"\\' * 280 for index in range(8)],
+        shift={"understanding": "Read all conditions.", "candidates": "Compare the actual alternatives.",
+               "delivery": "Keep the source intact."},
+        encounter={"situation": "Situation", "action": "Original approach", "outcome": "Feedback"},
+        source={"kind": "test_large_detail"},
+    )
+    before = native.memory.get_experience(record["id"])
+    def read(arguments):
+        return native.tool.execute(native.scope, ToolCall("detail", "posture", arguments),
+            CancellationToken(), action_request_id="read-only-detail")
+    args = {"op": "get", "experience_id": record["id"]}
+    parts, digest = [], None
+    while args is not None:
+        result = read(args)
+        assert result["experience"] is None and result["material_too_large"]
+        assert len(json.dumps(result, ensure_ascii=False).encode()) <= 16000
+        detail = result["detail"]
+        assert detail["format"] == "experience_json_fragment"
+        assert detail["offset"] == sum(len(part) for part in parts)
+        assert detail["digest"] == (digest or detail["digest"])
+        digest = detail["digest"]
+        parts.append(detail["content"])
+        args = detail["next"]
+    text = ''.join(parts)
+    complete = json.loads(text)
+    assert len(parts) > 1
+    assert complete["counterexamples"] == record["counterexamples"]
+    assert complete["source"]["evidence"] == record["source"]
+    assert hashlib.sha256(text.encode()).hexdigest() == digest
+    assert native.memory.get_experience(record["id"]) == before
+    assert native.tool._requests() == []
+
+    end = read({"op": "get", "experience_id": record["id"], "offset": len(text), "expected_digest": digest})
+    assert end["detail"]["eof"] and end["detail"]["content"] == '' and end["detail"]["next"] is None
+    with pytest.raises(ScopeConflict, match="offset exceeds"):
+        read({"op": "get", "experience_id": record["id"], "offset": len(text) + 1, "expected_digest": digest})
+    native.memory.revise_experience(record["id"], expected_revision=1, changes={"lesson": "A revised lesson."})
+    with pytest.raises(ScopeConflict, match="experience changed"):
+        read({"op": "get", "experience_id": record["id"], "offset": 100, "expected_digest": digest})
+    assert read({"op": "get", "experience_id": record["id"]})["detail"]["revision"] == 2
+    private = {key: deepcopy(record[key]) for key in ("subject_id", "title", "lesson", "conditions",
+        "counterexamples", "shift", "encounter", "source", "record_type")}
+    native.memory.add_experience(**private, experience_id="private-large-detail",
+                                 context_id="work:private-detail", scope="context")
+    for identity in ("private-large-detail", "missing-detail"):
+        with pytest.raises(ScopeConflict, match="not active or accessible"):
+            read({"op": "get", "experience_id": identity, "offset": 10, "expected_digest": digest})
+    native.memory.revise_experience(record["id"], expected_revision=2, changes={"active": False})
+    with pytest.raises(ScopeConflict, match="not active or accessible"):
+        read({"op": "get", "experience_id": record["id"]})
+
+
+@pytest.mark.parametrize('extra', [{'offset': True}, {'offset': -1}, {'offset': 1},
+    {'max_chars': 0}, {'max_chars': 8193}, {'expected_digest': 'invalid'}])
+def test_experience_detail_arguments_reject_invalid_ranges(extra):
+    with pytest.raises(ValueError):
+        validate({'op': 'get', 'experience_id': 'detail', **extra})
+
+
+def test_native_http_get_follows_large_experience_details_to_the_original_tail(tmp_path, monkeypatch):
+    import json
+    from material_fixture import MaterialFixture
+    from test_pages import client_for, send, wait_for
+
+    class DetailFixture(MaterialFixture):
+        def __init__(self):
+            super().__init__(monkeypatch.setenv)
+            self.fragments = []
+
+        def handler(self, request):
+            body = json.loads(request.content)
+            self.requests.append(body)
+            messages = body['messages']
+            start = max(i for i, row in enumerate(messages) if row['role'] == 'user')
+            delivered = [json.loads(row['content']) for row in messages[start + 1:] if row['role'] == 'tool']
+            if not delivered:
+                return self.response(tool='posture', arguments={'op': 'get', 'experience_id': 'native-large-detail'})
+            assert delivered[-1]['status'] == 'succeeded', delivered[-1]
+            detail = delivered[-1]['output']['detail']
+            self.fragments.append(detail['content'])
+            if detail['next']:
+                return self.response(tool='posture', arguments=detail['next'], sequence=len(delivered))
+            return self.response('Read every original exception. [Explicit synthetic fixture]')
+
+    fixture = DetailFixture()
+    with client_for(tmp_path, model_factory=fixture.factory, posture=True) as client:
+        runtime = client.app.state.pages.runtime
+        record = runtime.harness.posture_memory.add_experience(
+            experience_id='native-large-detail', subject_id=runtime.continuity_engram_id,
+            context_id='', scope='context', record_type='constructed_fixture', title='Large original detail',
+            lesson='L' * 4000, conditions='C' * 1000, counterexamples=['E' * 1880 + str(i) for i in range(8)],
+            shift={'understanding': 'Read details.', 'candidates': 'Compare options.', 'delivery': 'Preserve all exceptions.'},
+            encounter={'situation': 'Task', 'action': 'Approach', 'outcome': 'Observation'},
+            source={'kind': 'synthetic_native_detail_fixture'},
+        )
+        send(client, 'home', 'Read the full original experience details. [Explicit synthetic fixture]')
+        wait_for(client, 'home', lambda view: any(row['content'].startswith('Read every original exception.')
+            for row in view['messages'] if row['role'] == 'assistant'), timeout=20)
+        assert len(fixture.fragments) > 1
+        complete = json.loads(''.join(fixture.fragments))
+        assert complete['counterexamples'] == record['counterexamples']
+        assert complete['source']['evidence'] == record['source']
+
+
 def test_native_find_pages_all_old_matching_records_without_exposing_private_cursors(native):
     """Broad lexical matches must not become trapped behind an 8-item or byte window."""
     from pulse_system.service.native_posture import validate
@@ -336,6 +462,37 @@ def test_native_find_pages_all_old_matching_records_without_exposing_private_cur
         with pytest.raises(ValueError):
             validate({"op": "find", "query": "Routine",
                       "after_experience_id": after})
+
+    # list must also reach old lessons when the agent does not already know
+    # their keywords. Retain the exact eligibility and byte bounds of find.
+    first_list = read({"op": "list"})
+    assert first_list["experiences"] == [{
+        "id": huge["id"], "revision": 1, "title": "Routine oversized conditions",
+        "material_too_large": True,
+    }]
+    assert first_list["next_after_experience_id"] == huge["id"]
+    assert first_list["more_experiences"]
+    assert isinstance(first_list["recent_sources"], list)
+    second_list = read({"op": "list",
+                        "after_experience_id": first_list["next_after_experience_id"]})
+    assert len(second_list["experiences"]) == 8
+    assert second_list["more_experiences"]
+    third_list = read({"op": "list",
+                       "after_experience_id": second_list["next_after_experience_id"]})
+    assert len(third_list["experiences"]) == 4
+    assert not third_list["more_experiences"]
+    assert third_list["next_after_experience_id"] is None
+    list_ids = [item["id"] for page in (first_list, second_list, third_list)
+                for item in page["experiences"]]
+    assert len(list_ids) == len(set(list_ids)) == 13
+    assert set(list_ids) == {huge["id"], *(item["id"] for item in ordinary)}
+    assert private["id"] not in list_ids
+    for invalid in (private["id"], "nonexistent-id"):
+        with pytest.raises(ScopeConflict, match="not active or accessible"):
+            read({"op": "list", "after_experience_id": invalid})
+    for invalid in (None, "", "line\\nbreak", "another/work", 123):
+        with pytest.raises(ValueError):
+            validate({"op": "list", "after_experience_id": invalid})
     assert native.tool._requests() == []  # Pure reads do not stage learning.
 
 
@@ -912,17 +1069,27 @@ def test_native_revision_recovers_receipt_crash_without_reapplying_over_later_ed
     assert receipt["status"] == "revised" and receipt["revision"] == 2
 
 
-def test_native_revision_journal_capacity_failure_is_atomic(native, monkeypatch):
-    import pulse_system.service.posture as posture_module
+def test_native_revision_journal_write_failure_is_atomic_and_retryable(native):
+    import sqlite3
 
     before, values, _ = revision_turn(native)
     staged = remember(native, values, action="revision-at-capacity")
     settle(native)
-    monkeypatch.setattr(posture_module, "MAX_STATE_BYTES", 1)
-    native.tool.drain()
+    connection = native.runtime.storage._conn
+    connection.execute("CREATE TRIGGER reject_experience_write BEFORE UPDATE ON posture_experiences "
+                       "BEGIN SELECT RAISE(ABORT, 'synthetic disk write fault'); END")
+    connection.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="synthetic disk write fault"):
+        native.tool.drain()
     assert native.memory.get_experience(before["id"]) == before
     receipt = native.runtime.storage.load_component_state(staged["request_id"])
-    assert receipt["status"] == "blocked" and receipt["error_code"] == "experience_not_admitted"
+    assert receipt["status"] == "prepared"
+    connection.execute("DROP TRIGGER reject_experience_write")
+    connection.commit()
+    native.tool.drain()
+    native.tool.drain()
+    assert native.memory.get_experience(before["id"])["revision"] == 2
+    assert native.runtime.storage.load_component_state(staged["request_id"])["status"] == "revised"
 
 
 def test_native_revision_staged_content_cannot_differ_from_actual_action(native):

@@ -21,11 +21,17 @@ Kernel implementation.
   where you were with your unsent draft and reading position intact.
 - Bring selected text Home with a link to its source message, or pass a
   selected result from one Work to another.
-- Attach text materials (Markdown, CSV, JSON or code, up to 1 MiB) or PDFs
-  (up to 32 MiB, read as their text) and read structured replies with
-  headings, tables and code blocks.
+- Attach text materials (Markdown, CSV, JSON or code, up to 1 MiB), PDFs
+  (up to 32 MiB, read as their text), or PNG/JPEG images (up to 1 MiB and
+  8,388,608 pixels). Preview them in Materials and send an exact source version.
+  Reading an image sends its original pixels to your configured model, which
+  must support image input. Replies can include headings, tables and code blocks.
+- Read public HTTPS text pages with their source URL and reading time.
+  Recall the saved observation later from the original page's history.
 - Let pages continue: background pulses within an hourly budget, or type
   `/tick 3` to give a page three more steps.
+- Start autonomous practice from Activity with a weekly request allowance. Work and
+  its sources persist through pauses, budget holds and restarts.
 - Keep examples and lessons from your corrections. They are available across
   your pages unless you keep one to its page.
 - Let the model change files in its workspace, and undo any change from the
@@ -33,19 +39,19 @@ Kernel implementation.
 - Browse and search the whole history, and move a stopped workspace to another
   directory.
 
-When no model is configured, the interface says **AI disconnected** and keeps
+When no model is configured, the interface says **No model configured** and keeps
 your messages as queued input. It never substitutes a scripted reply for a model.
 
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a1-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a1)
+[`per_pulse-0.1.0a10-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a10)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a1-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a10-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -90,9 +96,10 @@ per-pulse
 
 The endpoint is a complete URL. The key stays in the server environment; the
 browser never receives it. `per-pulse doctor` checks the local configuration
-without contacting the provider. A model server on your own computer works too.
-See [Connect a model](docs/models.md) for local models, PowerShell and the
-other provider options.
+without contacting the provider. A model server on this computer or at a literal private LAN IP works too.
+Private LAN HTTP must be explicitly enabled; it sends the model your task and
+file context without transport encryption. See [Connect a model](docs/models.md)
+for the required settings, PowerShell and other provider options.
 
 ## Let pages continue
 
@@ -115,6 +122,16 @@ also pass finished results to each other through connections; see
 Pages can learn connections from their activity, and their local rhythm adapts
 across the workspace. Activity shows learned connections and lets you remove
 them. Use `--no-adaptive-pulse` to freeze connection learning and keep a fixed rhythm.
+
+## Start autonomous practice
+
+With a model configured, open **Activity**, set a weekly request limit and select
+**Start autonomous practice**. An original SELF departure can create native
+Works and return source-linked results without you first sending a message.
+**Pause autonomous practice** stops new autonomous sends; increasing the
+allowance lets retained Work continue. A weekly slot counts a physical model
+request, including retries and delegated requests, not a price or token cap.
+See [Autonomous practice](docs/autonomous-practice.md) for details and limits.
 
 ## Explore the example
 

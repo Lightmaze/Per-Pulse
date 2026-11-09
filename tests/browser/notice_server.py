@@ -21,7 +21,7 @@ from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapte
 
 
 PRIVATE = "LOCAL_NOTICE_OWNER_PRIVATE_7A2"
-NOTE = PRIVATE + ": Preserve the registration and its original neighborhood. " + (
+NOTE = PRIVATE + ": Preserve the literal [REDACTED] marker and its original neighborhood. " + (
     "Keep this detail attributable to its own Work. " * 25)
 KIND = "pulse.local-notices.v1"
 LABEL = " [Explicit synthetic HTTP fixture]"

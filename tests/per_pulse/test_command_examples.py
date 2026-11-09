@@ -159,6 +159,10 @@ def test_same_response_read_is_unseen_but_a_later_quiet_round_can_keep_it(tmp_pa
         response = client.post(f"/api/pages/{page}/tick", json={"count": 1})
         assert response.status_code == 201, response.text
         wait_for(client, page, lambda view: view["tick"]["status"] == "complete")
+        # The durable turn settles before the existing posture outbox is
+        # admitted later in the runtime tick. Observe that separate result.
+        wait_for(client, page, lambda _: len(client.get(
+            f"/api/pages/{page}/posture").json()["experiences"]) == 1)
         saved, = client.get(f"/api/pages/{page}/posture").json()["experiences"]
         assert saved["excerpt"] == "STDERR_FINAL_DIAGNOSIS" and saved["feedback"] == []
         assert client.app.state.pages.runtime.harness._command_executor.calls == 1
@@ -324,3 +328,32 @@ def test_command_capture_cannot_supply_authority_or_outcome(extra):
     with pytest.raises(ValueError):
         validate({"op": "remember_command", "receipt_id": "real-read", "title": "Example",
                   "excerpt": "Exact observed passage", **extra})
+
+
+def test_command_retains_literal_marker_from_delivered_stderr(tmp_path, setup, monkeypatch):
+    """Command observations keep the receipt's real flags, not guessed marker flags."""
+    import command_output_fixture
+
+    selected = "literal [REDACTED] diagnostic"
+    monkeypatch.setattr(
+        command_output_fixture, "STDERR",
+        ("Routine output. " + selected + "\n").encode("utf-8"),
+    )
+    fixture = setup
+    with client_for(tmp_path, posture=True, model_factory=fixture.factory,
+                    allow_workspace_actions=True) as client:
+        page = work(client)
+        action = run(client, page)
+        results = choose(
+            client, page, fixture, op="read", action_id=action, stream="stderr",
+            offset=0, limit=4000,
+            retain={"title": "Observed command marker", "excerpt": selected},
+        )
+        assert [item["status"] for item in results] == ["succeeded", "succeeded"]
+        read = results[0]["output"]
+        saved, = client.get(f"/api/pages/{page}/posture").json()["experiences"]
+        assert saved["excerpt"] == selected
+        assert saved["source"]["command_receipt_id"] == read["receipt_id"]
+        assert saved["source"]["selected_excerpt"]["sha256"] == hashlib.sha256(
+            selected.encode("utf-8")).hexdigest()
+        assert saved["source"]["command_observation"]["redacted"] == read["redacted"]

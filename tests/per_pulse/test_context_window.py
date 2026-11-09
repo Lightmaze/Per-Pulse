@@ -20,7 +20,7 @@ def _answer(text):
 
 
 def _call(call_id):
-    return {"role": "assistant", "content": json.dumps({"text": "", "tool_calls": [
+    return {"role": "assistant", "tool_call_count": 1, "content": json.dumps({"text": "", "tool_calls": [
         {"tool_call_id": call_id, "action_request_id": call_id, "name": "read_file", "arguments": {"path": "a"}}]})}
 
 
@@ -66,11 +66,60 @@ def test_a_window_never_starts_with_a_tool_result():
     assert fitted == tuple(messages)
 
 
+def test_plain_json_tool_call_examples_remain_separate_replies():
+    messages = [_user("Start")]
+    for index in range(30):
+        # These have the internal envelope's exact spelling, but no terminal
+        # tool-call authority. They must not bind every later reply together.
+        example = {**_call(f"example-{index}"), "tool_call_count": 0}
+        messages += [example, {"role": "system", "content": "Context " + "x" * 400}]
+    fitted = fit_context(messages, 500)
+    assert len(fitted) < len(messages)
+    assert fitted[-2:] == tuple(messages[-2:])
+
+
 def test_the_latest_turn_is_kept_whole_even_when_it_is_larger_than_the_budget():
     messages = _turns(5) + [_user("Big " + "b" * 9_000)]
     fitted = fit_context(messages, 1_000)
     assert fitted[-1] == messages[-1]
-    assert fitted[1] == messages[0]
+    assert messages[0] not in fitted
+
+
+def test_an_oversized_historical_opening_does_not_crowd_out_a_short_followup():
+    messages = [_user("ORIGINAL_OPENING " + "x" * 12_000), _answer("Saved the original."),
+                _user("Continue with the next step.")]
+    original = tuple(dict(message) for message in messages)
+    fitted = fit_context(messages, 2_048)
+    assert sum(estimate_tokens(message) for message in fitted) <= 2_048
+    assert fitted[-1] == messages[-1]
+    assert messages[0] not in fitted
+    assert fitted[0]["content"] == OMITTED_NOTE
+    assert tuple(messages) == original
+
+
+def test_opening_is_optional_only_when_it_cannot_fit_beside_the_current_exchange():
+    opening = _user("Original goal " + "x" * 1_800)
+    current = [_user("Continue " + "y" * 1_800), _call("current"), _result("current")]
+    messages = [opening, _answer("An earlier result."), *current]
+    assert estimate_tokens(opening) < 1_000
+    assert sum(estimate_tokens(message) for message in current) < 1_000
+    fitted = fit_context(messages, 1_000)
+    assert opening not in fitted
+    assert tuple(fitted[-len(current):]) == tuple(current)
+    assert sum(estimate_tokens(message) for message in fitted) <= 1_000
+
+
+def test_a_first_input_is_never_removed_as_an_old_opening():
+    messages = [_user("CURRENT_INPUT " + "x" * 12_000)]
+    assert fit_context(messages, 2_048) == tuple(messages)
+
+
+def test_a_current_exchange_stays_whole_after_an_oversized_opening_is_omitted():
+    current = [_user("Read the next part."), _call("current"), _result("current", 9_000)]
+    messages = [_user("ORIGINAL_OPENING " + "x" * 12_000), _answer("Done."), *current]
+    fitted = fit_context(messages, 2_048)
+    assert messages[0] not in fitted
+    assert tuple(fitted[-len(current):]) == tuple(current)
 
 
 def test_budget_must_be_positive():

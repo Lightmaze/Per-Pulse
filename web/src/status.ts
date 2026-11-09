@@ -16,6 +16,7 @@ function activity(tone: ActivityTone, labelKey: MessageKey, label: string, detai
 /** A readable reason for the Kernel's error code of a failed or paused turn. */
 export function failureReason(code: string | null | undefined): { key: MessageKey; text: string; params?: Record<string, string> } | null {
   if (!code) return null;
+  if (code.startsWith('web_')) return { key: 'status.failureWeb', text: 'The webpage could not be read. Check that the source is a public HTTPS text page, or try another source.' };
   const http = /^provider_http_(\d{3})$/.exec(code);
   const status = http ? Number(http[1]) : 0;
   if (status === 401 || status === 403) return { key: 'status.failureAuth', text: 'The model service did not accept the API key. Check P_PULSE_API_KEY, then send again.' };
@@ -54,7 +55,7 @@ export function getPageActivity(status: PageSummary['status'], configured: boole
   }
   if (stale) return activity('neutral', 'status.updatesPaused', 'Updates paused', 'status.updatesPausedDetail', 'The latest status could not be checked. Refresh to try again.');
   if (status === 'queued' || status === 'working') {
-    if (!configured) return activity('neutral', 'status.savedDisconnected', 'Saved · AI disconnected', 'status.savedDisconnectedDetail', 'Your message is saved. Connect a model to continue this turn.');
+    if (!configured) return activity('neutral', 'status.savedDisconnected', 'Saved · No model configured', 'status.savedDisconnectedDetail', 'Your message is saved. Connect a model to continue this turn.');
     return status === 'working'
       ? activity('active', 'status.working', 'Working', 'status.workingDetail', 'Per Pulse is working in this conversation.')
       : activity('neutral', 'status.queued', 'Queued', 'status.queuedDetail', 'Your message is saved and waiting for its turn.');

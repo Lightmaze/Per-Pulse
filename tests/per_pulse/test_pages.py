@@ -75,7 +75,7 @@ def test_offline_pages_links_and_selected_return_survive_restart(tmp_path):
         workspace_id = initial["workspaceId"]
         assert workspace_id == client.app.state.pages.runtime.world_id
         assert [p["id"] for p in initial["pages"]] == ["home"]
-        assert initial["provider"]["label"] == "AI disconnected"
+        assert initial["provider"]["label"] == "No model configured"
         home = send(client, "home", "Keep the original conversation here.")
         created = new_page(client, sourceMessageId=home["messageId"])
         page_id = created["page"]["id"]

@@ -189,7 +189,8 @@ try {
   await article.getByRole('button', { name: 'New page', exact: true }).click();
   const newPage = page.getByRole('dialog', { name: 'Give this a little room.', exact: true });
   await newPage.getByText('This starts with the message text. Its files remain available from the linked source message.', { exact: true }).waitFor();
-  assert.ok(!(await newPage.getByRole('textbox', { name: 'Where should we begin?', exact: true }).inputValue()).includes('[Attached workspace materials]'));
+  assert.ok(!(await newPage.locator('#new-page-source').inputValue()).includes('[Attached workspace materials]'));
+  assert.equal(await newPage.getByRole('textbox', { name: 'Your request', exact: true }).inputValue(), 'Continue from this source.');
   await close();
   await article.getByRole('button', { name: 'Bring to Home', exact: true }).click();
   const bring = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
@@ -238,7 +239,7 @@ try {
   assert.equal((await data('/api/pages/' + origin + '/materials')).materials.length, 2);
   await choose('too-large.txt', Buffer.alloc(1024 * 1024 + 1, 97));
   await dialog().getByRole('button', { name: 'Upload file', exact: true }).click();
-  await dialog().getByText('Choose a text file of at most 1 MiB or a PDF of at most 32 MiB.', { exact: true }).waitFor();
+  await dialog().getByText('Choose text or a PNG/JPEG image of at most 1 MiB, or a PDF of at most 32 MiB.', { exact: true }).waitFor();
   await close();
   await attach();
   await dialog().locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();

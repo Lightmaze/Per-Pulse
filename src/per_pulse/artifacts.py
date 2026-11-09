@@ -10,8 +10,8 @@ recorded version and never exposes a later writer's content as the old result.
 
 Only the existing ``mutate_file`` receipt contract is supported. Command output,
 assistant claims, arbitrary workspace paths, and unconfirmed effects are not
-artifacts. Preview is bounded and redacted. Downloads separately verify the
-complete current text and refuse any content that would require redaction.
+artifacts. Preview bounds the current text. Downloads verify the complete
+current file against its recorded version and preserve its UTF-8 bytes.
 
 Undo restores the change's own checkpoint through the Kernel workspace
 provider. It applies only while the file still has that change's content.
@@ -59,11 +59,6 @@ def clip_text(text: str, max_bytes: int) -> tuple[str, bool]:
     if len(encoded) <= max_bytes:
         return text, False
     return encoded[:max_bytes].decode("utf-8", errors="ignore"), True
-
-
-def _stored_markers(text: str) -> tuple[bool, bool]:
-    """Literal omission and truncation markers left by a stored model result."""
-    return "[REDACTED]" in text, stored_text_flags(text)[1]
 
 
 def _digest(value: Any) -> bool:
@@ -285,7 +280,7 @@ class PageArtifacts:
         }
         try:
             # Reuses the product's dirfd/no-follow path traversal, regular-file
-            # check, hardlink rejection, bounded UTF-8 read, and secret guard.
+            # check, hardlink rejection and bounded UTF-8 read.
             current = WorkspaceFiles(self.execution._kernel.workspace_root).read(item["path"])
         except FileAccessError as error:
             response["artifact"] = {**item, "state": "unavailable"}
@@ -297,38 +292,32 @@ class PageArtifacts:
             response.update({"state": "changed", "reason": "artifact_version_changed"})
             response["artifact"] = {**item, "state": "changed"}
             return response
-        # This is the user's own local file: show it as it is, bounded only
-        # in length. A file holding a stored omission marker from a model
-        # result is not a complete original, so it is not offered whole.
+        # The verified file is the source, not a serialized tool preview.
+        # Literal omission markers in its text do not change its identity.
         content, truncated = clip_text(current["content"], MAX_PREVIEW_BYTES)
-        marker, stored_truncated = _stored_markers(current["content"])
         response.update({
             "state": "current", "content": content,
-            "redacted": marker,
-            "truncated": bool(truncated or stored_truncated),
+            "redacted": False,
+            "truncated": truncated,
             # A clipped but otherwise complete file may still be transferred.
-            "downloadable": not (marker or stored_truncated),
+            "downloadable": True,
         })
         response["artifact"] = {**item, "state": "current"}
         return response
 
     def download(self, page_id: str, artifact_id: str) -> dict:
-        """Return complete verified UTF-8 bytes, never a reconstructed preview.
+        """Return verified original bytes, never an encoded document preview.
 
-        Read once through the existing no-follow descriptor path. Encoding its
-        lossless UTF-8 text back to bytes preserves BOM, CRLF and all whitespace.
+        Read once through the existing no-follow descriptor path. The
+        validated preview and original bytes share the same snapshot.
         The returned bytes have the receipt's digest even if a writer replaces
         the filesystem path after this read. No pathname is reopened by HTTP.
         """
         item = self._resolve(page_id, artifact_id)
         try:
-            current = WorkspaceFiles(self.execution._kernel.workspace_root).read(item["path"])
+            current, data = WorkspaceFiles(self.execution._kernel.workspace_root).read_with_bytes(item["path"])
         except FileAccessError as error:
             raise ArtifactError(error.code, "This recorded file version is not available for download.", error.status) from error
         if current["sha256"] != item["sha256"]:
             raise ArtifactError("artifact_version_changed", "This file has changed since this page wrote it. Refresh the file preview.", 409)
-        # A literal stored omission/truncation marker is ambiguous provenance,
-        # not a basis for claiming an exact original file download.
-        if any(_stored_markers(current["content"])):
-            raise ArtifactError("artifact_download_redacted", "This file holds an incomplete stored result and cannot be downloaded as an original result.", 422)
-        return {"artifact": item, "content": current["content"].encode("utf-8")}
+        return {"artifact": item, "content": data}

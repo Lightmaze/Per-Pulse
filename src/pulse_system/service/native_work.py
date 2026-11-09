@@ -24,23 +24,31 @@ from .report_contributions import CITATION_SCHEMA, validate_citations
 NAME = 'work'
 PREFIX = 'native-work-v1:'
 SCHEMA = {'type': 'object', 'properties': {
-    'op': {'type': 'string', 'enum': ['list', 'inspect', 'create', 'send', 'report']},
+    'op': {'type': 'string', 'enum': ['list', 'search', 'inspect', 'create', 'send', 'report']},
     'work_id': {'type': 'string', 'maxLength': 160},
+    'after_work_id': {'type': 'string', 'maxLength': 160},
+    'query': {'type': 'string', 'maxLength': 160},
     'title': {'type': 'string', 'maxLength': 160},
     'instruction': {'type': 'string', 'maxLength': 8192},
     'note': {'type': 'string', 'maxLength': 4096},
     'kind': {'type': 'string', 'enum': ['result', 'question', 'finding']},
     'contributions': CITATION_SCHEMA,
 }, 'required': ['op'], 'additionalProperties': False}
-_FIELDS = {'list': set(), 'inspect': {'work_id'}, 'create': {'title', 'instruction'},
+_FIELDS = {'list': set(), 'search': {'query'}, 'inspect': {'work_id'},
+           'create': {'title', 'instruction'},
            'send': {'work_id', 'instruction'}, 'report': {'kind', 'note'}}
+_OPTIONAL_FIELDS = {'list': {'after_work_id'}, 'search': {'after_work_id'},
+                    'report': {'contributions'}}
 
 
 def descriptor() -> ToolDescriptor:
     return ToolDescriptor(NAME,
         'Hand focused jobs to Works from Home. create(title, instruction) starts a Work '
         'with only the instructions, constraints and file references it needs, not '
-        'unrelated Home history. list shows your Works, inspect(work_id) shows a Work\'s '
+        'unrelated Home history. list(after_work_id?) shows up to 32 of your Works; '
+        'pass next_after_work_id to reach older ones. search(query, after_work_id?) '
+        'finds matching Work titles (not message contents) across your full '
+        'history, 32 per page. inspect(work_id) shows a Work\'s '
         'recent results, and send(work_id, instruction) gives an existing Work its next '
         'instruction without interrupting what it is doing. Use IDs from list, or ask the '
         'user when unsure. A create or send is delivered after this turn succeeds: finish '
@@ -63,7 +71,7 @@ def validate(arguments: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(op, str) or op not in _FIELDS:
         raise ValueError('unknown operation or incorrect work fields')
     required = {'op'} | _FIELDS[op]
-    optional = {'contributions'} if op == 'report' else set()
+    optional = _OPTIONAL_FIELDS.get(op, set())
     if not required <= set(values) or set(values) - required - optional:
         raise ValueError('unknown operation or incorrect work fields')
     if 'contributions' in values:
@@ -194,14 +202,34 @@ class NativeWork:
             if a['op'] in {'create', 'send', 'report'} and not r.harness.allow_work_organization:
                 raise ScopeConflict('this runtime profile does not allow scheduling Work')
             subject = scope.engram_id
-            if a['op'] == 'list':
+            if a['op'] in {'list', 'search'}:
                 fronts = r.world.list_task_fronts(focal_engram_id=subject)
+                if a['op'] == 'search':
+                    # Search only owned Work titles. Never pull unrelated Work
+                    # transcripts into the Home model context to find a match.
+                    needle = a['query'].strip().casefold()
+                    fronts = [front for front in fronts if needle in front.title.casefold()]
                 fronts.sort(key=lambda x: (x.updated_at, x.id), reverse=True)
-                requests = r.storage.native_work_requests(subject=subject, limit=32)
-                output = {'works': [r._task_front_view(f) for f in fronts[:32]],
-                    'more_works': len(fronts) > 32,
-                    'recent_requests': [self._receipt(v) for v in requests],
-                    'scope': 'current_subject_only', 'complete_history': False}
+                start = 0
+                if 'after_work_id' in a:
+                    # A foreign, missing, or nonmatching anchor must not reveal
+                    # another subject's Work or silently shift the search page.
+                    start = next((i + 1 for i, front in enumerate(fronts)
+                                  if front.id == a['after_work_id']), None)
+                    if start is None:
+                        raise ScopeConflict('Work cursor is unavailable in this subject and result')
+                page = fronts[start:start + 32]
+                has_more = start + len(page) < len(fronts)
+                output = {'works': [r._task_front_view(f) for f in page],
+                    'more_works': has_more,
+                    'next_after_work_id': page[-1].id if has_more else None,
+                    'scope': 'current_subject_only'}
+                if a['op'] == 'list':
+                    requests = r.storage.native_work_requests(subject=subject, limit=32)
+                    output.update(recent_requests=[self._receipt(v) for v in requests],
+                                  complete_history=False)
+                else:
+                    output.update(searched_field='title', search_complete=not has_more)
             elif a['op'] == 'inspect':
                 front = self._owned(subject, a['work_id'])
                 detail = r.get_task_front(front.id)

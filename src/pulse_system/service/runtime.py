@@ -6631,6 +6631,9 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             spontaneous_emitter=self._spontaneous_dispatch_for_engram,
             scheduler=self._scheduler,
             admission_filter=self._native_event_admitted,
+            foreground_event=(
+                self._native_foreground_event if self._harness_kind == "kernel" else None
+            ),
             context_wait_modifier=(self._context_pulse.wait_modifier if self._context_pulse else None),
             approval_parked=native_approval_parked,
             unsettled_provider_usage=native_unsettled_provider_usage,
@@ -8453,6 +8456,20 @@ class RuntimeService(_RuntimeShutdownCoordinator):
     def native_team_request_origin(self, event_id):
         """Original caller result for a source-bound native consultation."""
         return self._native_team.request_origin(event_id) if self._native_team is not None else None
+
+    def _native_foreground_event(self, event):
+        """Preserve a carrier for user work and its verified continuations."""
+        from pulse_harness.core.errors import ProviderUnavailable
+        from pulse_system.service.weekly_requests import world_source_for_event
+        try:
+            return world_source_for_event(
+                self._causal_ledger, self._world_id, event.event_id,
+                origin_for_event=lambda item: self.native_team_request_origin(item.id),
+            ) is None
+        except ProviderUnavailable:
+            # Unknown provenance never gains priority over the person's work.
+            # The original provider admission still decides whether it may run.
+            return False
 
     def _native_event_admitted(self, event, observed_at):
         if self._context_pulse is not None and not self._context_pulse.admits(event, observed_at):

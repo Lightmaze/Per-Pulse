@@ -40,6 +40,12 @@ button, a, input, textarea { outline-offset: 4px; }
 .pages-label .icon-button { width: 32px; height: 32px; }
 .pages-label .icon-button:hover { opacity: 1; }
 .page-nav { display: flex; flex-direction: column; gap: 5px; min-height: 0; overflow-y: auto; padding-bottom: 16px; scrollbar-width: thin; }
+.sidebar-page-filter { display: flex; gap: 8px; align-items: center; color: var(--muted); margin: 0 8px 8px 13px; border-bottom: 1px solid var(--border); }
+.sidebar-page-filter input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 12px; padding: 7px 0; color: var(--text); }
+.sidebar-page-filter:focus-within { border-color: var(--accent); }
+.sidebar-more-pages { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 13px; font-size: 12px; color: var(--muted); }
+.sidebar-more-pages button { padding: 6px 0; color: var(--accent); font-size: 12px; }
+.sidebar-more-pages button:hover { text-decoration: underline; }
 .empty-pages { color: var(--muted); font-size: 12px; text-align: left; line-height: 1.6; padding: 7px 13px; }
 .sidebar-footer { margin-top: auto; padding-top: 22px; }
 .workspace-label { color: var(--muted); font-size: 12px; line-height: 18px; padding: 0 13px; }
@@ -278,6 +284,12 @@ button, a, input, textarea { outline-offset: 4px; }
 @keyframes pulse { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
 .pulse-activity-trigger { margin-left: auto; min-height: 34px; padding: 3px 8px; }
 .pulse-activity-dialog { max-width: 590px; }
+.pulse-activity-disclosure { margin-top: 12px; }
+.pulse-activity-disclosure > summary { cursor: pointer; padding: 7px 0; font-size: 12px; font-weight: 600; color: var(--text); }
+.pulse-activity-disclosure > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.pulse-activity-disclosure[open] > summary { margin-bottom: 6px; }
+.pulse-activity-connections { margin-top: 21px; padding-top: 14px; border-top: 1px solid var(--border); }
+.pulse-activity-connections > .pulse-activity-section:first-of-type { margin-top: 6px; padding-top: 0; border-top: 0; }
 .pulse-activity-section { margin-top: 21px; padding-top: 20px; border-top: 1px solid var(--border); }
 .pulse-activity-section h3 { font-size: 13px; font-weight: 600; margin: 0 0 11px; }
 .pulse-activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
@@ -584,3 +596,14 @@ button, a, input, textarea { outline-offset: 4px; }
 .execution-step .step-note { font-size: 11px; }
 .execution-step.step-running span:first-child { color: var(--text); }
 .execution-step.step-failed .step-note { color: var(--error); }
+
+.material-image { margin: 12px 0; }
+.material-image img { display: block; width: auto; height: auto; max-width: 100%; max-height: 42vh; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #f4f6f0; }
+.material-image figcaption { margin-top: 8px; color: var(--muted); font-size: 12px; }
+
+.web-sources { margin: 12px 0; color: var(--muted); font-size: 13px; }
+.web-sources summary { cursor: pointer; }
+.web-sources ul { padding-left: 20px; }
+.web-sources li { margin: 12px 0; overflow-wrap: anywhere; }
+.web-sources .message-content { font-size: 13px; }
+.web-sources .message-content p { margin: 4px 0; }

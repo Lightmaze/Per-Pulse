@@ -4,14 +4,13 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 
 Every model round sends a session's transcript. A long-lived page would
 eventually exceed any model's context window, and from then on every message
-in it would fail. This projection keeps the page's opening message and the
-most recent whole turns that fit an estimated budget, and says that earlier
+in it would fail. This projection keeps the most recent whole turns and, when
+it fits beside them, the page's opening message. It says that earlier
 messages can be looked up with the history tools. The durable transcript is
 never changed.
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -36,13 +35,9 @@ def _final_assistant(message: Mapping[str, Any]) -> bool:
     """An assistant message that ends a turn (no tool calls follow it)."""
     if message.get("role") != "assistant":
         return False
-    content = message.get("content")
-    try:
-        payload = json.loads(content) if isinstance(content, str) else None
-    except ValueError:
-        return True
-    return not (isinstance(payload, dict) and set(payload) == {"text", "tool_calls"}
-                and payload.get("tool_calls"))
+    # This host-only count comes from the completed model round. A textual
+    # JSON example must not turn separate replies into one endless exchange.
+    return not message.get("tool_call_count", 0)
 
 
 def _boundaries(messages: Sequence[Mapping[str, Any]]) -> list[int]:
@@ -59,8 +54,8 @@ def _boundaries(messages: Sequence[Mapping[str, Any]]) -> list[int]:
 def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple[Mapping[str, Any], ...]:
     """Return ``messages`` or a shorter projection whose estimate fits ``max_tokens``.
 
-    The first message is kept when it is the conversation's opening user
-    message. The window always starts at a turn or user-message boundary, so
+    The opening user message is kept when it fits beside the latest complete
+    exchange. The window always starts at a turn or user-message boundary, so
     an assistant tool call is never separated from its results. If even the
     latest turn is larger than the budget, the projection starts at that turn;
     nothing inside the current exchange is dropped.
@@ -80,6 +75,11 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
     suffix = [0] * (len(messages) + 1)
     for index in range(len(messages) - 1, -1, -1):
         suffix[index] = suffix[index + 1] + estimate_tokens(messages[index])
+    # An old opening can exceed a newly selected model's window by itself.
+    # Prefer the current exchange; the original opening remains in history.
+    if pinned and fixed + suffix[starts[-1]] > max_tokens:
+        pinned = ()
+        fixed = estimate_tokens(note)
     start = next((index for index in starts if fixed + suffix[index] <= max_tokens), starts[-1])
     if start <= len(pinned):
         return messages

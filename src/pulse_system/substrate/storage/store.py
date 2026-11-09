@@ -61,6 +61,10 @@ _STORAGE_BOOTSTRAP_TABLES = (
     "local_notices",
     "messages",
     "projects",
+    "posture_journals",
+    "posture_experiences",
+    "posture_experience_revisions",
+    "posture_experience_feedback",
     "runtime_leases",
     "task_fronts",
     "task_offer_revisions",
@@ -689,6 +693,14 @@ class Storage:
                 state TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS idx_native_team_origin
+                ON component_state (
+                    CASE WHEN json_valid(state) THEN json_extract(state, '$.subject') END,
+                    CASE WHEN json_valid(state) THEN json_extract(state, '$.delegation_event_id') END,
+                    updated_at DESC,
+                    component
+                )
+                WHERE component GLOB 'native-team-v1:*';
 
             CREATE TABLE IF NOT EXISTS weight_state (
                 component TEXT NOT NULL,
@@ -7105,6 +7117,37 @@ class Storage:
 
     # ── Component state (delegation router/Claustrum modulator weight persistence) ─────────────
 
+    def _posture_journal_read(self, callback):
+        """Read the experience journal under the World's existing storage lock."""
+        with self._lock:
+            self._conn.execute("BEGIN")
+            try:
+                return callback(self._conn)
+            finally:
+                self._conn.rollback()
+
+    def _posture_journal_write(self, callback, *, guard):
+        """Serialize experience revisions across connections and fence publication."""
+        def check(conn):
+            self._assert_runtime_publication()
+            lease = self._get_runtime_lease_uncommitted(conn)
+            if lease is not None:
+                permit = self._runtime_publication_permit
+                if permit is None:
+                    raise RuntimeLeaseLostError(owner_id="unbound-posture", epoch=0,
+                                                reason="lease_binding_required", lease=lease)
+                self._assert_runtime_lease_uncommitted(permit.owner_id, permit.epoch, _now(), conn)
+        with self._lock:
+            # A native guard can renew/check its lease in a transaction of its
+            # own. Run it before BEGIN; recheck the exact permit and lease in
+            # this transaction before publication instead of nesting BEGIN.
+            guard()
+            with self._immediate_transaction() as conn:
+                check(conn)
+                result = callback(conn)
+                check(conn)
+                return result
+
     @_locked
     def save_component_state(self, component: str, state: dict) -> None:
         """Upsert a sideband component's learned state (JSON-serializable)."""
@@ -7148,6 +7191,17 @@ class Storage:
                     raise RuntimeError("component transaction has ended")
                 row = storage._conn.execute("SELECT state FROM component_state WHERE component = ?", (component,)).fetchone()
                 return json.loads(row[0]) if row else None
+            def list_component_state_keys(self, prefix):
+                """Enumerate an indexed component prefix inside this fenced transaction."""
+                if not self.active:
+                    raise RuntimeError("component transaction has ended")
+                if not isinstance(prefix, str) or not prefix:
+                    raise ValueError("component prefix is required")
+                return [row[0] for row in storage._conn.execute(
+                    "SELECT component FROM component_state "
+                    "WHERE component >= ? AND component < ? ORDER BY component",
+                    (prefix, prefix + "\uffff"),
+                )]
             def save_component_state(self, component, state):
                 if not self.active:
                     raise RuntimeError("component transaction has ended")
@@ -7424,10 +7478,15 @@ class Storage:
         clauses = ["component GLOB 'native-team-v1:*'"]
         args = []
         if subject is not None:
-            clauses.append("json_extract(state, '$.subject') = ?")
+            clauses.append(
+                "(CASE WHEN json_valid(state) THEN json_extract(state, '$.subject') END) = ?"
+                if delegation_event_id is not None else "json_extract(state, '$.subject') = ?")
             args.append(subject)
         if delegation_event_id is not None:
-            clauses.append("json_extract(state, '$.delegation_event_id') = ?")
+            # Match migration 0012's guarded index expressions exactly. This
+            # lookup runs on every admission; LIMIT alone still scans history.
+            # An invalid old record cannot establish a verified causal origin.
+            clauses.append("(CASE WHEN json_valid(state) THEN json_extract(state, '$.delegation_event_id') END) = ?")
             args.append(delegation_event_id)
         if pending:
             clauses.append("json_extract(state, '$.status') = 'prepared'")

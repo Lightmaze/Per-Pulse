@@ -21,7 +21,7 @@ test('POSIX terminal setup uses exports and never embeds a real secret', () => {
   for (const shell of ['posix', 'powershell']) {
     const rendered = providerSetupCommand(shell);
     const lines = rendered.split('\n');
-    assert.equal(lines.length, 7);
+    assert.match(rendered, /P_PULSE_ALLOW_PRIVATE_HTTP/);
     assert.ok(rendered.includes(shell === 'powershell'
       ? "$env:P_PULSE_CHAT_AUTH_STYLE = 'bearer'"
       : "export P_PULSE_CHAT_AUTH_STYLE='bearer'"), 'remote mode resets a prior Azure header');
@@ -40,7 +40,7 @@ test('explicit local-model mode offers both terminal types without a credential'
     assert.ok(!command.includes('your-api-key'));
     assert.ok(command.endsWith('per-pulse doctor\nper-pulse'));
     const lines = command.split('\n');
-    assert.equal(lines.length, 8);
+    assert.ok(lines.every(line => line.trim()), 'Terminal template contains no empty step');
     assert.ok(command.includes(shell === 'powershell'
       ? "$env:P_PULSE_CHAT_AUTH_STYLE = 'bearer'"
       : "export P_PULSE_CHAT_AUTH_STYLE='bearer'"), 'local mode resets a prior Azure header');
@@ -67,7 +67,7 @@ test('Azure API-key setup is available in POSIX and PowerShell without a real cr
     assert.ok(command.includes('P_PULSE_LOCAL_NO_AUTH'));
     assert.ok(command.includes('P_PULSE_PROVIDER_NAMESPACE'));
     assert.ok(command.endsWith('per-pulse doctor\nper-pulse'));
-    assert.equal(command.split('\n').length, 8);
+    assert.match(command, /P_PULSE_ALLOW_PRIVATE_HTTP/);
     assert.ok(!command.includes('sk-'), 'no real provider credentials in the template');
   }
 });

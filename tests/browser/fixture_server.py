@@ -20,6 +20,7 @@ release = threading.Event()
 entered = threading.Event()
 requests = []
 before = 'Draft heading.\npassword=abc\nOrdinary report content.\n'
+literal_before = 'Draft heading.\n[REDACTED] is literal source text.\n'
 large_before = 'DRAFT ' + 'An explicitly synthetic long report. ' * 1_400 + '\n'
 rewrite_before = 'Original report.\n'
 rewrite_after = 'A complete rewritten line: "quoted", café and source text.\r\n' * 4_000
@@ -53,10 +54,10 @@ This **confirmed file** keeps its source available for later work.
 '''
 document_revision = '# A later version\n\nPRIVATE_LATER_WORK_RESULT belongs to its own original receipt.\n'
 (state / 'workspace').mkdir(exist_ok=True)
-for filename, content in [('redacted.txt', before), ('large-report.txt', large_before),
+for filename, content in [('redacted.txt', before), ('literal-markers.txt', literal_before), ('large-report.txt', large_before),
                           ('rewritten-report.txt', rewrite_before)]:
     if not (state / 'workspace' / filename).exists():
-        (state / 'workspace' / filename).write_text(content)
+        (state / 'workspace' / filename).write_bytes(content.encode('utf-8'))
 download_name = 'Café 100% 文本.txt'
 download_before = '\ufeffDRAFT\r\n' + 'A fixture line: café 文本.\r\n' * 1400
 if not (state / 'workspace' / download_name).exists():
@@ -65,6 +66,11 @@ if not (state / 'workspace' / download_name).exists():
 def handler(request):
     body = json.loads(request.content)
     requests.append(body)
+    # Match Anthropic's real schema rejection, including native runtime tools.
+    for tool in body.get('tools', []):
+        schema = tool['function']['parameters']
+        if any(key in schema for key in ('oneOf', 'anyOf', 'allOf')):
+            return httpx.Response(400, json={'error': {'message': 'Unsupported root tool schema composition'}})
     messages = body['messages']
     text = json.dumps(messages)
     has_tool = any(m.get('role') == 'tool' for m in messages)
@@ -82,7 +88,9 @@ def handler(request):
     if not has_tool and 'WRITE_' in text:
         name = 'slow.txt' if 'SLOW_AFTER_APPROVAL' in text else 'declined.txt' if 'WRITE_DECLINE' in text else 'approved.txt'
         arguments = {'path': name, 'expected_digest': None, 'content': 'A real file from a synthetic model fixture.\n'}
-        if 'WRITE_REDACTED' in text:
+        if 'WRITE_LITERAL_MARKER' in text:
+            arguments = {'path': 'literal-markers.txt', 'expected_digest': hashlib.sha256(literal_before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'Draft heading.', 'new': 'Final heading.'}]}}
+        elif 'WRITE_REDACTED' in text:
             arguments = {'path': 'redacted.txt', 'expected_digest': hashlib.sha256(before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'Draft heading.', 'new': 'Final heading.'}]}}
         if 'WRITE_LARGE' in text:
             arguments = {'path': 'large-report.txt', 'expected_digest': hashlib.sha256(large_before.encode()).hexdigest(), 'patch': {'edits': [{'old': 'DRAFT', 'new': 'FINAL'}]}}
@@ -103,8 +111,12 @@ def handler(request):
     else:
         delta = {'content': 'Synthetic model fixture: this page has finished its turn.'}
         finish = 'stop'
-    chunks = [{'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]}, {'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish}]}]
-    stream = ''.join('data: ' + json.dumps(c) + '\n\n' for c in chunks) + 'data: [DONE]\n\n'
+    chunks = [{'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}], 'usage': None},
+              {'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish}], 'usage': None},
+              {'choices': [], 'usage': {'prompt_tokens': 120, 'completion_tokens': 8, 'total_tokens': 128}}]
+    # Exercise standard CR-only framing and a leading BOM through the browser's
+    # approval, file effect, tool continuation and source-return journey.
+    stream = '\ufeff' + ''.join('data: ' + json.dumps(c) + '\r\r' for c in chunks) + 'data: [DONE]\r\r'
     return httpx.Response(200, headers={'content-type':'text/event-stream'}, content=stream)
 
 def factory(scope):

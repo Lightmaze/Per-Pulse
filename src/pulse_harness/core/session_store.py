@@ -2555,7 +2555,10 @@ class HarnessStore:
                         scope,
                         role="assistant",
                         clean_content=clean_content,
-                        redacted=False,
+                        # The legacy storage flag records marker presence. Keep
+                        # it consistent with replay validation even for literal
+                        # markers in complete model-authored tool arguments.
+                        redacted=_redacted,
                         truncated=False,
                         message_id=assistant_item_id,
                         parent_item_id=None,
@@ -2566,7 +2569,7 @@ class HarnessStore:
                         scope,
                         role="system",
                         clean_content=review_context,
-                        redacted=False,
+                        redacted=_review_redacted,
                         truncated=False,
                         message_id=review_item_id,
                         # Source identity is durable in the envelope; a parent
@@ -3342,14 +3345,22 @@ class HarnessStore:
                     ).fetchone()
                     if assistant is None:
                         raise StoreUnavailable("model round assistant authority item is missing")
-                    try:
-                        decoded_assistant = json.loads(assistant["content"])
-                    except (TypeError, ValueError):
+                    # The round, not its reply's spelling, determines whether
+                    # content is text or an internal tool envelope. This also
+                    # restores existing plain-JSON replies without rewriting
+                    # their original bytes, response digests or identities.
+                    if int(row["tool_call_count"]) == 0:
                         response_payload["text"] = assistant["content"]
                     else:
+                        try:
+                            decoded_assistant = json.loads(assistant["content"])
+                        except (TypeError, ValueError) as exc:
+                            raise StoreUnavailable(
+                                "model round assistant authority payload is malformed"
+                            ) from exc
                         if (
                             isinstance(decoded_assistant, Mapping)
-                            and "tool_calls" in decoded_assistant
+                            and set(decoded_assistant) == {"text", "tool_calls"}
                         ):
                             text_value = decoded_assistant.get("text")
                             raw_calls = decoded_assistant.get("tool_calls")
@@ -3369,10 +3380,12 @@ class HarnessStore:
                                     "name",
                                     "arguments",
                                 }
-                                if set(raw_call) != required or not all(
+                                if (set(raw_call).difference({"provider_metadata"}) != required or not all(
                                     isinstance(raw_call[key], str) and raw_call[key].strip()
                                     for key in ("tool_call_id", "action_request_id", "name")
-                                ) or not isinstance(raw_call["arguments"], Mapping):
+                                ) or not isinstance(raw_call["arguments"], Mapping)
+                                    or ("provider_metadata" in raw_call
+                                        and not isinstance(raw_call["provider_metadata"], Mapping))):
                                     raise StoreUnavailable(
                                         "model round assistant tool-call authority is invalid"
                                     )
@@ -3382,6 +3395,8 @@ class HarnessStore:
                                         "action_request_id": raw_call["action_request_id"],
                                         "name": raw_call["name"],
                                         "arguments": dict(raw_call["arguments"]),
+                                        **({"provider_metadata": dict(raw_call["provider_metadata"])}
+                                           if "provider_metadata" in raw_call else {}),
                                     }
                                 )
                             response_payload = {
@@ -3389,7 +3404,9 @@ class HarnessStore:
                                 "tool_calls": canonical_calls,
                             }
                         else:
-                            response_payload["text"] = assistant["content"]
+                            raise StoreUnavailable(
+                                "model round assistant authority payload is malformed"
+                            )
                 if row["response_digest"] != digest_json(response_payload):
                     raise StoreUnavailable(
                         "model round response digest does not match assistant authority"
@@ -5575,6 +5592,35 @@ class HarnessStore:
             row = self._action_row(action_request_id)
             self._assert_action_scope(row, scope)
             return self._action_from_row(row)
+
+    def action_arguments_match_model_call(self, scope: HarnessScope, action_request_id: str) -> bool:
+        """Whether saved arguments exactly match their completed original model call.
+
+        Historical omission flags alone cannot distinguish a literal marker.
+        An action without complete model authority remains unproven.
+        """
+        with self._lock:
+            action = self.get_action(scope, action_request_id)
+            rows = self._db.execute(
+                "SELECT r.response_digest, r.tool_call_count, t.content FROM model_rounds r "
+                "JOIN transcript_messages t ON t.session_id=r.session_id AND t.item_id=r.assistant_item_id "
+                "WHERE r.session_id=? AND r.turn_id=? AND r.status=? AND r.tool_call_count>0",
+                (scope.session_id, scope.turn_id, ModelRoundStatus.COMPLETED.value),
+            ).fetchall()
+            matches = []
+            for row in rows:
+                payload = json.loads(row["content"])
+                if (not isinstance(payload, dict) or set(payload) != {"text", "tool_calls"}
+                        or not isinstance(payload["tool_calls"], list)
+                        or len(payload["tool_calls"]) != row["tool_call_count"]
+                        or digest_json(payload) != row["response_digest"]):
+                    raise StoreUnavailable("model call authority is incomplete")
+                matches.extend(call for call in payload["tool_calls"]
+                               if call.get("action_request_id") == action_request_id)
+            return bool(len(matches) == 1
+                        and matches[0].get("name") == action.tool_name
+                        and matches[0].get("arguments") == dict(action.arguments)
+                        and action_request_id == f"{scope.digest}:{matches[0].get('tool_call_id')}")
 
     def action_scope_for_session(
         self,

@@ -40,7 +40,8 @@ def test_upgrade_preserves_history_and_uses_bounded_query_paths(tmp_path, old_ve
     with sqlite3.connect(path) as previous:
         obsolete = ((NEW_INDEXES if old_version == 7 else ())
                     + ((WINDOW_INDEX, QUEUE_INDEX) if old_version < 9 else ())
-                    + ((MESSAGE_INDEX,) if old_version < 10 else ()))
+                    + ((MESSAGE_INDEX,) if old_version < 10 else ())
+                    + ("idx_native_team_origin",))
         for name in obsolete:
             previous.execute(f"DROP INDEX {name}")
         previous.execute("DROP TABLE local_notices")
@@ -50,8 +51,8 @@ def test_upgrade_preserves_history_and_uses_bounded_query_paths(tmp_path, old_ve
     try:
         migration = reopened.schema_migration_result
         assert migration.from_version == old_version
-        assert migration.to_version == 11
-        assert migration.applied_versions == tuple(range(old_version + 1, 12))
+        assert migration.to_version == 13
+        assert migration.applied_versions == tuple(range(old_version + 1, 14))
         assert migration.backup_path is not None
         with sqlite3.connect(migration.backup_path) as backup:
             assert backup.execute("PRAGMA user_version").fetchone()[0] == old_version

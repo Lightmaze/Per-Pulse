@@ -7,6 +7,7 @@ import { MessageContent } from './MessageContent';
 import { CopyButton } from './CopyButton';
 import { ReplayOrigin } from './ReplayOrigin';
 import { messageBody } from '../messageBody';
+import { PageSourceContent } from './PageSourceContent';
 import { initialWorkHandoffExcerpt } from '../workHandoffExcerpt';
 import { readTransferPresentation } from '../transferPresentation';
 import { useLiveReply } from '../liveReply';
@@ -30,10 +31,10 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
       const transferPresentation = readTransferPresentation(message);
       const referenceKey = JSON.stringify(message.references.map(({ id, targetPageId, label }) => ({ id, targetPageId, label })));
       return <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id} key={message.id} tabIndex={-1} aria-label={t(message.role === 'user' ? 'conversation.yourMessage' : message.role === 'assistant' ? 'conversation.assistantMessage' : 'conversation.workspaceMessage')}>
-      <div className="message-label">{message.role === 'user' ? t('conversation.you') : message.role === 'assistant' ? 'Per Pulse' : t('conversation.workspace')}</div>
-      {message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">{t("conversation.from")} <SessionLink pageId={message.sourcePageId} label={pageMap.get(message.sourcePageId) ? pageTitle(pageMap.get(message.sourcePageId)!) : t('conversation.sourcePage')} targetMessageId={message.sourceMessageId ?? undefined} origin={{ pageId: view.page.id, messageId: message.id }} navigate={navigate} /></div> : null}
+      <div className="message-label">{message.pageSource ? t('source.heading') : message.role === 'user' ? t('conversation.you') : message.role === 'assistant' ? 'Per Pulse' : t('conversation.workspace')}</div>
+      {!message.pageSource && message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">{t("conversation.from")} <SessionLink pageId={message.sourcePageId} label={pageMap.get(message.sourcePageId) ? pageTitle(pageMap.get(message.sourcePageId)!) : t('conversation.sourcePage')} targetMessageId={message.sourceMessageId ?? undefined} origin={{ pageId: view.page.id, messageId: message.id }} navigate={navigate} /></div> : null}
       <ReplayOrigin message={message} pageId={view.page.id} navigate={navigate} />
-      {transferPresentation ? <div className="transfer-presentation">
+      {message.pageSource ? <PageSourceContent message={message} pageId={view.page.id} navigate={navigate} sourceTitle={message.sourcePageId && pageMap.get(message.sourcePageId) ? pageTitle(pageMap.get(message.sourcePageId)!) : undefined} /> : transferPresentation ? <div className="transfer-presentation">
         <section className="transfer-presentation-source" aria-label={t('conversation.transferSource')}>
           <div className="transfer-presentation-label">{t(transferPresentation.edited ? 'conversation.transferSourceEdited' : 'conversation.transferSource')}</div>
           <MessageContent content={transferPresentation.excerpt} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />

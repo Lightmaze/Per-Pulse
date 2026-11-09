@@ -29,7 +29,14 @@ def event(delta, finish=None):
 
 
 def handler(request):
+    messages = json.loads(request.content)['messages']
+    latest = next((m['content'] for m in reversed(messages) if m['role'] == 'user'), '')
     def body():
+        if latest == 'REFUSAL_FIXTURE':
+            yield event({'content': None, 'refusal': 'Synthetic refusal fixture. I cannot complete this request.'})
+            yield event({}, 'stop')
+            yield b'data: [DONE]\n\n'
+            return
         yield event({'content': 'Synthetic fixture. Drafting the plan:\n\n1. Read the notes.'})
         release.wait(30)
         yield event({'content': '\n2. Write the summary.'})

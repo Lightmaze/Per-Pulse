@@ -54,6 +54,7 @@ jobs:
       - name: Verify native Harness approvals and artifacts in Chromium
         run: |
           PER_PULSE_PLAYWRIGHT_PATH="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_TEST_PYTHON=python PER_PULSE_QA_OUTPUT="$RUNNER_TEMP/per-pulse-harness-screenshots" node tests/browser/harness_smoke.mjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python node tests/browser/literal_approval_flow.mjs
       - name: Verify native Home and Work organization with file actions disabled
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_WORK_ORGANIZATION_SCREENSHOTS="$RUNNER_TEMP/per-pulse-harness-screenshots/work-organization" node tests/browser/work_organization_flow.mjs
@@ -99,9 +100,18 @@ jobs:
       - name: Verify earlier conversation browsing in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-history-screenshots" node tests/browser/history_flow.mjs
+      - name: Verify plain JSON replies through continuation and restart
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python node tests/browser/plain_json_reply_flow.mjs
+      - name: Verify original authorship when opening a sourced page
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python node tests/browser/page_source_flow.mjs
       - name: Verify clipped original tool-result recall, restart and Work isolation in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TOOL_HISTORY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-history-screenshots/tool-results" node tests/browser/tool_history_flow.mjs
+      - name: Verify native web reading, source links and restart in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_WEB_SCREENSHOTS="$RUNNER_TEMP/per-pulse-history-screenshots/web-reading" node tests/browser/web_read_flow.mjs
       - name: Keep conversation history browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -122,9 +132,15 @@ jobs:
       - name: Verify concrete example capture, native retrieval and later feedback in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_EXAMPLE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-example-screenshots" node tests/browser/example_flow.mjs
+      - name: Verify native PNG and JPEG material input in Chromium
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_IMAGE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-download-screenshots/images" node tests/browser/image_materials_flow.mjs
       - name: Verify exact native file downloads in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_DOWNLOAD_SCREENSHOTS="$RUNNER_TEMP/per-pulse-download-screenshots" node tests/browser/download_flow.mjs
+      - name: Verify failed browser draft writes remain recoverable
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python node tests/browser/draft_storage_flow.mjs
       - name: Verify Work completion remains visible from idle Home
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_STATUS_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/workspace_status_flow.mjs
@@ -134,6 +150,7 @@ jobs:
       - name: Verify /tick continuation and Stop in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_TICK_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/tick_flow.mjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_CAPACITY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/foreground_capacity_flow.mjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_UNDO_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/undo_flow.mjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_FAILURE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/failure_flow.mjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_STEPS_SCREENSHOTS="$RUNNER_TEMP/per-pulse-status-screenshots" node tests/browser/steps_flow.mjs
@@ -259,6 +276,11 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" \
           PER_PULSE_PYTHON="$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" \
           node tests/browser/materials_flow.mjs
+      - name: Verify native images from the installed wheel
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" \
+          PER_PULSE_INSTALLED_PYTHON="$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" \
+          node tests/browser/image_materials_flow.mjs
 
   windows:
     runs-on: windows-latest
@@ -280,7 +302,11 @@ jobs:
       - name: Install the local service
         run: python -m pip install -e ".[dev]"
       - name: Start, browse, upload, change and undo files on Windows, and keep them inside the workspace
-        run: python -m pytest -q tests/per_pulse/test_workspace_files_api.py tests/per_pulse/test_auto_apply_edits.py tests/per_pulse/test_artifacts.py tests/per_pulse/test_pages.py tests/per_pulse/test_keys_in_content.py tests/per_pulse/test_windows_file_boundary.py
+        run: python -m pytest -q tests/per_pulse/test_workspace_files_api.py tests/per_pulse/test_auto_apply_edits.py tests/per_pulse/test_artifacts.py tests/per_pulse/test_pages.py tests/per_pulse/test_keys_in_content.py tests/per_pulse/test_windows_file_boundary.py tests/per_pulse/test_pulse_schema_upgrade.py tests/per_pulse/test_native_team_origin_index.py
+      - name: Verify bounded DNS, HTTPS hostname checks and cancellation on Windows
+        run: python -m pytest -q tests/per_pulse/test_web_read.py
+      - name: Verify provider schemas, streaming and persistent tool continuation on Windows
+        run: python -m pytest -q tests/per_pulse/test_provider_compatibility.py
 
   browser-journey:
     runs-on: ubuntu-latest

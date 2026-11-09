@@ -26,7 +26,7 @@ from pulse_system.core.types import (
     EngramStatus, HarnessTurnState,
 )
 
-from .posture import PostureMemory, experience_search_text
+from .posture import PostureMemory, _text, experience_search_text
 
 NAME = "posture"
 PREFIX = "native-posture-v1:"
@@ -50,6 +50,9 @@ SCHEMA = {
         "query": {"type": "string", "minLength": 2, "maxLength": 160},
         "after_experience_id": {"type": "string", "maxLength": 160},
         "experience_id": {"type": "string", "maxLength": 160},
+        "offset": {"type": "integer", "minimum": 0},
+        "max_chars": {"type": "integer", "minimum": 1, "maximum": 8192},
+        "expected_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "expected_revision": {"type": "integer", "minimum": 1},
         "verdict": {"type": "string", "enum": sorted(_NATIVE_VERDICTS)},
         "source_message_id": {"type": "string", "maxLength": 160},
@@ -82,12 +85,12 @@ SCHEMA["properties"]["changes"] = {
 def descriptor() -> ToolDescriptor:
     return ToolDescriptor(
         NAME,
-        "Keep lessons from this page's work and the user's later feedback. list shows "
-        "recent experiences, newest first, with recent message IDs. find(query) matches "
-        "literal text in experiences' titles, lessons, conditions, decision shifts and kept"
-        " passages; when next_after_experience_id is returned, repeat find with it as "
-        "after_experience_id for older matches. A match shown only as a reference because "
-        "it is too large is not advice. get(experience_id) reads one experience. "
+        "Keep lessons and later feedback. list shows newest experiences and recent "
+        "message IDs; when next_after_experience_id appears, page older ones with "
+        "list(after_experience_id). find(query) searches titles, lessons, conditions, "
+        "shifts and passages; page older matches with find(query, after_experience_id). "
+        "An oversized reference is not advice. get(experience_id) reads details; follow "
+        "detail.next for large JSON records. "
         "remember(source_message_id, feedback_message_id, title, lesson, conditions, "
         "counterexamples, shift) keeps a lesson from the user's later feedback on an "
         "earlier assistant reply: say what the feedback changes in understanding, "
@@ -127,7 +130,12 @@ def validate(arguments: Mapping[str, Any]) -> dict:
     if not isinstance(arguments, Mapping):
         raise ValueError("posture arguments must be an object")
     values = deepcopy(dict(arguments))
-    if values == {"op": "list"}:
+    if values.get("op") == "list" and set(values) in ({"op"}, {"op", "after_experience_id"}):
+        if "after_experience_id" in values:
+            after = values["after_experience_id"]
+            if not isinstance(after, str) or not re.fullmatch(
+                    r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", after):
+                raise ValueError("invalid after_experience_id")
         return values
     if values.get("op") == "find" and set(values) in (
         {"op", "query"}, {"op", "query", "after_experience_id"}
@@ -143,11 +151,20 @@ def validate(arguments: Mapping[str, Any]) -> dict:
                 raise ValueError("invalid after_experience_id")
             result["after_experience_id"] = after
         return result
-    if values.get("op") == "get" and set(values) == {"op", "experience_id"}:
+    if (values.get("op") == "get" and {"op", "experience_id"} <= set(values)
+            <= {"op", "experience_id", "offset", "max_chars", "expected_digest"}):
         identity = values["experience_id"]
         if (not isinstance(identity, str) or not identity.strip()
                 or len(identity) > 160 or any(ord(character) < 32 for character in identity)):
             raise ValueError("invalid experience_id")
+        for key, minimum, maximum in (("offset", 0, 2**31 - 1), ("max_chars", 1, 8192)):
+            if key in values and (type(values[key]) is not int or not minimum <= values[key] <= maximum):
+                raise ValueError("invalid " + key)
+        if "expected_digest" in values and (not isinstance(values["expected_digest"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", values["expected_digest"]) is None):
+            raise ValueError("invalid expected_digest")
+        if values.get("offset", 0) and "expected_digest" not in values:
+            raise ValueError("continued experience details require expected_digest")
         return values
     if values.get("op") in ("feedback", "revise"):
         fields = _FEEDBACK_FIELDS if values["op"] == "feedback" else _REVISION_FIELDS
@@ -414,9 +431,14 @@ def capture_example(runtime, subject_id: str, context_id: str, source_message_id
     original, prior_turn = _settled_result(runtime, subject_id, context_id, source_message_id)
     if not isinstance(excerpt, str) or not excerpt.strip() or excerpt not in original.content:
         raise ScopeConflict("the example must be an exact passage from the original result")
-    clean, redacted, truncated = _source_text(excerpt, 8000)
-    if redacted or truncated or clean != excerpt:
-        raise ScopeConflict("select a shorter example passage without credentials")
+    # This is a verbatim slice of an actual committed result. Literal marker
+    # strings in that result are data, not evidence that this slice was clipped.
+    # Validate the real UTF-8 size; source identity and passage equality were
+    # checked above, while surrounding encounter material remains bounded.
+    try:
+        _text(excerpt, "example excerpt", 8000)
+    except ValueError as exc:
+        raise ScopeConflict("select an example passage within 8000 UTF-8 bytes") from exc
     learning_trigger = {}
     if latest_input_id is not None:
         latest, _, learning_trigger = _input_situation(runtime, subject_id, context_id, latest_input_id)
@@ -622,6 +644,38 @@ class NativePosture:
         )} | {"scope": "subject", "effect": "experience_not_proven_ability",
              "admission": "after_successful_native_turn"}
 
+    @staticmethod
+    def _detail(record, values, *, too_large):
+        """Addressable original material; fragments are not partial advice."""
+        text = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        digest = _digest(record)
+        if values.get("expected_digest", digest) != digest:
+            raise ScopeConflict("experience changed; restart get without expected_digest")
+        offset = values.get("offset", 0)
+        if offset > len(text):
+            raise ScopeConflict("experience detail offset exceeds the original material")
+        maximum = values.get("max_chars", 4000)
+
+        def render(end):
+            return {"experience": None, "material_too_large": too_large,
+                    "scope": "current_context_and_explicit_subject_transfers",
+                    "semantic_applicability": "not_yet_assessed",
+                    "detail": {"experience_id": record["id"], "revision": record["revision"],
+                        "format": "experience_json_fragment", "digest": digest,
+                        "content": text[offset:end], "offset": offset, "end": end,
+                        "total_chars": len(text), "offset_unit": "unicode_characters", "eof": end == len(text),
+                        "next": ({"op": "get", "experience_id": record["id"], "offset": end,
+                                  "max_chars": maximum, "expected_digest": digest} if end < len(text) else None)}}
+
+        low, high = offset, min(len(text), offset + maximum)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if len(json.dumps(render(middle), ensure_ascii=False).encode("utf-8")) <= 16000:
+                low = middle
+            else:
+                high = middle - 1
+        return render(low)
+
     def execute(self, scope, call, cancellation, *, action_request_id=None):
         r = self.runtime
         with self._lock:
@@ -634,71 +688,73 @@ class NativePosture:
             turn = self._live_turn(scope)
             if values["op"] in {"list", "find", "get"}:
                 from pulse_harness.plugins.posture import pack_posture_materials
-                materials = memory.materials(subject_id=scope.engram_id, context_id=scope.context_id)
                 if values["op"] == "get":
-                    eligible = [item for item in materials["episodes"]
-                                if item["id"] == values["experience_id"]]
+                    item = memory.material_experience(
+                        subject_id=scope.engram_id, context_id=scope.context_id,
+                        experience_id=values["experience_id"])
+                    eligible = [] if item is None else [item]
                     if not eligible:
                         # Same error for nonexistent, inactive and private IDs.
                         raise ScopeConflict("experience is not active or accessible from this context")
                     packed = pack_posture_materials({"episodes": eligible}, byte_budget=16000)
+                    if not packed["episodes"] or any(key in values for key in ("offset", "max_chars", "expected_digest")):
+                        return self._detail(eligible[0], values, too_large=not bool(packed["episodes"]))
                     return {"experience": packed["episodes"][0] if packed["episodes"] else None,
                             "material_too_large": not bool(packed["episodes"]),
                             "scope": "current_context_and_explicit_subject_transfers",
                             "semantic_applicability": "not_yet_assessed"}
-                if values["op"] == "find":
+                materials = memory.materials(subject_id=scope.engram_id, context_id=scope.context_id)
+                is_find = values["op"] == "find"
+                eligible = materials["episodes"]
+                if is_find:
                     needle = values["query"].casefold()
-                    eligible = [item for item in materials["episodes"]
+                    eligible = [item for item in eligible
                                 if needle in experience_search_text(item).casefold()]
-                    # The order is the journal's newest-first (updated_at, id) order.
-                    # A cursor is accepted only if it is still in this caller's
-                    # *matching and accessible* results, so it cannot probe another
-                    # Work's private IDs or jump across unrelated searches.
-                    start = 0
-                    after = values.get("after_experience_id")
-                    if after is not None:
-                        positions = [index for index, item in enumerate(eligible)
-                                     if item["id"] == after]
-                        if not positions:
-                            raise ScopeConflict("experience cursor is not active or accessible for this query")
-                        start = positions[0] + 1
-                    selected, visible = [], []
-                    for item in eligible[start:]:
-                        if len(visible) == 8:
+                # The host journal already filters inaccessible contexts and inactive
+                # experiences. A cursor must belong to exactly that visible sequence.
+                start = 0
+                after = values.get("after_experience_id")
+                if after is not None:
+                    positions = [index for index, item in enumerate(eligible)
+                                 if item["id"] == after]
+                    if not positions:
+                        raise ScopeConflict("experience cursor is not active or accessible for this query")
+                    start = positions[0] + 1
+
+                # Do not discard old lessons at the 8-item/16KiB window. Page
+                # both operations by stable experience ID; never offer a partial
+                # lesson as usable guidance when one item exceeds the limit.
+                selected, visible = [], []
+                for item in eligible[start:]:
+                    if len(visible) == 8:
+                        break
+                    packed = pack_posture_materials(
+                        {"episodes": [*selected, item]}, byte_budget=16000,
+                    )
+                    if len(packed["episodes"]) != len(selected) + 1:
+                        if visible:
                             break
-                        packed = pack_posture_materials(
-                            {"episodes": [*selected, item]}, byte_budget=16000,
-                        )
-                        if len(packed["episodes"]) != len(selected) + 1:
-                            if visible:
-                                # Do not jump past an omitted record: the next
-                                # request must start with the first one not seen.
-                                break
-                            # An individually oversized record is still
-                            # discoverable by ID, but its partial conditions
-                            # cannot safely be offered as usable guidance.
-                            visible.append({"id": item["id"], "revision": item["revision"],
-                                            "title": item["title"], "material_too_large": True})
-                            break
-                        selected.append(item)
-                        visible.append(packed["episodes"][-1])
-                    consumed = start + len(visible)
-                    remaining = max(0, len(eligible) - consumed)
-                    return {"experiences": visible, "matching_count": len(eligible),
-                            "more_experiences": remaining > 0,
-                            "omitted_experience_count": remaining,
-                            "next_after_experience_id": visible[-1]["id"] if remaining and visible else None,
-                            "retrieval": "literal_casefold_on_eligible_content_only",
-                            "scope": "current_context_and_explicit_subject_transfers",
-                            "semantic_applicability": "not_yet_assessed"}
-                packed = pack_posture_materials(materials, byte_budget=16000)
-                visible = packed["episodes"][:8]
-                return {"experiences": visible,
-                        "more_experiences": len(materials["episodes"]) > len(visible),
-                        "omitted_experience_count": len(materials["episodes"]) - len(visible),
-                        "recent_sources": self._recent_sources(scope, turn),
-                        "scope": "current_context_and_explicit_subject_transfers",
-                        "semantic_applicability": "not_yet_assessed"}
+                        visible.append({"id": item["id"], "revision": item["revision"],
+                                        "title": item["title"], "material_too_large": True})
+                        break
+                    selected.append(item)
+                    visible.append(packed["episodes"][-1])
+
+                consumed = start + len(visible)
+                remaining = max(0, len(eligible) - consumed)
+                result = {
+                    "experiences": visible, "more_experiences": remaining > 0,
+                    "omitted_experience_count": remaining,
+                    "next_after_experience_id": visible[-1]["id"] if remaining and visible else None,
+                    "scope": "current_context_and_explicit_subject_transfers",
+                    "semantic_applicability": "not_yet_assessed",
+                }
+                if is_find:
+                    result["matching_count"] = len(eligible)
+                    result["retrieval"] = "literal_casefold_on_eligible_content_only"
+                else:
+                    result["recent_sources"] = self._recent_sources(scope, turn)
+                return result
             if not isinstance(action_request_id, str) or not action_request_id:
                 raise ScopeConflict("remember requires its native action identity")
             key = PREFIX + _digest({"scope": scope.as_dict(), "action": action_request_id})

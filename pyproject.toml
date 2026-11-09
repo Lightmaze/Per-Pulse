@@ -1,6 +1,6 @@
 [project]
 name = "per-pulse"
-version = "0.1.0a1"
+version = "0.1.0a10"
 description = "A persistent conversation workspace built on Pulse's native Home, Work, and Harness Kernel."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -21,6 +21,7 @@ dependencies = [
   "openai>=1.0,<4",
   "sympy>=1.14.0,<2",
   "pypdf>=6.20,<7",
+  "Pillow>=13,<14",
 ]
 
 [project.urls]
@@ -55,6 +56,8 @@ exclude = [
 
 [tool.hatch.build.targets.sdist.force-include]
 "web/dist" = "web/dist"
+"tests/fixtures/web_tls/cert.pem" = "tests/fixtures/web_tls/cert.pem"
+"tests/fixtures/web_tls/key.pem" = "tests/fixtures/web_tls/key.pem"
 
 [tool.pytest.ini_options]
 testpaths = ["tests/per_pulse"]

@@ -48,6 +48,7 @@ class ReferenceInput(Input):
 
 
 class NewPage(Input):
+    sourceExcerpt: Annotated[str, StringConstraints(min_length=1, max_length=32_000)] | None = None
     title: Title
     instruction: Content
     sourcePageId: Identifier = "home"
@@ -395,9 +396,9 @@ def create_app(
         return service
 
     @app.get("/api/workspace/files")
-    def list_files(request: Request, path: str = ""):
+    def list_files(request: Request, path: str = "", cursor: str | None = None):
         service = file_service(request)
-        return service.file_response(service.files.list(path))
+        return service.file_response(service.files.list(path, cursor=cursor))
 
     @app.get("/api/workspace/files/content")
     def read_file(request: Request, path: str):
@@ -498,7 +499,7 @@ def create_app(
     @app.post("/api/pages", status_code=201)
     def create(body: NewPage, request: Request):
         return pages(request).create_page(
-            body.title, body.instruction, body.sourcePageId, body.sourceMessageId,
+            body.title, body.instruction, body.sourcePageId, body.sourceMessageId, source_excerpt=body.sourceExcerpt,
         )
 
     @app.post("/api/pages/{page_id}/messages", status_code=202)

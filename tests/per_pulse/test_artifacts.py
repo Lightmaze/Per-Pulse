@@ -459,8 +459,8 @@ def test_preview_shows_the_users_own_text_bounded_after_verifying_original_bytes
         assert download.status_code == 200
         assert download.content == after.encode("utf-8")
 
-def test_preview_rejects_hidden_marker_beyond_bounded_prefix(tmp_path, monkeypatch):
-    """A safe-looking preview cannot authorize carrying an unsafe complete file."""
+def test_literal_marker_beyond_preview_does_not_block_verified_file_download(tmp_path, monkeypatch):
+    """A local file's text is data, including outside the displayed preview."""
     import per_pulse.artifacts as module
 
     monkeypatch.setattr(module, "MAX_PREVIEW_BYTES", 256)
@@ -486,13 +486,12 @@ def test_preview_rejects_hidden_marker_beyond_bounded_prefix(tmp_path, monkeypat
         assert preview["observedSha256"] == _sha(after)
         assert preview["truncated"]
         assert "[REDACTED]" not in preview["content"]
-        # The entire file contains a persisted redaction marker *after* the
-        # displayed portion. Both actions must agree it is not transferable.
-        assert preview["redacted"]
-        assert preview["downloadable"] is False
-        denied = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
-        assert denied.status_code == 422
-        assert denied.json()["error"]["code"] == "artifact_download_redacted"
+        assert preview["redacted"] is False
+        assert preview["downloadable"] is True
+        downloaded = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert downloaded.status_code == 200
+        assert downloaded.content == after.encode("utf-8")
+        assert downloaded.headers["ETag"] == '"' + _sha(after) + '"'
 
 
 def test_download_keeps_complete_utf8_bytes_and_filename_after_restart(tmp_path, monkeypatch):
@@ -553,19 +552,51 @@ def test_download_serves_verified_snapshot_without_reopening_a_replaced_path(tmp
     with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
         page_id = _page(client)
         action_id = _approve(PageExecution(client.app.state.pages.runtime), page_id)
-        read = WorkspaceFiles.read
+        read = WorkspaceFiles.read_with_bytes
 
         def replace_after_read(files, path):
             snapshot = read(files, path)
             (tmp_path / "workspace" / path).write_text(replacement, encoding="utf-8", newline="")
             return snapshot
 
-        monkeypatch.setattr(WorkspaceFiles, "read", replace_after_read)
+        monkeypatch.setattr(WorkspaceFiles, "read_with_bytes", replace_after_read)
         downloaded = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
         assert downloaded.status_code == 200 and downloaded.content == original.encode()
         assert (tmp_path / "workspace" / "report.txt").read_text(encoding="utf-8") == replacement
         refused = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
         assert refused.status_code == 409 and replacement not in refused.text
+
+
+def test_native_pdf_download_keeps_original_bytes_and_digest_after_restart(tmp_path, monkeypatch):
+    from pdf_samples import synthetic_pdf
+
+    data = synthetic_pdf(["The exact PDF report."])
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {
+        "path": "report.pdf", "expected_digest": None, "content": data.decode("ascii"),
+    }}, [])
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        page_id = _page(client)
+        action_id = _approve(PageExecution(client.app.state.pages.runtime), page_id)
+        preview = client.get(f"/api/pages/{page_id}/artifacts/{action_id}")
+        assert preview.status_code == 200
+        assert "The exact PDF report." in preview.json()["content"]
+        assert "%PDF" not in preview.json()["content"]
+        url = f"/api/pages/{page_id}/artifacts/{action_id}/download"
+        response = client.get(url)
+        assert response.status_code == 200
+        assert response.content == data
+        assert response.headers["x-per-pulse-content-sha256"] == hashlib.sha256(data).hexdigest()
+        assert response.headers["content-type"] == "application/octet-stream"
+        assert response.headers["x-content-type-options"] == "nosniff"
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        response = client.get(url)
+        assert response.status_code == 200 and response.content == data
+        assert client.get(f"/api/pages/home/artifacts/{action_id}/download").status_code == 404
+        (tmp_path / "workspace" / "report.pdf").write_bytes(synthetic_pdf(["A later private report."]))
+        refused = client.get(url)
+        assert refused.status_code == 409
+        assert "A later private report." not in refused.text
 
 
 def test_artifact_identity_survives_event_retention_and_list_bounds(tmp_path, monkeypatch):

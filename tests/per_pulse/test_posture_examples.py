@@ -76,19 +76,17 @@ def test_existing_v1_lessons_upgrade_in_the_same_journal_without_rewriting_histo
     storage = Storage()
     memory = PostureMemory(storage, "world")
     try:
-        lesson = memory.add_experience(**episode())
-        state = storage.load_component_state(memory.component)
-        state["schema"] = LEGACY_SCHEMA
-        state["experiences"][lesson["id"]].pop("representation")
-        before = deepcopy(state["experiences"][lesson["id"]])
+        lesson = PostureMemory.validate_experience(**episode())
+        lesson.pop("representation")
+        state = {"schema": LEGACY_SCHEMA, "world_id": "world", "experiences": {lesson["id"]: lesson}}
+        before = deepcopy(lesson)
         storage.save_component_state(memory.component, state)
         assert memory.get_experience(lesson["id"]) == before
         assert storage.load_component_state(memory.component)["schema"] == LEGACY_SCHEMA
         saved = memory.add_experience(**example())
-        after = storage.load_component_state(memory.component)
-        assert after["schema"] == SCHEMA
-        assert after["experiences"][lesson["id"]] == before
-        assert len(after["experiences"]) == 2
+        assert storage.load_component_state(memory.component) == state
+        assert memory.get_experience(lesson["id"]) == before
+        assert len(memory.list_experiences(subject_id="subject")) == 2
         offered = memory.materials(subject_id="subject", context_id="origin")["episodes"]
         assert {item["representation"] for item in offered} == {"lesson", "example"}
         assert {item["id"] for item in offered} == {lesson["id"], saved["id"]}
@@ -314,3 +312,66 @@ def test_page_example_can_attach_real_ordered_followup_without_treating_it_as_su
         assert saved["sourceAnchor"]["feedbackMessageId"] == followup["messageId"]
         assert saved["encounter"]["outcome"].startswith("This particular example did not fit")
         assert saved["feedback"] == []
+
+
+@pytest.mark.parametrize("marker", [
+    "[REDACTED]",
+    "[TRUNCATED sha256=" + "a" * 64 + " redacted=1 preview=literal documentation]",
+])
+def test_exact_native_result_example_retains_literal_marker_and_source(tmp_path, marker):
+    """The observed reply, not marker-shaped words, defines the selected source."""
+    from per_pulse.service import PageService
+
+    service = PageService(tmp_path, posture=True, model_factory=None)
+    runtime = service.runtime
+    try:
+        subject = runtime.continuity_engram_id
+        fence = runtime._current_runtime_fence
+        stimulus = runtime.inject(subject, "Explain this log marker literally.")
+        turn = runtime.causal_ledger.begin_turn(
+            stimulus, subject, "Explain this log marker literally.",
+            execution_context="", runtime_fence=fence(),
+        )
+        _, result = runtime.causal_ledger.settle_turn(
+            turn.id, "Example text: " + marker + " is part of the sample.",
+            runtime_fence=fence(), metadata={"evidence_class": "TEST_DOUBLE"},
+        )
+        captured = capture_example(runtime, subject, "", result.id, marker)
+        selected = captured["source"]["selected_excerpt"]
+        assert result.content[selected["start"]:selected["end"]] == marker
+        assert selected["sha256"] == hashlib.sha256(marker.encode()).hexdigest()
+        saved = runtime.harness.posture_memory.add_experience(
+            subject_id=subject, context_id="", scope="subject",
+            title="Literal observed output", representation="example",
+            excerpt=marker, note="A quoted result, not a secret or endorsement.",
+            encounter=captured["encounter"], source=captured["source"],
+            record_type=captured["record_type"],
+        )
+        assert saved["excerpt"] == marker
+        assert runtime.harness.posture_memory.get_experience(saved["id"])["source"] == captured["source"]
+    finally:
+        runtime.close()
+
+
+def test_exact_native_result_example_keeps_utf8_byte_limit(tmp_path):
+    from per_pulse.service import PageService
+
+    service = PageService(tmp_path, posture=True, model_factory=None)
+    runtime = service.runtime
+    try:
+        subject = runtime.continuity_engram_id
+        fence = runtime._current_runtime_fence
+        stimulus = runtime.inject(subject, "Keep the result as a verbatim example.")
+        turn = runtime.causal_ledger.begin_turn(
+            stimulus, subject, "Keep the result as a verbatim example.",
+            execution_context="", runtime_fence=fence(),
+        )
+        passage = "🌍" * 2001  # 8004 UTF-8 bytes, despite only 2001 code points
+        _, result = runtime.causal_ledger.settle_turn(
+            turn.id, passage, runtime_fence=fence(),
+            metadata={"evidence_class": "TEST_DOUBLE"},
+        )
+        with pytest.raises(ScopeConflict, match="8000 UTF-8 bytes"):
+            capture_example(runtime, subject, "", result.id, passage)
+    finally:
+        runtime.close()

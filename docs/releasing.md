@@ -2,9 +2,10 @@
 
 ## Prepare a candidate
 
-1. Choose the package version in `pyproject.toml` and write
-   `docs/releases/v<VERSION>.md`. Update the download filename in the installation
-   guide and README. Keep changes in a reviewed PR.
+1. Choose the package version in `pyproject.toml`, set the same `__version__` in
+   `src/per_pulse/__init__.py`, and write `docs/releases/v<VERSION>.md`. Update
+   the download filename in the installation guide and README. Keep changes
+   in a reviewed PR.
 2. Build the client, run the normal checks, and build the distributions:
 
    ```sh
@@ -24,7 +25,9 @@
    Node and compares every wheel member with the original. It installs the
    original wheel, with normal dependency resolution, into fresh environments
    on Linux, Windows and macOS. Native first use/restart runs on all three;
-   installed Chromium first use runs on Linux.
+   installed Chromium first use and PNG/JPEG material reading run on Linux.
+   The Linux job then installs pytest as a test-fixture dependency and checks
+   webpage source observations and history recall in the installed application.
 4. Review the normal CI and package workflow results on the exact candidate.
    Merge the candidate, then wait for full `Verify Per Pulse` CI on the exact
    main commit. Read review comments and inspect the actual browser flow.

@@ -150,7 +150,7 @@ try {
   await navigate('Home');
   assert.equal((await (await restartRead).json()).serviceInstanceId, restarted.serviceInstanceId);
   await page.locator('.sync-notice').waitFor();
-  assert.equal(await page.locator('.provider-indicator').innerText(), 'AI connected', 'background reads cannot silently adopt another process');
+  assert.equal(await page.locator('.provider-indicator').innerText(), 'Model configured', 'background reads cannot silently adopt another process');
   let reconnectCaptured;
   const reconnectCapturedRead = new Promise(done => { reconnectCaptured = done; });
   const reconnectHeld = new Promise(done => { releaseReconnect = done; });
@@ -172,12 +172,12 @@ try {
   await navigate('Home');
   assert.equal((await (await overlappingRead).json()).serviceInstanceId, restarted.serviceInstanceId);
   await page.waitForTimeout(100);
-  assert.equal(await page.locator('.provider-indicator').innerText(), 'AI connected');
+  assert.equal(await page.locator('.provider-indicator').innerText(), 'Model configured');
   const reconnectedRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/bootstrap');
   releaseReconnect(); await reconnectedRead;
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
   await page.getByText('The held Home reply finished. [Explicit synthetic fixture]', { exact: true }).waitFor();
-  await wait(async () => (await page.locator('.provider-indicator').innerText()) === 'AI disconnected', 'explicit reconnect adopts the restarted service');
+  await wait(async () => (await page.locator('.provider-indicator').innerText()) === 'No model configured', 'explicit reconnect adopts the restarted service');
   await wait(async () => await page.locator('.sync-notice').count() === 0, 'reconnect recovers the current page view and clears the notice');
   assert.equal(await composer.inputValue(), homeDraft);
   // Removing the final interceptor can stall an unrelated request starting
@@ -193,6 +193,45 @@ try {
   await shot('work-discovery-restarted-mobile');
   assert.equal((await get('/__work-discovery/status')).requests, 0);
   checks.push('A real service restart is fenced until explicit refresh; the discovered Work, result and drafts remain available offline on a phone.');
+
+  // Inject many *display summaries* into one browser read to exercise a
+  // long-lived sidebar without creating fake native Works or model results.
+  // The already persisted Work remains the real, navigable source.
+  await page.route('**/api/bootstrap', async route => {
+    const response = await route.fetch();
+    const bootstrap = await response.json();
+    const original = bootstrap.pages.find(item => item.id === workId);
+    assert.ok(original, 'the original persisted Work must still exist');
+    const syntheticRows = Array.from({ length: 130 }, (_, index) => ({
+      ...original, id: `fixture-work-${index + 1}`, title: `Archive Work ${index + 1}`,
+      description: 'Synthetic display summary only', status: 'idle',
+    }));
+    await route.fulfill({ response, json: { ...bootstrap, pages: [
+      ...bootstrap.pages.filter(item => item.kind === 'home'),
+      ...syntheticRows,
+      ...bootstrap.pages.filter(item => item.kind === 'work'),
+    ] } });
+  }, { times: 1 });
+  await page.reload();
+  const navToggle = page.getByRole('button', { name: 'Toggle navigation', exact: true });
+  await navToggle.click();
+  const navigation = page.getByLabel('Workspace navigation');
+  const sidebarWorks = navigation.locator('.page-nav a.nav-row');
+  await navigation.getByRole('searchbox', { name: 'Find a Work' }).waitFor();
+  assert.equal(await sidebarWorks.count(), 49, '48 displayed summaries plus the pinned real deep Work');
+  assert.equal(await navigation.getByRole('link', { name: title, exact: true }).count(), 1);
+  await navigation.getByRole('button', { name: 'Show more Works' }).click();
+  assert.equal(await sidebarWorks.count(), 97, 'progressively reveal instead of mounting all Works');
+  await navigation.getByRole('button', { name: 'Show more Works' }).click();
+  assert.equal(await sidebarWorks.count(), 131, 'all summaries eventually remain reachable');
+  const pageFilter = navigation.getByRole('searchbox', { name: 'Find a Work' });
+  await pageFilter.fill('archive work 130');
+  assert.equal(await sidebarWorks.count(), 1, 'search reaches the oldest matching summary');
+  assert.equal(await sidebarWorks.first().innerText().then(value => value.trim()), 'Archive Work 130');
+  await pageFilter.fill('');
+  assert.equal(await sidebarWorks.count(), 49, 'clearing the search restores bounded initial rendering and the active Work');
+  checks.push('The real persisted Work remains visible after 130 display-only Work summaries; progressive loading and case-insensitive filtering reach older Works without mounting every row.');
+
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
 } catch (error) {

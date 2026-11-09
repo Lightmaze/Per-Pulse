@@ -6,15 +6,21 @@ import type { Material, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList 
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
 import { TextDocument } from './TextDocument';
+import { ImagePreview } from './ImagePreview';
 
 const PREVIEW_CHARS = 64_000;
 // The same native file errors also serve result downloads. Keep upload advice
 // in this flow rather than replacing their explanations across the product.
 const materialErrors: Record<string, MessageKey> = {
+  image_unreadable: 'library.imageUnreadable', material_image_unreadable: 'library.imageUnreadable',
+  image_pixels_exceeded: 'library.imagePixels', material_image_pixels_exceeded: 'library.imagePixels',
+  image_animated: 'library.imageAnimated', material_image_animated: 'library.imageAnimated',
+  image_too_large: 'library.tooLarge', material_image_too_large: 'library.tooLarge',
   workspace_changed: 'library.workspaceChanged', file_too_large: 'library.tooLarge',
   empty_file: 'library.emptyFile', text_files_only: 'library.textOnly',
   pdf_unreadable: 'library.pdfUnreadable', pdf_encrypted: 'library.pdfEncrypted',
   protected_or_invalid_path: 'library.invalidPath',
+  invalid_directory_cursor: 'library.directoryChanged', directory_changed_retry: 'library.directoryChanged',
   invalid_path: 'library.invalidPath', filename_only: 'library.invalidPath',
   file_changed_retry: 'library.changed', file_unavailable: 'library.unavailable',
   path_unavailable: 'library.unavailable', not_a_single_regular_file: 'library.invalidPath',
@@ -77,10 +83,26 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
     }
   }
 
-  function browse(path: string) {
+  function browse(path: string, cursor?: string) {
     void perform(async (signal, current) => {
-      const result = checked(await api.files(path, identity, signal));
-      if (current()) { setListing(result); setPreview(null); }
+      const result = checked(await api.files(path, identity, signal, cursor));
+      if (!current()) return;
+      if (cursor) {
+        // A page continues the same anchored directory. Keep already-opened
+        // files in view; sorting the collected pages avoids chunk boundaries
+        // deciding whether a folder appears before a file.
+        setListing(previous => {
+          if (!previous || previous.path !== result.path) return result;
+          const entries = new Map([...previous.entries, ...result.entries].map(entry => [entry.path, entry]));
+          return { ...result, entries: [...entries.values()].sort((a, b) =>
+            Number(a.kind === 'file') - Number(b.kind === 'file')
+            || a.name.toLocaleLowerCase().localeCompare(b.name.toLocaleLowerCase())
+            || a.name.localeCompare(b.name)) };
+        });
+      } else {
+        setListing(result);
+        setPreview(null);
+      }
     });
   }
 
@@ -172,14 +194,17 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
           <Icon name={entry.kind === 'directory' ? 'chevron' : 'page'} size={16} /><span>{entry.name}{entry.kind === 'directory' ? '/' : ''}</span>
           {entry.bytes !== null ? <small>{entry.bytes.toLocaleString()} {t('library.bytes')}</small> : null}
         </button>
-      </li>)}</ul> : listing ? <p className="material-hint">{t('library.empty')}</p> : null}
-      {listing?.truncated ? <p className="material-hint">{t('library.listLimited')}</p> : null}
+      </li>)}</ul> : listing && !listing.nextCursor ? <p className="material-hint">{t('library.empty')}</p> : null}
+      {listing?.nextCursor ? <button type="button" className="secondary-button" disabled={disabled} onClick={() => browse(directory, listing.nextCursor!)}>{t('library.loadMore')}</button> : null}
+      {listing?.truncated && !listing?.nextCursor ? <p className="material-hint">{t('library.listLimited')}</p> : null}
     </section>
     {preview ? <section className="material-preview" aria-label={t('library.preview')}>
       <h3 ref={previewHeading} tabIndex={-1}>{preview.path.split('/').at(-1)}</h3>
       {preview.format === 'pdf_text' ? <p className="material-hint">{t(pdfHasText(preview.content) ? 'materials.pdfText' : 'materials.pdfNoText')}</p> : null}
       {preview.format === 'pdf_text' && preview.complete === false ? <p className="material-hint">{t('materials.pdfPartial')}</p> : null}
-      <TextDocument key={`${preview.path}/${preview.sha256}`} path={preview.path} content={preview.content.slice(0, PREVIEW_CHARS)} truncated={preview.content.length > PREVIEW_CHARS} />
+      {preview.format === 'image'
+        ? <ImagePreview name={preview.path.split('/').at(-1) ?? preview.path} image={preview.image} source={preview.imageDataUrl} />
+        : <TextDocument key={`${preview.path}/${preview.sha256}`} path={preview.path} content={preview.content.slice(0, PREVIEW_CHARS)} truncated={preview.content.length > PREVIEW_CHARS} />}
       {preview.content.length > PREVIEW_CHARS ? <p className="material-hint">{t('library.previewLimited')}</p> : null}
       <details><summary>{t('library.details')}</summary><p>{preview.path}</p><p>SHA-256: {preview.sha256}</p></details>
     </section> : null}

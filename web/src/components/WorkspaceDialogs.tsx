@@ -4,7 +4,7 @@ import { useLanguage } from '../i18n';
 import type { Artifact, Bootstrap, Material, Message, PageSummary, ResponseLanguage } from '../types';
 import { Dialog } from './Dialog';
 import { Icon } from './Icon';
-import { messageBody } from '../messageBody';
+import { initialPageSource } from '../pageSource';
 import { isExactWorkHandoffExcerpt } from '../workHandoffExcerpt';
 import { providerSetupCommand, type ProviderMode, type ProviderShell } from '../providerSetup';
 import { CopyButton } from './CopyButton';
@@ -23,20 +23,27 @@ export type Modal =
   | { kind: 'materials'; materialId?: string; pageId?: string }
   | { kind: 'rename' };
 
-export function CreatePageDialog({ initial, busy, error, close, create }: { initial?: Message; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string) => void }) {
+export function CreatePageDialog({ initial, busy, error, close, create }: { initial?: Message; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
   const { t } = useLanguage();
   const [title, setTitle] = useState('');
-  const [instruction, setInstruction] = useState(initial?.materials?.length ? messageBody(initial) : initial?.content ?? '');
+  const source = initialPageSource(initial);
+  const [excerpt, setExcerpt] = useState(source.excerpt);
+  const [instruction, setInstruction] = useState(source.instruction);
   return <Dialog title={t("dialogs.createTitle")} onClose={close}>
     <p className="dialog-description">{t('dialogs.createDescription')}</p>
     {initial?.materials?.length ? <p className="lesson-note">{t('materials.newPageSource')}</p> : null}
-    <form onSubmit={event => { event.preventDefault(); if (title.trim() && instruction.trim() && !busy) create(title.trim(), instruction.trim()); }}>
+    <form onSubmit={event => { event.preventDefault(); if (title.trim() && instruction.trim() && !busy) create(title.trim(), instruction.trim(), initial ? excerpt : undefined); }}>
       <label className="field-label" htmlFor="new-page-title">{t('dialogs.pageName')}</label>
       <input id="new-page-title" autoFocus value={title} onChange={event => setTitle(event.target.value)} placeholder={t('dialogs.namePlaceholder')} maxLength={160} required />
-      <label className="field-label" htmlFor="new-page-focus">{t('dialogs.focusLabel')}</label>
+      {initial ? <>
+        <label className="field-label" htmlFor="new-page-source">{t(source.excerpt.includes(excerpt) ? 'source.excerpt' : 'source.edited')} · {initial.role === 'assistant' ? 'Per Pulse' : t(initial.role === 'user' ? 'conversation.you' : 'conversation.workspace')}</label>
+        <textarea id="new-page-source" value={excerpt} onChange={event => setExcerpt(event.target.value)} rows={4} required />
+        <p className="lesson-note">{t('source.separation')}</p>
+      </> : null}
+      <label className="field-label" htmlFor="new-page-focus">{t(initial ? 'source.request' : 'dialogs.focusLabel')}</label>
       <textarea id="new-page-focus" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder={t('dialogs.focusPlaceholder')} rows={5} required />
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button type="submit" className="primary-button" disabled={busy || !title.trim() || !instruction.trim()}>{busy ? t('dialogs.creating') : t('dialogs.createPage')}</button></div>
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button type="submit" className="primary-button" disabled={busy || !title.trim() || !instruction.trim() || Boolean(initial && !excerpt.trim())}>{busy ? t('dialogs.creating') : t('dialogs.createPage')}</button></div>
     </form>
   </Dialog>;
 }
@@ -182,8 +189,10 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
           <option value="keyed">{t('settings.modeKeyed')}</option>
           <option value="azure">{t('settings.modeAzure')}</option>
           <option value="loopback">{t('settings.modeLoopback')}</option>
+          <option value="lan">{t('settings.modeLan')}</option>
         </select>
         {setupMode === 'loopback' ? <p className="settings-detail">{t('settings.localModelHint')}</p> : null}
+        {setupMode === 'lan' ? <p className="settings-detail">{t('settings.lanModelHint')}</p> : null}
         {setupMode === 'azure' ? <p className="settings-detail">{t('settings.azureModelHint')}</p> : null}
         <label className="field-label" htmlFor="provider-terminal-shell">{t('settings.terminalShell')}</label>
         <select id="provider-terminal-shell" value={setupShell}
@@ -194,7 +203,7 @@ export function SettingsDialog({ bootstrap, close, refresh, learning }: { bootst
         <pre aria-label={t('settings.connectCommand')}><code>{setupCommand}</code></pre>
         <CopyButton text={setupCommand} label={t('settings.copySetup')} />
         <p className="settings-detail">{t('settings.doctorHint')}</p>
-        <p>{t(setupMode === 'loopback' ? 'settings.localModelSafety' : 'settings.connectionSafety')}</p>
+        <p>{t(setupMode === 'loopback' ? 'settings.localModelSafety' : setupMode === 'lan' ? 'settings.lanModelSafety' : 'settings.connectionSafety')}</p>
       </details> : null}</div>
     <div className="settings-section">
       <h3>{t('settings.languageHeading')}</h3>

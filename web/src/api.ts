@@ -61,8 +61,8 @@ const pulseWriteHeaders = (identity: PulseWriteIdentity) => ({
 });
 
 export const api = {
-  files: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
-    request<WorkspaceFileList>(`/workspace/files?path=${encodeURIComponent(path)}`, { headers: pulseWriteHeaders(identity), signal }),
+  files: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal, cursor?: string) =>
+    request<WorkspaceFileList>(`/workspace/files?path=${encodeURIComponent(path)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: pulseWriteHeaders(identity), signal }),
   file: (path: string, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
     request<WorkspaceFile>(`/workspace/files/content?path=${encodeURIComponent(path)}`, { headers: pulseWriteHeaders(identity), signal }),
   upload: (file: File, identity: WorkspaceFileIdentity, signal?: AbortSignal) =>
@@ -95,7 +95,7 @@ export const api = {
     request<MessageHistory>(`${pagePath(id)}/messages?beforeMessageId=${encodeURIComponent(beforeMessageId)}`, { signal }),
   searchMessages: (id: string, query: string, beforeMessageId: string | null, signal?: AbortSignal) =>
     request<MessageHistory>(`${pagePath(id)}/messages/search?q=${encodeURIComponent(query)}${beforeMessageId ? `&beforeMessageId=${encodeURIComponent(beforeMessageId)}` : ''}`, { signal }),
-  createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null }) =>
+  createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null; sourceExcerpt?: string }) =>
     request<{ page: PageSummary; reference: PageReference; initialMessageId: string; view: PageView }>('/pages', { method: 'POST', body: JSON.stringify(data) }),
   send: (id: string, content: string, references: DraftReference[], materials: string[] = []) =>
     request<{ messageId: string; view: PageView }>(`${pagePath(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, references, materials }) }),
@@ -115,7 +115,7 @@ export const api = {
     return verifiedDownload(response, material.sha256, 'material_download_unverified');
   },
   uploadMaterial: async (pageId: string, identity: WorkspaceFileIdentity, uploadId: string, file: File, signal?: AbortSignal) => {
-    if (file.size > uploadLimit(file.name)) throw new ApiError('Choose a text file of at most 1 MiB or a PDF of at most 32 MiB.', 'material_too_large', 413);
+    if (file.size > uploadLimit(file.name)) throw new ApiError('Choose text or a PNG/JPEG image of at most 1 MiB, or a PDF of at most 32 MiB.', 'material_too_large', 413);
     const bytes = await file.arrayBuffer();
     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), value => value.toString(16).padStart(2, '0')).join('');
     const result = await request<WorkspaceFileIdentity & { material: Material; repeated: boolean }>(`${pagePath(pageId)}/materials?name=${encodeURIComponent(file.name)}`, {

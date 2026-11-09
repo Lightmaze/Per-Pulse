@@ -102,6 +102,43 @@ try {
   assert.equal(await page.locator('.material-preview pre').innerText(), 'EXAMPLE_KEY=not-a-credential\n');
   await close();
   checks.push('User dotfiles are visible, previewable source materials without exposing Git internals');
+  // A real >200-file folder is browsable and previewable without bypassing
+  // the native scoped file API or treating the first listing as the whole directory.
+  const longFolder = join(directory, 'workspace', 'many-notes');
+  await mkdir(longFolder);
+  for (let index = 0; index < 225; index++) {
+    await writeFile(join(longFolder, `note-${String(index).padStart(4, '0')}.txt`),
+      `Source note ${index}\n`);
+  }
+  await open();
+  const materialDialog = page.getByRole('dialog', { name: 'Materials', exact: true });
+  await materialDialog.getByRole('button', { name: 'many-notes/', exact: true }).click();
+  const more = materialDialog.getByRole('button', { name: 'Load more files', exact: true });
+  await more.waitFor();
+  const firstNames = await materialDialog.locator('.material-list button').allTextContents();
+  assert.equal(firstNames.length, 200);
+  const missingName = Array.from({ length: 225 }, (_, index) =>
+    `note-${String(index).padStart(4, '0')}.txt`).find(name =>
+    !firstNames.some(text => text.includes(name)));
+  assert.ok(missingName, 'some source must be after the first directory page');
+
+  // Refresh is an honest recovery when a folder changes between pages.
+  await writeFile(join(longFolder, 'new-entry.txt'), 'Newer source\n');
+  await more.click();
+  await materialDialog.getByRole('alert').getByText('This folder changed. Refresh to browse it again.', { exact: true }).waitFor();
+  const refreshed = page.waitForResponse(response => response.url().includes('/api/workspace/files?path=many-notes')
+    && !response.url().includes('&cursor=') && response.status() === 200);
+  await materialDialog.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await refreshed;
+  await wait(() => more.isEnabled(), 'directory listing refreshed');
+  await more.click();
+  await materialDialog.locator('.material-list button').filter({ hasText: missingName }).waitFor();
+  await materialDialog.locator('.material-list button').filter({ hasText: missingName }).click();
+  assert.equal(await materialDialog.locator('.material-preview > h3').innerText(), missingName);
+  assert.ok((await materialDialog.locator('.material-preview pre').innerText()).startsWith('Source note '));
+  await close();
+  await rm(longFolder, { recursive: true, force: true });
+  checks.push('Directory continuation loads older files in a 225-file folder, detects changes, refreshes and opens the original source');
   await page.locator('.composer textarea').fill('Keep my question and its page link.');
   await page.getByRole('button', { name: 'Link a page', exact: true }).click();
   await page.getByRole('option', { name: /^Home\b/ }).click();
@@ -184,10 +221,10 @@ try {
   await page.getByRole('alert').filter({ hasText: 'This file is empty.' }).waitFor();
   await picker.setInputFiles({ name: 'large.txt', mimeType: 'text/plain', buffer: Buffer.alloc(1024 * 1024 + 1, 97) });
   await page.getByRole('button', { name: 'Upload file', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: 'at most 1 MiB or a PDF of at most 32 MiB' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'at most 1 MiB, or a PDF of at most 32 MiB' }).waitFor();
   await picker.setInputFiles({ name: 'binary.txt', mimeType: 'text/plain', buffer: Buffer.from([97, 0, 98]) });
   await page.getByRole('button', { name: 'Upload file', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: 'UTF-8 text file' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'UTF-8 text' }).waitFor();
   assert.equal((await files()).length, 1);
   await close();
   checks.push('Empty, oversized and binary files show specific errors without creating files');

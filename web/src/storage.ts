@@ -3,6 +3,9 @@ import type { Draft, NavigationOrigin } from './types';
 const PREFIX = 'per-pulse.ui.v2.';
 export const EMPTY_DRAFT: Draft = { text: '', references: [] };
 const storageKey = (workspaceId: string, kind: 'draft' | 'position', pageId: string) => `${PREFIX}${encodeURIComponent(workspaceId)}.${kind}.${encodeURIComponent(pageId)}`;
+// A readable old value is not newer than this tab's failed write. Keep the
+// caller's current draft when attaching into that page until saving succeeds.
+const failedDraftWrites = new Set<string>();
 
 export function readDraft(workspaceId: string, pageId: string): Draft {
   try {
@@ -22,6 +25,7 @@ export function readDraft(workspaceId: string, pageId: string): Draft {
  * unavailable storage.
  */
 export function readCurrentDraft(workspaceId: string, pageId: string, inMemory: Draft): Draft {
+  if (failedDraftWrites.has(storageKey(workspaceId, 'draft', pageId))) return inMemory;
   try {
     localStorage.getItem(storageKey(workspaceId, 'draft', pageId));
     return readDraft(workspaceId, pageId);
@@ -30,11 +34,17 @@ export function readCurrentDraft(workspaceId: string, pageId: string, inMemory: 
   }
 }
 
-export function saveDraft(workspaceId: string, pageId: string, draft: Draft) {
+export function saveDraft(workspaceId: string, pageId: string, draft: Draft): boolean {
+  const key = storageKey(workspaceId, 'draft', pageId);
   try {
-    if (!draft.text && !draft.references.length && !draft.materials?.length) localStorage.removeItem(storageKey(workspaceId, 'draft', pageId));
-    else localStorage.setItem(storageKey(workspaceId, 'draft', pageId), JSON.stringify(draft));
-  } catch { /* Draft editing remains available when browser storage is unavailable. */ }
+    if (!draft.text && !draft.references.length && !draft.materials?.length) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(draft));
+    failedDraftWrites.delete(key);
+    return true;
+  } catch {
+    failedDraftWrites.add(key);
+    return false;
+  }
 }
 
 export function savePosition(workspaceId: string, pageId: string, position: number) {

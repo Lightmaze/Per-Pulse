@@ -92,6 +92,22 @@ def envelope(request):
 
 
 @pytest.mark.parametrize("page_kind", ["home", "work"])
+def test_literal_marker_notice_is_saved_and_read_after_restart(tmp_path, monkeypatch, page_kind):
+    fixture = NoticeFixture(monkeypatch)
+    options = {"model_factory": fixture.factory, "pulse": PulseSettings(enabled=False)}
+    content = "Remember the literal [REDACTED] marker in the source example."
+    with client_for(tmp_path, **options) as client:
+        page = "home" if page_kind == "home" else new_page(client)["page"]["id"]
+        result = fixture.call(client, page, op="record", content=content)
+        assert result["status"] == "succeeded"
+        note = result["output"]["notice"]
+        assert note["content"] == content
+    with client_for(tmp_path, **options) as client:
+        result = fixture.call(client, page, op="read", id=note["id"])
+        assert result["output"]["notice"]["content"] == content
+
+
+@pytest.mark.parametrize("page_kind", ["home", "work"])
 def test_immediate_memory_restart_source_and_close(tmp_path, monkeypatch, page_kind):
     fixture = NoticeFixture(monkeypatch)
     fixture.reasoning = True
@@ -346,7 +362,7 @@ def test_invalid_notice_arguments(arguments):
 
 def test_auxiliary_memory_does_not_hide_current_life_frame():
     scope = HarnessScope("world", "subject", "session", 0, "owner", turn_id="turn")
-    tool_call = {"role": "assistant", "content": json.dumps({"text": "", "tool_calls": [
+    tool_call = {"role": "assistant", "tool_call_count": 1, "content": json.dumps({"text": "", "tool_calls": [
         {"tool_call_id": "frame", "name": "life_frame", "arguments": {}}]})}
     tool_result = {"role": "tool", "content": json.dumps({"tool_call_id": "frame", "status": "succeeded",
         "output": {"life_image": {"kind": "pulse_life_image.v1"}}})}

@@ -353,12 +353,19 @@ silently retry a write against a different World.
   regular UTF-8 file up to 1 MiB, returning `path`, `content`, `bytes` and
   `sha256`. For a `.pdf` file up to 32 MiB, `content` is its text with a
   `[Page N]` line before each page, and `format` is `"pdf_text"`; `bytes` and
-  `sha256` describe the original PDF. This is current file content, not a historical artifact receipt.
+  `sha256` describe the original PDF. A `.png`, `.jpg` or `.jpeg` returns
+  `format: "image"`, empty `content`, `image: {mime, width, height}` and an
+  `imageDataUrl` for the authenticated preview. This data URL is a transient
+  response, not stored material metadata. This is current file content, not a historical artifact receipt.
 - `POST /api/workspace/files?name=notes.md` accepts raw bytes with
   `Content-Type: application/octet-stream`. Its streamed body is limited to
   1 MiB (32 MiB for a `.pdf`), independent of Content-Length. A PDF must be
-  readable and not password-protected (`pdf_unreadable`, `pdf_encrypted`). Success is `201` with `path`, original
-  `name`, `bytes`, `sha256` and `source: "user_upload"`. Empty, binary,
+  readable and not password-protected (`pdf_unreadable`, `pdf_encrypted`).
+  PNG/JPEG images must be still, valid and at most 8,388,608 pixels. Actual
+  bytes determine their MIME type; original bytes are retained without conversion.
+  Image errors include `image_unreadable`, `image_animated` and
+  `image_pixels_exceeded`. Success is `201` with `path`, original
+  `name`, `bytes`, `sha256` and `source: "user_upload"`. Empty, unsupported binary,
   oversized and protected-path uploads are rejected before publication. A unique native `uploads/` file is created without replacing
   an existing file. Short extensions survive long Unicode file names.
 
@@ -370,6 +377,31 @@ uses a native attachment receipt, preserving existing draft text and page links.
 Sending verifies that selected files still match their recorded bytes and
 digests. This reference is not a model read receipt: native read tools return
 their own observations when a configured model actually opens the file.
+
+### Image input to the configured model
+
+The material footer directs PNG/JPEG sources to `read_file(path,
+expected_digest=sha256)`. Text and PDF sources continue through `reading.open`.
+An image read returns a digest-bound `pulse.workspace-image.v1` source reference,
+not text coordinates. The native ChatHTTP bridge resolves only references from
+the current successful `read_file` tool exchange, rechecks the source bytes and
+adds attributed `image_url` content parts to the next request. It sends at most
+five distinct images per round; unavailable or excess references receive a visible
+text explanation. Configure an image-compatible Chat Completions model, such as
+the models documented in [OpenAI vision](https://developers.openai.com/api/docs/guides/images-vision)
+or [DeepSeek vision](https://api-docs.deepseek.com/guides/vision/).
+
+The reference is bound to the exact native scope and live tool provider. A restart,
+a different turn, a changed file or a forged reference cannot reuse its pixels;
+read the source again. Base64 is absent from durable tool results and conversation
+history. Later turns do not replay image payloads automatically. Pixel input is
+part of the existing model attempt and usage accounting. The adapter checks the
+complete encoded request, including images and tools, against its configured
+8 MiB default before dispatch; it does not trim history or images to make it fit.
+
+Image validation uses Pillow's bounded PNG/JPEG decoding. The pixel limit bounds
+one RGBA raster to 32 MiB before decoding; this is not a total process-memory
+limit, and the decoder's own metadata limits also apply.
 
 ### Native message attachments
 
@@ -388,7 +420,9 @@ their own observations when a configured model actually opens the file.
 - `GET /api/pages/{id}/materials/{materialId}` verifies ownership and current
   version, then returns `material`, bounded `content`, `redacted`, `truncated`,
   `downloadable` and `previewLimitBytes`. A changed or missing source is refused. The preview
-  limit is 64 KiB, independently of the 1 MiB original-file limit.
+  text preview limit is 64 KiB, independently of the original-file limit.
+  An image returns the same `format`, `image` and `imageDataUrl` fields as the
+  workspace file view; its `previewLimitBytes` is 1 MiB (original image bytes).
 - `GET /api/pages/{id}/materials/{materialId}/download` requires the current
   World/instance headers, resolves the original page receipt and rechecks the
   complete file. It returns `application/octet-stream`, the receipt's source
@@ -459,9 +493,10 @@ durable-content limit remain unchanged. Download does not create a model turn.
 
 An overwritten file returns `409 artifact_version_changed`. Unavailable,
 binary, oversized or protected files preserve the native file error code and
-status. Files containing a stored `[REDACTED]` or truncation marker return
-`422 artifact_download_redacted`. Wrong-page and unconfirmed
-action IDs remain `404 artifact_not_found`. The response also carries the exact
+status. Literal `[REDACTED]` or truncation-shaped text remains part of the
+verified file; only an actually clipped preview is marked truncated.
+Wrong-page and unconfirmed action IDs remain `404 artifact_not_found`.
+The response also carries the exact
 digest as an ETag; the browser checks the received bytes before saving them.
 
 File and uncertainty observation follows only the native committed generation

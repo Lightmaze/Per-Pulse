@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { api } from './api';
+import { api, ApiError } from './api';
+import { uploadLimit } from './uploadLimits';
 import { messageBody } from './messageBody';
 import { retryMessageInput } from './retryMessage';
 import { parseTickCommand } from './tickCommand';
@@ -16,6 +17,7 @@ import { Composer } from './components/Composer';
 import { ExecutionStatus } from './components/ExecutionStatus';
 import { PageArtifacts } from './components/PageArtifacts';
 import { CommandOutputs } from './components/CommandOutputs';
+import { WebSources } from './components/WebSources';
 import { CollaboratorChoices } from './components/CollaboratorChoices';
 import { PulseActivity } from './components/PulseActivity';
 import { HomeContinuations } from './components/HomeContinuations';
@@ -46,6 +48,9 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [sourceNotice, setSourceNotice] = useState('');
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [draftSaveFailures, setDraftSaveFailures] = useState<Record<string, boolean>>({});
+  const [pastingPages, setPastingPages] = useState<Record<string, boolean>>({});
+  const pendingPastes = useRef(new Set<string>());
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
   const main = useRef<HTMLElement>(null);
@@ -55,6 +60,8 @@ export default function App() {
   const scrollTimer = useRef<number | undefined>(undefined);
   const composerSelection = useRef({ start: 0, end: 0 });
   const workspaceId = bootstrap?.workspaceId;
+  const latestBootstrap = useRef(bootstrap);
+  latestBootstrap.current = bootstrap;
   const currentPage = useRef(route.id);
   currentPage.current = route.id;
   const currentRouteSerial = useRef(route.serial);
@@ -77,14 +84,85 @@ export default function App() {
 
   const openModal = (next: Modal) => { setModalError(''); setModal(next); setPulseOpen(false); setSidebarOpen(false); };
   const closeModal = () => { if (!busy) { setModal(null); setModalError(''); } };
+  const persistDraft = useCallback((pageId: string, next: Draft) => {
+    if (!workspaceId) return;
+    const saved = saveDraft(workspaceId, pageId, next);
+    const key = `${workspaceId}/${pageId}`;
+    setDraftSaveFailures(previous => {
+      if (saved && !previous[key]) return previous;
+      const updated = { ...previous };
+      if (saved) delete updated[key];
+      else updated[key] = true;
+      return updated;
+    });
+  }, [workspaceId]);
   const changeDraft = useCallback((next: Draft) => {
     if (!workspaceId) return;
     interacted.current = `${workspaceId}-${route.id}-${route.serial}`;
     const updated = { ...draftsRef.current, [draftKey]: next };
     draftsRef.current = updated;
     setDrafts(updated);
-    saveDraft(workspaceId, route.id, next);
-  }, [route.id, route.serial, workspaceId, draftKey]);
+    persistDraft(route.id, next);
+  }, [route.id, route.serial, workspaceId, draftKey, persistDraft]);
+
+  const pasteImage = async (image: File) => {
+    const identity = bootstrap;
+    const worldId = workspaceId;
+    const pageId = route.id;
+    const key = draftKey;
+    const serial = route.serial;
+    if (!identity || !worldId || pendingPastes.current.has(key)) return;
+    const extension = image.type === 'image/png' ? 'png' : 'jpg';
+    const name = /\.(png|jpe?g)$/i.test(image.name) ? image.name : `Pasted image.${extension}`;
+    const file = name === image.name ? image : new File([image], name, { type: image.type });
+    if (!file.size) { setToast(t('library.emptyFile')); return; }
+    if (file.size > uploadLimit(name)) { setToast(t('library.tooLarge')); return; }
+    const before = readCurrentDraft(worldId, pageId, draftsRef.current[key] ?? EMPTY_DRAFT);
+    if ((before.materials?.length ?? 0) >= 5) { setToast(t('materials.selectionFull')); return; }
+
+    pendingPastes.current.add(key);
+    setPastingPages(previous => ({ ...previous, [key]: true }));
+    try {
+      // Reuse the same durable workspace upload receipt as Materials. Pasting
+      // never sends a model turn or grants a file action.
+      const uploadId = crypto.randomUUID().replace(/-/g, '');
+      const response = await api.uploadMaterial(pageId, identity, uploadId, file);
+      if (response.workspaceId !== worldId || response.serviceInstanceId !== identity.serviceInstanceId
+          || response.material.pageId !== pageId || response.material.id !== uploadId) {
+        throw new Error(t('library.referenceUnconfirmed'));
+      }
+      // A reload or workspace switch must not attach an old server's response
+      // to the new World. Navigation within this World is fine: update the
+      // original page's draft without stealing focus from the current page.
+      if (latestBootstrap.current?.workspaceId !== worldId
+          || latestBootstrap.current.serviceInstanceId !== identity.serviceInstanceId) return;
+      const current = readCurrentDraft(worldId, pageId, draftsRef.current[key] ?? EMPTY_DRAFT);
+      if ((current.materials?.length ?? 0) >= 5) {
+        if (currentPage.current === pageId && currentRouteSerial.current === serial) setToast(t('composer.pastedImageSaved'));
+        return;
+      }
+      const next: Draft = { ...current, materials: [
+        ...(current.materials ?? []), { id: response.material.id, name: response.material.name },
+      ] };
+      const updated = { ...draftsRef.current, [key]: next };
+      draftsRef.current = updated;
+      setDrafts(updated);
+      persistDraft(pageId, next);
+      if (currentPage.current === pageId && currentRouteSerial.current === serial) setToast(t('composer.pastedImageReady'));
+    } catch (problem) {
+      if (currentPage.current === pageId && currentRouteSerial.current === serial) {
+        setToast(problem instanceof ApiError && (problem.code === 'network_error' || problem.code === 'material_upload_unconfirmed')
+          ? t('library.uploadUnconfirmed') : errorText(problem));
+      }
+    } finally {
+      pendingPastes.current.delete(key);
+      setPastingPages(previous => {
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     document.title = view?.page.kind === 'work' ? `${view.page.title} · Per Pulse` : 'Per Pulse';
@@ -175,7 +253,7 @@ export default function App() {
       const updated = { ...draftsRef.current, [draftKey]: nextDraft };
       draftsRef.current = updated;
       setDrafts(updated);
-      saveDraft(workspaceId, id, nextDraft);
+      persistDraft(id, nextDraft);
       if (currentPage.current === id) {
         const messageId = 'messageId' in response ? response.messageId : null;
         if (messageId) requestAnimationFrame(() => { if (currentPage.current === id) document.getElementById(`message-${messageId}`)?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });
@@ -195,12 +273,12 @@ export default function App() {
     }
   };
 
-  const createPage = async (title: string, instruction: string) => {
+  const createPage = async (title: string, instruction: string, sourceExcerpt?: string) => {
     const sourceId = route.id;
     const message = modal?.kind === 'create' ? modal.message : undefined;
     setBusy(true); setModalError('');
     try {
-      const response = await api.createPage({ title, instruction, sourcePageId: sourceId, sourceMessageId: message?.id });
+      const response = await api.createPage({ title, instruction, sourcePageId: sourceId, sourceMessageId: message?.id, sourceExcerpt });
       applyView(response.view);
       refreshPage(sourceId).catch(() => {});
       navigate(response.page.id, { pageId: sourceId, messageId: message?.id, referenceId: response.reference.id });
@@ -263,7 +341,7 @@ export default function App() {
           const updated = { ...draftsRef.current, [targetKey]: next };
           draftsRef.current = updated;
           setDrafts(updated);
-          saveDraft(workspaceId, page.id, next);
+          persistDraft(page.id, next);
         }
         // A late native answer may update that Work, never hijack a newer
         // route or close another dialog the user has since opened.
@@ -357,7 +435,7 @@ export default function App() {
       const updated = { ...draftsRef.current, [homeKey]: next };
       draftsRef.current = updated;
       setDrafts(updated);
-      saveDraft(workspaceId, 'home', next);
+      persistDraft('home', next);
     }
     // Never steal the user's focus if they navigated elsewhere during I/O.
     if (currentPage.current === sourceId && currentRouteSerial.current === sourceSerial) {
@@ -475,6 +553,7 @@ export default function App() {
           {syncError && !error && !sendError ? <div className="error-notice sync-notice" role="status"><span>{syncError}</span><button disabled={isRefreshing} onClick={() => refreshWorkspace().catch(() => {})}>{isRefreshing ? t('app.checkingUpdates') : t('app.refreshUpdates')}</button></div> : null}
           {view ? <ExecutionStatus key={`exec-${route.id}`} view={view} applyView={applyView} /> : null}
           {view ? <CommandOutputs key={`commands-${workspaceId}/${route.id}`} view={view} /> : null}
+          {view ? <WebSources key={`web-${workspaceId}/${route.id}`} view={view} navigate={navigate} /> : null}
           {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} onUseInHome={view.page.kind === 'work' ? prepareArtifactHome : undefined} onUseInWork={view.page.kind === 'work' && pages.some(page => page.kind === 'work' && page.id !== view.page.id) ? artifact => openModal({ kind: 'picker', mode: 'artifact', artifact }) : undefined} onChanged={() => refreshPage(view.page.id)} /> : null}
           {view?.page.kind === 'work' ? <CollaboratorChoices key={`${workspaceId}/${route.id}`} pageId={route.id} pages={pages} navigate={navigate} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection, needsExactExcerpt) => openModal({ kind: 'return', message, content: selection, needsExactExcerpt })} onTransfer={(message, excerpt) => openModal({ kind: 'transfer', message, excerpt })} onSaveExample={bootstrap?.postureEnabled ? (message, content, needsExactExcerpt) => openModal({ kind: 'save-example', message, content, needsExactExcerpt }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
@@ -486,7 +565,7 @@ export default function App() {
                 .catch(problem => setSendErrors(previous => ({ ...previous, [draftKey]: errorText(problem) })));
             }}>{t('tick.stop')}</button>
           </div> : null}
-          {view && workspaceId ? <Composer draft={draft} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onInspectMaterial={materialId => openModal({ kind: 'materials', materialId, pageId: route.id })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
+          {view && workspaceId ? <Composer draft={draft} onPasteImage={pasteImage} pastingImage={pastingPages[draftKey] === true} draftSaveFailed={draftSaveFailures[draftKey] === true} retryDraftSave={() => persistDraft(route.id, draft)} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onInspectMaterial={materialId => openModal({ kind: 'materials', materialId, pageId: route.id })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
     </div>

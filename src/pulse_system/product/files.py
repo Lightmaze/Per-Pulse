@@ -6,7 +6,10 @@ and special files. Raw model/tool content is never rendered as executable HTML.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 from contextlib import contextmanager
+import json
 import hashlib
 import os
 from pathlib import Path
@@ -15,6 +18,7 @@ import stat
 from typing import Iterator
 from uuid import uuid4
 
+from pulse_harness.adapters.image_input import ImageInputError, image_metadata, image_data_url, is_image_path
 from pulse_harness.adapters.document_text import (
     MAX_PDF_BYTES, DocumentTextError, PdfText, is_pdf_path, read_pdf,
 )
@@ -67,6 +71,13 @@ def _pdf_text(data: bytes) -> PdfText:
         raise FileAccessError(error.code, 415) from None
 
 
+def _image(data: bytes) -> dict:
+    try:
+        return image_metadata(data)
+    except ImageInputError as error:
+        raise FileAccessError(error.code, 415) from error
+
+
 def _text(data: bytes) -> str:
     try:
         text = data.decode("utf-8")
@@ -75,6 +86,40 @@ def _text(data: bytes) -> str:
     if "\x00" in text:
         raise FileAccessError("text_files_only", 415)
     return text
+
+
+def _directory_revision(directory: int) -> list[int]:
+    """Identity and entry-change stamp, read from the already anchored handle."""
+    if _WINDOWS:
+        info = winfiles.attributes(directory)
+        return [int(info.volume), int(info.index_high), int(info.index_low),
+                int(info.write.high), int(info.write.low)]
+    info = os.fstat(directory)
+    return [int(info.st_dev), int(info.st_ino), int(info.st_mtime_ns), int(info.st_ctime_ns)]
+
+
+def _page_start(cursor: str | None, path: str, revision: list[int]) -> int:
+    if cursor is None:
+        return 0
+    if not isinstance(cursor, str) or len(cursor) > 4096 or not re.fullmatch(r"[A-Za-z0-9_-]+", cursor):
+        raise FileAccessError("invalid_directory_cursor")
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+        value = json.loads(raw)
+    except (ValueError, UnicodeError, binascii.Error):
+        raise FileAccessError("invalid_directory_cursor") from None
+    if (not isinstance(value, dict) or value.get("v") != 1 or value.get("path") != path
+            or type(value.get("offset")) is not int or value["offset"] < 1):
+        raise FileAccessError("invalid_directory_cursor")
+    if value.get("revision") != revision:
+        raise FileAccessError("directory_changed_retry", 409)
+    return value["offset"]
+
+
+def _page_cursor(path: str, offset: int, revision: list[int]) -> str:
+    body = json.dumps({"v": 1, "path": path, "offset": offset, "revision": revision},
+                      separators=(",", ":"), ensure_ascii=True)
+    return base64.urlsafe_b64encode(body.encode("utf-8")).decode("ascii").rstrip("=")
 
 
 class WorkspaceFiles:
@@ -109,17 +154,28 @@ class WorkspaceFiles:
             if fd >= 0:
                 os.close(fd)
 
-    def list(self, path: str = "") -> dict:
-        rows = []
-        truncated = False
+    def list(self, path: str = "", *, cursor: str | None = None) -> dict:
         if _WINDOWS:
-            return self._list_windows(path)
+            return self._list_windows(path, cursor=cursor)
         with self.directory(path) as directory:
+            revision = _directory_revision(directory)
+            start = _page_start(cursor, path, revision)
+            rows = []
+            next_offset = start
+            scanned_this_page = 0
+            has_more = False
             with os.scandir(directory) as entries:
-                for scanned, entry in enumerate(entries):
-                    if scanned >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
-                        truncated = True
+                # Cursor counts raw directory entries, including protected ones.
+                # This retains a bounded page without persisting a second index
+                # or ever treating the first 4,000 entries as a lifetime cap.
+                for offset, entry in enumerate(entries):
+                    if offset < start:
+                        continue
+                    if scanned_this_page >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
+                        has_more = True
                         break
+                    scanned_this_page += 1
+                    next_offset = offset + 1
                     relative = f"{path}/{entry.name}" if path else entry.name
                     try:
                         _parts(relative)
@@ -131,21 +187,32 @@ class WorkspaceFiles:
                                      "bytes": info.st_size if stat.S_ISREG(info.st_mode) else None})
                     except (OSError, FileAccessError):
                         continue
-        rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold()))
-        return {"path": path, "entries": rows, "truncated": truncated,
+            if _directory_revision(directory) != revision:
+                raise FileAccessError("directory_changed_retry", 409)
+        rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold(), row["name"]))
+        return {"path": path, "entries": rows, "truncated": has_more,
+                "nextCursor": _page_cursor(path, next_offset, revision) if has_more else None,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
-    def _list_windows(self, path: str) -> dict:
-        rows = []
-        truncated = False
+    def _list_windows(self, path: str, *, cursor: str | None = None) -> dict:
         with self.directory(path) as directory:
-            for scanned, (name, is_directory, size, reparse) in enumerate(winfiles.list_directory(directory)):
-                if scanned >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
-                    truncated = True
+            revision = _directory_revision(directory)
+            start = _page_start(cursor, path, revision)
+            rows = []
+            next_offset = start
+            scanned_this_page = 0
+            has_more = False
+            for offset, (name, is_directory, size, reparse) in enumerate(winfiles.list_directory(directory)):
+                if offset < start:
+                    continue
+                if scanned_this_page >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
+                    has_more = True
                     break
+                scanned_this_page += 1
+                next_offset = offset + 1
                 relative = f"{path}/{name}" if path else name
                 if reparse:
-                    continue  # symlinks and junctions are not workspace entries
+                    continue
                 try:
                     _parts(relative)
                 except FileAccessError:
@@ -153,8 +220,11 @@ class WorkspaceFiles:
                 rows.append({"name": name, "path": relative,
                              "kind": "directory" if is_directory else "file",
                              "bytes": None if is_directory else size})
-        rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold()))
-        return {"path": path, "entries": rows, "truncated": truncated,
+            if _directory_revision(directory) != revision:
+                raise FileAccessError("directory_changed_retry", 409)
+        rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold(), row["name"]))
+        return {"path": path, "entries": rows, "truncated": has_more,
+                "nextCursor": _page_cursor(path, next_offset, revision) if has_more else None,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
     def read_bytes(self, path: str) -> bytes:
@@ -182,13 +252,21 @@ class WorkspaceFiles:
         return data
 
     def read(self, path: str) -> dict:
-        """A file's text; for a PDF, its text page by page (``complete`` is false if it stops early)."""
+        """Text, PDF text, or a transient original-image preview with source identity."""
+        return self.read_with_bytes(path)[0]
+
+    def read_with_bytes(self, path: str) -> tuple[dict, bytes]:
+        """Validated preview and original bytes from one bounded, anchored read."""
         data = self.read_bytes(path)
         result = {"path": path, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        if is_image_path(path):
+            metadata = _image(data)
+            return ({**result, "content": "", "format": "image",
+                     "image": metadata, "imageDataUrl": image_data_url(data, metadata["mime"])}, data)
         if not is_pdf_path(path):
-            return {**result, "content": _text(data)}
+            return {**result, "content": _text(data)}, data
         pdf = _pdf_text(data)
-        return {**result, "content": pdf.text, "format": "pdf_text", "complete": pdf.complete}
+        return {**result, "content": pdf.text, "format": "pdf_text", "complete": pdf.complete}, data
 
     def upload(self, name: str, data: bytes) -> dict:
         parts = _parts(name)
@@ -196,7 +274,9 @@ class WorkspaceFiles:
             raise FileAccessError("filename_only")
         if len(data) > upload_limit(name):
             raise FileAccessError("file_too_large", 413)
-        if is_pdf_path(name):
+        if is_image_path(name):
+            _image(data)
+        elif is_pdf_path(name):
             _pdf_text(data)
         else:
             _text(data)
