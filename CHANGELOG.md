@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a10
+
+- Open a previously cited experience directly from the persistent World journal without rescanning the full history, preserving original and shared-Work visibility rules.
+- Keep native weekly request provenance valid through deep Home/Work and tool chains instead of refusing at a fixed 256-event boundary; continue rejecting missing, cyclic and cross-World roots.
+- Put ongoing work, pause/resume and weekly allowance first in Activity. Expand hourly token details and page connections only when needed, with English/Chinese navigation.
+- Paste PNG/JPEG screenshots directly into an unsent Home or Work draft. Keep the exact source-backed image bytes and per-page draft across reload and navigation; send only on explicit user action.
+
 ## 0.1.0a9
 
 - Connect to an operator-selected OpenAI-compatible model server at a literal private LAN IPv4 or ULA IPv6 address, using the existing World, Kernel and model transport.
