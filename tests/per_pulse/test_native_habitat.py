@@ -11,6 +11,9 @@ import hashlib
 import pytest
 
 from per_pulse.service import PageService, PulseSettings
+from per_pulse.execution import PageExecution
+from test_execution import _wait
+from test_pages import client_for, new_page, wait_for
 from pulse_system.service.native_habitat import OBSERVE, WRITE, validate
 from test_internal_work_organization import WorkFixture, run_event
 
@@ -120,3 +123,46 @@ def test_read_only_workspace_never_advertises_habitat_mutation(tmp_path):
         assert not (pages.runtime.habitat.root / "regions/garden/notes.txt").exists()
     finally:
         pages.runtime.close()
+
+
+@pytest.mark.parametrize("decision", ["deny", "allow_once"])
+def test_habitat_write_waits_for_real_native_approval(tmp_path, monkeypatch, decision):
+    """A model tool call cannot write before the user's decision is recorded.
+
+    Only the HTTP model decision is synthetic. The page, original Kernel action,
+    approval transaction, filesystem effect, and later model continuation are real.
+    """
+    fixture = WorkFixture(monkeypatch.setenv)
+    fixture.plan = [(WRITE, {
+        "op": "write", "region": "garden", "file": "approved.txt",
+        "content": "Only if the owner allows once.\\n",
+    })]
+    with client_for(tmp_path, model_factory=fixture.factory,
+                    allow_workspace_actions=True, auto_apply_edits=False,
+                    posture=False, pulse=PulseSettings(
+                        enabled=True, spontaneous_rate=0,
+                        adaptive_connections=False, spectrum_enabled=False)) as client:
+        runtime = client.app.state.pages.runtime
+        execution = PageExecution(runtime)
+        page = new_page(client, "Ask before changing the garden",
+                        "Write the new garden note only when approved.")["page"]["id"]
+        target = runtime.habitat.root / "regions" / "garden" / "approved.txt"
+        waiting = _wait(execution, page,
+            lambda view: bool(view["pendingActions"])
+            and view["pendingActions"][0]["canResolve"])
+        action_id = waiting["pendingActions"][0]["actionId"]
+        assert waiting["pendingActions"][0]["toolName"] == WRITE
+        assert not target.exists(), "approval pending must not write any file"
+        scope = runtime.kernel_service.store.action_scope_for_session(
+            execution._scope(page), action_id)
+        assert runtime.kernel_service.store.get_action(scope, action_id).approval_id
+        receipt = execution.resolve_approval(page, action_id, decision)
+        assert receipt["continuationError"] is None, receipt
+        wait_for(client, page, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        assert target.exists() is (decision == "allow_once")
+        if decision == "allow_once":
+            assert target.read_text() == "Only if the owner allows once.\\n"
+        assert execution.resolve_approval(page, action_id, decision)["repeated"]
+        assert target.exists() is (decision == "allow_once")
