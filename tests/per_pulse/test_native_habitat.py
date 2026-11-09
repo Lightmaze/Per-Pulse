@@ -32,6 +32,20 @@ def test_region_cannot_escape_its_world_directory(name, values):
 
 def test_two_distinct_works_revisit_one_persistent_region(tmp_path, monkeypatch):
     fixture = WorkFixture(monkeypatch.setenv)
+    # A failed tool action is intentionally sanitized by TurnRunner. Preserve
+    # its exact local exception class for fixture regression diagnostics only.
+    from pulse_system.service.native_habitat import NativeHabitat
+    failures = []
+    original_execute = NativeHabitat.execute
+
+    def explain_failure(self, *args, **kwargs):
+        try:
+            return original_execute(self, *args, **kwargs)
+        except Exception as exc:
+            failures.append(f"{type(exc).__name__}: {exc}")
+            raise
+
+    monkeypatch.setattr(NativeHabitat, "execute", explain_failure)
     settings = PulseSettings(
         enabled=True, spontaneous_rate=0, check_interval_seconds=0.01,
         adaptive_connections=False, spectrum_enabled=False,
@@ -56,7 +70,7 @@ def test_two_distinct_works_revisit_one_persistent_region(tmp_path, monkeypatch)
         })]
         run_event(pages.runtime, pages.runtime.causal_ledger.get_event(first["initialMessageId"]))
         result = fixture.outcomes[0]
-        assert result["status"] == "succeeded", result
+        assert result["status"] == "succeeded", (result, failures)
         receipt = result["output"]["effectReceipt"]
         assert receipt["terminal_state"] == "committed"
         assert receipt["before_digest"] is None
