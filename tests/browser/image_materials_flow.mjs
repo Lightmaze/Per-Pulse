@@ -188,6 +188,38 @@ try {
     checks.push(format + ': upload, preview, native read_file, exact HTTP pixels, source and original download');
   }
 
+  // An ordinary user can paste a screenshot into Home without opening the
+  // file browser. It must remain an unsent, source-versioned draft after a
+  // browser reload; only Send can carry original pixels onto the model wire.
+  const pastedBytes = examples.get('PNG');
+  const originalCount = seenPixels.length;
+  await page.locator('.composer textarea').fill('Please inspect this pasted screenshot.');
+  const pastedUpload = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/materials?'));
+  await page.evaluate(encoded => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const clipboard = new DataTransfer();
+    clipboard.items.add(new File([bytes], 'Clipboard.png', { type: 'image/png' }));
+    const input = document.querySelector('.composer textarea');
+    const pasted = new ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true });
+    assertPaste(input.dispatchEvent(pasted) === false);
+    function assertPaste(ok) { if (!ok) throw new Error('Image paste was not consumed by the composer'); }
+  }, pastedBytes.toString('base64'));
+  const pastedReceipt = await (await pastedUpload).json();
+  assert.equal(pastedReceipt.material.sha256, createHash('sha256').update(pastedBytes).digest('hex'));
+  await page.getByRole('button', { name: 'Inspect Clipboard.png before sending' }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Please inspect this pasted screenshot.');
+  assert.equal(seenPixels.length, originalCount, 'Paste must not submit to the model');
+  await page.reload();
+  await page.getByRole('button', { name: 'Inspect Clipboard.png before sending' }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Please inspect this pasted screenshot.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => seenPixels.length === originalCount + 1 &&
+    (await view()).messages.at(-1)?.role === 'assistant', 'pasted screenshot arrives on native model wire');
+  assert.ok(seenPixels.at(-1).equals(pastedBytes));
+  const sentImage = [...(await view()).messages].reverse().find(message => message.materials?.some(item => item.name === 'Clipboard.png'));
+  assert.ok(sentImage, 'Pasted image retains its source on the saved message');
+  checks.push('Clipboard image paste: no auto-send, persisted draft after reload, original pixels and source on explicit Send');
+
   await open();
   const picker = page.getByLabel('Choose a file', { exact: true });
   await picker.setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('broken image') });
