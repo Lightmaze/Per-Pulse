@@ -150,10 +150,10 @@ def test_oversized_first_tool_exchange_still_keeps_the_first_user_goal():
     messages = [_user("Investigate this file."), _call("first"), result]
     fitted = fit_context(messages, 1_000)
     assert sum(estimate_tokens(item) for item in fitted) <= 1_000
-    assert fitted[1] == messages[0]
-    assert fitted[2] == messages[1]
-    assert json.loads(fitted[3]["content"])["output"]["context_window"]["message_id"] == "saved-first-tool-5"
-    assert fitted[0]["content"] == OMITTED_NOTE
+    assert fitted[0] == messages[0]
+    assert fitted[1] == messages[1]
+    assert json.loads(fitted[2]["content"])["output"]["context_window"]["message_id"] == "saved-first-tool-5"
+    assert not any(item.get("content") == OMITTED_NOTE for item in fitted)
     assert result == messages[-1]
 
 
