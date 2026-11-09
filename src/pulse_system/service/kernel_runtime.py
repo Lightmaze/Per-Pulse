@@ -29,7 +29,8 @@ from pulse_harness.life import tools as life_tools
 from pulse_harness.adapters.history import ConversationHistoryTools, HISTORY_SCHEMAS
 from pulse_harness.adapters.command import CommandWorkspaceToolProvider, DockerCommandExecutor, recover_world_commands
 from pulse_harness.core import ActionStatus, HarnessScope, ModelRoundStatus, SessionStatus, TurnStatus
-from pulse_harness.core.errors import HarnessError as KernelError, LeaseFenced, ScopeConflict
+from pulse_harness.core.errors import HarnessError as KernelError, IdempotencyConflict, LeaseFenced, ScopeConflict
+from pulse_harness.core.replay import digest_json
 from pulse_harness.core.lifecycle import HarnessRuntimeBootstrap
 from pulse_harness.core.provider import validate_model_adapter
 from pulse_system.agent.harness.base import HarnessError, HarnessTurnResult
@@ -118,6 +119,11 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         self._attention = attention
         self._notice = notice
         self._habitat = habitat
+        # A physical Habitat is bound after KernelService construction. Keep a
+        # getter rather than freezing the None observed during bootstrap.
+        self._habitat_bindings: dict[str, str] = {}
+        self._habitat_consumed: set[str] = set()
+        self._habitat_lock = threading.RLock()
         self._posture = posture
         self._replay_authorize = replay_authorize
         self._cognition = cognition
@@ -125,9 +131,65 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         self._history = ConversationHistoryTools(self.store, history_scopes)
         self._command_history_scopes = command_history_scopes
 
+    def _bound_habitat(self):
+        return self._habitat() if callable(self._habitat) else self._habitat
+
+    def action_authority_identity(self, scope, call, *, action_request_id):
+        if call.name != "habitat_write":
+            return super().action_authority_identity(scope, call, action_request_id=action_request_id)
+        from .native_habitat import validate
+        validate(call.name, call.arguments)
+        habitat = self._bound_habitat()
+        if habitat is None or not self._allow_mutations:
+            raise ScopeConflict("Habitat mutation authority is unavailable")
+        root = habitat.runtime.habitat.root
+        return {
+            "adapter": "pulse.native-habitat.v1",
+            "world_id": scope.world_id,
+            "scope_digest": scope.digest,
+            "action_request_id": action_request_id,
+            "arguments_digest": digest_json(dict(call.arguments)),
+            "storage_identity": self._storage_identity(),
+            "habitat_root": self._root_identity(root),
+        }
+
+    def bind_action_authority(self, scope, call, *, action_request_id):
+        if call.name != "habitat_write":
+            return super().bind_action_authority(scope, call, action_request_id=action_request_id)
+        action = self.store.get_action(scope, action_request_id)
+        authority = self.store.get_action_authority(scope, action_request_id)
+        digest = digest_json(dict(call.arguments))
+        if (action.tool_name != call.name or action.args_digest != digest
+                or not authority or not authority.get("required")
+                or authority.get("provider_type") != f"{type(self).__module__}.{type(self).__qualname__}"
+                or authority.get("provider_source") != "pulse.native-habitat"
+                or authority.get("identity") != self.action_authority_identity(
+                    scope, call, action_request_id=action_request_id)):
+            raise ScopeConflict("Habitat action has no matching durable Kernel authority")
+        with self._habitat_lock:
+            if action_request_id not in self._habitat_bindings:
+                if action.status not in {ActionStatus.INTENT, ActionStatus.APPROVAL_PENDING}:
+                    raise ScopeConflict("orphan Habitat effect cannot rebind after approval")
+                self._habitat_bindings[action_request_id] = digest
+            elif self._habitat_bindings[action_request_id] != digest:
+                raise IdempotencyConflict("Habitat authority binding changed")
+
+    def _claim_habitat_effect(self, scope, call, action_request_id):
+        if not action_request_id:
+            raise ScopeConflict("Habitat mutation requires a Kernel action")
+        # Recheck both the durable identity and the current process binding.
+        self.bind_action_authority(scope, call, action_request_id=action_request_id)
+        action = self.store.get_action(scope, action_request_id)
+        if action.status is not ActionStatus.RUNNING or not action.approval_id:
+            raise ScopeConflict("Habitat mutation requires its claimed approved action")
+        with self._habitat_lock:
+            if action_request_id in self._habitat_consumed:
+                raise IdempotencyConflict("Habitat effect cannot be replayed")
+            self._habitat_consumed.add(action_request_id)
+
     def descriptors(self):
         return tuple(d for d in super().descriptors()
-                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),)) + (() if self._attention is None else (self._attention_descriptor(),)) + (() if self._posture is None else (self._posture_descriptor(),)) + (() if self._notice is None else (self._notice_descriptor(),)) + (() if self._habitat is None else tuple(d for d in self._habitat_descriptors() if self._allow_mutations or not d.mutable))
+                     if self._allow_mutations or not d.mutable) + (workspace_index.descriptor(), workspace_reading.descriptor(), native_replay.descriptor()) + self._history.descriptors() + life_tools.descriptors() + (() if self._team is None else (self._team_descriptor(),)) + (() if self._work is None else (self._work_descriptor(),)) + (() if self._cognition is None else (self._cognition_descriptor(),)) + (() if self._local is None else (self._local_descriptor(),)) + (() if self._attention is None else (self._attention_descriptor(),)) + (() if self._posture is None else (self._posture_descriptor(),)) + (() if self._notice is None else (self._notice_descriptor(),)) + (() if self._bound_habitat() is None else tuple(d for d in self._habitat_descriptors() if self._allow_mutations or not d.mutable))
 
     def descriptors_for_scope(self, scope):
         return ((native_replay.descriptor(),) if native_replay.mode(self.store, scope)
@@ -219,12 +281,14 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
                 raise ScopeConflict("native Pulse attention is unavailable")
             return self._attention.execute(scope, call, cancellation, action_request_id=action_request_id)
         if call.name in {"habitat_observe", "habitat_write"}:
-            if self._habitat is None:
+            habitat = self._bound_habitat()
+            if habitat is None:
                 raise ScopeConflict("native Habitat is unavailable")
             if call.name == "habitat_write" and not self._allow_mutations:
                 raise ScopeConflict("Habitat writes are disabled by this workspace profile")
-            return self._habitat.execute(
+            return habitat.execute(
                 scope, call, cancellation, action_request_id=action_request_id,
+                authority_claim=(self._claim_habitat_effect if call.name == "habitat_write" else None),
             )
         if call.name == "notice":
             if self._notice is None:
@@ -628,7 +692,7 @@ class KernelHarnessRuntime:
                     store, root, checkpoints, guard=self._check,
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
                     command_executor=self._command_executor, history_scopes=self._history_scopes,
-                    command_history_scopes=self._own_history_scopes, life_hub=self.life, habitat=self.habitat,
+                    command_history_scopes=self._own_history_scopes, life_hub=self.life, habitat=lambda: self.habitat,
                     cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, posture=self.posture, notice=self.notice, replay_authorize=self.authorize_replay,
                     background_main_round_limit=background_main_round_limit_for_turn,
                     rim_policy=self._rim_policy),
@@ -738,6 +802,9 @@ class KernelHarnessRuntime:
         if (action.tool_name != call.name or dict(action.arguments) != dict(call.arguments)
                 or action.terminal):
             raise ScopeConflict("Habitat does not match the authorized Kernel action")
+        if (call.name == "habitat_write"
+                and (action.status is not ActionStatus.RUNNING or not action.approval_id)):
+            raise ScopeConflict("Habitat write needs its original approved running action")
 
     def bind_provider_attempt_accounting(self, factory):
         """Install host accounting before any native model client is opened.
