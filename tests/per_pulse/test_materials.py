@@ -136,9 +136,27 @@ def test_dotfile_upload_is_a_native_material_without_starting_a_turn(tmp_path):
         assert not client.get("/api/pages/home").json()["messages"]
 
 
+def test_key_extension_material_can_be_attached_without_auto_sending(tmp_path):
+    """The operator's explicit source is accepted regardless of .key suffix."""
+    content = b"ssh-ed25519 SYNTHETIC_PUBLIC_KEY fixture@example.test\n"
+    with client_for(tmp_path, model_factory=None) as client:
+        uploaded = upload(client, "home", "public.key", content)
+        assert uploaded.status_code == 201, uploaded.text
+        material = uploaded.json()["material"]
+        assert (tmp_path / "workspace" / material["path"]).read_bytes() == content
+        assert not client.get("/api/pages/home").json()["messages"]
+        preview = client.get(f"/api/pages/home/materials/{material['id']}")
+        assert preview.status_code == 200
+        assert preview.json()["content"].encode() == content
+        sent = client.post("/api/pages/home/messages", json={
+            "content": "Verify this public key.", "materials": [material["id"]]})
+        assert sent.status_code == 202, sent.text
+        assert sent.json()["view"]["messages"][-1]["materials"] == [material]
+
+
 @pytest.mark.parametrize("name,content,status", [
     ("../outside.txt", b"hello", 400), (".git", b"hello", 400),
-    (".pulse", b"hello", 400), ("secret.key", b"hello", 400),
+    (".pulse", b"hello", 400),
     ("binary.txt", b"hello\x00", 415), ("binary.txt", b"\xff\xfe", 415),
     ("large.txt", b"x" * (MAX_FILE_BYTES + 1), 413),
 ])
