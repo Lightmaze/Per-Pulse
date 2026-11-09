@@ -350,7 +350,7 @@ def create_app(
     @app.exception_handler(FileAccessError)
     async def file_error(_request: Request, error: FileAccessError):
         messages = {
-            "file_too_large": "Choose a text file of at most 1 MiB or a PDF of at most 32 MiB.",
+            "file_too_large": "Choose a text file of at most 1 MiB, or a PNG/JPEG image or PDF of at most 32 MiB.",
             "text_files_only": "Choose a UTF-8 text file, such as Markdown, plain text or CSV, or a PDF.",
             "pdf_unreadable": "This PDF could not be read. Try saving it as a PDF again.",
             "pdf_encrypted": "This PDF is password-protected. Remove the password and try again.",

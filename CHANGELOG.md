@@ -4,6 +4,7 @@
 
 - Explain a background turn stopped by the weekly allowance, or one whose start could not be confirmed, with a next step (Activity, or send a message) instead of showing only its code.
 - Let the model correct a mistaken tool call. An unknown tool name or arguments that are not one JSON object no longer end the turn; like any failed call, the model is told why (and which tools are available) instead of receiving only an error code.
+- Attach full-size phone photos and screenshots (PNG/JPEG up to 32 MiB and 50 megapixels) instead of refusing anything over 1 MiB or 8 megapixels. The original is kept and downloadable; a model receives it unchanged when it fits 1 MiB and 2048 px, otherwise an upright scaled copy, and is told so. The Materials preview shows that same copy.
 
 ## 0.1.0a10
 

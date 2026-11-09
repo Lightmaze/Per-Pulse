@@ -1,11 +1,13 @@
 import type { PageUsage } from './pageUsage';
 export type ImageMetadata = { mime: 'image/png' | 'image/jpeg'; width: number; height: number };
+/** Present when a large original is previewed as the scaled copy a model receives. */
+export type PreviewSize = { width: number; height: number };
 export type WorkspaceFileIdentity = { workspaceId: string; serviceInstanceId: string };
 export type WorkspaceFileEntry = { name: string; path: string; kind: 'file' | 'directory'; bytes: number | null };
 export type WorkspaceFileList = WorkspaceFileIdentity & {
   path: string; entries: WorkspaceFileEntry[]; truncated: boolean; nextCursor?: string | null; limit_bytes: number; scope: 'shared_native_workspace';
 };
-export type WorkspaceFile = WorkspaceFileIdentity & { path: string; content: string; bytes: number; sha256: string; format?: 'pdf_text' | 'image'; complete?: boolean; image?: ImageMetadata; imageDataUrl?: string };
+export type WorkspaceFile = WorkspaceFileIdentity & { path: string; content: string; bytes: number; sha256: string; format?: 'pdf_text' | 'image'; complete?: boolean; image?: ImageMetadata; previewImage?: PreviewSize; imageDataUrl?: string };
 export type WorkspaceUpload = WorkspaceFileIdentity & { path: string; name: string; bytes: number; sha256: string; source: 'user_upload' };
 
 export type PageSummary = {
@@ -120,7 +122,7 @@ export type Material = {
   originArtifactPageId?: string; originArtifactId?: string;
 };
 export type MaterialList = { pageId: string; materials: Material[]; truncated: boolean; limitBytes: number };
-export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number; downloadable: boolean; format?: 'pdf_text' | 'image'; complete?: boolean; image?: ImageMetadata; imageDataUrl?: string };
+export type MaterialRead = { material: Material; content: string; redacted: boolean; truncated: boolean; previewLimitBytes: number; downloadable: boolean; format?: 'pdf_text' | 'image'; complete?: boolean; image?: ImageMetadata; previewImage?: PreviewSize; imageDataUrl?: string };
 
 export type CollaboratorOutcome = 'adopted' | 'revised' | 'discarded';
 

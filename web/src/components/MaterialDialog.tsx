@@ -81,7 +81,7 @@ export function MaterialDialog({ identity, pageId, materialId, close, browse, pa
           {preview.format === 'pdf_text' && preview.complete === false ? <p className="material-hint">{t('materials.pdfPartial')}</p> : null}
           {preview.truncated ? <p>{t('materials.truncated')}</p> : null}
           {preview.format === 'image'
-            ? <ImagePreview name={preview.material.name} image={preview.image} source={preview.imageDataUrl} />
+            ? <ImagePreview name={preview.material.name} image={preview.image} scaled={preview.previewImage} source={preview.imageDataUrl} />
             : <div aria-label={t('materials.content')}><TextDocument key={`${preview.material.id}/${preview.material.sha256}`} path={preview.material.path} content={preview.content} truncated={preview.truncated} /></div>}
           <details><summary>{t('library.details')}</summary><p>{preview.material.path}</p><p>SHA-256: {preview.material.sha256}</p></details>
         </> : null}
