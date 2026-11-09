@@ -252,7 +252,11 @@ if __name__ == "__main__":
     (workspace / "large-notice-source.txt").write_text(
         "\n".join(f"Authored large source line {index:04d}: inspect the actual passage, retaining source identity."
                   for index in range(360)) + "\n")
-    os.environ["P_PULSE_CONTEXT_TOKENS"] = "1024"
+    # This browser journey verifies multi-passage Notice use and later history
+    # clipping, not the independent 1024-token single-tool-result paging case.
+    # Keep one active 24k-source reading turn within the model's window; the
+    # browser creates subsequent real turns to exercise historical clipping.
+    os.environ["P_PULSE_CONTEXT_TOKENS"] = "16384"
     fixture = NoticeFixture(args.data_dir)
     # Keep the production default enabled=False, with a short observer interval
     # so an accidental activation becomes visible during the idle check.
