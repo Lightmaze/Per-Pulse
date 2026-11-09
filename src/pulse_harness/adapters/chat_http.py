@@ -26,7 +26,7 @@ from pulse_harness.life.tools import LIFE_SCHEMAS
 from pulse_harness.adapters.command import COMMAND_SCHEMA
 from pulse_harness.adapters.command_output import NAME as COMMAND_OUTPUT_NAME, SCHEMA as COMMAND_OUTPUT_SCHEMA
 from pulse_harness.adapters.history import HISTORY_SCHEMAS
-from pulse_harness.core.contracts import ToolCall
+from pulse_harness.core.contracts import ARGUMENT_ERROR_KEY, ToolCall
 from pulse_harness.core.errors import ProviderProtocolError, ProviderUnavailable
 from pulse_harness.core.provider import ModelDelta, ModelDeltaKind, ModelRequest, ProviderEvidence
 from pulse_harness.core.provider import ProviderUsage, validate_provider_response_id
@@ -849,14 +849,24 @@ class _ChatStream:
                 ids: set[str] = set()
                 for index in sorted(calls):
                     call = calls[index]
-                    try:
-                        arguments = _decode(call["arguments"])
-                    except ValueError:
-                        raise ProviderProtocolError("invalid tool argument JSON") from None
-                    if not call["id"] or not call["name"] or call["id"] in ids or not isinstance(arguments, dict):
+                    if not call["id"] or not call["name"] or call["id"] in ids:
                         raise ProviderProtocolError("invalid or duplicate tool call")
                     ids.add(call["id"])
                     metadata = dict(call["provider_metadata"])
+                    # Arguments the model wrote badly are its mistake to correct,
+                    # not a broken stream: the runner answers the call with why.
+                    # Some servers send no text for a call without arguments.
+                    arguments: Any = {}
+                    if call["arguments"].strip():
+                        try:
+                            arguments = _decode(call["arguments"])
+                        except ValueError as error:
+                            metadata[ARGUMENT_ERROR_KEY] = str(error)[:200]
+                            arguments = {}
+                    if not isinstance(arguments, dict):
+                        kind = {list: "array", str: "string", bool: "boolean"}.get(type(arguments), "number" if arguments is not None else "null")
+                        metadata[ARGUMENT_ERROR_KEY] = f"got a JSON {kind}"
+                        arguments = {}
                     if has_reasoning_details and index == min(calls):
                         # Message-level continuation travels once with the
                         # first call in the same durable assistant response.
