@@ -106,9 +106,10 @@ class _GuardedModel:
 
 
 class _WorldWorkspace(CommandWorkspaceToolProvider):
-    def __init__(self, *args, guard, mutation_guard, allow_mutations, history_scopes, life_hub, cognition, cognition_authorize, work, team, command_history_scopes=None, local=None, posture=None, attention=None, notice=None, habitat=None, replay_authorize=None, background_main_round_limit=None, rim_policy=False, **kwargs):
+    def __init__(self, *args, guard, mutation_guard, allow_mutations, auto_apply_edits=False, history_scopes, life_hub, cognition, cognition_authorize, work, team, command_history_scopes=None, local=None, posture=None, attention=None, notice=None, habitat=None, replay_authorize=None, background_main_round_limit=None, rim_policy=False, **kwargs):
         self._guard, self._mutation_guard = guard, mutation_guard
         self._allow_mutations = allow_mutations
+        self._auto_apply_edits = auto_apply_edits
         self._background_main_round_limit = background_main_round_limit
         self._rim_policy = rim_policy
         super().__init__(*args, command_guard=guard, command_start_guard=mutation_guard, **kwargs)
@@ -180,7 +181,8 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         # Recheck both the durable identity and the current process binding.
         self.bind_action_authority(scope, call, action_request_id=action_request_id)
         action = self.store.get_action(scope, action_request_id)
-        if action.status is not ActionStatus.RUNNING or not action.approval_id:
+        if (action.status is not ActionStatus.RUNNING
+                or (not action.approval_id and not self._auto_apply_edits)):
             raise ScopeConflict("Habitat mutation requires its claimed approved action")
         with self._habitat_lock:
             if action_request_id in self._habitat_consumed:
@@ -691,6 +693,7 @@ class KernelHarnessRuntime:
                 tool_provider_factory=lambda store, root, checkpoints: _WorldWorkspace(
                     store, root, checkpoints, guard=self._check,
                     mutation_guard=self._mutation_guard, allow_mutations=self._allow_mutations,
+                    auto_apply_edits=self._auto_apply_edits,
                     command_executor=self._command_executor, history_scopes=self._history_scopes,
                     command_history_scopes=self._own_history_scopes, life_hub=self.life, habitat=lambda: self.habitat,
                     cognition=self.cognition, cognition_authorize=self._cognition_authorize, work=self.work, team=self.team, local=self.local, attention=self.attention, posture=self.posture, notice=self.notice, replay_authorize=self.authorize_replay,
@@ -803,7 +806,8 @@ class KernelHarnessRuntime:
                 or action.terminal):
             raise ScopeConflict("Habitat does not match the authorized Kernel action")
         if (call.name == "habitat_write"
-                and (action.status is not ActionStatus.RUNNING or not action.approval_id)):
+                and (action.status is not ActionStatus.RUNNING
+                     or (not action.approval_id and not self._auto_apply_edits))):
             raise ScopeConflict("Habitat write needs its original approved running action")
 
     def bind_provider_attempt_accounting(self, factory):
