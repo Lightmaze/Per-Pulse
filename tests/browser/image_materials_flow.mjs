@@ -235,6 +235,7 @@ try {
   const droppedBytes = examples.get('JPEG');
   const beforeDrop = seenPixels.length;
   await page.locator('.composer textarea').fill('Inspect the dropped photograph.');
+  await page.locator('.composer-hint').getByText('Paste or drop a PNG/JPEG', { exact: false }).waitFor();
   const droppedUpload = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/materials?'));
   await page.evaluate(encoded => {
     const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
