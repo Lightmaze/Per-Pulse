@@ -812,7 +812,7 @@ class KernelHarnessRuntime:
             raise ScopeConflict("Habitat does not match the authorized Kernel action")
         if (call.name == "habitat_write"
                 and (action.status is not ActionStatus.RUNNING
-                     or (not action.approval_id and not self._auto_apply_edits))):
+                     or not action.approval_id)):
             raise ScopeConflict("Habitat write needs its original approved running action")
 
     def bind_provider_attempt_accounting(self, factory):
