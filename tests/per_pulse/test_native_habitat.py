@@ -116,6 +116,90 @@ def test_two_distinct_works_revisit_one_persistent_region(tmp_path, monkeypatch,
         assert len(pages.runtime.storage.list_engrams()) == 1
 
 
+
+def test_long_region_keeps_original_writer_after_restart_and_exposes_external_edits(
+        tmp_path, monkeypatch):
+    """A bounded preview never erases full-file provenance or invents a writer."""
+    fixture = WorkFixture(monkeypatch.setenv)
+    settings = PulseSettings(
+        enabled=True, spontaneous_rate=0,
+        adaptive_connections=False, spectrum_enabled=False,
+    )
+    first, second = "A" * 48_000, "B" * 48_000
+
+    def open_client():
+        return client_for(
+            tmp_path, model_factory=fixture.factory,
+            allow_workspace_actions=True, auto_apply_edits=True,
+            posture=False, pulse=settings,
+        )
+
+    def write_in_work(client, instruction, op, content):
+        fixture.plan = [(WRITE, {
+            "op": op, "region": "garden", "file": "large.txt",
+            "content": content,
+        })]
+        page = new_page(client, "Regional " + op, instruction)["page"]["id"]
+        runtime = client.app.state.pages.runtime
+        execution = PageExecution(runtime)
+        waiting = _wait(execution, page, lambda view:
+            bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action = waiting["pendingActions"][0]
+        assert action["toolName"] == WRITE
+        target = runtime.habitat.root / "regions/garden/large.txt"
+        assert (target.read_text() if target.exists() else "") == (
+            first if op == "append" else "")
+        decision = execution.resolve_approval(page, action["actionId"], "allow_once")
+        assert decision["continuationError"] is None, decision
+        wait_for(client, page, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        assert fixture.outcomes[0]["status"] == "succeeded"
+        return action["actionId"], fixture.outcomes[0]["output"]["effectReceipt"]
+
+    with open_client() as client:
+        first_action, _ = write_in_work(client, "First large visit.", "write", first)
+        second_action, second_receipt = write_in_work(
+            client, "Append in a separate Work.", "append", second)
+        assert first_action != second_action
+        target = client.app.state.pages.runtime.habitat.root / "regions/garden/large.txt"
+        assert target.read_text() == first + second
+        assert second_receipt["after_digest"] == hashlib.sha256((first + second).encode()).hexdigest()
+
+    with open_client() as client:
+        fixture.plan = [(OBSERVE, {
+            "op": "read", "region": "garden", "file": "large.txt",
+        })]
+        response = client.post("/api/pages/home/messages", json={
+            "content": "Read the full region source after restart."})
+        assert response.status_code == 202, response.text
+        wait_for(client, "home", lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        answer = fixture.outcomes[0]["output"]
+        assert answer["current"].startswith(first)
+        assert "内容已截断" in answer["current"]
+        assert answer["fullCurrentSha256"] == second_receipt["after_digest"]
+        assert answer["lastVerifiedWrite"]["source"]["kernelActionId"] == second_action
+        assert answer["lastVerifiedWrite"]["effectReceipt"] == second_receipt
+
+        # An out-of-band edit invalidates that same author's verified origin.
+        target = client.app.state.pages.runtime.habitat.root / "regions/garden/large.txt"
+        target.write_text(first + second + "externally modified", encoding="utf-8")
+        fixture.plan = [(OBSERVE, {
+            "op": "read", "region": "garden", "file": "large.txt",
+        })]
+        response = client.post("/api/pages/home/messages", json={
+            "content": "Read after another actor changed the region."})
+        assert response.status_code == 202, response.text
+        wait_for(client, "home", lambda view: len([
+            m for m in view["messages"]
+            if m["role"] == "assistant" and m["status"] == "settled"
+        ]) >= 2)
+        changed = fixture.outcomes[0]["output"]
+        assert changed["lastVerifiedWrite"] is None
+        assert changed["fullCurrentSha256"] != second_receipt["after_digest"]
+
 def test_read_only_workspace_never_advertises_habitat_mutation(tmp_path):
     pages = PageService(tmp_path, model_factory=None, posture=False,
                         allow_workspace_actions=False)
