@@ -36,7 +36,7 @@ HISTORY_SCHEMAS = {
     "read_history": {
         "type": "object", "properties": {
             "message_id": {"type": "string",
-                           "description": "Exact source message_id returned by search_history. Discussion IDs are limited to 256 characters; role=tool accepts IDs within the configured persisted payload bound."},
+                           "description": "Exact message_id from search_history or a saved context-window user/tool reference. Discussion IDs are limited to 256 characters; role=tool accepts IDs within the persisted payload bound."},
             "offset": {"type": "integer", "minimum": 0,
                        "description": "Character offset in the saved text, not a byte offset."},
             "max_chars": {"type": "integer", "minimum": 1, "maximum": 4096},
