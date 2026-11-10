@@ -327,6 +327,8 @@ jobs:
           npm --prefix web run build
       - name: Install native World/Kernel service
         run: python -m pip install -e '.[dev]'
+      - name: Verify focused Habitat Kernel authority before browser
+        run: python -m pytest -q tests/per_pulse/test_native_habitat.py
       - name: Verify the same user correction-to-artifact journey in Chromium
         run: |
           npm install --prefix "$RUNNER_TEMP/per-pulse-browser-tools" playwright@1.62.1 --no-audit --no-fund
@@ -338,6 +340,9 @@ jobs:
       - name: Verify autonomous first departure and restart in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_AUTONOMOUS_SCREENSHOTS="$RUNNER_TEMP/per-pulse-journey-screenshots/autonomous" node tests/browser/autonomous_practice_flow.mjs
+      - name: Verify one regional Habitat across Home, two Works, approvals and restart
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python node tests/browser/habitat_region_flow.mjs
       - name: Verify original-Work collaborator consent, transfer and withdrawal in Chromium
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_RIM_SCREENSHOTS="$RUNNER_TEMP/per-pulse-rim-screenshots" node tests/browser/rim_feedback_flow.mjs

@@ -291,6 +291,8 @@ class ToolDescriptor:
     requires_approval: bool = False
     capability: str = ""
     source: str = "core"
+    # Irreversible tools require approval even under generic auto-apply.
+    auto_apply_supported: bool = True
 
 
 # Set in ToolCall.provider_metadata by a model adapter when the model's
