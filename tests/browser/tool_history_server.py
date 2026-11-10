@@ -134,8 +134,17 @@ class ToolHistoryFixture:
             return streamed("Read the file and kept the original tool receipt." + LABEL)
 
         if "HISTORY_WINDOW_FILLER" in task:
-            assert all(OLD not in (message.get("content") or "") for message in messages
-                       if message["role"] in {"user", "assistant"}), "no discussion summary may leak the old marker"
+            leaked = [
+                {"index": index, "role": message["role"],
+                 "context": (message.get("content") or "")[
+                     max(0, (message.get("content") or "").find(OLD) - 120):
+                     (message.get("content") or "").find(OLD) + len(OLD) + 120],
+                 "has_tool_calls": bool(message.get("tool_calls"))}
+                for index, message in enumerate(messages)
+                if message["role"] in {"user", "assistant"}
+                and OLD in (message.get("content") or "")
+            ]
+            assert not leaked, f"no discussion summary may leak the old marker: {leaked}"
             return streamed("Continuation received. " + "Keep the current discussion readable. " * 160 + LABEL)
 
         if "RECALL_TOOL_HISTORY" in task:
