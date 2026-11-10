@@ -85,6 +85,10 @@ class ExternalEffectUncertainError(ExternalEffectPublicationError):
         self.crossed_boundary = True
 
 
+class HabitatVersionChanged(ValueError):
+    """A pinned Habitat mutation no longer matches the current file."""
+
+
 class OrdinaryExternalEffectAuthority:
     """Non-transferable commit capability issued by one external fence."""
 
@@ -661,6 +665,11 @@ class ManagedHabitat(Habitat):
                     f"环境拒绝：{exc.code}",
                 )
             ]
+        except HabitatVersionChanged:
+            return [Response(
+                "filesystem", Reply.REFUSE,
+                "habitat_version_changed: file changed; read the current version before editing",
+            )]
         except (OSError, ValueError) as exc:
             return [Response("filesystem", Reply.REFUSE, f"环境拒绝：{self._safe_error(exc)}")]
         return [
@@ -924,7 +933,7 @@ class ManagedHabitat(Habitat):
             # before creating a directory, staging a file or recording an effect.
             # A delayed Kernel approval must not overwrite a newer Work's edit.
             if expected_digest is not None and before_digest != expected_digest:
-                raise ValueError("Habitat file changed; read the current version before editing")
+                raise HabitatVersionChanged("Habitat file changed since observation")
             parent_created = self._mkdir(path.parent)
             content = payload
             if append and path.exists():
