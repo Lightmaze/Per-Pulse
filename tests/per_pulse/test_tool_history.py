@@ -91,10 +91,13 @@ def test_clipped_tool_result_is_read_in_original_text_pages_without_reopening_th
         store, history = pages.runtime.kernel_service.store, reader(pages)
         saved = next(row for row in store.transcript_rows(original_scope) if row["role"] == "tool")
         original_action = store.actions_for_turn(original_scope)[0]
-        # The current turn remains excluded, even after its tool action completed.
+        # Browsing excludes current-turn tool copies, but direct, authorized
+        # lookup of its settled result is available for context continuation.
         assert recall(history, original_scope, query="", role="tool")["matches"] == []
-        with pytest.raises(ScopeConflict):
-            recall(history, original_scope, "read_history", message_id=saved["message_id"], role="tool")
+        current = recall(history, original_scope, "read_history",
+                         message_id=saved["message_id"], role="tool")
+        assert current["content"] == saved["content"]
+        assert current["coverage"]["current_turn_excluded"] is False
         for _ in range(4):
             current, _ = activate(pages, page_id, text="Continue the local discussion. " + "detail " * 360)
         last = fixture.requests[-1][1]["messages"]
@@ -130,6 +133,104 @@ def test_clipped_tool_result_is_read_in_original_text_pages_without_reopening_th
         assert ORIGINAL in "".join(parts) and "REVISED_CURRENT_FILE" not in "".join(parts)
         assert tuple(store._db.iterdump()) == before
         assert len(fixture.requests) == request_count
+    finally:
+        pages.runtime.close()
+
+
+
+def test_one_large_tool_result_can_be_recalled_in_the_same_turn(tmp_path, monkeypatch):
+    monkeypatch.setenv("P_PULSE_CONTEXT_TOKENS", "2048")
+    fixture = HistoryFixture(monkeypatch)
+    pages = PageService(tmp_path, model_factory=fixture.factory)
+    try:
+        source = tmp_path / "workspace" / "large.txt"
+        source.write_text("CURRENT_TOOL_SOURCE_MARKER:" + "z" * 18_000)
+        _, scope, _ = create(pages, operations=[("read_file", {"path": "large.txt"})])
+        store = pages.runtime.kernel_service.store
+        saved = next(row for row in store.transcript_rows(scope) if row["role"] == "tool")
+        latest = fixture.requests[-1][1]["messages"]
+        projected = next(row for row in latest if row["role"] == "tool")
+        reference = json.loads(projected["content"])["output"]["context_window"]
+        assert reference["message_id"] == saved["message_id"]
+        assert "CURRENT_TOOL_SOURCE_MARKER" not in projected["content"]
+        assert "CURRENT_TOOL_SOURCE_MARKER" in saved["content"]
+        history = reader(pages)
+        original = recall(history, scope, "read_history",
+                          message_id=saved["message_id"], role="tool", max_chars=120)
+        # The stored result is a JSON tool envelope; the first page contains
+        # the action metadata, not necessarily the file bytes. Follow the
+        # actual cursor instead of assuming a marker at offset zero.
+        passages = [original["content"]]
+        offset = original["next_offset"]
+        assert offset is not None
+        assert original["coverage"]["current_turn_excluded"] is False
+        while offset is not None:
+            page = recall(history, scope, "read_history",
+                          message_id=saved["message_id"], role="tool",
+                          offset=offset, max_chars=4096)
+            assert page["offset"] == offset
+            assert page["source"] == original["source"]
+            passages.append(page["content"])
+            offset = page["next_offset"]
+        assert "".join(passages) == saved["content"]
+        assert "CURRENT_TOOL_SOURCE_MARKER" in "".join(passages)
+    finally:
+        pages.runtime.close()
+
+
+
+def test_model_itself_reads_a_projected_current_result_without_rerunning_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("P_PULSE_CONTEXT_TOKENS", "2048")
+    monkeypatch.setenv("TOOL_HISTORY_FIXTURE_KEY", "explicit-synthetic-credential")
+    requests = []
+
+    def respond(request):
+        messages = json.loads(request.content)["messages"]
+        requests.append(messages)
+        tool_results = [item for item in messages if item["role"] == "tool"]
+        if not tool_results:
+            name, args, text = "read_file", {"path": "large.txt"}, None
+        elif len(tool_results) == 1:
+            reference = json.loads(tool_results[0]["content"])["output"]["context_window"]
+            name, args, text = "read_history", {
+                "message_id": reference["message_id"], "role": "tool", "offset": 0, "max_chars": 1000,
+            }, None
+        else:
+            recovered = json.loads(tool_results[-1]["content"])["output"]
+            assert "CURRENT_TOOL_SOURCE_MARKER" in json.dumps(recovered)
+            name, args, text = None, None, "Recovered the saved file result and continued."
+
+        if name:
+            delta = {"tool_calls": [{"index": 0, "id": f"pagination-step-{len(tool_results)}",
+                     "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]}
+        else:
+            delta = {"content": text}
+        event = {"choices": [{"index": 0, "delta": delta,
+                              "finish_reason": "tool_calls" if name else "stop"}]}
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+            content="data: " + json.dumps(event) + "\n\ndata: [DONE]\n\n")
+
+    def factory(_scope):
+        return ChatHTTPModelAdapter(ChatHTTPConfig(
+            "https://fixture.invalid/chat/completions", "continuation-model",
+            credential_env="TOOL_HISTORY_FIXTURE_KEY"),
+            transport=httpx.MockTransport(respond))
+
+    pages = PageService(tmp_path, model_factory=factory)
+    try:
+        (tmp_path / "workspace" / "large.txt").write_text(
+            "CURRENT_TOOL_SOURCE_MARKER:" + "q" * 18_000)
+        _, scope, _ = create(pages, operations=[])
+        store = pages.runtime.kernel_service.store
+        actions = store.actions_for_turn(scope)
+        assert [action.tool_name for action in actions] == ["read_file", "read_history"]
+        saved = next(row for row in store.transcript_rows(scope)
+                     if row["role"] == "tool" and "CURRENT_TOOL_SOURCE_MARKER" in row["content"])
+        projected = json.loads(next(row for row in requests[1] if row["role"] == "tool")["content"])
+        assert projected["output"]["context_window"]["message_id"] == saved["message_id"]
+        assert len(requests) == 3
+        assert any("Recovered the saved file result" in row["content"]
+                   for row in store.transcript_rows(scope) if row["role"] == "assistant")
     finally:
         pages.runtime.close()
 

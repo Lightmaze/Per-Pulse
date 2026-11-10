@@ -31,10 +31,18 @@ including longer original provider call IDs. Discussion identities retain their
 
 Omitting `role` reads saved user messages and final assistant discussion as
 before. `role: "user"` and `role: "assistant"` narrow that discussion. Assistant
-tool-call envelopes remain outside these readers. The current turn is excluded
-in every mode, and selected-history replay retains its existing discussion-only
-source selection. The model's current tool exchange remains whole when the
-context window is fitted.
+tool-call envelopes remain outside these readers. A search excludes the current turn to prevent recursive discovery of recall
+receipts. A direct `read_history` with `role: "tool"` and the exact saved
+`message_id` may read a terminal, delivered tool result from the current
+turn. Current-turn user/assistant discussion remains excluded; selected-history
+replay retains its discussion-only source selection.
+
+When a *current* tool result by itself is too large for the model request, the
+Harness projects only that result's text into a small JSON reference with its
+saved `message_id`, real tool status, and instructions for paging it with
+`read_history`. The surrounding user request and tool-call/result pairing stay
+in the request. The full saved result remains unchanged and the tool is not
+run again. An unaddressable result is never silently replaced.
 
 Tool sources retain the original session, subject, turn, message, event,
 transcript sequence, timestamp and content digest. They also report verified
