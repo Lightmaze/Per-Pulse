@@ -250,14 +250,14 @@ def test_habitat_rechecks_observed_version_at_approval(tmp_path, monkeypatch, op
         target = runtime.habitat.root / "regions/garden/notes.txt"
 
         fixture.plan = [(WRITE, {"op": "write", "region": "garden",
-                                "file": "notes.txt", "content": "First version.\\n"})]
+                                "file": "notes.txt", "content": "First version.\n"})]
         original = new_page(client, "Original observation", "Write the first note.")["page"]["id"]
         waiting = _wait(execution, original, lambda view:
                         bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
         execution.resolve_approval(original, waiting["pendingActions"][0]["actionId"], "allow_once")
         wait_for(client, original, lambda view: any(
             m["role"] == "assistant" and m["status"] == "settled" for m in view["messages"]))
-        assert target.read_text() == "First version.\\n"
+        assert target.read_text() == "First version.\n"
 
         fixture.plan = [(OBSERVE, {"op": "read", "region": "garden", "file": "notes.txt"})]
         reader = new_page(client, "Read current version", "Inspect the shared note.")["page"]["id"]
@@ -266,7 +266,7 @@ def test_habitat_rechecks_observed_version_at_approval(tmp_path, monkeypatch, op
         observed_digest = fixture.outcomes[0]["output"]["fullCurrentSha256"]
 
         fixture.plan = [(WRITE, {"op": op, "region": "garden",
-                                "file": "notes.txt", "content": "Edited version.\\n",
+                                "file": "notes.txt", "content": "Edited version.\n",
                                 "expectedSha256": observed_digest})]
         editor = new_page(client, "Delayed revision", "Edit the note I inspected.")["page"]["id"]
         waiting = _wait(execution, editor, lambda view:
@@ -275,19 +275,19 @@ def test_habitat_rechecks_observed_version_at_approval(tmp_path, monkeypatch, op
         assert waiting["pendingActions"][0]["arguments"]["expectedSha256"] == observed_digest
         # Another actor updates the same physical file while this Work waits
         # for its original approval. No stage or writer index may be added.
-        target.write_text("Newer independent version.\\n", encoding="utf-8")
+        target.write_text("Newer independent version.\n", encoding="utf-8")
         receipt = execution.resolve_approval(editor, action_id, "allow_once")
         assert receipt["accepted"], receipt
         wait_for(client, editor, lambda view: any(
             m["role"] == "assistant" and m["status"] == "settled" for m in view["messages"]))
-        assert target.read_text() == "Newer independent version.\\n"
+        assert target.read_text() == "Newer independent version.\n"
         assert fixture.outcomes[0]["status"] != "succeeded", fixture.outcomes[0]
         assert execution.resolve_approval(editor, action_id, "allow_once")["repeated"]
-        assert target.read_text() == "Newer independent version.\\n"
+        assert target.read_text() == "Newer independent version.\n"
 
         latest = hashlib.sha256(target.read_bytes()).hexdigest()
         fixture.plan = [(WRITE, {"op": op, "region": "garden",
-                                "file": "notes.txt", "content": "Edited version.\\n",
+                                "file": "notes.txt", "content": "Edited version.\n",
                                 "expectedSha256": latest})]
         next_work = new_page(client, "Rebase onto latest", "Continue using the current note.")["page"]["id"]
         next_wait = _wait(execution, next_work, lambda view:
@@ -298,8 +298,8 @@ def test_habitat_rechecks_observed_version_at_approval(tmp_path, monkeypatch, op
         assert fixture.outcomes[0]["status"] == "succeeded", fixture.outcomes[0]
         assert fixture.outcomes[0]["output"]["effectReceipt"]["before_digest"] == latest
         assert target.read_text() == (
-            "Edited version.\\n" if op == "write"
-            else "Newer independent version.\\nEdited version.\\n"
+            "Edited version.\n" if op == "write"
+            else "Newer independent version.\nEdited version.\n"
         )
 
 
@@ -363,7 +363,7 @@ def test_habitat_write_waits_for_real_native_approval(tmp_path, monkeypatch, dec
     fixture = WorkFixture(monkeypatch.setenv)
     fixture.plan = [(WRITE, {
         "op": "write", "region": "garden", "file": "approved.txt",
-        "content": "Only if the owner allows once.\\n",
+        "content": "Only if the owner allows once.\n",
     })]
     with client_for(tmp_path, model_factory=fixture.factory,
                     allow_workspace_actions=True, auto_apply_edits=auto_apply_edits,
@@ -391,6 +391,6 @@ def test_habitat_write_waits_for_real_native_approval(tmp_path, monkeypatch, dec
             for m in view["messages"]))
         assert target.exists() is (decision == "allow_once")
         if decision == "allow_once":
-            assert target.read_text() == "Only if the owner allows once.\\n"
+            assert target.read_text() == "Only if the owner allows once.\n"
         assert execution.resolve_approval(page, action_id, decision)["repeated"]
         assert target.exists() is (decision == "allow_once")
