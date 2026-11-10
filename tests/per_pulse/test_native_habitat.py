@@ -394,3 +394,98 @@ def test_habitat_write_waits_for_real_native_approval(tmp_path, monkeypatch, dec
             assert target.read_text() == "Only if the owner allows once.\\n"
         assert execution.resolve_approval(page, action_id, decision)["repeated"]
         assert target.exists() is (decision == "allow_once")
+
+
+@pytest.mark.parametrize("name,values", [
+    (OBSERVE, {"op": "read", "file": "notes.txt"}),
+    (OBSERVE, {"op": "list", "region": None}),
+    (OBSERVE, {"op": "list", "file": "notes.txt"}),
+    (WRITE, {"op": "write", "file": "notes.txt", "content": "x"}),
+])
+def test_regionless_discovery_does_not_relax_other_habitat_paths(name, values):
+    with pytest.raises(ValueError):
+        validate(name, values)
+
+
+def test_later_work_discovers_existing_regions_without_knowing_their_names(tmp_path, monkeypatch):
+    """Region discovery travels through the real World after a process restart.
+
+    The model tool selections are synthetic; native Home/Work histories,
+    Kernel approval, SQLite and the physical Habitat are real.
+    """
+    fixture = WorkFixture(monkeypatch.setenv)
+    settings = PulseSettings(
+        enabled=True, spontaneous_rate=0,
+        adaptive_connections=False, spectrum_enabled=False,
+    )
+
+    def open_client():
+        return client_for(
+            tmp_path, model_factory=fixture.factory,
+            allow_workspace_actions=True, auto_apply_edits=True,
+            posture=False, pulse=settings,
+        )
+
+    with open_client() as client:
+        fixture.plan = [(OBSERVE, {"op": "list"})]
+        response = client.post("/api/pages/home/messages", json={
+            "content": "Find any shared working regions.",
+        })
+        assert response.status_code == 202, response.text
+        wait_for(client, "home", lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        empty = fixture.outcomes[0]
+        assert empty["status"] == "succeeded", empty
+        assert empty["output"]["current"] == "No Habitat regions yet."
+        assert empty["output"]["region"] is None
+
+        fixture.plan = [(WRITE, {
+            "op": "write", "region": "garden",
+            "file": "notes.txt", "content": "A persistent observation.\n",
+        })]
+        first = new_page(client, "First visit", "Keep a note in the garden.")["page"]["id"]
+        execution = PageExecution(client.app.state.pages.runtime)
+        pending = _wait(execution, first, lambda view: bool(
+            view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action = pending["pendingActions"][0]
+        assert action["toolName"] == WRITE
+        decision = execution.resolve_approval(first, action["actionId"], "allow_once")
+        assert decision["continuationError"] is None, decision
+        wait_for(client, first, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        assert (client.app.state.pages.runtime.habitat.root /
+                "regions/garden/notes.txt").read_text() == "A persistent observation.\n"
+
+    with open_client() as client:
+        fixture.plan = [(OBSERVE, {"op": "list"})]
+        later = new_page(
+            client, "Unfamiliar revisit",
+            "Discover earlier shared places without being given a region name.",
+        )["page"]["id"]
+        wait_for(client, later, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        discovered = fixture.outcomes[0]
+        assert discovered["status"] == "succeeded", discovered
+        assert discovered["output"]["path"] == "regions"
+        assert discovered["output"]["region"] is None
+        assert "garden/" in discovered["output"]["current"]
+
+        fixture.plan = [(OBSERVE, {
+            "op": "read", "region": "garden", "file": "notes.txt",
+        })]
+        response = client.post(f"/api/pages/{later}/messages", json={
+            "content": "Visit the shared region discovered in the previous result.",
+        })
+        assert response.status_code == 202, response.text
+        wait_for(client, later, lambda view: len([
+            m for m in view["messages"]
+            if m["role"] == "assistant" and m["status"] == "settled"
+        ]) >= 2)
+        result = fixture.outcomes[0]
+        assert result["status"] == "succeeded", result
+        assert result["output"]["current"] == "A persistent observation.\n"
+        assert result["output"]["lastVerifiedWrite"]["source"]["contextId"].startswith("work:")
+
