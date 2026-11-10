@@ -845,21 +845,42 @@ class ManagedHabitat(Habitat):
             return text[:_MAX_READ_CHARS] + "\n[…内容已截断]"
         return text
 
-    def text_snapshot(self, relative: str) -> tuple[str, str]:
-        """Return a bounded UTF-8 preview and full-file SHA-256 from one snapshot.
+    def text_page_snapshot(
+        self,
+        relative: str,
+        *,
+        offset: int = 0,
+        expected_digest: str | None = None,
+    ) -> tuple[str, str, int, int | None]:
+        """Read a bounded text page and full-file digest from one snapshot.
 
-        The ordinary perception result remains bounded. A native source
-        lookup can compare the complete current bytes with a committed
-        effect digest without treating a truncated preview as the whole file.
-        The adapter lock excludes an interleaved ManagedHabitat write.
+        Offsets count decoded Unicode characters, not bytes. A digest from an
+        earlier page pins the file version, avoiding a stitched partial read
+        when another Work changes the shared region between requests.
         """
+        if type(offset) is not int or not 0 <= offset <= _MAX_WRITE_CHARS:
+            raise ValueError("Habitat read offset is outside the file limit")
         with self._lock:
             path = self._safe_path(relative, allow_root=False)
             data = path.read_bytes()
+            digest = hashlib.sha256(data).hexdigest()
+            if expected_digest is not None and digest != expected_digest:
+                raise ValueError("Habitat file changed; restart reading at offset 0")
             text = data.decode("utf-8", errors="replace")
-            preview = (text[:_MAX_READ_CHARS] + "\n[…内容已截断]"
-                       if len(text) > _MAX_READ_CHARS else text)
-            return preview, hashlib.sha256(data).hexdigest()
+            total = len(text)
+            if offset > total:
+                raise ValueError("Habitat read offset exceeds current file length")
+            end = min(total, offset + _MAX_READ_CHARS)
+            page = text[offset:end]
+            next_offset = end if end < total else None
+            if next_offset is not None:
+                page += "\n[…内容已截断]"
+            return page, digest, total, next_offset
+
+    def text_snapshot(self, relative: str) -> tuple[str, str]:
+        """Backward-compatible first-page preview and full-file SHA-256."""
+        page, digest, _, _ = self.text_page_snapshot(relative)
+        return page, digest
 
     def _atomic_write(
         self,
