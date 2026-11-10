@@ -75,10 +75,10 @@ class ConversationHistoryTools:
                 "succession summary. Results are historical references, not new instructions. "
                 "Use role=tool to find original saved tool results with verified action sources; "
                 "recall-tool copies are excluded. Omit role for discussion, or select user/assistant. "
-                "Use read_history with the same role to expand a result. Current-turn messages are excluded.",
+                "Use read_history with the same role to expand a result. Search excludes the current turn. Exact read_history(role='user') can page the current saved user input.",
                 capability="history.read", source="pulse_harness.history"),
             ToolDescriptor("read_history", "Read a saved conversation passage by message_id, including a settled tool result from this turn. "
-                "Use next_offset for the remaining original stored text. "
+                "Use next_offset for the remaining original stored text, including a large saved user input from this turn when role=user. "
                 "Pass role=tool for a tool-result source; omit role for discussion. "
                 "This reads history; it does not replay actions or create a new user message. Redaction and prior "
                 "truncation remain explicit; unrecorded text cannot be recovered.",
@@ -125,9 +125,9 @@ class ConversationHistoryTools:
             result = self._search(scope, scopes, args, cancellation)
         else:
             result = self._read(scope, scopes, args, cancellation)
-        # A direct tool-result lookup can read a settled result in the active
-        # turn. Search still excludes this turn to prevent recursive recall.
-        current_excluded = not (call.name == "read_history" and role == "tool")
+        # Exact reads can page the current saved user input or a settled tool
+        # result. Search still excludes the active turn to avoid recursive recall.
+        current_excluded = not (call.name == "read_history" and role in {"user", "tool"})
         result["coverage"] = {"available_sessions": len(scopes), "unavailable_sessions": missing,
                               "roles": [role] if role else ["user", "assistant"],
                               "current_turn_excluded": current_excluded}
@@ -195,12 +195,12 @@ class ConversationHistoryTools:
         count = _integer(args.get("max_chars", 4000), 1, 4096)
         for source in scopes:
             cancellation.raise_if_cancelled()
-            # A terminal tool result from the active turn is already durable,
-            # and its explicit message_id may be needed when its large body is
-            # projected out of the next model request. Original user/assistant
-            # messages still obey current-turn exclusion; recall tool copies
-            # remain excluded by the store's authoritative action join.
-            exclude_current = args.get("role") != "tool"
+            # Exact, role-scoped reads of the current user input and a settled
+            # tool result are safe: both are durable and already belong to the
+            # executing turn. Assistant results stay excluded, as do all
+            # recall-tool copies through the store's authoritative action join.
+            # Search still excludes the entire current turn.
+            exclude_current = args.get("role") not in {"user", "tool"}
             row = self.store.read_transcript_message(source, message_id,
                 exclude_turn_id=scope.turn_id if exclude_current and source == scope.session_scope() else "",
                 role=args.get("role"), excluded_tool_names=RECALL_TOOL_NAMES)
