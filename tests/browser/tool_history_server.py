@@ -136,7 +136,7 @@ class ToolHistoryFixture:
         if "HISTORY_WINDOW_FILLER" in task:
             assert all(OLD not in (message.get("content") or "") for message in messages
                        if message["role"] in {"user", "assistant"}), "no discussion summary may leak the old marker"
-            return streamed("Continuation received. " + "Keep the current discussion readable. " * 48 + LABEL)
+            return streamed("Continuation received. " + "Keep the current discussion readable. " * 160 + LABEL)
 
         if "RECALL_TOOL_HISTORY" in task:
             if not results:
@@ -216,9 +216,10 @@ if __name__ == "__main__":
     if not (workspace / FILENAME).exists():
         (workspace / FILENAME).write_text(ORIGINAL, encoding="utf-8")
     # This scenario verifies older settled tool-result history, not current-result
-    # paging. Give the first ordinary read enough model context to arrive
-    # intact; the later filler turns still force a real window eviction.
-    os.environ["P_PULSE_CONTEXT_TOKENS"] = "4096"
+    # paging. Give the first ordinary read and multi-page read_history sequence
+    # room to arrive intact. Larger filler replies still force a real window
+    # eviction before each historical recall.
+    os.environ["P_PULSE_CONTEXT_TOKENS"] = "8192"
     fixture = ToolHistoryFixture(args.data_dir)
     real_read = StructuredWorkspaceToolProvider._read
 
