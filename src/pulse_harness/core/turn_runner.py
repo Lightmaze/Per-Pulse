@@ -646,6 +646,10 @@ class TurnRunner:
             "capability": descriptor.capability,
             "source": descriptor.source,
         }
+        if not descriptor.auto_apply_supported:
+            # A policy tightening must invalidate old action authority while
+            # preserving the historical digest for unchanged descriptors.
+            tool_identity["auto_apply_supported"] = False
         descriptor_digest = digest_json(tool_identity)
         # Actions recorded before this change hold a digest that also covers
         # the description. Keep matching those while the text is unchanged.
@@ -726,6 +730,8 @@ class TurnRunner:
         raise ProviderProtocolError(f"model requested an unregistered tool: {name}")
 
     def _requires_approval(self, descriptor: ToolDescriptor) -> bool:
+        if descriptor.mutable and not descriptor.auto_apply_supported:
+            return True
         if descriptor.capability in self.auto_apply_capabilities:
             return False
         return descriptor.requires_approval or descriptor.mutable
