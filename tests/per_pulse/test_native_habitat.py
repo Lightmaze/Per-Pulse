@@ -363,7 +363,7 @@ def test_habitat_write_waits_for_real_native_approval(tmp_path, monkeypatch, dec
     fixture = WorkFixture(monkeypatch.setenv)
     fixture.plan = [(WRITE, {
         "op": "write", "region": "garden", "file": "approved.txt",
-        "content": "Only if the owner allows once.\n",
+        "content": "Only if the owner allows once.\\n",
     })]
     with client_for(tmp_path, model_factory=fixture.factory,
                     allow_workspace_actions=True, auto_apply_edits=auto_apply_edits,
@@ -391,6 +391,6 @@ def test_habitat_write_waits_for_real_native_approval(tmp_path, monkeypatch, dec
             for m in view["messages"]))
         assert target.exists() is (decision == "allow_once")
         if decision == "allow_once":
-            assert target.read_text() == "Only if the owner allows once.\n"
+            assert target.read_text() == "Only if the owner allows once.\\n"
         assert execution.resolve_approval(page, action_id, decision)["repeated"]
         assert target.exists() is (decision == "allow_once")
