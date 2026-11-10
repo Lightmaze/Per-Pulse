@@ -48,7 +48,10 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
   const pulse = verifiedHomePulse(workspaceId, freshBootstrap,
     currentSnapshot?.pulseUnavailable ? null : currentSnapshot?.observation ?? null);
   const freshPages = freshBootstrap?.pages ?? null;
-  const unavailable = Boolean(currentSnapshot?.pulseUnavailable || currentSnapshot?.workspaceUnavailable);
+  // A failed Pulse observation does not invalidate a successfully read World
+  // page list. Current Work approvals remain navigable from Home.
+  const workspaceUnavailable = Boolean(currentSnapshot?.workspaceUnavailable);
+  const unavailable = Boolean(currentSnapshot?.pulseUnavailable || workspaceUnavailable);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -162,7 +165,8 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
   return <>
     {unavailable ? <section className="home-continuations" aria-label={t('pulse.home.unavailableTitle')}>
       <h2>{t('pulse.home.unavailableTitle')}</h2>
-      <p role="status" className="home-continuations-intro">{t('pulse.home.unavailableInfo')}</p>
+      <p role="status" className="home-continuations-intro">{t(workspaceUnavailable
+        ? 'pulse.home.unavailableInfo' : 'pulse.home.pulseUnavailableInfo')}</p>
       <button type="button" className="text-button" onClick={() => setRefreshRequest(value => value + 1)}>
         {t('pulse.refresh')}
       </button>
