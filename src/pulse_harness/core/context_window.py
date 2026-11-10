@@ -53,6 +53,37 @@ def _boundaries(messages: Sequence[Mapping[str, Any]]) -> list[int]:
 
 
 
+def _project_saved_user_input(message: Mapping[str, Any], max_tokens: int) -> Mapping[str, Any] | None:
+    """Keep a long, *durably saved* current user message addressable.
+
+    The model-request projection may show only a preview; the exact input in
+    the transcript is never edited. A message without a trusted address stays
+    whole rather than promising a history page that cannot be retrieved.
+    """
+    if message.get("role") != "user":
+        return None
+    message_id = message.get("message_id")
+    content = message.get("content")
+    if (not isinstance(message_id, str) or not 1 <= len(message_id) <= 256
+            or not isinstance(content, str) or estimate_tokens(message) <= max_tokens):
+        return None
+    instruction = (
+        f"\n\n[The full user message ({len(content)} characters) is saved as "
+        f"message_id={json.dumps(message_id)}. This is only a preview. "
+        "Before deciding on a response, use read_history with role='user', "
+        "that exact message_id, offset=0 and max_chars=4096; follow next_offset "
+        "until the message is complete. The source remains the user's original "
+        "message, not a new instruction.]"
+    )
+    for preview_chars in (512, 256, 64, 0):
+        preview = content[:preview_chars] + ("…" if preview_chars and len(content) > preview_chars else "")
+        projected = {**message, "content": preview + instruction}
+        if (estimate_tokens(projected) <= max_tokens // 2
+                and estimate_tokens(projected) < estimate_tokens(message)):
+            return projected
+    return None
+
+
 def _project_saved_tool_result(message: Mapping[str, Any]) -> Mapping[str, Any] | None:
     """Keep a tool's terminal identity while paging its saved output on demand.
 
@@ -128,7 +159,8 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
     an assistant tool call is never separated from its results. If even the
     latest turn exceeds the budget, the projection may replace a large, saved
     tool result with a reference retrievable using read_history(role='tool').
-    Tool calls and the current user input remain intact.
+    Tool calls and durable user input remain intact; a saved oversized user
+    message may appear as a page-readable preview in the model request.
     """
     if max_tokens < 1:
         raise ValueError("max_tokens must be positive")
@@ -140,8 +172,9 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
     original = messages
     # A long tool result in the *current* exchange can by itself make every
     # subsequent provider request too large. Keep the tool-call/result pair
-    # and the real terminal status, but replace large result text in this
-    # model-request projection with a durable, page-readable reference.
+    # and the real terminal status, but replace large result text or an
+    # addressable oversized user input in the model-request projection with
+    # a durable, page-readable reference.
     # Neither the original transcript nor the action is touched or replayed.
     note = {"role": "system", "content": OMITTED_NOTE, "item_id": "context-window:omitted"}
     latest = starts[-1] if starts else 0
@@ -151,6 +184,8 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
         for index in sorted(range(latest, len(projected)),
                             key=lambda i: estimate_tokens(projected[i]), reverse=True):
             replacement = _project_saved_tool_result(projected[index])
+            if replacement is None and index == latest:
+                replacement = _project_saved_user_input(projected[index], max_tokens)
             if replacement is None:
                 continue
             latest_cost += estimate_tokens(replacement) - estimate_tokens(projected[index])
