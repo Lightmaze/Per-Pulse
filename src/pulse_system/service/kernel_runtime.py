@@ -110,6 +110,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
     def __init__(self, *args, guard, mutation_guard, allow_mutations, auto_apply_edits=False, history_scopes, life_hub, cognition, cognition_authorize, work, team, command_history_scopes=None, local=None, posture=None, attention=None, notice=None, habitat=None, replay_authorize=None, background_main_round_limit=None, rim_policy=False, **kwargs):
         self._guard, self._mutation_guard = guard, mutation_guard
         self._allow_mutations = allow_mutations
+        self._auto_apply_edits = bool(allow_mutations and auto_apply_edits)
         self._background_main_round_limit = background_main_round_limit
         self._rim_policy = rim_policy
         super().__init__(*args, command_guard=guard, command_start_guard=mutation_guard, **kwargs)
@@ -125,7 +126,6 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         self._habitat_bindings: dict[str, str] = {}
         self._habitat_consumed: set[str] = set()
         self._habitat_lock = threading.RLock()
-        self._posture = posture
         self._posture = posture
         self._replay_authorize = replay_authorize
         self._cognition = cognition
@@ -183,7 +183,7 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         self.bind_action_authority(scope, call, action_request_id=action_request_id)
         action = self.store.get_action(scope, action_request_id)
         if (action.status is not ActionStatus.RUNNING
-                or (not action.approval_id and not self._auto_apply_edits)):
+                or not action.approval_id):
             raise ScopeConflict("Habitat mutation requires its claimed approved action")
         with self._habitat_lock:
             if action_request_id in self._habitat_consumed:
