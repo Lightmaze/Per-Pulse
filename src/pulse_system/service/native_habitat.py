@@ -37,6 +37,7 @@ WRITE_SCHEMA: dict[str, Any] = {
         "region": {"type": "string", "maxLength": 64},
         "file": {"type": "string", "maxLength": 128},
         "content": {"type": "string", "maxLength": _MAX_CONTENT},
+        "expectedSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     }, "required": ["op", "region", "file", "content"], "additionalProperties": False,
 }
 
@@ -59,6 +60,9 @@ def descriptors() -> tuple[ToolDescriptor, ToolDescriptor]:
             "Change a file in the continuing World's named Habitat region: "
             "write(region,file,content) replaces its current text; "
             "append(region,file,content) preserves the current text and adds new text. "
+            "When revising an observed file, supply its fullCurrentSha256 as "
+            "expectedSha256 to avoid overwriting changes made before approval; "
+            "if it changed, read the latest version and decide again. "
             "The first write creates the region. The exact original Kernel action "
             "and the physical before/after digests remain in the Habitat effect "
             "journal. This is a workspace mutation: it requires the existing "
@@ -97,10 +101,16 @@ def validate(name: str, args: Mapping[str, Any]) -> dict[str, str]:
         else:
             raise ValueError("Habitat observation expects list or read")
     elif name == WRITE:
-        if values.get("op") not in {"write", "append"} or set(values) != {
-            "op", "region", "file", "content"
-        }:
-            raise ValueError("Habitat mutation expects write/append(region,file,content)")
+        if (values.get("op") not in {"write", "append"}
+                or not {"op", "region", "file", "content"} <= set(values)
+                or set(values) - {"op", "region", "file", "content", "expectedSha256"}):
+            raise ValueError("Habitat mutation expects write/append(region,file,content) "
+                             "with optional expectedSha256")
+        if "expectedSha256" in values and (
+            not isinstance(values["expectedSha256"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", values["expectedSha256"]) is None
+        ):
+            raise ValueError("Habitat expectedSha256 must be a full lowercase SHA-256")
     else:
         raise ValueError("Unknown native Habitat tool")
     region = values["region"]
@@ -153,6 +163,7 @@ class NativeHabitat:
                 values["op"], target=location,
                 payload=values.get("content", ""),
                 correlation_id=action_request_id if call.name == WRITE else None,
+                expected_digest=values.get("expectedSha256"),
             ))
             if response.reply is not Reply.YIELD:
                 if "UNCERTAIN/" in response.detail:

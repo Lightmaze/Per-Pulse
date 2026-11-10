@@ -229,6 +229,87 @@ def test_long_region_keeps_original_writer_after_restart_and_exposes_external_ed
         assert changed["lastVerifiedWrite"] is None
         assert changed["fullCurrentSha256"] != second_receipt["after_digest"]
 
+
+@pytest.mark.parametrize("op", ["write", "append"])
+def test_habitat_rechecks_observed_version_at_approval(tmp_path, monkeypatch, op):
+    """A real delayed Kernel approval must not overwrite a newer regional file.
+
+    Only model tool selections are synthetic. The file, Work histories,
+    original approval, refusal and later successful write are native.
+    """
+    fixture = WorkFixture(monkeypatch.setenv)
+    settings = PulseSettings(
+        enabled=True, spontaneous_rate=0,
+        adaptive_connections=False, spectrum_enabled=False,
+    )
+    with client_for(tmp_path, model_factory=fixture.factory,
+                    allow_workspace_actions=True, auto_apply_edits=True,
+                    posture=False, pulse=settings) as client:
+        runtime = client.app.state.pages.runtime
+        execution = PageExecution(runtime)
+        target = runtime.habitat.root / "regions/garden/notes.txt"
+
+        fixture.plan = [(WRITE, {"op": "write", "region": "garden",
+                                "file": "notes.txt", "content": "First version.\n"})]
+        original = new_page(client, "Original observation", "Write the first note.")["page"]["id"]
+        waiting = _wait(execution, original, lambda view:
+                        bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        execution.resolve_approval(original, waiting["pendingActions"][0]["actionId"], "allow_once")
+        wait_for(client, original, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled" for m in view["messages"]))
+        assert target.read_text() == "First version.\n"
+
+        fixture.plan = [(OBSERVE, {"op": "read", "region": "garden", "file": "notes.txt"})]
+        reader = new_page(client, "Read current version", "Inspect the shared note.")["page"]["id"]
+        wait_for(client, reader, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled" for m in view["messages"]))
+        observed_digest = fixture.outcomes[0]["output"]["fullCurrentSha256"]
+
+        fixture.plan = [(WRITE, {"op": op, "region": "garden",
+                                "file": "notes.txt", "content": "Edited version.\n",
+                                "expectedSha256": observed_digest})]
+        editor = new_page(client, "Delayed revision", "Edit the note I inspected.")["page"]["id"]
+        waiting = _wait(execution, editor, lambda view:
+                        bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action_id = waiting["pendingActions"][0]["actionId"]
+        assert waiting["pendingActions"][0]["arguments"]["expectedSha256"] == observed_digest
+        # Another actor updates the same physical file while this Work waits
+        # for its original approval. No stage or writer index may be added.
+        target.write_text("Newer independent version.\n", encoding="utf-8")
+        receipt = execution.resolve_approval(editor, action_id, "allow_once")
+        assert receipt["accepted"], receipt
+        wait_for(client, editor, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled" for m in view["messages"]))
+        assert target.read_text() == "Newer independent version.\n"
+        assert fixture.outcomes[0]["status"] != "succeeded", fixture.outcomes[0]
+        assert execution.resolve_approval(editor, action_id, "allow_once")["repeated"]
+        assert target.read_text() == "Newer independent version.\n"
+
+        latest = hashlib.sha256(target.read_bytes()).hexdigest()
+        fixture.plan = [(WRITE, {"op": op, "region": "garden",
+                                "file": "notes.txt", "content": "Edited version.\n",
+                                "expectedSha256": latest})]
+        next_work = new_page(client, "Rebase onto latest", "Continue using the current note.")["page"]["id"]
+        next_wait = _wait(execution, next_work, lambda view:
+                          bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        execution.resolve_approval(next_work, next_wait["pendingActions"][0]["actionId"], "allow_once")
+        wait_for(client, next_work, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled" for m in view["messages"]))
+        assert fixture.outcomes[0]["status"] == "succeeded", fixture.outcomes[0]
+        assert fixture.outcomes[0]["output"]["effectReceipt"]["before_digest"] == latest
+        assert target.read_text() == (
+            "Edited version.\n" if op == "write"
+            else "Newer independent version.\nEdited version.\n"
+        )
+
+
+@pytest.mark.parametrize("bad", ["", "A" * 64, "abcd", None, 7, True])
+def test_habitat_edit_rejects_invalid_expected_sha(bad):
+    with pytest.raises(ValueError, match="expectedSha256"):
+        validate(WRITE, {"op": "write", "region": "garden", "file": "note.txt",
+                         "content": "text", "expectedSha256": bad})
+
+
 @pytest.mark.parametrize("arguments", [
     {"op": "read", "region": "garden", "file": "notes.txt", "offset": 64_000},
     {"op": "read", "region": "garden", "file": "notes.txt", "offset": -1},
