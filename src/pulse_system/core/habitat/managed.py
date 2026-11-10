@@ -845,6 +845,22 @@ class ManagedHabitat(Habitat):
             return text[:_MAX_READ_CHARS] + "\n[…内容已截断]"
         return text
 
+    def text_snapshot(self, relative: str) -> tuple[str, str]:
+        """Return a bounded UTF-8 preview and full-file SHA-256 from one snapshot.
+
+        The ordinary perception result remains bounded. A native source
+        lookup can compare the complete current bytes with a committed
+        effect digest without treating a truncated preview as the whole file.
+        The adapter lock excludes an interleaved ManagedHabitat write.
+        """
+        with self._lock:
+            path = self._safe_path(relative, allow_root=False)
+            data = path.read_bytes()
+            text = data.decode("utf-8", errors="replace")
+            preview = (text[:_MAX_READ_CHARS] + "\n[…内容已截断]"
+                       if len(text) > _MAX_READ_CHARS else text)
+            return preview, hashlib.sha256(data).hexdigest()
+
     def _atomic_write(
         self,
         path: Path,
