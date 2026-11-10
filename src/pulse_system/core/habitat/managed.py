@@ -626,6 +626,7 @@ class ManagedHabitat(Habitat):
                     action.payload,
                     append=False,
                     correlation_id=action.correlation_id,
+                    expected_digest=action.expected_digest,
                 )
                 detail = f"环境已写入：{self._relative(path)}"
             elif verb == "append":
@@ -635,6 +636,7 @@ class ManagedHabitat(Habitat):
                     action.payload,
                     append=True,
                     correlation_id=action.correlation_id,
+                    expected_digest=action.expected_digest,
                 )
                 detail = f"环境已追加：{self._relative(path)}"
             elif verb == "mkdir":
@@ -889,6 +891,7 @@ class ManagedHabitat(Habitat):
         *,
         append: bool,
         correlation_id: str | None = None,
+        expected_digest: str | None = None,
     ) -> HabitatEffectReceipt:
         if not isinstance(payload, str):
             raise ValueError("payload must be text")
@@ -900,6 +903,11 @@ class ManagedHabitat(Habitat):
             raise ValueError("correlation_id must be a bounded non-empty string")
         if len(payload) > _MAX_WRITE_CHARS:
             raise ValueError("payload is too large")
+        if expected_digest is not None and (
+            not isinstance(expected_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
+        ):
+            raise ValueError("expected digest must be a full lowercase SHA-256")
         # The append read, replacement and adapter-owned fingerprint form one
         # publication transaction with ``poll_changes``.  Releasing the lock
         # between replace and remember would expose our own write as world
@@ -907,12 +915,17 @@ class ManagedHabitat(Habitat):
         # updates.  ``RLock`` permits ``_remember`` to reuse the same domain.
         with self._lock:
             self._publication.assert_active()
-            parent_created = self._mkdir(path.parent)
             before_digest = (
                 hashlib.sha256(path.read_bytes()).hexdigest()
                 if path.is_file()
                 else None
             )
+            # Compare while holding the same lock as append and replacement,
+            # before creating a directory, staging a file or recording an effect.
+            # A delayed Kernel approval must not overwrite a newer Work's edit.
+            if expected_digest is not None and before_digest != expected_digest:
+                raise ValueError("Habitat file changed; read the current version before editing")
+            parent_created = self._mkdir(path.parent)
             content = payload
             if append and path.exists():
                 # ``_read_text`` is intentionally bounded for perception.  An

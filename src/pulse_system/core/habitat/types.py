@@ -76,6 +76,8 @@ class Action:
     target: str = ""
     payload: str = ""
     correlation_id: str | None = None
+    # A caller may pin a mutation to a version observed before approval.
+    expected_digest: str | None = None
 
 
 @dataclass(frozen=True)
