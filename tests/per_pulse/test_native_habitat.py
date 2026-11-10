@@ -182,10 +182,39 @@ def test_long_region_keeps_original_writer_after_restart_and_exposes_external_ed
         assert answer["fullCurrentSha256"] == second_receipt["after_digest"]
         assert answer["lastVerifiedWrite"]["source"]["kernelActionId"] == second_action
         assert answer["lastVerifiedWrite"]["effectReceipt"] == second_receipt
+        assert answer["readOffset"] == 0
+        assert answer["totalChars"] == 96_000
+        assert answer["nextOffset"] == 64_000
+
+        # Home continues the actual file beyond the truncated first page,
+        # preserving the original Work B source across the restart.
+        fixture.plan = [(OBSERVE, {
+            "op": "read", "region": "garden", "file": "large.txt",
+            "offset": answer["nextOffset"],
+            "expectedSha256": answer["fullCurrentSha256"],
+        })]
+        response = client.post("/api/pages/home/messages", json={
+            "content": "Continue reading the same regional file."})
+        assert response.status_code == 202, response.text
+        wait_for(client, "home", lambda view: len([
+            m for m in view["messages"]
+            if m["role"] == "assistant" and m["status"] == "settled"
+        ]) >= 2)
+        continuation = fixture.outcomes[0]["output"]
+        assert continuation["current"] == second[16_000:]
+        assert continuation["readOffset"] == 64_000
+        assert continuation["totalChars"] == 96_000
+        assert continuation["nextOffset"] is None
+        assert continuation["fullCurrentSha256"] == second_receipt["after_digest"]
+        assert continuation["lastVerifiedWrite"]["source"]["kernelActionId"] == second_action
 
         # An out-of-band edit invalidates that same author's verified origin.
         target = client.app.state.pages.runtime.habitat.root / "regions/garden/large.txt"
         target.write_text(first + second + "externally modified", encoding="utf-8")
+        with pytest.raises(ValueError, match="changed"):
+            client.app.state.pages.runtime.habitat.text_page_snapshot(
+                "regions/garden/large.txt", offset=64_000,
+                expected_digest=second_receipt["after_digest"])
         fixture.plan = [(OBSERVE, {
             "op": "read", "region": "garden", "file": "large.txt",
         })]
@@ -195,10 +224,23 @@ def test_long_region_keeps_original_writer_after_restart_and_exposes_external_ed
         wait_for(client, "home", lambda view: len([
             m for m in view["messages"]
             if m["role"] == "assistant" and m["status"] == "settled"
-        ]) >= 2)
+        ]) >= 3)
         changed = fixture.outcomes[0]["output"]
         assert changed["lastVerifiedWrite"] is None
         assert changed["fullCurrentSha256"] != second_receipt["after_digest"]
+
+@pytest.mark.parametrize("arguments", [
+    {"op": "read", "region": "garden", "file": "notes.txt", "offset": 64_000},
+    {"op": "read", "region": "garden", "file": "notes.txt", "offset": -1},
+    {"op": "read", "region": "garden", "file": "notes.txt", "offset": True},
+    {"op": "list", "region": "garden", "offset": 64_000},
+    {"op": "read", "region": "garden", "file": "notes.txt",
+     "offset": 64_000, "expectedSha256": "not-a-digest"},
+])
+def test_habitat_continuation_rejects_unpinned_or_invalid_pages(arguments):
+    with pytest.raises(ValueError):
+        validate(OBSERVE, arguments)
+
 
 def test_read_only_workspace_never_advertises_habitat_mutation(tmp_path):
     pages = PageService(tmp_path, model_factory=None, posture=False,
