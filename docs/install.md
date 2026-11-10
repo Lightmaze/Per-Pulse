@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a11-py3-none-any.whl` from the
-[v0.1.0a11 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a11).
+Download `per_pulse-0.1.0a12-py3-none-any.whl` from the
+[v0.1.0a12 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a12).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a11-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a12-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a11-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a12-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -64,6 +64,17 @@ Use `--pulse-budget N` to change this or `--no-pulse` to switch it off. Model
 file changes apply by default and offer Undo; `--ask-before-edits` asks first.
 See [workspace actions](workspace-actions.md) for what Undo can restore.
 
+## Continue in a shared Habitat region
+
+With a configured model, Home and focused Works can visit a named Habitat
+region using the native `habitat_observe` and `habitat_write` tools. Ask one
+Work to write a regional text file, approve that exact action with **Allow once**,
+then ask another Work to revisit and continue it. Home can read the same file
+after restart. For a file longer than the first 64,000 characters, the model can
+use `nextOffset` with `fullCurrentSha256` to read the remainder without mixing
+versions. Habitat changes currently have no Undo and always need Allow once;
+regular workspace edits still have their normal Undo.
+
 ## Start autonomous practice
 
 For self-directed work, open Activity, choose a weekly request limit and select
@@ -92,7 +103,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a11-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a12-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
