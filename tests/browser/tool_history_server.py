@@ -134,14 +134,23 @@ class ToolHistoryFixture:
             return streamed("Read the file and kept the original tool receipt." + LABEL)
 
         if "HISTORY_WINDOW_FILLER" in task:
-            assert all(OLD not in message.get("content", "") for message in messages
-                       if message["role"] in {"user", "assistant"}), "no discussion summary may leak the old marker"
-            return streamed("Continuation received. " + "Keep the current discussion readable. " * 24 + LABEL)
+            # Before the first historical recall, raw tool bytes must never
+            # appear in authored discussion. Once a user explicitly recalls
+            # them, the *assistant's legitimate answer* contains the marker
+            # until enough later turns evict it from the active window.
+            # Verify actual eviction at RECALL_TOOL_HISTORY below, rather
+            # than requiring it prematurely on each filler message.
+            if "last_source" not in self.saved:
+                assert all(OLD not in (message.get("content") or "") for message in messages
+                           if message["role"] in {"user", "assistant"}), (
+                    "raw tool bytes appeared in discussion before any authorized history recall"
+                )
+            return streamed("Continuation received. " + "Keep the current discussion readable. " * 160 + LABEL)
 
         if "RECALL_TOOL_HISTORY" in task:
             if not results:
                 assert OMITTED_NOTE in [message.get("content") for message in messages], "native window really clipped history"
-                assert all(OLD not in message.get("content", "") for message in messages), "old marker is unavailable before recall"
+                assert all(OLD not in (message.get("content") or "") for message in messages), "old marker is unavailable before recall"
                 assert all(name != "read_file" for _message, name in tool_messages), "the original read_file exchange left the actual request"
                 assert self.original_row() == self.saved["original_row"], "clipping preserves the saved original row"
                 assert NEW in (self.directory / "workspace" / FILENAME).read_text(), "physical file already changed"
@@ -215,7 +224,11 @@ if __name__ == "__main__":
     workspace.mkdir(exist_ok=True)
     if not (workspace / FILENAME).exists():
         (workspace / FILENAME).write_text(ORIGINAL, encoding="utf-8")
-    os.environ["P_PULSE_CONTEXT_TOKENS"] = "1024"
+    # This scenario verifies older settled tool-result history, not current-result
+    # paging. Give the first ordinary read and multi-page read_history sequence
+    # room to arrive intact. Larger filler replies still force a real window
+    # eviction before each historical recall.
+    os.environ["P_PULSE_CONTEXT_TOKENS"] = "8192"
     fixture = ToolHistoryFixture(args.data_dir)
     real_read = StructuredWorkspaceToolProvider._read
 

@@ -26,7 +26,7 @@ from pulse_harness.life.tools import LIFE_SCHEMAS
 from pulse_harness.adapters.command import COMMAND_SCHEMA
 from pulse_harness.adapters.command_output import NAME as COMMAND_OUTPUT_NAME, SCHEMA as COMMAND_OUTPUT_SCHEMA
 from pulse_harness.adapters.history import HISTORY_SCHEMAS
-from pulse_harness.core.contracts import ToolCall
+from pulse_harness.core.contracts import ARGUMENT_ERROR_KEY, ToolCall
 from pulse_harness.core.errors import ProviderProtocolError, ProviderUnavailable
 from pulse_harness.core.provider import ModelDelta, ModelDeltaKind, ModelRequest, ProviderEvidence
 from pulse_harness.core.provider import ProviderUsage, validate_provider_response_id
@@ -175,6 +175,33 @@ RETRY_STATUSES = frozenset({408, 409, 429})
 INITIAL_RETRY_SECONDS = 0.5
 MAX_RETRY_SECONDS = 8.0
 MAX_RETRY_AFTER_SECONDS = 60.0
+
+
+# Refusals that are not about the content of a request. A request carrying an
+# image that fails with any other status is tried once more without the image:
+# text-only models (common on local servers) refuse image parts outright.
+_NOT_ABOUT_CONTENT = frozenset({401, 403, 404, 408, 409, 429})
+
+
+def _images_refused_note(status: int, *, earlier: bool = False) -> str:
+    when = "refused an earlier request" if earlier else "refused this request"
+    return (f"The configured model {when} while it carried an image (HTTP {status}), so no pixels "
+            "accompany this image reference. Do not claim to have seen it. Tell the person this model "
+            "did not accept the image; reading it needs a model that accepts image input.")
+
+
+def _without_images(body: dict[str, Any], note: str) -> int:
+    """Remove image parts from a request body in place, leaving one note per message."""
+    removed = 0
+    for message in body.get("messages", ()):
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        kept = [part for part in content if not (isinstance(part, dict) and part.get("type") == "image_url")]
+        if len(kept) != len(content):
+            removed += len(content) - len(kept)
+            message["content"] = [*kept, {"type": "text", "text": note}]
+    return removed
 
 
 def _retryable(response: httpx.Response) -> bool:
@@ -398,6 +425,9 @@ class ChatHTTPModelAdapter:
                  attempt_accounting=None) -> None:
         self.workspace_image_resolver = None
         self.life_image_resolver = None  # native runtime may bind a scoped, ephemeral observation renderer
+        # The status with which this model refused a request only because it
+        # carried an image; later requests leave images out and say why.
+        self.images_refused: int | None = None
         self.config = config
         self._schemas = _decode(_json(dict(WORKSPACE_SCHEMAS if tool_schemas is None else tool_schemas)))
         self._client = httpx.Client(timeout=config.timeout_seconds, follow_redirects=False,
@@ -586,6 +616,8 @@ class ChatHTTPModelAdapter:
                     "or this round exceeded five images. Use read_file again for the required source."}])
             if visual:
                 messages.append({"role": "user", "content": visual})
+        if self.images_refused is not None:
+            _without_images(body, _images_refused_note(self.images_refused, earlier=True))
         # continuation_of/tool_results already exist in the durable transcript.
         # Appending them here would replay a tool exchange twice on resume.
         return body
@@ -669,6 +701,7 @@ class _ChatStream:
                 return
             retries = self.adapter.config.max_retries
             attempt = 0
+            images_refused: int | None = None
             while True:
                 attempt += 1
                 # Each *physical* HTTP attempt, including transport and HTTP
@@ -713,6 +746,16 @@ class _ChatStream:
                     accounting.settle(active_ticket, "rejected")
                     active_ticket = None
                 if attempt > retries or not _retryable(response):
+                    status = response.status_code
+                    if (images_refused is None and status not in _NOT_ABOUT_CONTENT
+                            and _without_images(self.body, _images_refused_note(status))):
+                        # Try once more without the pixels, at once; the model is told why.
+                        images_refused = status
+                        response.close()
+                        response = None
+                        request = self.adapter._client.build_request("POST", self.adapter.config.endpoint,
+                            headers=headers, json=self.body)
+                        continue
                     # Never persist a remote body, URL, request headers or credentials.
                     tries = f" after {attempt} attempts" if attempt > 1 else ""
                     raise ProviderUnavailable(f"model endpoint returned HTTP {response.status_code}{tries}",
@@ -725,6 +768,10 @@ class _ChatStream:
             if "text/event-stream" not in response.headers.get("content-type", "").lower():
                 raise ProviderProtocolError("model endpoint did not return an SSE stream")
             yield from self._deltas(response)
+            if images_refused is not None and self._done:
+                # Remember only after a complete reply without the image: a
+                # stream that breaks proves nothing about image support.
+                self.adapter.images_refused = images_refused
         except httpx.HTTPError:
             if not self._cancelled():
                 raise ProviderUnavailable("model transport failed", code="provider_transport_error") from None
@@ -804,14 +851,24 @@ class _ChatStream:
                 ids: set[str] = set()
                 for index in sorted(calls):
                     call = calls[index]
-                    try:
-                        arguments = _decode(call["arguments"])
-                    except ValueError:
-                        raise ProviderProtocolError("invalid tool argument JSON") from None
-                    if not call["id"] or not call["name"] or call["id"] in ids or not isinstance(arguments, dict):
+                    if not call["id"] or not call["name"] or call["id"] in ids:
                         raise ProviderProtocolError("invalid or duplicate tool call")
                     ids.add(call["id"])
                     metadata = dict(call["provider_metadata"])
+                    # Arguments the model wrote badly are its mistake to correct,
+                    # not a broken stream: the runner answers the call with why.
+                    # Some servers send no text for a call without arguments.
+                    arguments: Any = {}
+                    if call["arguments"].strip():
+                        try:
+                            arguments = _decode(call["arguments"])
+                        except ValueError as error:
+                            metadata[ARGUMENT_ERROR_KEY] = str(error)[:200]
+                            arguments = {}
+                    if not isinstance(arguments, dict):
+                        kind = {list: "array", str: "string", bool: "boolean"}.get(type(arguments), "number" if arguments is not None else "null")
+                        metadata[ARGUMENT_ERROR_KEY] = f"got a JSON {kind}"
+                        arguments = {}
                     if has_reasoning_details and index == min(calls):
                         # Message-level continuation travels once with the
                         # first call in the same durable assistant response.

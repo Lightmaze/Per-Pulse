@@ -210,6 +210,37 @@ def test_materials_browser_keeps_ordinary_dotfiles_visible_and_internal_paths_cl
                           headers=identity).json()["content"] == "API_KEY=synthetic-only\n"
 
 
+def test_public_key_file_is_an_ordinary_user_selected_workspace_material(tmp_path):
+    """A .key suffix alone is not evidence of a protected secret."""
+    content = b"ssh-ed25519 SYNTHETIC_PUBLIC_KEY fixture@example.test\n"
+    root = tmp_path / "workspace"
+    with _client(tmp_path) as client:
+        identity = _identity(client)
+        (root / "public.key").write_bytes(content)
+        listing = client.get("/api/workspace/files", headers=identity)
+        assert listing.status_code == 200
+        assert "public.key" in {row["name"] for row in listing.json()["entries"]}
+        preview = client.get("/api/workspace/files/content",
+                             params={"path": "public.key"}, headers=identity)
+        assert preview.status_code == 200
+        assert preview.json()["sha256"] == hashlib.sha256(content).hexdigest()
+        assert preview.json()["content"].encode() == content
+        imported = _upload(client, content, name="public.key", headers=identity)
+        assert imported.status_code == 201, imported.text
+        receipt = imported.json()
+        assert (root / receipt["path"]).read_bytes() == content
+        assert not client.get("/api/pages/home").json()["messages"]
+
+    with _client(tmp_path) as client:
+        identity = _identity(client)
+        resumed = client.get("/api/workspace/files/content",
+                             params={"path": receipt["path"]}, headers=identity)
+        assert resumed.status_code == 200
+        assert resumed.json()["sha256"] == hashlib.sha256(content).hexdigest()
+        assert client.get("/api/workspace/files/content", params={"path": receipt["path"]},
+                          headers={**identity, "X-Per-Pulse-World": "different"}).status_code == 409
+
+
 @pytest.mark.parametrize("tool_name", ["read_file", "reading"])
 def test_imported_source_is_read_by_existing_native_tools_in_separate_works(tmp_path, monkeypatch, tool_name):
     """Synthetic tool choices, real imported bytes and original action receipts."""
@@ -293,7 +324,8 @@ def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
         root = tmp_path / "workspace"
         for index in range(425):
             (root / f"note-{index:04d}.txt").write_text(f"Native note {index}", encoding="utf-8")
-        (root / "not-visible.key").write_text("Protected name", encoding="utf-8")
+        # .pem remains protected; .key is ordinary user-owned source text.
+        (root / "not-visible.pem").write_text("Protected name", encoding="utf-8")
         (root / ".pulse").mkdir(exist_ok=True)
         (root / "ordinary-folder").mkdir()
 
@@ -318,7 +350,7 @@ def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
         assert len(names) == len(set(names)) == 426
         assert {f"note-{index:04d}.txt" for index in range(425)} <= set(names)
         assert "ordinary-folder" in names
-        assert "not-visible.key" not in names
+        assert "not-visible.pem" not in names
         assert ".pulse" not in names
         assert page["nextCursor"] is None and page["truncated"] is False
         # urlsafe_b64decode can raise binascii.Error for legal-looking but malformed strings.
@@ -352,8 +384,9 @@ def test_directory_cursor_continues_after_bounded_scan_of_protected_entries(tmp_
     with _client(tmp_path) as client:
         identity = _identity(client)
         root = tmp_path / "workspace"
+        # Still exercise a page filled with truly protected entries.
         for index in range(7):
-            (root / f"hidden-{index}.key").write_text("Do not list", encoding="utf-8")
+            (root / f"hidden-{index}.pem").write_text("Do not list", encoding="utf-8")
         (root / "visible.txt").write_text("Can be reached", encoding="utf-8")
         page = client.get("/api/workspace/files", headers=identity).json()
         found = [row["name"] for row in page["entries"]]

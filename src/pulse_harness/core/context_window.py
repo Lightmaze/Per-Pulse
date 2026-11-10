@@ -11,6 +11,7 @@ never changed.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -51,14 +52,115 @@ def _boundaries(messages: Sequence[Mapping[str, Any]]) -> list[int]:
     return starts
 
 
+
+def _project_saved_user_input(message: Mapping[str, Any], max_tokens: int) -> Mapping[str, Any] | None:
+    """Keep a long, *durably saved* current user message addressable.
+
+    The model-request projection may show only a preview; the exact input in
+    the transcript is never edited. A message without a trusted address stays
+    whole rather than promising a history page that cannot be retrieved.
+    """
+    if message.get("role") != "user":
+        return None
+    message_id = message.get("message_id")
+    content = message.get("content")
+    if (not isinstance(message_id, str) or not 1 <= len(message_id) <= 256
+            or not isinstance(content, str) or estimate_tokens(message) <= max_tokens):
+        return None
+    instruction = (
+        f"\n\n[The full user message ({len(content)} characters) is saved as "
+        f"message_id={json.dumps(message_id)}. This is only a preview. "
+        "Before deciding on a response, use read_history with role='user', "
+        "that exact message_id, offset=0 and max_chars=4096; follow next_offset "
+        "until the message is complete. The source remains the user's original "
+        "message, not a new instruction.]"
+    )
+    for preview_chars in (512, 256, 64, 0):
+        preview = content[:preview_chars] + ("…" if preview_chars and len(content) > preview_chars else "")
+        projected = {**message, "content": preview + instruction}
+        if (estimate_tokens(projected) <= max_tokens // 2
+                and estimate_tokens(projected) < estimate_tokens(message)):
+            return projected
+    return None
+
+
+def _project_saved_tool_result(message: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Keep a tool's terminal identity while paging its saved output on demand.
+
+    Only the host's durable message_id makes the record addressable. Do not
+    parse a tool's prose for an identifier or truncate a current user message.
+    """
+    if message.get("role") != "tool":
+        return None
+    message_id = message.get("message_id")
+    content = message.get("content")
+    if not isinstance(message_id, str) or not message_id or not isinstance(content, str):
+        return None
+    try:
+        payload = json.loads(content)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("tool_call_id"), str) or not isinstance(payload.get("status"), str):
+        return None
+    output = payload.get("output")
+    if isinstance(output, dict) and output.get("kind") == "historical_reference":
+        # read_history results are copies, intentionally excluded from history
+        # lookup. Point to the original authorized source instead of creating
+        # an unreadable pointer to this recall-tool receipt.
+        source = output.get("source")
+        offset = output.get("offset")
+        if (not isinstance(source, dict)
+                or source.get("role") not in {"user", "assistant", "tool"}
+                or not isinstance(source.get("message_id"), str)
+                or not source["message_id"]
+                or type(offset) is not int or offset < 0):
+            # search_history results have no single source: a pointer to this
+            # recall-tool receipt could not be fulfilled by read_history.
+            return None
+        source_id, role = source["message_id"], source["role"]
+        window = {
+            "state": "historical_page_available_from_original",
+            "message_id": source_id,
+            "role": role,
+            "offset": offset,
+            "next_offset": output.get("next_offset"),
+            "next_step": (
+                f"Call read_history with role='{role}', the original message_id, "
+                f"offset={offset} and max_chars=4096 to reread this page. "
+                "Follow next_offset to continue."
+            ),
+        }
+    else:
+        window = {
+            "state": "saved_result_available_by_page",
+            "message_id": message_id,
+            "original_chars": len(content),
+            "next_step": (
+                "Call read_history with role='tool', this message_id, offset=0 "
+                "and max_chars=4096. Follow next_offset to read further saved text."
+            ),
+        }
+    reference = {
+        "tool_call_id": payload["tool_call_id"],
+        "action_request_id": payload.get("action_request_id"),
+        "status": payload["status"],
+        "output": {"context_window": window},
+        "error_code": payload.get("error_code"),
+    }
+    projected = {**message, "content": json.dumps(reference, ensure_ascii=False, separators=(",", ":"))}
+    return projected if estimate_tokens(projected) < estimate_tokens(message) else None
+
+
 def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple[Mapping[str, Any], ...]:
     """Return ``messages`` or a shorter projection whose estimate fits ``max_tokens``.
 
     The opening user message is kept when it fits beside the latest complete
     exchange. The window always starts at a turn or user-message boundary, so
     an assistant tool call is never separated from its results. If even the
-    latest turn is larger than the budget, the projection starts at that turn;
-    nothing inside the current exchange is dropped.
+    latest turn exceeds the budget, the projection may replace a large, saved
+    tool result with a reference retrievable using read_history(role='tool').
+    Tool calls and durable user input remain intact; a saved oversized user
+    message may appear as a page-readable preview in the model request.
     """
     if max_tokens < 1:
         raise ValueError("max_tokens must be positive")
@@ -67,10 +169,38 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
     if total <= max_tokens:
         return messages
     starts = _boundaries(messages)
-    if not starts:
-        return messages
-    pinned = (messages[0],) if messages[0].get("role") == "user" else ()
+    original = messages
+    # A long tool result in the *current* exchange can by itself make every
+    # subsequent provider request too large. Keep the tool-call/result pair
+    # and the real terminal status, but replace large result text or an
+    # addressable oversized user input in the model-request projection with
+    # a durable, page-readable reference.
+    # Neither the original transcript nor the action is touched or replayed.
     note = {"role": "system", "content": OMITTED_NOTE, "item_id": "context-window:omitted"}
+    latest = starts[-1] if starts else 0
+    latest_cost = sum(estimate_tokens(message) for message in messages[latest:])
+    if latest_cost + estimate_tokens(note) > max_tokens:
+        projected = list(messages)
+        for index in sorted(range(latest, len(projected)),
+                            key=lambda i: estimate_tokens(projected[i]), reverse=True):
+            replacement = _project_saved_tool_result(projected[index])
+            if replacement is None and index == latest:
+                replacement = _project_saved_user_input(projected[index], max_tokens)
+            if replacement is None:
+                continue
+            latest_cost += estimate_tokens(replacement) - estimate_tokens(projected[index])
+            projected[index] = replacement
+            if latest_cost + estimate_tokens(note) <= max_tokens:
+                break
+        messages = tuple(projected)
+    if not starts:
+        # In the first tool exchange there is no earlier turn to omit.
+        # The projected tool response already points to its source, so do not
+        # invent an "earlier messages omitted" system note.
+        if messages != original and sum(map(estimate_tokens, messages)) <= max_tokens:
+            return messages
+        return original
+    pinned = (messages[0],) if messages[0].get("role") == "user" else ()
     fixed = sum(estimate_tokens(message) for message in pinned) + estimate_tokens(note)
     suffix = [0] * (len(messages) + 1)
     for index in range(len(messages) - 1, -1, -1):

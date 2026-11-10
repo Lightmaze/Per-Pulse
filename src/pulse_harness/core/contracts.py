@@ -291,9 +291,14 @@ class ToolDescriptor:
     requires_approval: bool = False
     capability: str = ""
     source: str = "core"
-    # Irreversible tools may require a human decision even when their general
-    # capability has auto-apply enabled for checkpointed/undoable tools.
+    # Irreversible tools require approval even under generic auto-apply.
     auto_apply_supported: bool = True
+
+
+# Set in ToolCall.provider_metadata by a model adapter when the model's
+# arguments could not be read as one JSON object; the call's arguments are then
+# empty and the runner answers it as a failed call the model can correct.
+ARGUMENT_ERROR_KEY = "argument_error"
 
 
 @dataclass(frozen=True, slots=True)

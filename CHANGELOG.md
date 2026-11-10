@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.0a11
+
+- Keep oversized tool results readable during the same Work turn through saved, source-linked history pages; a later context eviction still points to the original result without replaying the tool action (#238).
+- Keep oversized saved user input readable in the same turn through a clearly partial preview and exact `read_history(role="user")` pages, without asking the user to repost it (#239).
+- Explain a background turn stopped by the weekly allowance, or one whose start could not be confirmed, with a next step (Activity, or send a message) instead of showing only its code.
+- Let the model correct a mistaken tool call. An unknown tool name or arguments that are not one JSON object no longer end the turn; like any failed call, the model is told why (and which tools are available) instead of receiving only an error code.
+- Attach full-size phone photos and screenshots (PNG/JPEG up to 32 MiB and 50 megapixels) instead of refusing anything over 1 MiB or 8 megapixels. The original is kept and downloadable; a model receives it unchanged when it fits 1 MiB and 2048 px, otherwise an upright scaled copy, and is told so. The Materials preview shows that same copy.
+- When a text-only model refuses a request that carries an image, send it once more without the image and tell the model why, instead of failing the turn with an unrelated hint about conversation length. Later images in the session are left out with the same note.
+
 ## 0.1.0a10
 
 - Open a previously cited experience directly from the persistent World journal without rescanning the full history, preserving original and shared-Work visibility rules.

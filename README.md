@@ -22,10 +22,10 @@ Kernel implementation.
 - Bring selected text Home with a link to its source message, or pass a
   selected result from one Work to another.
 - Attach text materials (Markdown, CSV, JSON or code, up to 1 MiB), PDFs
-  (up to 32 MiB, read as their text), or PNG/JPEG images (up to 1 MiB and
-  8,388,608 pixels). Preview them in Materials and send an exact source version.
-  Reading an image sends its original pixels to your configured model, which
-  must support image input. Replies can include headings, tables and code blocks.
+  (up to 32 MiB, read as their text), or PNG/JPEG images (up to 32 MiB and
+  50 megapixels). Preview them in Materials and send an exact source version.
+  Reading an image sends it to your configured model, which must support image
+  input; a large image is sent as a copy scaled to fit 2048 px and 1 MiB. Replies can include headings, tables and code blocks.
 - Read public HTTPS text pages with their source URL and reading time.
   Recall the saved observation later from the original page's history.
 - Let pages continue: background pulses within an hourly budget, or type
@@ -45,13 +45,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a10-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a10)
+[`per_pulse-0.1.0a11-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a11)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a10-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a11-py3-none-any.whl
 per-pulse --example
 ```
 

@@ -359,10 +359,11 @@ silently retry a write against a different World.
   response, not stored material metadata. This is current file content, not a historical artifact receipt.
 - `POST /api/workspace/files?name=notes.md` accepts raw bytes with
   `Content-Type: application/octet-stream`. Its streamed body is limited to
-  1 MiB (32 MiB for a `.pdf`), independent of Content-Length. A PDF must be
-  readable and not password-protected (`pdf_unreadable`, `pdf_encrypted`).
-  PNG/JPEG images must be still, valid and at most 8,388,608 pixels. Actual
-  bytes determine their MIME type; original bytes are retained without conversion.
+  1 MiB (32 MiB for a `.pdf`, `.png`, `.jpg` or `.jpeg`), independent of
+  Content-Length. A PDF must be readable and not password-protected
+  (`pdf_unreadable`, `pdf_encrypted`). PNG/JPEG images must be still, valid and
+  at most 50,000,000 pixels. Actual bytes determine their MIME type; original
+  bytes are retained without conversion.
   Image errors include `image_unreadable`, `image_animated` and
   `image_pixels_exceeded`. Success is `201` with `path`, original
   `name`, `bytes`, `sha256` and `source: "user_upload"`. Empty, unsupported binary,
@@ -422,7 +423,9 @@ limit, and the decoder's own metadata limits also apply.
   `downloadable` and `previewLimitBytes`. A changed or missing source is refused. The preview
   text preview limit is 64 KiB, independently of the original-file limit.
   An image returns the same `format`, `image` and `imageDataUrl` fields as the
-  workspace file view; its `previewLimitBytes` is 1 MiB (original image bytes).
+  workspace file view; its `previewLimitBytes` is 1 MiB. `imageDataUrl` is the
+  image a model receives: the original, or for a larger original a copy scaled
+  to fit 2048 px and 1 MiB, in which case `previewImage` gives its size.
 - `GET /api/pages/{id}/materials/{materialId}/download` requires the current
   World/instance headers, resolves the original page receipt and rechecks the
   complete file. It returns `application/octet-stream`, the receipt's source

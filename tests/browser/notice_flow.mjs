@@ -115,6 +115,15 @@ try {
   assert.equal(registered.source.event_id, original.id, 'Notice source is the actual saved triggering instruction');
   checks.push('chat records a native Notice and reads more than 24,000 source characters across actual tool continuations');
 
+  // Unlike the dedicated tiny-window paging regression, this browser journey
+  // keeps the original large reading exchange intact. Multiple later UI turns
+  // then make the registered Notice a genuine historical (omitted) source.
+  for (let index = 0; index < 4; index++) {
+    await send(owner, 'FILL_NOTICE_HISTORY_' + index + ': ' + 'Further context for the active Work. '.repeat(400),
+      'Ready for this local Work.');
+  }
+  checks.push('later complete Work turns move the original Notice registration out of the model context');
+
   await send(owner, 'CHECK_AFTER_WINDOW: Inspect the retained notice and its original registration.',
     'The notice survived context clipping; its original registration is readable.');
   const read = (await evidence()).last_read;

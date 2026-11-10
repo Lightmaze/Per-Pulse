@@ -122,6 +122,93 @@ def test_a_current_exchange_stays_whole_after_an_oversized_opening_is_omitted():
     assert tuple(fitted[-len(current):]) == tuple(current)
 
 
+
+def test_large_current_tool_result_is_addressable_without_replaying_the_action():
+    result = {**_result("current", 18_000), "message_id": "saved-tool-message-7",
+              "item_id": "tool-result:current", "transcript_seq": 7}
+    messages = [_user("Opening goal"), _answer("Previous answer"),
+                _user("Read and continue."), _call("current"), result]
+    original = tuple(dict(message) for message in messages)
+    fitted = fit_context(messages, 1_000)
+    assert sum(estimate_tokens(message) for message in fitted) <= 1_000
+    assert fitted[-3]["role"] == "user"
+    assert fitted[-2] == messages[-2]  # tool-call authority stays intact
+    note = json.loads(fitted[-1]["content"])
+    assert note["tool_call_id"] == "current"
+    assert note["status"] == "succeeded"
+    reference = note["output"]["context_window"]
+    assert reference["message_id"] == "saved-tool-message-7"
+    assert reference["original_chars"] == len(result["content"])
+    assert "read_history" in reference["next_step"]
+    assert "x" * 18_000 not in fitted[-1]["content"]
+    assert tuple(messages) == original  # saved original is unchanged
+
+
+
+def test_oversized_first_tool_exchange_still_keeps_the_first_user_goal():
+    result = {**_result("first", 20_000), "message_id": "saved-first-tool-5"}
+    messages = [_user("Investigate this file."), _call("first"), result]
+    fitted = fit_context(messages, 1_000)
+    assert sum(estimate_tokens(item) for item in fitted) <= 1_000
+    assert fitted[0] == messages[0]
+    assert fitted[1] == messages[1]
+    assert json.loads(fitted[2]["content"])["output"]["context_window"]["message_id"] == "saved-first-tool-5"
+    assert not any(item.get("content") == OMITTED_NOTE for item in fitted)
+    assert result == messages[-1]
+
+
+def test_unaddressable_current_tool_result_is_not_silently_discarded():
+    messages = [_user("Read"), _call("current"), _result("current", 18_000)]
+    fitted = fit_context(messages, 1_000)
+    assert fitted[-1] == messages[-1]  # no trusted message_id, no false pointer
+    assert sum(estimate_tokens(message) for message in fitted) > 1_000
+
+
+
+def test_projected_history_page_points_to_its_original_source_not_its_recall_receipt():
+    original_source = "original-saved-tool-result"
+    recalled = {
+        "tool_call_id": "read_history-call",
+        "status": "succeeded",
+        "output": {
+            "kind": "historical_reference",
+            "source": {"role": "tool", "message_id": original_source},
+            "offset": 512,
+            "next_offset": 1024,
+            "content": "多字节记录" * 3000,
+        },
+    }
+    messages = [_user("Read the next page."), _call("read_history-call"),
+                {"role": "tool", "message_id": "unreadable-recall-tool-receipt",
+                 "content": json.dumps(recalled, ensure_ascii=False)}]
+    fitted = fit_context(messages, 1200)
+    assert sum(estimate_tokens(message) for message in fitted) <= 1200
+    reference = json.loads(fitted[-1]["content"])["output"]["context_window"]
+    assert reference["state"] == "historical_page_available_from_original"
+    assert reference["message_id"] == original_source
+    assert reference["role"] == "tool"
+    assert reference["offset"] == 512 and reference["next_offset"] == 1024
+    assert "read_history" in reference["next_step"]
+    assert "unreadable-recall-tool-receipt" not in fitted[-1]["content"]
+    assert "多字节记录" not in fitted[-1]["content"]
+
+
+def test_oversized_history_search_never_gets_an_unreadable_recall_pointer():
+    search = {
+        "tool_call_id": "search-history-call",
+        "status": "succeeded",
+        "output": {
+            "kind": "historical_reference",
+            "matches": [{"source": {"role": "tool", "message_id": "old"}}] * 1200,
+        },
+    }
+    result = {"role": "tool", "message_id": "excluded-search-history-receipt",
+              "content": json.dumps(search)}
+    messages = [_user("Search old decisions."), _call("search-history-call"), result]
+    fitted = fit_context(messages, 1200)
+    assert fitted[-1] == result
+    assert sum(estimate_tokens(message) for message in fitted) > 1200
+
 def test_budget_must_be_positive():
     with pytest.raises(ValueError):
         fit_context([], 0)

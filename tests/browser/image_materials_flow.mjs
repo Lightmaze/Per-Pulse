@@ -57,6 +57,19 @@ print(json.dumps({"prefix": str(prefix), "version": distribution.version, "modul
 const examples = new Map(['PNG', 'JPEG'].map(format => [format, execFileSync(python, [...pythonArguments, '-c',
   'from PIL import Image; import sys; im=Image.new("RGB",(240,160),(25,100,225)); im.paste((235,50,60),(25,30,85,90)); im.save(sys.stdout.buffer,format=sys.argv[1])', format],
   { cwd: pythonCwd, env: pythonEnv })]));
+// A full-screen screenshot larger than one model image may carry: it is kept
+// as it is, and the model receives the service's deterministic scaled copy.
+const [largeScreenshot, largeModelCopy] = JSON.parse(execFileSync(python, [...pythonArguments, '-c', `
+import base64, json, os, sys
+from io import BytesIO
+from PIL import Image
+from pulse_harness.adapters.image_input import image_metadata, model_image
+image = Image.frombytes("RGB", (1600, 1000), os.urandom(1600 * 1000 * 3))
+output = BytesIO(); image.save(output, format="PNG"); data = output.getvalue()
+view = model_image(data, image_metadata(data))
+assert view.scaled and len(data) > 1024 * 1024
+print(json.dumps([base64.b64encode(data).decode(), base64.b64encode(view.data).decode()]))
+`], { cwd: pythonCwd, env: pythonEnv, maxBuffer: 64 * 1024 * 1024 }).toString()).map(value => Buffer.from(value, 'base64'));
 const requests = [];
 const seenPixels = [];
 const checks = [];
@@ -83,7 +96,8 @@ const model = createServer(async (request, response) => {
     if (visuals.length) {
       for (const image of visuals) {
         const bytes = Buffer.from(image.image_url.url.split(',')[1], 'base64');
-        assert.ok([...examples.values()].some(expected => bytes.equals(expected)), 'Provider receives the exact original image bytes');
+        assert.ok([...examples.values(), largeModelCopy].some(expected => bytes.equals(expected)),
+          'Provider receives the exact original, or the scaled copy of a large original');
         seenPixels.push(bytes);
       }
       return reply(response, { content: 'Original image bytes received. [Local HTTP fixture]' }, 'stop');
@@ -220,6 +234,85 @@ try {
   assert.ok(sentImage, 'Pasted image retains its source on the saved message');
   checks.push('Clipboard image paste: no auto-send, persisted draft after reload, original pixels and source on explicit Send');
 
+  // A screenshot over 1 MiB is attached, not refused. The model receives a
+  // scaled copy; the Materials preview says so and the original downloads.
+  const largeCount = seenPixels.length;
+  await page.locator('.composer textarea').fill('Please inspect this full-screen screenshot.');
+  const largeUpload = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/materials?'));
+  await page.evaluate(encoded => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const clipboard = new DataTransfer();
+    clipboard.items.add(new File([bytes], 'Full screen.png', { type: 'image/png' }));
+    document.querySelector('.composer textarea').dispatchEvent(new ClipboardEvent('paste', {
+      clipboardData: clipboard, bubbles: true, cancelable: true,
+    }));
+  }, largeScreenshot.toString('base64'));
+  const largeReceipt = await (await largeUpload).json();
+  assert.equal(largeReceipt.material.bytes, largeScreenshot.length);
+  await page.getByRole('button', { name: 'Inspect Full screen.png before sending' }).click();
+  await page.getByText('Shown as the 1,600 × 1,000 copy your model receives. Download the original for full detail.', { exact: true }).waitFor();
+  await shot('image-large-screenshot-preview');
+  const largeDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download original', exact: true }).click();
+  assert.ok((await readFile(await (await largeDownload).path())).equals(largeScreenshot));
+  await close();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => seenPixels.length === largeCount + 1 &&
+    (await view()).messages.at(-1)?.role === 'assistant', 'large screenshot reaches native model request');
+  assert.ok(seenPixels.at(-1).equals(largeModelCopy) && largeModelCopy.length <= 1024 * 1024);
+  const scaledNote = requests.at(-1).messages.flatMap(message => Array.isArray(message.content) ? message.content : [])
+    .find(part => part.type === 'text' && part.text.includes('copy scaled from the 1600x1000 original'));
+  assert.ok(scaledNote, 'The model is told it receives a scaled copy');
+  checks.push('Large screenshot paste: attached instead of refused, preview and model receive a scaled copy, original downloads');
+
+  // Dragging an image onto the Home composer uses the same durable draft
+  // upload as paste. Dragging a non-image does not attach it or navigate away.
+  await page.evaluate(() => {
+    const target = document.querySelector('.composer textarea');
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['hello'], 'notes.txt', { type: 'text/plain' }));
+    const event = new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true });
+    if (target.dispatchEvent(event)) throw new Error('File drop should not navigate away');
+  });
+  await page.locator('.composer-hint').getByText('Drop a PNG or JPEG image.', { exact: false }).waitFor();
+  assert.equal(await page.locator('.composer-materials li').count(), 0, 'Non-image drops do not change the draft');
+
+  const droppedBytes = examples.get('JPEG');
+  const beforeDrop = seenPixels.length;
+  await page.locator('.composer textarea').fill('Inspect the dropped photograph.');
+  await page.locator('.composer-hint').getByText('Paste or drop a PNG/JPEG', { exact: false }).waitFor();
+  const droppedUpload = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/materials?'));
+  await page.evaluate(encoded => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'Dropped photo.jpg', { type: 'image/jpeg' }));
+    const target = document.querySelector('.composer textarea');
+    const event = new DragEvent('dragover', { dataTransfer: transfer, bubbles: true, cancelable: true });
+    if (target.dispatchEvent(event)) throw new Error('Image dragover must be accepted');
+  }, droppedBytes.toString('base64'));
+  await page.locator('.composer.composer-drag-target').waitFor();
+  await page.locator('.composer-hint').getByText('Drop a PNG or JPEG to attach', { exact: false }).waitFor();
+  await page.evaluate(encoded => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'Dropped photo.jpg', { type: 'image/jpeg' }));
+    const target = document.querySelector('.composer textarea');
+    const event = new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true });
+    if (target.dispatchEvent(event)) throw new Error('Image drop must not navigate away');
+  }, droppedBytes.toString('base64'));
+  const droppedReceipt = await (await droppedUpload).json();
+  assert.equal(droppedReceipt.material.sha256, createHash('sha256').update(droppedBytes).digest('hex'));
+  await page.getByRole('button', { name: 'Inspect Dropped photo.jpg before sending' }).waitFor();
+  assert.equal(seenPixels.length, beforeDrop, 'Dropping an image cannot send a model turn');
+  await page.reload();
+  await page.getByRole('button', { name: 'Inspect Dropped photo.jpg before sending' }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Inspect the dropped photograph.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => seenPixels.length === beforeDrop + 1 &&
+    (await view()).messages.at(-1)?.role === 'assistant', 'dropped image reaches native model request');
+  assert.ok(seenPixels.at(-1).equals(droppedBytes));
+  checks.push('Home image drag/drop: visible target, non-image feedback, durable unsent draft, exact image bytes only on Send');
+
   // The same composer path works inside a Work. Its attachment must not
   // appear in Home merely because their files share the World workspace.
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
@@ -263,9 +356,9 @@ try {
   await picker.setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('broken image') });
   await page.getByRole('button', { name: 'Upload file', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'This image could not be read.' }).waitFor();
-  await picker.setInputFiles({ name: 'large.jpg', mimeType: 'image/jpeg', buffer: Buffer.alloc(1024 * 1024 + 1) });
+  await picker.setInputFiles({ name: 'large.jpg', mimeType: 'image/jpeg', buffer: Buffer.alloc(32 * 1024 * 1024 + 1) });
   await page.getByRole('button', { name: 'Upload file', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: 'at most 1 MiB' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'PNG/JPEG image or PDF of at most 32 MiB' }).waitFor();
   await close();
   checks.push('Broken and oversized images show actionable errors without adding a source');
 

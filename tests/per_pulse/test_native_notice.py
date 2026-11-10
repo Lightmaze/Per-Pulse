@@ -341,10 +341,29 @@ def test_small_window_keeps_meaningful_multibyte_excerpt(tmp_path, monkeypatch):
                      if message["role"] == "system" and message["content"] == native_notice.HOST_CONTEXT
                      or message["role"] == "assistant" and native_notice.KIND in (message.get("content") or "")]
         assert sum(estimate_tokens(message) for message in auxiliary) <= 512
-        read = fixture.call(client, "home", op="read", id=note["id"], max_chars=64)["output"]
+        def durable_output(result):
+            output = result["output"]
+            if "context_window" not in output:
+                return output
+            # With a 1024-token budget, the full notice tool response can
+            # exceed this model request. The model sees a page reference; the
+            # original multilingual bytes must remain in the single Kernel
+            # transcript and be addressable from this exact session.
+            pointer = output["context_window"]
+            assert pointer["state"] == "saved_result_available_by_page"
+            assert "read_history" in pointer["next_step"]
+            session = HarnessScope.from_dict(note["source"]["scope"]).session_scope()
+            saved = client.app.state.pages.runtime.kernel_service.store.read_transcript_message(
+                session, pointer["message_id"], role="tool")
+            assert saved is not None
+            assert len(saved["content"]) == pointer["original_chars"]
+            assert json.loads(saved["content"])["status"] == "succeeded"
+            return json.loads(saved["content"])["output"]
+
+        read = durable_output(fixture.call(client, "home", op="read", id=note["id"], max_chars=64))
         assert read["notice"]["content"] == content
         assert read["source_passage"]["next_offset"] == 64
-        tail = fixture.call(client, "home", op="read", id=note["id"], offset=64, max_chars=100)["output"]
+        tail = durable_output(fixture.call(client, "home", op="read", id=note["id"], offset=64, max_chars=100))
         assert tail["source_passage"]["offset"] == 64
 
 

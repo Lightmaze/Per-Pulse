@@ -6,8 +6,9 @@
   reporting are required. Provider compatibility and output quality depend on
   the model and service; no model is bundled.
 - PDF reading and search cover extracted text. Scanned or image-only PDF pages
-  need OCR elsewhere. Still PNG/JPEG images up to 1 MiB and 8,388,608 pixels can
-  be sent to a configured model that accepts image input.
+  need OCR elsewhere. Still PNG/JPEG images up to 32 MiB and 50 megapixels can
+  be sent to a configured model that accepts image input; a model receives a
+  copy scaled to fit 2048 px and 1 MiB when the original is larger.
 - Long conversations retain all saved history, while each model request carries
   a bounded selection. Earlier messages and tool results can be read from history.
 - Background turns have admission limits. Reported token totals can be incomplete

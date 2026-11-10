@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 from uuid import uuid4
 
 from pulse_harness.adapters.resources import workspace_write_resource
-from pulse_harness.adapters.image_input import MAX_IMAGE_BYTES, is_image_path
+from pulse_harness.adapters.image_input import MODEL_IMAGE_BYTES, is_image_path
 from pulse_harness.core.errors import HarnessError
 from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES, WorkspaceFiles, upload_limit
 from .artifacts import ArtifactError, clip_text
@@ -33,12 +33,12 @@ class MaterialError(Exception):
         self.code, self.message, self.status = code, message, status
 
 
-TOO_LARGE = "Choose text or a PNG/JPEG image of at most 1 MiB, or a PDF of at most 32 MiB."
+TOO_LARGE = "Choose text of at most 1 MiB, or a PNG/JPEG image or PDF of at most 32 MiB."
 UPLOAD_PROBLEMS = {
     "image_unreadable": "This image could not be read. Choose a valid PNG or JPEG.",
-    "image_pixels_exceeded": "Choose an image of at most 8 megapixels (8,388,608 pixels).",
+    "image_pixels_exceeded": "Choose an image of at most 50 megapixels.",
     "image_animated": "Choose a still PNG or JPEG image.",
-    "image_too_large": "Choose a PNG or JPEG of at most 1 MiB.",
+    "image_too_large": "Choose a PNG or JPEG of at most 32 MiB.",
     "text_files_only": "Choose a UTF-8 text file, such as Markdown, plain text or CSV, a PDF, or a PNG/JPEG image.",
     "pdf_unreadable": "This PDF could not be read. Try saving it as a PDF again.",
     "pdf_encrypted": "This PDF is password-protected. Remove the password and try again.",
@@ -245,9 +245,10 @@ class PageMaterials:
             # The user's own uploaded source: shown as it is, bounded in length.
             content, truncated = clip_text(current["content"], MAX_PREVIEW_BYTES)
             return {"material": record, "content": content, "redacted": False,
-                    "truncated": truncated, "previewLimitBytes": (MAX_IMAGE_BYTES if current.get("format") == "image" else MAX_PREVIEW_BYTES),
+                    "truncated": truncated, "previewLimitBytes": (MODEL_IMAGE_BYTES if current.get("format") == "image" else MAX_PREVIEW_BYTES),
                     "downloadable": True,
-                    **{key: current[key] for key in ("format", "complete", "image", "imageDataUrl") if key in current}}
+                    **{key: current[key] for key in ("format", "complete", "image", "previewImage", "imageDataUrl")
+                       if key in current}}
 
     def download(self, page_id, material_id):
         """Read one complete receipt-bound source, preserving its original bytes."""
