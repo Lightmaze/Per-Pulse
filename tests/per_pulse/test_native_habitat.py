@@ -489,3 +489,144 @@ def test_later_work_discovers_existing_regions_without_knowing_their_names(tmp_p
         assert result["output"]["current"] == "A persistent observation.\n"
         assert result["output"]["lastVerifiedWrite"]["source"]["contextId"].startswith("work:")
 
+
+
+@pytest.mark.parametrize("values", [
+    {"op": "find"},
+    {"op": "find", "query": " "},
+    {"op": "find", "query": "x", "file": "notes.txt"},
+    {"op": "find", "query": "notes", "after": "../outside.txt"},
+    {"op": "find", "query": "notes", "region": "garden", "after": "other/notes.txt"},
+])
+def test_habitat_find_requires_bounded_query_and_owned_cursor(values):
+    with pytest.raises(ValueError):
+        validate(OBSERVE, values)
+
+
+def test_later_work_finds_attributed_text_beyond_first_habitat_page(tmp_path, monkeypatch):
+    """Search old regional material without knowing its region or file first.
+
+    The model's HTTP tool choices are synthetic; both actual Work writes,
+    original Kernel approvals, durable World and restart are real.
+    """
+    fixture = WorkFixture(monkeypatch.setenv)
+    settings = PulseSettings(
+        enabled=True, spontaneous_rate=0,
+        adaptive_connections=False, spectrum_enabled=False,
+    )
+
+    def open_client():
+        return client_for(
+            tmp_path, model_factory=fixture.factory,
+            allow_workspace_actions=True, auto_apply_edits=True,
+            posture=False, pulse=settings,
+        )
+
+    def approved_write(client, op, content):
+        fixture.plan = [(WRITE, {
+            "op": op, "region": "garden", "file": "journey.txt", "content": content,
+        })]
+        page = new_page(client, "Habitat " + op, "Record a regional experience.")["page"]["id"]
+        execution = PageExecution(client.app.state.pages.runtime)
+        pending = _wait(execution, page, lambda view: bool(
+            view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action = pending["pendingActions"][0]
+        assert action["toolName"] == WRITE
+        receipt = execution.resolve_approval(page, action["actionId"], "allow_once")
+        assert receipt["continuationError"] is None, receipt
+        wait_for(client, page, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        assert fixture.outcomes[0]["status"] == "succeeded"
+        return action["actionId"]
+
+    with open_client() as client:
+        approved_write(client, "write", "a" * 48_000)
+        last_action = approved_write(client, "append", "b" * 20_000 + "migration outcome: succeeded\n")
+        target = client.app.state.pages.runtime.habitat.root / "regions/garden/journey.txt"
+        assert target.stat().st_size > 64_000
+        full_sha = hashlib.sha256(target.read_bytes()).hexdigest()
+
+    with open_client() as client:
+        fixture.plan = [(OBSERVE, {"op": "find", "query": "MIGRATION OUTCOME"})]
+        later = new_page(
+            client, "Unfamiliar regional search",
+            "Find the earlier migration outcome without its file name.",
+        )["page"]["id"]
+        wait_for(client, later, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        found = fixture.outcomes[0]
+        assert found["status"] == "succeeded", found
+        output = found["output"]
+        assert output["searchIncomplete"] is False
+        assert output["nextCursor"] is None
+        assert output["scannedFiles"] == 1
+        assert len(output["matches"]) == 1
+        match = output["matches"][0]
+        assert match["path"] == "regions/garden/journey.txt"
+        assert match["readOffset"] == 68_000
+        assert "migration outcome: succeeded" in match["excerpt"]
+        assert match["fullCurrentSha256"] == full_sha
+        assert match["lastVerifiedWrite"]["source"]["kernelActionId"] == last_action
+        assert match["lastVerifiedWrite"]["source"]["contextId"].startswith("work:")
+
+        # The real original read tool can expand the matching text by its
+        # provided offset and pinned version, without a separate search store.
+        fixture.plan = [(OBSERVE, {
+            "op": "read", "region": "garden", "file": "journey.txt",
+            "offset": match["readOffset"],
+            "expectedSha256": match["fullCurrentSha256"],
+        })]
+        response = client.post(f"/api/pages/{later}/messages", json={
+            "content": "Read the attributed passage and continue from it.",
+        })
+        assert response.status_code == 202, response.text
+        wait_for(client, later, lambda view: len([
+            m for m in view["messages"]
+            if m["role"] == "assistant" and m["status"] == "settled"
+        ]) >= 2)
+        assert fixture.outcomes[0]["output"]["current"].startswith(
+            "migration outcome: succeeded\n")
+
+
+def test_habitat_find_cursor_and_incomplete_search_are_explicit(tmp_path, monkeypatch):
+    """More files than one bounded search never silently yield 'no results'."""
+    fixture = WorkFixture(monkeypatch.setenv)
+    fixture.plan = [(OBSERVE, {"op": "find", "query": "later target"})]
+    with client_for(
+        tmp_path, model_factory=fixture.factory, allow_workspace_actions=True,
+        posture=False, pulse=PulseSettings(enabled=True, spontaneous_rate=0,
+            adaptive_connections=False, spectrum_enabled=False),
+    ) as client:
+        root = client.app.state.pages.runtime.habitat.root / "regions/garden"
+        root.mkdir(parents=True, exist_ok=True)
+        for index in range(25):
+            (root / f"notes{index:02d}.txt").write_text(
+                "later target\n" if index == 24 else "unrelated\n")
+        page = new_page(client, "Search first pass", "Find previous related notes.")["page"]["id"]
+        wait_for(client, page, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        first = fixture.outcomes[0]["output"]
+        assert first["matches"] == []
+        assert first["scannedFiles"] == 24
+        assert first["nextCursor"] == "garden/notes23.txt"
+        assert first["searchIncomplete"] is True
+
+        fixture.plan = [(OBSERVE, {"op": "find", "query": "later target",
+                                  "after": first["nextCursor"]})]
+        response = client.post(f"/api/pages/{page}/messages", json={
+            "content": "Continue the same bounded regional search.",
+        })
+        assert response.status_code == 202, response.text
+        wait_for(client, page, lambda view: len([
+            m for m in view["messages"]
+            if m["role"] == "assistant" and m["status"] == "settled"
+        ]) >= 2)
+        second = fixture.outcomes[0]["output"]
+        assert second["searchIncomplete"] is False
+        assert second["nextCursor"] is None
+        assert second["matches"][0]["file"] == "notes24.txt"
+        # These setup files were external, not original Kernel writes.
+        assert second["matches"][0]["lastVerifiedWrite"] is None
