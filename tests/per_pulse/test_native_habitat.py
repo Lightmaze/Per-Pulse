@@ -30,85 +30,91 @@ def test_region_cannot_escape_its_world_directory(name, values):
         validate(name, values)
 
 
-def test_two_distinct_works_revisit_one_persistent_region(tmp_path, monkeypatch):
+@pytest.mark.parametrize("auto_apply_edits", [False, True])
+def test_two_distinct_works_revisit_one_persistent_region(tmp_path, monkeypatch, auto_apply_edits):
+    """Both ordinary and auto-apply profiles retain the actual approval boundary.
+
+    The action decisions are synthetic HTTP responses; permissions, physical
+    files, World/Kernel state and reopened SQLite are real.
+    """
     fixture = WorkFixture(monkeypatch.setenv)
-    # A failed tool action is intentionally sanitized by TurnRunner. Preserve
-    # its exact local exception class for fixture regression diagnostics only.
-    from pulse_system.service.native_habitat import NativeHabitat
-    failures = []
-    original_execute = NativeHabitat.execute
-
-    def explain_failure(self, *args, **kwargs):
-        try:
-            return original_execute(self, *args, **kwargs)
-        except Exception as exc:
-            failures.append(f"{type(exc).__name__}: {exc}")
-            raise
-
-    monkeypatch.setattr(NativeHabitat, "execute", explain_failure)
     settings = PulseSettings(
         enabled=True, spontaneous_rate=0, check_interval_seconds=0.01,
         adaptive_connections=False, spectrum_enabled=False,
     )
 
-    def open_service():
-        return PageService(
+    def open_client():
+        return client_for(
             tmp_path, model_factory=fixture.factory,
-            allow_workspace_actions=True, auto_apply_edits=True,
+            allow_workspace_actions=True, auto_apply_edits=auto_apply_edits,
             posture=False, pulse=settings,
         )
 
-    pages = open_service()
-    a = b = None
-    try:
-        first = pages.create_page("Visit a place", "Make one real local observation.")
-        second = pages.create_page("Return to the place", "Read what is already there.")
-        a, b = first["page"]["id"], second["page"]["id"]
+    def approve_once(client, page_id, target):
+        execution = PageExecution(client.app.state.pages.runtime)
+        waiting = _wait(execution, page_id, lambda view:
+            bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action = waiting["pendingActions"][0]
+        assert action["toolName"] == WRITE
+        assert not target.exists() or target.read_text() == "An actual first observation.\n"
+        receipt = execution.resolve_approval(page_id, action["actionId"], "allow_once")
+        assert receipt["continuationError"] is None, receipt
+        wait_for(client, page_id, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        return action["actionId"]
+
+    with open_client() as client:
+        pages = client.app.state.pages
+        target = pages.runtime.habitat.root / "regions/garden/notes.txt"
         fixture.plan = [(WRITE, {
             "op": "write", "region": "garden", "file": "notes.txt",
             "content": "An actual first observation.\n",
         })]
-        run_event(pages.runtime, pages.runtime.causal_ledger.get_event(first["initialMessageId"]))
+        a = new_page(client, "Visit a place", "Make one real local observation.")["page"]["id"]
+        action_a = approve_once(client, a, target)
         result = fixture.outcomes[0]
-        assert result["status"] == "succeeded", (result, failures)
+        assert result["status"] == "succeeded", result
         receipt = result["output"]["effectReceipt"]
         assert receipt["terminal_state"] == "committed"
         assert receipt["before_digest"] is None
         assert receipt["after_digest"] == hashlib.sha256(b"An actual first observation.\n").hexdigest()
-        assert receipt["correlation_id"]
-        assert (pages.runtime.habitat.root / "regions/garden/notes.txt").read_text() == "An actual first observation.\n"
+        assert receipt["correlation_id"] == action_a
+        assert target.read_text() == "An actual first observation.\n"
 
         fixture.plan = [(OBSERVE, {"op": "read", "region": "garden", "file": "notes.txt"})]
-        run_event(pages.runtime, pages.runtime.causal_ledger.get_event(second["initialMessageId"]))
+        b = new_page(client, "Return to the place", "Read what is already there.")["page"]["id"]
+        wait_for(client, b, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
         assert fixture.outcomes[0]["status"] == "succeeded"
         assert fixture.outcomes[0]["output"]["current"] == "An actual first observation.\n"
         assert fixture.outcomes[0]["output"]["lastVerifiedWrite"]["effectReceipt"] == receipt
         assert fixture.outcomes[0]["output"]["lastVerifiedWrite"]["source"]["contextId"].startswith("work:")
-        assert fixture.outcomes[0]["output"]["lastVerifiedWrite"]["source"]["kernelActionId"] == receipt["correlation_id"]
-        assert fixture.outcomes[0]["output"]["source"]["contextId"].startswith("work:")
+        assert fixture.outcomes[0]["output"]["lastVerifiedWrite"]["source"]["kernelActionId"] == action_a
         assert len(pages.runtime.storage.list_engrams()) == 1
-    finally:
-        pages.runtime.close()
 
-    # A different local Work continues the same place after SQLite restart.
-    resumed = open_service()
-    try:
+    with open_client() as client:
+        pages = client.app.state.pages
+        target = pages.runtime.habitat.root / "regions/garden/notes.txt"
         fixture.plan = [(WRITE, {
             "op": "append", "region": "garden", "file": "notes.txt",
             "content": "A second observation.\n",
         })]
-        instruction = resumed.send(b, "Continue the shared regional observation.")
-        run_event(resumed.runtime, resumed.runtime.causal_ledger.get_event(instruction["messageId"]))
+        response = client.post(f"/api/pages/{b}/messages", json={
+            "content": "Continue the shared regional observation."})
+        assert response.status_code == 202, response.text
+        action_b = approve_once(client, b, target)
         answer = fixture.outcomes[0]
         assert answer["status"] == "succeeded", answer
         after = "An actual first observation.\nA second observation.\n"
-        assert (resumed.runtime.habitat.root / "regions/garden/notes.txt").read_text() == after
+        assert target.read_text() == after
+        assert answer["output"]["effectReceipt"]["correlation_id"] == action_b
         assert answer["output"]["effectReceipt"]["before_digest"] == receipt["after_digest"]
         assert answer["output"]["effectReceipt"]["after_digest"] == hashlib.sha256(after.encode()).hexdigest()
         assert answer["output"]["writerIndex"] == "recorded"
-        assert len(resumed.runtime.storage.list_engrams()) == 1
-    finally:
-        resumed.runtime.close()
+        assert len(pages.runtime.storage.list_engrams()) == 1
+
 
 def test_read_only_workspace_never_advertises_habitat_mutation(tmp_path):
     pages = PageService(tmp_path, model_factory=None, posture=False,
@@ -140,7 +146,8 @@ def test_read_only_workspace_never_advertises_habitat_mutation(tmp_path):
 
 
 @pytest.mark.parametrize("decision", ["deny", "allow_once"])
-def test_habitat_write_waits_for_real_native_approval(tmp_path, monkeypatch, decision):
+@pytest.mark.parametrize("auto_apply_edits", [False, True])
+def test_habitat_write_waits_for_real_native_approval(tmp_path, monkeypatch, decision, auto_apply_edits):
     """A model tool call cannot write before the user's decision is recorded.
 
     Only the HTTP model decision is synthetic. The page, original Kernel action,
@@ -152,7 +159,7 @@ def test_habitat_write_waits_for_real_native_approval(tmp_path, monkeypatch, dec
         "content": "Only if the owner allows once.\\n",
     })]
     with client_for(tmp_path, model_factory=fixture.factory,
-                    allow_workspace_actions=True, auto_apply_edits=False,
+                    allow_workspace_actions=True, auto_apply_edits=auto_apply_edits,
                     posture=False, pulse=PulseSettings(
                         enabled=True, spontaneous_rate=0,
                         adaptive_connections=False, spectrum_enabled=False)) as client:
