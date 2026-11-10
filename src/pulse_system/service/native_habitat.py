@@ -58,10 +58,11 @@ def descriptors() -> tuple[ToolDescriptor, ToolDescriptor]:
             "The first write creates the region. The exact original Kernel action "
             "and the physical before/after digests remain in the Habitat effect "
             "journal. This is a workspace mutation: it requires the existing "
-            "approval, or the owner's enabled auto-apply policy; Habitat effects lack automatic Undo. "
+            "explicit Allow once approval because Habitat effects do not yet support Undo. "
             "Do not replay an uncertain effect.",
             mutable=True, requires_approval=True,
             capability="workspace.write", source="pulse.native-habitat",
+            auto_apply_supported=False,
         ),
     )
 
