@@ -113,8 +113,10 @@ try {
     { exact: true },
   ).waitFor();
   await page.getByRole('heading', { name: 'Pages needing attention', exact: true }).waitFor();
-  assert.equal(await page.locator('.home-continuation-open').count(), 0,
-    'unverified Pulse results must stay hidden while only the Work list is fresh');
+  assert.equal(await page.locator('#home-local-results .home-continuation-open').count(), 0,
+    'unverified Pulse result links must stay hidden while only the Work list is fresh');
+  assert.equal(await page.locator('.home-continuation-source').count(), 0,
+    'unverified Pulse source links must also stay hidden');
   await page.getByRole('button', { name: 'Open Continuing observation', exact: true }).click();
   await wait(() => new URL(page.url()).pathname === '/page/' + work,
     'current Work opens during independent Pulse observation failure');
