@@ -170,17 +170,26 @@ class NativeHabitat:
                     # effect because only the attribution index failed.
                     answer["writerIndex"] = "unavailable_after_commit"
             elif call.name == OBSERVE and values["op"] == "read":
-                # The observation may be bounded; this hashes exactly what
-                # was observed, not an unverified full historical file version.
+                # A 64k preview cannot validate an earlier 96k write.
+                # Verify the current *full bytes* through the World-owned
+                # adapter, and require the bounded preview to agree with this
+                # fresh snapshot before naming the original writer.
                 observed_digest = hashlib.sha256(
                     response.detail.encode("utf-8")).hexdigest()
                 answer["observedTextSha256"] = observed_digest
+                try:
+                    current_preview, current_digest = runtime.habitat.text_snapshot(location)
+                except (OSError, ValueError):
+                    current_preview, current_digest = None, None
+                matching_preview = current_preview == response.detail
+                answer["fullCurrentSha256"] = current_digest if matching_preview else None
                 record = runtime.storage.load_component_state(
                     self._index_key(runtime.world_id, location))
-                if (isinstance(record, dict)
+                if (matching_preview and current_digest is not None
+                        and isinstance(record, dict)
                         and record.get("worldId") == runtime.world_id
                         and record.get("path") == location
-                        and record.get("afterDigest") == observed_digest
+                        and record.get("afterDigest") == current_digest
                         and isinstance(record.get("source"), dict)
                         and isinstance(record.get("effectReceipt"), dict)):
                     answer["lastVerifiedWrite"] = {
