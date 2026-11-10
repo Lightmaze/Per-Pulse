@@ -291,6 +291,9 @@ class ToolDescriptor:
     requires_approval: bool = False
     capability: str = ""
     source: str = "core"
+    # Irreversible tools may require a human decision even when their general
+    # capability has auto-apply enabled for checkpointed/undoable tools.
+    auto_apply_supported: bool = True
 
 
 @dataclass(frozen=True, slots=True)
