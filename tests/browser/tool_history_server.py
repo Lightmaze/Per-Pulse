@@ -141,7 +141,7 @@ class ToolHistoryFixture:
         if "RECALL_TOOL_HISTORY" in task:
             if not results:
                 assert OMITTED_NOTE in [message.get("content") for message in messages], "native window really clipped history"
-                assert all(OLD not in message.get("content", "") for message in messages), "old marker is unavailable before recall"
+                assert all(OLD not in (message.get("content") or "") for message in messages), "old marker is unavailable before recall"
                 assert all(name != "read_file" for _message, name in tool_messages), "the original read_file exchange left the actual request"
                 assert self.original_row() == self.saved["original_row"], "clipping preserves the saved original row"
                 assert NEW in (self.directory / "workspace" / FILENAME).read_text(), "physical file already changed"
