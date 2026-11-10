@@ -89,6 +89,10 @@ const approve = async id => {
   assert.equal(action.toolName, 'habitat_write');
   await allow.click();
   await wait(async () => (await view(id)).execution.status === 'idle', 'original Work completes');
+  // The turn can become idle just before the final assistant message settles.
+  // Capture a stable history only after the real returned answer is visible.
+  await wait(async () => (await view(id)).messages.some(x =>
+    x.role === 'assistant' && x.status === 'settled'), 'approved Work answer settles');
   return action.actionId;
 };
 const send = async text => {
