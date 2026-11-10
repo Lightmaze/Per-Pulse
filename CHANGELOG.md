@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a12
+
+- Visit a shared native Habitat region from Home or separate Works. A Work can write a file with the original Kernel action's one-time approval; a later Work can read and append to that same physical file, and Home can revisit it after restart, with verified writer provenance (#181).
+- Continue a Habitat text file beyond its initial 64,000-character observation through pinned `nextOffset`/`expectedSha256` reads. Stop if the file changes instead of joining pages from different versions (#242).
+- When only Pulse's Home observation fails, keep review of currently verified Works available rather than telling the person to refresh before taking any action; unverified background results stay unavailable (#241).
+- Habitat region edits currently require explicit Allow once and have no Undo; normal Workspace file edits keep their existing auto-apply and Undo behavior.
+
 ## 0.1.0a11
 
 - Keep oversized tool results readable during the same Work turn through saved, source-linked history pages; a later context eviction still points to the original result without replaying the tool action (#238).
