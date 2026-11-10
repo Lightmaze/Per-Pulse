@@ -203,7 +203,7 @@ class NativeHabitat:
         candidates.sort(key=lambda item: item[0])
         after = values.get("after", "")
         candidates = [(key, path) for key, path in candidates if key > after]
-        query = values["query"].casefold()
+        pattern = re.compile(re.escape(values["query"]), flags=re.IGNORECASE)
         matches, unread_tails, skipped = [], [], []
         scanned, last_key = 0, None
         for key, path in candidates:
@@ -235,8 +235,9 @@ class NativeHabitat:
                 # successful negative search results.
                 skipped.append(key)
                 continue
-            content_index = text.casefold().find(query)
-            name_match = query in path.name.casefold()
+            found = pattern.search(text)
+            content_index = found.start() if found is not None else -1
+            name_match = pattern.search(path.name) is not None
             if content_index < 0 and not name_match:
                 continue
             record = runtime.storage.load_component_state(
