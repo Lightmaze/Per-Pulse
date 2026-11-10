@@ -121,7 +121,8 @@ try {
   await page.unroute('**/api/bootstrap', attentionProjection);
   await page.goto(base);
   await page.locator('.home-continuation-open').waitFor();
-  assert.equal(await page.getByRole('heading', { name: 'Pages needing attention' }).count(), 0);
+  await wait(async () => await page.getByRole('heading', { name: 'Pages needing attention' }).count() === 0,
+    'native fresh Work list replaces the temporary review projection');
   checks.push('A Pulse-only outage keeps current Work review navigable without exposing unverified background results.');
 
   if (screenshots) await page.screenshot({ path: join(screenshots, 'background-result-home.png') });
