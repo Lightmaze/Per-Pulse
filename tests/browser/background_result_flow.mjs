@@ -92,6 +92,41 @@ try {
   await page.locator('.home-continuation-open').waitFor();
   assert.equal(await page.getByRole('heading', { name: 'Recent updates unavailable' }).count(), 0);
   checks.push('A failed native Home observation shows read-only last-known work and recovers with explicit refresh, without a model request.');
+
+  // Presentation-only status fixture: a fresh World/Work list can say that a
+  // page needs review even if the independent Pulse observation is down.
+  // Opening the page does not approve an action or synthesize a Kernel effect.
+  const attentionProjection = async route => {
+    const upstream = await route.fetch();
+    const bootstrap = await upstream.json();
+    bootstrap.pages = bootstrap.pages.map(entry => entry.id === work
+      ? { ...entry, status: 'needs_attention' } : entry);
+    await route.fulfill({ response: upstream, json: bootstrap });
+  };
+  await page.route('**/api/bootstrap', attentionProjection);
+  await page.route('**/api/pulse/observation', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: '{"error":"synthetic Pulse-only outage"}',
+  }), { times: 1 });
+  await page.goto(base);
+  await page.getByText(
+    'Background results could not be checked. Pages needing your decision below come from the current Work list and can still be opened.',
+    { exact: true },
+  ).waitFor();
+  await page.getByRole('heading', { name: 'Pages needing attention', exact: true }).waitFor();
+  assert.equal(await page.locator('#home-local-results .home-continuation-open').count(), 0,
+    'unverified Pulse result links must stay hidden while only the Work list is fresh');
+  assert.equal(await page.locator('.home-continuation-source').count(), 0,
+    'unverified Pulse source links must also stay hidden');
+  await page.getByRole('button', { name: 'Open Continuing observation', exact: true }).click();
+  await wait(() => new URL(page.url()).pathname === '/page/' + work,
+    'current Work opens during independent Pulse observation failure');
+  await page.unroute('**/api/bootstrap', attentionProjection);
+  await page.goto(base);
+  await page.locator('.home-continuation-open').waitFor();
+  await wait(async () => await page.getByRole('heading', { name: 'Pages needing attention' }).count() === 0,
+    'native fresh Work list replaces the temporary review projection');
+  checks.push('A Pulse-only outage keeps current Work review navigable without exposing unverified background results.');
+
   if (screenshots) await page.screenshot({ path: join(screenshots, 'background-result-home.png') });
   await page.locator('.home-continuation-source').click();
   await wait(() => new URL(page.url()).hash === '#message-' + activation.sourceEventId, 'exact original source');
