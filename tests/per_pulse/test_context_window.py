@@ -164,6 +164,51 @@ def test_unaddressable_current_tool_result_is_not_silently_discarded():
     assert sum(estimate_tokens(message) for message in fitted) > 1_000
 
 
+
+def test_projected_history_page_points_to_its_original_source_not_its_recall_receipt():
+    original_source = "original-saved-tool-result"
+    recalled = {
+        "tool_call_id": "read_history-call",
+        "status": "succeeded",
+        "output": {
+            "kind": "historical_reference",
+            "source": {"role": "tool", "message_id": original_source},
+            "offset": 512,
+            "next_offset": 1024,
+            "content": "多字节记录" * 3000,
+        },
+    }
+    messages = [_user("Read the next page."), _call("read_history-call"),
+                {"role": "tool", "message_id": "unreadable-recall-tool-receipt",
+                 "content": json.dumps(recalled, ensure_ascii=False)}]
+    fitted = fit_context(messages, 1200)
+    assert sum(estimate_tokens(message) for message in fitted) <= 1200
+    reference = json.loads(fitted[-1]["content"])["output"]["context_window"]
+    assert reference["state"] == "historical_page_available_from_original"
+    assert reference["message_id"] == original_source
+    assert reference["role"] == "tool"
+    assert reference["offset"] == 512 and reference["next_offset"] == 1024
+    assert "read_history" in reference["next_step"]
+    assert "unreadable-recall-tool-receipt" not in fitted[-1]["content"]
+    assert "多字节记录" not in fitted[-1]["content"]
+
+
+def test_oversized_history_search_never_gets_an_unreadable_recall_pointer():
+    search = {
+        "tool_call_id": "search-history-call",
+        "status": "succeeded",
+        "output": {
+            "kind": "historical_reference",
+            "matches": [{"source": {"role": "tool", "message_id": "old"}}] * 1200,
+        },
+    }
+    result = {"role": "tool", "message_id": "excluded-search-history-receipt",
+              "content": json.dumps(search)}
+    messages = [_user("Search old decisions."), _call("search-history-call"), result]
+    fitted = fit_context(messages, 1200)
+    assert fitted[-1] == result
+    assert sum(estimate_tokens(message) for message in fitted) > 1200
+
 def test_budget_must_be_positive():
     with pytest.raises(ValueError):
         fit_context([], 0)
