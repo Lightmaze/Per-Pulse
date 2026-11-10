@@ -134,17 +134,17 @@ class ToolHistoryFixture:
             return streamed("Read the file and kept the original tool receipt." + LABEL)
 
         if "HISTORY_WINDOW_FILLER" in task:
-            leaked = [
-                {"index": index, "role": message["role"],
-                 "context": (message.get("content") or "")[
-                     max(0, (message.get("content") or "").find(OLD) - 120):
-                     (message.get("content") or "").find(OLD) + len(OLD) + 120],
-                 "has_tool_calls": bool(message.get("tool_calls"))}
-                for index, message in enumerate(messages)
-                if message["role"] in {"user", "assistant"}
-                and OLD in (message.get("content") or "")
-            ]
-            assert not leaked, f"no discussion summary may leak the old marker: {leaked}"
+            # Before the first historical recall, raw tool bytes must never
+            # appear in authored discussion. Once a user explicitly recalls
+            # them, the *assistant's legitimate answer* contains the marker
+            # until enough later turns evict it from the active window.
+            # Verify actual eviction at RECALL_TOOL_HISTORY below, rather
+            # than requiring it prematurely on each filler message.
+            if "last_source" not in self.saved:
+                assert all(OLD not in (message.get("content") or "") for message in messages
+                           if message["role"] in {"user", "assistant"}), (
+                    "raw tool bytes appeared in discussion before any authorized history recall"
+                )
             return streamed("Continuation received. " + "Keep the current discussion readable. " * 160 + LABEL)
 
         if "RECALL_TOOL_HISTORY" in task:
