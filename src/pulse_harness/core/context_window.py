@@ -71,18 +71,49 @@ def _project_saved_tool_result(message: Mapping[str, Any]) -> Mapping[str, Any] 
         return None
     if not isinstance(payload, dict) or not isinstance(payload.get("tool_call_id"), str) or not isinstance(payload.get("status"), str):
         return None
+    output = payload.get("output")
+    if isinstance(output, dict) and output.get("kind") == "historical_reference":
+        # read_history results are copies, intentionally excluded from history
+        # lookup. Point to the original authorized source instead of creating
+        # an unreadable pointer to this recall-tool receipt.
+        source = output.get("source")
+        offset = output.get("offset")
+        if (not isinstance(source, dict)
+                or source.get("role") not in {"user", "assistant", "tool"}
+                or not isinstance(source.get("message_id"), str)
+                or not source["message_id"]
+                or type(offset) is not int or offset < 0):
+            # search_history results have no single source: a pointer to this
+            # recall-tool receipt could not be fulfilled by read_history.
+            return None
+        source_id, role = source["message_id"], source["role"]
+        window = {
+            "state": "historical_page_available_from_original",
+            "message_id": source_id,
+            "role": role,
+            "offset": offset,
+            "next_offset": output.get("next_offset"),
+            "next_step": (
+                f"Call read_history with role='{role}', the original message_id, "
+                f"offset={offset} and max_chars=4096 to reread this page. "
+                "Follow next_offset to continue."
+            ),
+        }
+    else:
+        window = {
+            "state": "saved_result_available_by_page",
+            "message_id": message_id,
+            "original_chars": len(content),
+            "next_step": (
+                "Call read_history with role='tool', this message_id, offset=0 "
+                "and max_chars=4096. Follow next_offset to read further saved text."
+            ),
+        }
     reference = {
         "tool_call_id": payload["tool_call_id"],
         "action_request_id": payload.get("action_request_id"),
         "status": payload["status"],
-        "output": {
-            "context_window": {
-                "state": "saved_result_available_by_page",
-                "message_id": message_id,
-                "original_chars": len(content),
-                "next_step": "Call read_history with role='tool', this message_id, offset=0 and max_chars=4096. Follow next_offset to read further saved text.",
-            }
-        },
+        "output": {"context_window": window},
         "error_code": payload.get("error_code"),
     }
     projected = {**message, "content": json.dumps(reference, ensure_ascii=False, separators=(",", ":"))}
