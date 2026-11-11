@@ -80,7 +80,12 @@ try {
   assert.equal(status.webRequests, 1);
   checks.push('one global enable reaches native SELF, Work, a partial web observation, a real file and a sourced Home report under weekly accounting');
   await page.getByRole('button', { name: 'Pause autonomous practice', exact: true }).click();
+  // Closing Activity must not trap the user behind a pending native weekly update.
+  // The native operation continues, so verify its outcome before navigating.
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.locator('.pulse-activity-dialog').waitFor({ state: 'detached' });
+  await wait(() => get('/api/pulse/weekly-usage'),
+    value => value.usage.enabled === false, 'autonomous practice paused');
   const report = home.messages.find(m => m.sourcePageId === work);
   await page.locator('#message-' + report.id).locator('.source-line a.session-link').click();
   await page.getByRole('heading', { name: 'Reading expedition', exact: true }).waitFor();
