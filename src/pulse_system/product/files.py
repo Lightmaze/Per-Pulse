@@ -160,9 +160,14 @@ class WorkspaceFiles:
             if fd >= 0:
                 os.close(fd)
 
-    def list(self, path: str = "", *, cursor: str | None = None) -> dict:
+    def list(self, path: str = "", *, cursor: str | None = None,
+             page_size: int | None = None) -> dict:
+        """Page an observed directory; the normal user API still defaults to 200."""
+        count = min(page_size if page_size is not None else MAX_LIST_ENTRIES, MAX_LIST_ENTRIES)
+        if type(count) is not int or count < 1:
+            raise FileAccessError("invalid_directory_page_size")
         if _WINDOWS:
-            return self._list_windows(path, cursor=cursor)
+            return self._list_windows(path, cursor=cursor, page_size=count)
         with self.directory(path) as directory:
             revision = _directory_revision(directory)
             start = _page_start(cursor, path, revision)
@@ -177,7 +182,7 @@ class WorkspaceFiles:
                 for offset, entry in enumerate(entries):
                     if offset < start:
                         continue
-                    if scanned_this_page >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
+                    if scanned_this_page >= MAX_SCAN_ENTRIES or len(rows) >= count:
                         has_more = True
                         break
                     scanned_this_page += 1
@@ -200,7 +205,7 @@ class WorkspaceFiles:
                 "nextCursor": _page_cursor(path, next_offset, revision) if has_more else None,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
-    def _list_windows(self, path: str, *, cursor: str | None = None) -> dict:
+    def _list_windows(self, path: str, *, cursor: str | None = None, page_size: int) -> dict:
         with self.directory(path) as directory:
             revision = _directory_revision(directory)
             start = _page_start(cursor, path, revision)
@@ -211,7 +216,7 @@ class WorkspaceFiles:
             for offset, (name, is_directory, size, reparse) in enumerate(winfiles.list_directory(directory)):
                 if offset < start:
                     continue
-                if scanned_this_page >= MAX_SCAN_ENTRIES or len(rows) >= MAX_LIST_ENTRIES:
+                if scanned_this_page >= MAX_SCAN_ENTRIES or len(rows) >= page_size:
                     has_more = True
                     break
                 scanned_this_page += 1
