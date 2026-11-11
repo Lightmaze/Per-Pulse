@@ -6,7 +6,6 @@ message references. An upload never starts a model turn or certifies reading.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -22,7 +21,6 @@ from .artifacts import ArtifactError, clip_text
 from .execution import ExecutionError
 
 
-MAX_MATERIALS = 1024
 MAX_VISIBLE_MATERIALS = 100
 MAX_PREVIEW_BYTES = 64 * 1024
 
@@ -72,21 +70,32 @@ class PageMaterials:
         self.files = WorkspaceFiles(pages.execution._kernel.workspace_root)
         self.writer = workspace_write_resource(self.files.root)
 
-    def _records(self):
-        return self.pages._state.get("materials", {})
+    def migrate(self):
+        """Move legacy World receipts without touching files or message links."""
+        pages = self.pages
+        with pages._lock:
+            pages.runtime._require_runtime_owner()
+            with pages.runtime._publication_permit.transaction_guard():
+                pages._state = pages.runtime.storage.migrate_page_materials(
+                    pages._state_key, pages.runtime.world_id,
+                )
 
     def _record(self, page_id, material_id):
         self.pages.execution._scope(page_id)
-        record = self._records().get(material_id)
+        record = self.pages.runtime.storage.get_page_material(
+            self.pages.runtime.world_id, material_id,
+        )
         if not record or record["pageId"] != page_id:
             raise MaterialError("material_not_found", "This source file does not belong to this page.", 404)
-        return dict(record)
+        return record
 
     def listing(self, page_id):
         with self.pages._lock:
             self.pages.execution._scope(page_id)
-            records = [dict(record) for record in self._records().values() if record["pageId"] == page_id]
-            records.sort(key=lambda record: (record["createdAt"], record["id"]), reverse=True)
+            records = self.pages.runtime.storage.list_page_materials(
+                self.pages.runtime.world_id, page_id,
+                MAX_VISIBLE_MATERIALS + 1,
+            )
             return {"pageId": page_id, "materials": records[:MAX_VISIBLE_MATERIALS],
                     "truncated": len(records) > MAX_VISIBLE_MATERIALS, "limitBytes": MAX_FILE_BYTES}
 
@@ -104,14 +113,12 @@ class PageMaterials:
             digest = hashlib.sha256(data).hexdigest()
             if expected_digest != digest:
                 raise MaterialError("material_upload_changed", "The uploaded bytes do not match the selected file.", 422)
-            old = self._records().get(upload_id)
+            old = pages.runtime.storage.get_page_material(pages.runtime.world_id, upload_id)
             if old is not None:
                 if (old["pageId"], old["name"], old["sha256"], old["bytes"]) != (page_id, name, digest, len(data)):
                     raise MaterialError("material_upload_conflict", "This upload identity belongs to another file.")
                 self._verify(old)
                 return {"material": dict(old), "repeated": True}
-            if len(self._records()) >= MAX_MATERIALS:
-                raise MaterialError("material_capacity", "This workspace has reached its source-file limit.")
             try:
                 # Cooperate with native file/command writers, and hold the same
                 # World publication fence through the create-only effect and
@@ -121,16 +128,13 @@ class PageMaterials:
                     receipt = self.files.upload(name, data)
                     record = {**receipt, "id": upload_id, "pageId": page_id,
                               "createdAt": datetime.now(timezone.utc).isoformat()}
-                    state = deepcopy(pages._state)
-                    state.setdefault("materials", {})[upload_id] = record
                     try:
-                        pages.runtime.storage.save_component_state(pages._state_key, state)
+                        pages.runtime.storage.save_page_material(pages.runtime.world_id, record)
                     except Exception as error:
                         # The file may already exist. Do not invent a receipt,
                         # delete it, or silently retry a physical upload.
                         raise MaterialError("material_upload_unconfirmed",
                             "The upload receipt was not saved. Check source files before trying again.", 503) from error
-                    pages._state = state
             except FileAccessError as error:
                 raise MaterialError("material_" + error.code,
                     UPLOAD_PROBLEMS.get(error.code, "The source file could not be uploaded."), error.status) from error
@@ -197,16 +201,14 @@ class PageMaterials:
                     current = self.files.read(path)
                     if current["sha256"] != expected_digest:
                         raise MaterialError("material_changed", "This source file changed. Open the version you want to use.")
-                    matching = [record for record in self._records().values()
-                                if record["path"] == path and record["sha256"] == expected_digest
-                                and record["bytes"] == current["bytes"]]
+                    matching = pages.runtime.storage.find_page_material_versions(
+                        pages.runtime.world_id, path, expected_digest, current["bytes"],
+                    )
                     existing = next((record for record in matching if record["pageId"] == page_id
                         and record.get("originArtifactPageId") == generated.get("originArtifactPageId")
                         and record.get("originArtifactId") == generated.get("originArtifactId")), None)
                     if existing:
                         return {"material": dict(existing), "repeated": True}
-                    if len(self._records()) >= MAX_MATERIALS:
-                        raise MaterialError("material_capacity", "This workspace has reached its source-file limit.")
                     # A shared workspace path is not its provenance. Resolve
                     # an original upload only from an existing, byte-verified
                     # native material receipt, never the caller's path or text.
@@ -223,14 +225,11 @@ class PageMaterials:
                               "sha256": expected_digest, "bytes": current["bytes"],
                               "source": "workspace_reference", "createdAt": datetime.now(timezone.utc).isoformat(),
                               **source, **generated}
-                    state = deepcopy(pages._state)
-                    state.setdefault("materials", {})[record["id"]] = record
                     try:
-                        pages.runtime.storage.save_component_state(pages._state_key, state)
+                        pages.runtime.storage.save_page_material(pages.runtime.world_id, record)
                     except Exception as error:
                         raise MaterialError("material_reference_unconfirmed",
                             "The file reference was not confirmed. Reopen the material before trying again.", 503) from error
-                    pages._state = state
             except FileAccessError as error:
                 raise MaterialError("material_" + error.code,
                     UPLOAD_PROBLEMS.get(error.code, "The source file could not be attached."), error.status) from error
@@ -278,7 +277,9 @@ class PageMaterials:
                 original = self.pages._rows(source_page, limit=1, event_id=origin["messageId"])
                 if original:
                     identities = self.pages._state.get("messageMaterials", {}).get(origin["messageId"], [])
-        records = [self._records().get(identity) for identity in identities]
+        records = [self.pages.runtime.storage.get_page_material(
+            self.pages.runtime.world_id, identity,
+        ) for identity in identities]
         if not records or any(not record or record["pageId"] != source_page for record in records):
             return {"materials": [], "materialSuffixLength": 0}
         suffix = material_footer(records)
