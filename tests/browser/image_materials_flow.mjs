@@ -104,10 +104,18 @@ const model = createServer(async (request, response) => {
     }
     const task = [...body.messages].reverse().find(message => message.role === 'user' && typeof message.content === 'string')?.content || '';
     if (!task.includes('[Attached workspace materials]')) return reply(response, { content: 'Ready. [Local HTTP fixture]' }, 'stop');
-    const material = JSON.parse(task.split('[Attached workspace materials]\n').at(-1).split('\n')[0]).files[0];
-    reply(response, { tool_calls: [{ index: 0, id: 'fixture-image-read', type: 'function', function: {
-      name: 'read_file', arguments: JSON.stringify({ path: material.path, expected_digest: material.sha256 }),
-    } }] }, 'tool_calls');
+    // The fixture must read *all* image materials the user attached. Reading
+    // only files[0] made a three-file draft look like a one-image model turn;
+    // that exercised a fixture shortcut rather than the native multi-source
+    // path. Real models can ask for several read_file calls in one round.
+    const materials = JSON.parse(task.split('[Attached workspace materials]\n').at(-1).split('\n')[0]).files;
+    const images = materials.filter(material => /\\.(png|jpe?g)$/i.test(material.name));
+    assert.ok(images.length, 'The test message must contain at least one image');
+    reply(response, { tool_calls: images.map((material, index) => ({
+      index, id: 'fixture-image-read-' + index, type: 'function', function: {
+        name: 'read_file', arguments: JSON.stringify({ path: material.path, expected_digest: material.sha256 }),
+      },
+    })) }, 'tool_calls');
   } catch (error) {
     errors.push('HTTP fixture: ' + error.message);
     response.writeHead(500).end();
