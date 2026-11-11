@@ -109,7 +109,7 @@ const model = createServer(async (request, response) => {
     // that exercised a fixture shortcut rather than the native multi-source
     // path. Real models can ask for several read_file calls in one round.
     const materials = JSON.parse(task.split('[Attached workspace materials]\n').at(-1).split('\n')[0]).files;
-    const images = materials.filter(material => /\\.(png|jpe?g)$/i.test(material.name));
+    const images = materials.filter(material => /\.(png|jpe?g)$/i.test(material.name));
     assert.ok(images.length, 'The test message must contain at least one image');
     reply(response, { tool_calls: images.map((material, index) => ({
       index, id: 'fixture-image-read-' + index, type: 'function', function: {
