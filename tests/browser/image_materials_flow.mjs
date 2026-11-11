@@ -318,7 +318,7 @@ try {
   // receipts remain authoritative; the model sees nothing until Send.
   const multiBefore = seenPixels.length;
   const multiRequestsBefore = requests.length;
-  const mixedText = 'Cross-source notes from a single drop.\\n';
+  const mixedText = 'Cross-source notes from a single drop.\n';
   await page.locator('.composer textarea').fill('Compare these three original sources.');
   await page.evaluate(([png, jpeg, note]) => {
     const data = new DataTransfer();
