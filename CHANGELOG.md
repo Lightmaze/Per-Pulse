@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0a14
+
+- Drop or paste several PNG/JPEG, text and PDF files together into a Home or Work composer. Keep up to five source-backed attachments in the unsent draft through refresh; only explicit Send calls the model. Preserve successfully attached files and explain what stopped the rest (#250).
+- Store long-term material receipts in indexed rows of the same World SQLite rather than an ever-growing page JSON field. Migrate old receipts transactionally on opening the World, preserve source IDs, file bytes and hashes, and remove the World-lifetime 1,024-receipt ceiling (#251).
+
 ## 0.1.0a13
 
 - Help later Works discover shared Habitat regions without being told their names: `habitat_observe(list)` lists the World regions, `habitat_observe(find)` searches across them with source-linked excerpts and explicit incomplete-search continuation, and a bounded region index appears before ordinary model decisions (#245, #246, #247).

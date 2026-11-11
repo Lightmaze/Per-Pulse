@@ -21,7 +21,10 @@ Kernel implementation.
   where you were with your unsent draft and reading position intact.
 - Bring selected text Home with a link to its source message, or pass a
   selected result from one Work to another.
-- Attach text materials (Markdown, CSV, JSON or code, up to 1 MiB), PDFs
+- Drop or paste up to five mixed PNG/JPEG, text or PDF files into a Home or
+  Work draft; the saved attachments survive refresh and go to the model only
+  when you press Send. You can also attach text materials (Markdown, CSV,
+  JSON or code, up to 1 MiB), PDFs
   (up to 32 MiB, read as their text), or PNG/JPEG images (up to 32 MiB and
   50 megapixels). Preview them in Materials and send an exact source version.
   Reading an image sends it to your configured model, which must support image
@@ -50,13 +53,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a13-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a13)
+[`per_pulse-0.1.0a14-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a14)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a13-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a14-py3-none-any.whl
 per-pulse --example
 ```
 

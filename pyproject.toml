@@ -1,6 +1,6 @@
 [project]
 name = "per-pulse"
-version = "0.1.0a13"
+version = "0.1.0a14"
 description = "A persistent conversation workspace built on Pulse's native Home, Work, and Harness Kernel."
 readme = "README.md"
 requires-python = ">=3.12"
