@@ -3,7 +3,7 @@ import type { Message } from './types';
 import { messageBody } from './messageBody.ts';
 
 /** A selected message supplies evidence, never silently becomes the new request. */
-export function initialPageSource(message?: Message): { excerpt: string; instruction: string } {
-  return message ? { excerpt: messageBody(message), instruction: 'Continue from this source.' }
+export function initialPageSource(message?: Message, defaultInstruction = 'Continue from this source.'): { excerpt: string; instruction: string } {
+  return message ? { excerpt: messageBody(message), instruction: defaultInstruction }
     : { excerpt: '', instruction: '' };
 }
