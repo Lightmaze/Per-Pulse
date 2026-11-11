@@ -210,6 +210,9 @@ class PageService:
             )
         self.example = example
         self.materials = PageMaterials(self)
+        # Old embedded receipts migrate in one World transaction before any
+        # page can expose or append materials, preserving message references.
+        self.materials.migrate()
         # Reuse the native TurnAdvisor seam, never a second model loop.
         # Bind before running a session so each new turn snapshots its language.
         install_language_advisor(self.runtime.kernel_service, self._response_language)
