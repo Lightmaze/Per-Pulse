@@ -31,6 +31,7 @@ from pulse_harness.adapters.command import CommandWorkspaceToolProvider, DockerC
 from pulse_harness.core import ActionStatus, HarnessScope, ModelRoundStatus, SessionStatus, TurnStatus
 from pulse_harness.core.errors import HarnessError as KernelError, IdempotencyConflict, LeaseFenced, ScopeConflict
 from pulse_harness.core.replay import digest_json
+from pulse_harness.core.context_window import estimate_tokens
 from pulse_harness.core.lifecycle import HarnessRuntimeBootstrap
 from pulse_harness.core.provider import validate_model_adapter
 from pulse_system.agent.harness.base import HarnessError, HarnessTurnResult
@@ -202,9 +203,15 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         return native_replay.project_model_messages(self.store, scope, messages)
 
     def model_context_messages(self, scope, max_tokens):
-        if self._notice is None or native_replay.mode(self.store, scope):
+        if native_replay.mode(self.store, scope):
             return ()
-        return self._notice.model_context_messages(scope, max_tokens)
+        notices = (self._notice.model_context_messages(scope, max_tokens)
+                   if self._notice is not None else ())
+        habitat = self._bound_habitat()
+        if habitat is None:
+            return notices
+        remaining = max(0, max_tokens - sum(estimate_tokens(item) for item in notices))
+        return (*notices, *habitat.model_context_messages(scope, remaining))
 
     def model_round_limit_for_scope(self, scope, configured):
         entry = native_replay.mode(self.store, scope)

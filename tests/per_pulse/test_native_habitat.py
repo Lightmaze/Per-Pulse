@@ -7,6 +7,7 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 
@@ -630,3 +631,66 @@ def test_habitat_find_cursor_and_incomplete_search_are_explicit(tmp_path, monkey
         assert second["matches"][0]["file"] == "notes24.txt"
         # These setup files were external, not original Kernel writes.
         assert second["matches"][0]["lastVerifiedWrite"] is None
+
+
+def test_later_work_sees_live_habitat_doorway_before_choosing_a_tool(tmp_path, monkeypatch):
+    """The native World exposes bounded region pointers, not cross-Work file text.
+
+    Model responses are explicit synthetic HTTP; the first Work's approved
+    physical write and the later Work's request after SQLite restart are real.
+    """
+    fixture = WorkFixture(monkeypatch.setenv)
+    settings = PulseSettings(
+        enabled=True, spontaneous_rate=0,
+        adaptive_connections=False, spectrum_enabled=False,
+    )
+
+    def open_client():
+        return client_for(
+            tmp_path, model_factory=fixture.factory, allow_workspace_actions=True,
+            auto_apply_edits=True, posture=False, pulse=settings,
+        )
+
+    with open_client() as client:
+        fixture.plan = [(WRITE, {
+            "op": "write", "region": "garden", "file": "observation.txt",
+            "content": "ORIGINAL_WORK_PRIVATE_OBSERVATION",
+        })]
+        first = new_page(client, "Record a place", "Write one original observation.")["page"]["id"]
+        execution = PageExecution(client.app.state.pages.runtime)
+        waiting = _wait(execution, first, lambda view:
+                        bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action = waiting["pendingActions"][0]
+        assert action["toolName"] == WRITE
+        execution.resolve_approval(first, action["actionId"], "allow_once")
+        wait_for(client, first, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        assert (client.app.state.pages.runtime.habitat.root /
+                "regions/garden/observation.txt").read_text() == "ORIGINAL_WORK_PRIVATE_OBSERVATION"
+
+    with open_client() as client:
+        fixture.requests.clear()
+        fixture.plan = []
+        later = new_page(client, "Uninformed later visit", "Continue a different task.")["page"]["id"]
+        wait_for(client, later, lambda view: any(
+            m["role"] == "assistant" and m["status"] == "settled"
+            for m in view["messages"]))
+        assert fixture.requests
+        request = fixture.requests[-1]
+        manifestations = [
+            json.loads(row["content"])
+            for row in request["messages"]
+            if row.get("role") == "assistant"
+            and "pulse.habitat-region-index.v1" in row.get("content", "")
+        ]
+        assert len(manifestations) == 1
+        assert manifestations[0]["regions"] == ["garden"]
+        assert manifestations[0]["moreAvailable"] is False
+        assert manifestations[0]["source"]["worldId"] == client.app.state.pages.runtime.world_id
+        assert any(row.get("role") == "system" and "habitat_observe" in row.get("content", "")
+                   for row in request["messages"])
+        assert "ORIGINAL_WORK_PRIVATE_OBSERVATION" not in json.dumps(request)
+        assert {item["function"]["name"] for item in request["tools"]} >= {
+            "habitat_observe", "habitat_write",
+        }
