@@ -38,7 +38,10 @@ jobs:
       - name: Verify integrated posture learning in Chromium
         run: |
           npm install --prefix "$RUNNER_TEMP/per-pulse-browser-tools" playwright@1.62.1 --no-audit --no-fund
-          node "$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright/cli.js" install --with-deps chromium
+          # Hosted Ubuntu runners supply Chromium system libraries. Do not use
+          # install --with-deps: apt DNS outages blocked main Verify twice before
+          # the first browser test, while browser-journey passed without apt.
+          node "$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright/cli.js" install chromium
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_SCREENSHOTS="$RUNNER_TEMP/per-pulse-posture-screenshots" node tests/browser/posture_flow.mjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_READING_SCREENSHOTS="$RUNNER_TEMP/per-pulse-posture-screenshots" node tests/browser/reading_examples_flow.mjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_REVISION_SCREENSHOTS="$RUNNER_TEMP/per-pulse-posture-screenshots" node tests/browser/example_revision_flow.mjs
@@ -332,9 +335,8 @@ jobs:
       - name: Verify the same user correction-to-artifact journey in Chromium
         run: |
           npm install --prefix "$RUNNER_TEMP/per-pulse-browser-tools" playwright@1.62.1 --no-audit --no-fund
-          # Hosted runner already has Chromium system libraries. Avoid a second large
-          # apt mirror transaction in the independent journey job; verify still
-          # exercises the full OS-deps installer separately.
+          # Hosted runner already has Chromium system libraries. Launch the
+          # actual browser without an apt mirror transaction (as in verify).
           node "$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright/cli.js" install chromium
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" PER_PULSE_PYTHON=python PER_PULSE_JOURNEY_SCREENSHOTS="$RUNNER_TEMP/per-pulse-journey-screenshots" node tests/browser/learning_artifact_flow.mjs
       - name: Verify autonomous first departure and restart in Chromium
