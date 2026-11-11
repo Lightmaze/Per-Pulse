@@ -38,8 +38,9 @@ Kernel implementation.
   page that made it.
 - Visit a shared Habitat region across Home and Works: approve a regional file
   change once, continue that file from another Work, and revisit it after restart.
-  Long text files can be read in version-pinned pages. Habitat writes require
-  Allow once and currently do not offer Undo.
+  Later Works can discover and search past regions without knowing their names;
+  version-checked writes avoid overwriting newer changes. Habitat writes still
+  require Allow once and currently do not offer Undo.
 - Browse and search the whole history, and move a stopped workspace to another
   directory.
 
@@ -49,13 +50,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a12-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a12)
+[`per_pulse-0.1.0a13-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a13)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a12-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a13-py3-none-any.whl
 per-pulse --example
 ```
 
