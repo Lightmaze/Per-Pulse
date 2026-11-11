@@ -257,14 +257,10 @@ def test_symlinked_upload_directory_cannot_escape_the_native_workspace(tmp_path)
 def test_failed_receipt_publication_does_not_invent_confirmation_or_retry_file_effect(tmp_path, monkeypatch):
     with client_for(tmp_path, model_factory=None) as client:
         pages = client.app.state.pages
-        save = pages.runtime.storage.save_component_state
+        def fail_receipt(_world_id, _record):
+            raise OSError("simulated indexed receipt storage failure")
 
-        def fail_receipt(key, value):
-            if key == pages._state_key and value.get("materials"):
-                raise OSError("simulated receipt storage failure")
-            return save(key, value)
-
-        monkeypatch.setattr(pages.runtime.storage, "save_component_state", fail_receipt)
+        monkeypatch.setattr(pages.runtime.storage, "save_page_material", fail_receipt)
         result = upload(client, "home", "Unconfirmed.txt", b"The physical file may exist.\n")
         assert result.status_code == 503
         assert result.json()["error"]["code"] == "material_upload_unconfirmed"
@@ -401,3 +397,38 @@ def test_cross_work_material_preserves_verified_original_upload_without_copying_
         restored = client.get(f"/api/pages/{receiving_page}/materials").json()["materials"]
         assert restored == [receiving]
         assert client.get(f"/api/pages/{next_page}/materials").json()["materials"] == [unknown, next_reference]
+
+
+def test_old_world_material_receipts_migrate_without_a_lifetime_limit(tmp_path):
+    """Cold opening preserves old identities and permits new material after 1024."""
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        original = upload(client, "home", "Original.txt", b"keep this version\n").json()["material"]
+        # Reproduce a genuine legacy JSON shape using one existing physical
+        # file: each receipt represents an independent reference to that file.
+        legacy = {
+            uuid4().hex: {**original, "id": uuid4().hex}
+            for _ in range(1024)
+        }
+        # The dictionary key is the receipt identity, as in previous versions.
+        legacy = {record["id"]: record for record in legacy.values()}
+        pages._state["materials"] = legacy
+        pages._save()
+        old_id = next(iter(legacy))
+        world_id = pages.runtime.world_id
+
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        assert pages.runtime.world_id == world_id
+        assert "materials" not in pages._state
+        assert pages.runtime.storage.get_page_material(world_id, old_id) == legacy[old_id]
+        assert client.get(f"/api/pages/home/materials/{old_id}").json()["content"] == "keep this version\n"
+        listing = client.get("/api/pages/home/materials").json()
+        assert len(listing["materials"]) == 100 and listing["truncated"] is True
+        next_upload = upload(client, "home", "After-limit.txt", b"still writable\n")
+        assert next_upload.status_code == 201, next_upload.text
+        assert "materials" not in pages.runtime.storage.load_component_state(pages._state_key)
+
+    with client_for(tmp_path, model_factory=None) as client:
+        assert client.get(f"/api/pages/home/materials/{old_id}").status_code == 200
+        assert client.get(f"/api/pages/home/materials/{next_upload.json()['material']['id']}").status_code == 200

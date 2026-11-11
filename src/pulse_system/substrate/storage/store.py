@@ -693,6 +693,21 @@ class Storage:
                 state TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS per_pulse_materials (
+                world_id TEXT NOT NULL,
+                id TEXT NOT NULL,
+                page_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                bytes INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                record TEXT NOT NULL,
+                PRIMARY KEY(world_id, id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_per_pulse_material_page
+                ON per_pulse_materials(world_id, page_id, created_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_per_pulse_material_version
+                ON per_pulse_materials(world_id, path, sha256, bytes);
             CREATE INDEX IF NOT EXISTS idx_native_team_origin
                 ON component_state (
                     CASE WHEN json_valid(state) THEN json_extract(state, '$.subject') END,
@@ -7147,6 +7162,99 @@ class Storage:
                 result = callback(conn)
                 check(conn)
                 return result
+
+    # Native PerPulse material receipts are indexed rows in this existing World
+    # SQLite database, not an ever-growing JSON member of the page view.
+    # Uploaded bytes remain in the existing workspace, not in this index.
+    @_locked
+    def get_page_material(self, world_id: str, material_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT record FROM per_pulse_materials WHERE world_id = ? AND id = ?",
+            (world_id, material_id),
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    @_locked
+    def list_page_materials(self, world_id: str, page_id: str, limit: int = 101) -> list[dict]:
+        if type(limit) is not int or not 1 <= limit <= 1001:
+            raise ValueError("material list limit must be 1..1001")
+        rows = self._conn.execute(
+            "SELECT record FROM per_pulse_materials "
+            "WHERE world_id = ? AND page_id = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
+            (world_id, page_id, limit),
+        ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    @_locked
+    def find_page_material_versions(
+        self, world_id: str, path: str, sha256: str, byte_count: int,
+    ) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT record FROM per_pulse_materials "
+            "WHERE world_id = ? AND path = ? AND sha256 = ? AND bytes = ? "
+            "ORDER BY created_at, id",
+            (world_id, path, sha256, byte_count),
+        ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    @_locked
+    def save_page_material(self, world_id: str, record: dict) -> None:
+        """Publish one immutable receipt; conflicting identities never overwrite."""
+        self._assert_runtime_publication()
+        with self._immediate_transaction() as conn:
+            conn.execute(
+                "INSERT INTO per_pulse_materials "
+                "(world_id, id, page_id, path, sha256, bytes, created_at, record) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (world_id, record["id"], record["pageId"], record["path"],
+                 record["sha256"], record["bytes"], record["createdAt"],
+                 json.dumps(record)),
+            )
+
+    @_locked
+    def migrate_page_materials(self, component: str, world_id: str) -> dict:
+        """Atomically move old embedded receipts into indexed World rows.
+
+        Keep the old page JSON intact if any receipt conflicts or the database
+        fails, so restart retries rather than losing a historical source.
+        """
+        self._assert_runtime_publication()
+        with self._immediate_transaction() as conn:
+            row = conn.execute(
+                "SELECT state FROM component_state WHERE component = ?", (component,),
+            ).fetchone()
+            if row is None:
+                return {}
+            state = json.loads(row[0])
+            legacy = state.get("materials") or {}
+            if not legacy:
+                return state
+            for identity, record in legacy.items():
+                if identity != record["id"]:
+                    raise ValueError("legacy material identity does not match its receipt")
+                payload = json.dumps(record)
+                existing = conn.execute(
+                    "SELECT record FROM per_pulse_materials WHERE world_id = ? AND id = ?",
+                    (world_id, identity),
+                ).fetchone()
+                if existing is not None:
+                    if json.loads(existing[0]) != record:
+                        raise ValueError("legacy material identity conflicts with indexed receipt")
+                    continue
+                conn.execute(
+                    "INSERT INTO per_pulse_materials "
+                    "(world_id, id, page_id, path, sha256, bytes, created_at, record) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (world_id, identity, record["pageId"], record["path"],
+                     record["sha256"], record["bytes"], record["createdAt"], payload),
+                )
+            state.pop("materials", None)
+            conn.execute(
+                "UPDATE component_state SET state = ?, updated_at = ? WHERE component = ?",
+                (json.dumps(state), _ts(_now()), component),
+            )
+            return state
 
     @_locked
     def save_component_state(self, component: str, state: dict) -> None:

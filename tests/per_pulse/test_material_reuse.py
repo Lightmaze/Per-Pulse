@@ -132,7 +132,7 @@ def test_reference_publication_failure_does_not_create_an_in_memory_receipt_or_c
         with monkeypatch.context() as patch:
             def fail(*_args, **_kwargs):
                 raise OSError("synthetic component publication failure")
-            patch.setattr(pages.runtime.storage, "save_component_state", fail)
+            patch.setattr(pages.runtime.storage, "save_page_material", fail)
             response = reference(client, "home", "source.md", digest)
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "material_reference_unconfirmed"
