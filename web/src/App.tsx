@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
-import { uploadLimit } from './uploadLimits';
+import { isSupportedUpload, uploadLimit } from './uploadLimits';
 import { messageBody } from './messageBody';
 import { retryMessageInput } from './retryMessage';
 import { parseTickCommand } from './tickCommand';
@@ -105,54 +105,85 @@ export default function App() {
     persistDraft(route.id, next);
   }, [route.id, route.serial, workspaceId, draftKey, persistDraft]);
 
-  const pasteImage = async (image: File) => {
+  const pasteFiles = async (selected: File[]) => {
     const identity = bootstrap;
     const worldId = workspaceId;
     const pageId = route.id;
     const key = draftKey;
     const serial = route.serial;
-    if (!identity || !worldId || pendingPastes.current.has(key)) return;
-    const extension = image.type === 'image/png' ? 'png' : 'jpg';
-    const name = /\.(png|jpe?g)$/i.test(image.name) ? image.name : `Pasted image.${extension}`;
-    const file = name === image.name ? image : new File([image], name, { type: image.type });
-    if (!file.size) { setToast(t('library.emptyFile')); return; }
-    if (file.size > uploadLimit(name)) { setToast(t('library.tooLarge')); return; }
+    if (!identity || !worldId || !selected.length) return;
+    if (pendingPastes.current.has(key)) {
+      setToast(t('composer.attachBusy'));
+      return;
+    }
     const before = readCurrentDraft(worldId, pageId, draftsRef.current[key] ?? EMPTY_DRAFT);
-    if ((before.materials?.length ?? 0) >= 5) { setToast(t('materials.selectionFull')); return; }
+    if ((before.materials?.length ?? 0) >= 5) {
+      setToast(t('materials.selectionFull'));
+      return;
+    }
 
     pendingPastes.current.add(key);
     setPastingPages(previous => ({ ...previous, [key]: true }));
+    let attached = 0;
+    let stoppedReason = '';
+    const isOriginVisible = () => currentPage.current === pageId && currentRouteSerial.current === serial;
     try {
-      // Reuse the same durable workspace upload receipt as Materials. Pasting
-      // never sends a model turn or grants a file action.
-      const uploadId = crypto.randomUUID().replace(/-/g, '');
-      const response = await api.uploadMaterial(pageId, identity, uploadId, file);
-      if (response.workspaceId !== worldId || response.serviceInstanceId !== identity.serviceInstanceId
-          || response.material.pageId !== pageId || response.material.id !== uploadId) {
-        throw new Error(t('library.referenceUnconfirmed'));
+      // A batch is deliberately sequential: each native receipt is verified
+      // and added to the original page's unsent draft before the next upload.
+      // Stop at the first failure; do not lose successfully attached sources.
+      for (const inputFile of selected) {
+        if (!isSupportedUpload(inputFile)) { stoppedReason = t('library.textOnly'); break; }
+        const extension = inputFile.type === 'image/png' ? 'png'
+          : inputFile.type === 'image/jpeg' ? 'jpg' : '';
+        const name = extension && !/\.(png|jpe?g)$/i.test(inputFile.name)
+          ? `Pasted image.${extension}` : inputFile.name;
+        const file = name === inputFile.name ? inputFile
+          : new File([inputFile], name, { type: inputFile.type });
+        if (!file.size) { stoppedReason = t('library.emptyFile'); break; }
+        if (file.size > uploadLimit(name)) { stoppedReason = t('library.tooLarge'); break; }
+        const current = readCurrentDraft(worldId, pageId, draftsRef.current[key] ?? EMPTY_DRAFT);
+        if ((current.materials?.length ?? 0) >= 5) {
+          stoppedReason = t('materials.selectionFull');
+          break;
+        }
+        const uploadId = crypto.randomUUID().replace(/-/g, '');
+        const response = await api.uploadMaterial(pageId, identity, uploadId, file);
+        if (response.workspaceId !== worldId || response.serviceInstanceId !== identity.serviceInstanceId
+            || response.material.pageId !== pageId || response.material.id !== uploadId) {
+          throw new Error(t('library.referenceUnconfirmed'));
+        }
+        // A late result may update the originating Work but must never attach
+        // to a replacement World or steal focus from another page.
+        if (latestBootstrap.current?.workspaceId !== worldId
+            || latestBootstrap.current.serviceInstanceId !== identity.serviceInstanceId) return;
+        const latest = readCurrentDraft(worldId, pageId, draftsRef.current[key] ?? EMPTY_DRAFT);
+        if ((latest.materials?.length ?? 0) >= 5) {
+          stoppedReason = t('composer.pastedImageSaved');
+          break;
+        }
+        const next: Draft = { ...latest, materials: [
+          ...(latest.materials ?? []), { id: response.material.id, name: response.material.name },
+        ] };
+        const updated = { ...draftsRef.current, [key]: next };
+        draftsRef.current = updated;
+        setDrafts(updated);
+        persistDraft(pageId, next);
+        attached++;
       }
-      // A reload or workspace switch must not attach an old server's response
-      // to the new World. Navigation within this World is fine: update the
-      // original page's draft without stealing focus from the current page.
-      if (latestBootstrap.current?.workspaceId !== worldId
-          || latestBootstrap.current.serviceInstanceId !== identity.serviceInstanceId) return;
-      const current = readCurrentDraft(worldId, pageId, draftsRef.current[key] ?? EMPTY_DRAFT);
-      if ((current.materials?.length ?? 0) >= 5) {
-        if (currentPage.current === pageId && currentRouteSerial.current === serial) setToast(t('composer.pastedImageSaved'));
-        return;
+      if (isOriginVisible()) {
+        setToast(stoppedReason ? attached
+          ? t('composer.filesPartial', { count: String(attached), reason: stoppedReason })
+          : stoppedReason
+          : t('composer.filesReady', { count: String(attached) }));
       }
-      const next: Draft = { ...current, materials: [
-        ...(current.materials ?? []), { id: response.material.id, name: response.material.name },
-      ] };
-      const updated = { ...draftsRef.current, [key]: next };
-      draftsRef.current = updated;
-      setDrafts(updated);
-      persistDraft(pageId, next);
-      if (currentPage.current === pageId && currentRouteSerial.current === serial) setToast(t('composer.pastedImageReady'));
     } catch (problem) {
-      if (currentPage.current === pageId && currentRouteSerial.current === serial) {
-        setToast(problem instanceof ApiError && (problem.code === 'network_error' || problem.code === 'material_upload_unconfirmed')
-          ? t('library.uploadUnconfirmed') : errorText(problem));
+      if (isOriginVisible()) {
+        const reason = problem instanceof ApiError
+          && (problem.code === 'network_error' || problem.code === 'material_upload_unconfirmed')
+          ? t('library.uploadUnconfirmed') : errorText(problem);
+        setToast(attached
+          ? t('composer.filesPartial', { count: String(attached), reason })
+          : reason);
       }
     } finally {
       pendingPastes.current.delete(key);
@@ -565,7 +596,7 @@ export default function App() {
                 .catch(problem => setSendErrors(previous => ({ ...previous, [draftKey]: errorText(problem) })));
             }}>{t('tick.stop')}</button>
           </div> : null}
-          {view && workspaceId ? <Composer draft={draft} onPasteImage={pasteImage} pastingImage={pastingPages[draftKey] === true} draftSaveFailed={draftSaveFailures[draftKey] === true} retryDraftSave={() => persistDraft(route.id, draft)} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onInspectMaterial={materialId => openModal({ kind: 'materials', materialId, pageId: route.id })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
+          {view && workspaceId ? <Composer draft={draft} onPasteFiles={pasteFiles} pastingImage={pastingPages[draftKey] === true} draftSaveFailed={draftSaveFailures[draftKey] === true} retryDraftSave={() => persistDraft(route.id, draft)} changeDraft={changeDraft} send={sendMessage} busy={sending} inputRef={input} pageTitle={view.page.title} pageKind={view.page.kind} provider={view.provider} onSettings={() => openModal({ kind: 'settings' })} onMaterials={() => openModal({ kind: 'materials' })} onInspectMaterial={materialId => openModal({ kind: 'materials', materialId, pageId: route.id })} onLink={() => { composerSelection.current = { start: input.current?.selectionStart ?? draft.text.length, end: input.current?.selectionEnd ?? draft.text.length }; openModal({ kind: 'picker', mode: 'compose' }); }} /> : null}
         </div>
       </main>
     </div>
