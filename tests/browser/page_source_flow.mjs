@@ -82,6 +82,26 @@ try {
   assert.equal(await card.locator('.transfer-presentation-source .transfer-presentation-label').innerText(), 'Per Pulse');
   assert.equal(await page.locator('vite-error-overlay').count(), 0);
   if (process.env.PER_PULSE_SOURCE_SCREENSHOT) await page.screenshot({ path: process.env.PER_PULSE_SOURCE_SCREENSHOT.replace('.png', '-mobile.png'), fullPage: false });
+  // Switching the interface language changes only the editable request template,
+  // never the quoted author, source bytes, or stored provenance.
+  await page.evaluate(() => localStorage.setItem('per-pulse.ui.language.v1', 'zh-CN'));
+  await page.goto(base);
+  await page.locator(`[data-message-id="${original.id}"]`).waitFor();
+  await page.locator(`[data-message-id="${original.id}"]`).getByRole('button', { name: '新建页面', exact: true }).click();
+  const chineseDialog = page.getByRole('dialog');
+  assert.equal(await chineseDialog.locator('#new-page-source').inputValue(), original.content);
+  assert.equal(await chineseDialog.getByRole('textbox', { name: '你的请求', exact: true }).inputValue(), '请根据这段来源继续工作。');
+  await chineseDialog.getByRole('textbox', { name: '页面名称' }).fill('中文来源工作');
+  await chineseDialog.getByRole('button', { name: '创建页面' }).click();
+  await page.getByRole('heading', { name: '中文来源工作', exact: true }).waitFor();
+  const chineseId = new URL(page.url()).pathname.split('/').pop();
+  const chineseView = await data('/api/pages/' + chineseId);
+  const chineseFirst = chineseView.messages.find(m => m.pageSource);
+  assert.equal(chineseFirst.pageSource.excerpt, original.content);
+  assert.equal(chineseFirst.pageSource.instruction, '请根据这段来源继续工作。');
+  await page.locator(`[data-message-id="${chineseFirst.id}"]`).locator('.message-label').getByText('来源与请求').waitFor();
+  await page.reload();
+  await page.locator(`[data-message-id="${chineseFirst.id}"]`).locator('.message-label').getByText('来源与请求').waitFor();
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: true, checks: ['Home source author', 'separate request editor', 'native user identity', 'rendered author', 'source anchor', 'reload', 'search attribution', 'mobile overflow', 'no page errors'], base, directory }));
 } finally {

@@ -26,7 +26,7 @@ export type Modal =
 export function CreatePageDialog({ initial, busy, error, close, create }: { initial?: Message; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
   const { t } = useLanguage();
   const [title, setTitle] = useState('');
-  const source = initialPageSource(initial);
+  const source = initialPageSource(initial, t('source.defaultRequest'));
   const [excerpt, setExcerpt] = useState(source.excerpt);
   const [instruction, setInstruction] = useState(source.instruction);
   return <Dialog title={t("dialogs.createTitle")} onClose={close}>

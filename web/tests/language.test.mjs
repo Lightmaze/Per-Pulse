@@ -73,3 +73,17 @@ test('interpolation preserves literal page names, dollar sequences and braces', 
   assert.equal(interpolate('{count} · {unknown}', { count: 0 }), '0 · {unknown}');
   assert.equal(interpolate('{toString}', {}), '{toString}');
 });
+
+test('Chinese source-workflow and material failure copy is localized without changing authorship', () => {
+  const keys = ['source.heading', 'source.excerpt', 'source.edited', 'source.request',
+    'source.separation', 'source.defaultRequest'];
+  for (const key of keys) {
+    assert.notEqual(workspaceChinese[key], workspaceEnglish[key], key);
+  }
+  for (const key of ['library.description', 'library.textOnly', 'library.imageUnreadable',
+    'library.imageAnimated', 'library.imageUnavailable']) {
+    assert.notEqual(materialsChinese[key], materialsEnglish[key], key);
+  }
+  assert.equal(workspaceEnglish['source.defaultRequest'], 'Continue from this source.');
+  assert.equal(workspaceChinese['source.defaultRequest'], '请根据这段来源继续工作。');
+});

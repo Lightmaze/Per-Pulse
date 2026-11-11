@@ -15,3 +15,13 @@ test('source preview removes verified material and replay wrappers only', () => 
   });
   assert.deepEqual(initialPageSource(), { excerpt: '', instruction: '' });
 });
+
+test('a Chinese source request keeps the original excerpt byte-for-byte', () => {
+  const content = 'Original customer words: 中文 🌍 {source}.';
+  assert.deepEqual(initialPageSource({ role: 'assistant', content }, '请根据这段来源继续工作。'), {
+    excerpt: content, instruction: '请根据这段来源继续工作。',
+  });
+  assert.deepEqual(initialPageSource(undefined, '请根据这段来源继续工作。'), {
+    excerpt: '', instruction: '',
+  });
+});

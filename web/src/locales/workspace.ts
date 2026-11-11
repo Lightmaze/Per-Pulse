@@ -1,5 +1,6 @@
 /** Product copy only. User-authored titles, messages, and reference labels stay verbatim. */
 export const workspaceEnglish = {
+  'source.defaultRequest': 'Continue from this source.',
   'source.heading': 'Source and request',
   'source.excerpt': 'Source excerpt',
   'source.edited': 'Source excerpt edited by you',
@@ -305,11 +306,12 @@ export const workspaceEnglish = {
 } as const;
 
 export const workspaceChinese = {
-  'source.heading': 'Source and request',
-  'source.excerpt': 'Source excerpt',
-  'source.edited': 'Source excerpt edited by you',
-  'source.request': 'Your request',
-  'source.separation': 'The source keeps its original author. Tell this page what to do with it below.',
+  'source.defaultRequest': '请根据这段来源继续工作。',
+  'source.heading': '来源与请求',
+  'source.excerpt': '来源原文',
+  'source.edited': '你编辑过的来源片段',
+  'source.request': '你的请求',
+  'source.separation': '来源保留原作者身份。请在下方说明希望这个页面如何使用它。',
 
   'collaboration.title': '查看这项工作的协作者选择',
   'collaboration.description': "查看已完成的协作者选择，以及实际交付给协作者的经验。",

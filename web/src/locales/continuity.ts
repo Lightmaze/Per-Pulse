@@ -292,10 +292,10 @@ export const continuityEnglish = {
   "status.sendAgain": "Send again",
 } as const;
 export const continuityChinese: Record<keyof typeof continuityEnglish, string> = {
-  "composer.draftNotSaved": "This draft is only in this tab. Copy the text or save it before refreshing.",
-  "composer.draftNotCleared": "The saved browser draft could not be cleared. An older draft may reappear after refreshing.",
-  "composer.copyDraftText": "Copy draft text",
-  "composer.retryDraftSave": "Try saving again",
+  "composer.draftNotSaved": "草稿目前只保存在此标签页中。刷新前请先复制文字或保存草稿。",
+  "composer.draftNotCleared": "无法清除浏览器中已保存的草稿。刷新后可能重新出现旧草稿。",
+  "composer.copyDraftText": "复制草稿文字",
+  "composer.retryDraftSave": "重新保存草稿",
   "webSources.title": "网页来源",
   "status.failureWeb": "无法读取这个网页。请确认来源是公开的 HTTPS 文本网页，或尝试其他来源。",
   "webSources.scope": "已保存提取文本的阅读记录。打开来源可查看当前网页，包括图片和排版。",
