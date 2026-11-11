@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a13-py3-none-any.whl` from the
-[v0.1.0a13 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a13).
+Download `per_pulse-0.1.0a14-py3-none-any.whl` from the
+[v0.1.0a14 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a14).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a13-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a14-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a13-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a14-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -46,7 +46,10 @@ You need a model that supports streaming, tool calls and usage reporting.
    original page and message.
 4. Stop and restart the service; your pages and messages remain available.
 
-Open **Materials** to attach text, PDFs or still PNG/JPEG images. Images need
+Drag several text, PDF or PNG/JPEG files onto the Home or Work composer to
+attach them to an unsent draft (up to five total); you can refresh before Send.
+Existing drafts and successfully attached files remain after a partial failure.
+Open **Materials** to browse and preview them. Images need
 a model that accepts image input; PDF reading covers extracted text. You can
 also ask the model to read a public HTTPS text page and return to its saved
 source observation. See [Materials](materials.md).
@@ -96,8 +99,12 @@ Before upgrading, stop the service and copy the complete data directory to a
 backup, then install the new wheel in the same environment.
 A first upgrade from a version older than a7 migrates the World database to
 schema v13 for the durable experience journal and first saves a database backup.
-Upgrading from a7 or later to a11 keeps that schema. Existing experience is imported on its first ordinary update, retaining the
-original components, sources and revision history. For a move, see
+Upgrading from a7 or later keeps that schema. Existing experience is imported on its first ordinary update, retaining the
+original components, sources and revision history. In a14, old material receipts
+stored in page JSON move transactionally into indexed rows of the same World
+SQLite database when the World first opens; the original workspace files and
+material IDs remain in place. Keep the pre-upgrade backup, as downgrading to
+older builds is not supported. For a move, see
 [workspace images](image.md); restore an older image with its matching
 implementation before upgrading the restored directory.
 There is no in-place data downgrade guarantee; keep a backup before an upgrade.
@@ -109,7 +116,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a13-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a14-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
