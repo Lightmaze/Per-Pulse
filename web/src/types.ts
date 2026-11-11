@@ -224,7 +224,8 @@ type ExperienceBase = {
   canReport: boolean;
   sourcePageId: string | null;
   sourceRegime?: 'replay' | null;
-  sourceKind?: 'reading' | 'command';
+  sourceKind?: 'reading' | 'command' | 'web';
+  webSource?: { url: string; title: string; fetchedAt: string; digest: string; truncated: boolean; receiptId: string };
   commandSource?: { stream: 'stdout' | 'stderr'; exitCode: number; captureComplete: boolean };
   readingSource?: { path: string; digest: string; receiptId: string; observedAt: string };
   sourceAnchor?: { resultMessageId: string; feedbackMessageId?: string };
