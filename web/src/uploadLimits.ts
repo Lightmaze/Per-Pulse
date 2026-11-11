@@ -11,6 +11,16 @@ export function isImageName(name: string): boolean {
   return /\.(png|jpe?g)$/i.test(name);
 }
 
+/** Match the same kinds the Materials picker accepts before dropping files.
+ * The native upload still validates bytes and source identity.
+ */
+export function isSupportedUpload(file: { name: string; type: string }): boolean {
+  return isImageName(file.name) || isPdfName(file.name)
+    || /\.(txt|md|markdown|csv|tsv|json|yaml|yml|log|py|ts|js|html|css)$/i.test(file.name)
+    || file.type.startsWith('text/')
+    || file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'application/pdf';
+}
+
 export function uploadLimit(name: string): number {
   if (isPdfName(name)) return MAX_PDF_BYTES;
   return isImageName(name) ? MAX_IMAGE_BYTES : MAX_TEXT_BYTES;

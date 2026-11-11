@@ -3,13 +3,14 @@ import type { Draft, ProviderState } from '../types';
 import { Icon } from './Icon';
 import { useLanguage } from '../i18n';
 import { CopyButton } from './CopyButton';
+import { isSupportedUpload } from '../uploadLimits';
 
-export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, onInspectMaterial, onPasteImage, pastingImage = false, inputRef, pageTitle, pageKind = 'home', provider, onSettings, draftSaveFailed = false, retryDraftSave }: {
+export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, onInspectMaterial, onPasteFiles, pastingImage = false, inputRef, pageTitle, pageKind = 'home', provider, onSettings, draftSaveFailed = false, retryDraftSave }: {
   draft: Draft; changeDraft: (draft: Draft) => void; send: () => void; busy: boolean; onLink: () => void; inputRef: RefObject<HTMLTextAreaElement | null>;
   pageTitle?: string; pageKind?: 'home' | 'work'; provider?: ProviderState; onSettings?: () => void;
   onMaterials?: () => void;
   onInspectMaterial?: (materialId: string) => void;
-  onPasteImage?: (file: File) => void;
+  onPasteFiles?: (files: File[]) => void;
   pastingImage?: boolean;
   draftSaveFailed?: boolean;
   retryDraftSave?: () => void;
@@ -29,7 +30,7 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
   return <div className="composer-wrap">
     <form className={`composer${draggingFile ? ' composer-drag-target' : ''}`}
       onDragOver={event => {
-        if (!onPasteImage || !event.dataTransfer.types.includes('Files')) return;
+        if (!onPasteFiles || !event.dataTransfer.types.includes('Files')) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = 'copy';
         if (!draggingFile) setDraggingFile(true);
@@ -38,25 +39,28 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingFile(false);
       }}
       onDrop={event => {
-        if (!onPasteImage || !event.dataTransfer.files.length) return;
-        event.preventDefault(); // Do not navigate away when a file is dropped on the composer.
+        if (!onPasteFiles || !event.dataTransfer.files.length) return;
+        event.preventDefault(); // A file drop never navigates away or sends a model turn.
         setDraggingFile(false);
-        const image = Array.from(event.dataTransfer.files)
-          .find(file => file.type === 'image/png' || file.type === 'image/jpeg');
-        if (image) {
-          setUnsupportedDrop(false);
-          onPasteImage(image); // Same durable, unsent Home/Work draft path as clipboard paste.
-        } else {
-          setUnsupportedDrop(true);
-        }
+        const files = Array.from(event.dataTransfer.files);
+        const supported = files.filter(isSupportedUpload);
+        setUnsupportedDrop(supported.length !== files.length);
+        if (supported.length) onPasteFiles(supported); // The existing durable draft upload path.
       }}
       onSubmit={event => { event.preventDefault(); if (canSend && !busy && !pastingImage) send(); }}>
       {draft.materials?.length ? <ul className="composer-materials" aria-label={t('materials.forMessage')}>{draft.materials.map(material => <li key={material.id}>{onInspectMaterial ? <button type="button" className="composer-material-inspect" aria-label={t('materials.inspectDraft', { name: material.name })} onClick={() => onInspectMaterial(material.id)}>{material.name}</button> : <span>{material.name}</span>}<button type="button" className="composer-material-remove" aria-label={t('materials.remove', { name: material.name })} onClick={() => changeDraft({ ...draft, materials: draft.materials?.filter(item => item.id !== material.id) })}><Icon name="close" size={14} /></button></li>)}</ul> : null}
       <textarea ref={inputRef} value={draft.text} onChange={event => { setUnsupportedDrop(false); changeDraft({ ...draft, text: event.target.value }); }} onPaste={event => {
-        if (!onPasteImage) return;
-        const image = Array.from(event.clipboardData.items)
-          .find(item => item.kind === 'file' && (item.type === 'image/png' || item.type === 'image/jpeg'))?.getAsFile();
-        if (image) { event.preventDefault(); setUnsupportedDrop(false); onPasteImage(image); }
+        if (!onPasteFiles) return;
+        const files = Array.from(event.clipboardData.items)
+          .filter(item => item.kind === 'file')
+          .map(item => item.getAsFile())
+          .filter((file): file is File => file !== null);
+        if (files.length) {
+          event.preventDefault();
+          const supported = files.filter(isSupportedUpload);
+          setUnsupportedDrop(supported.length !== files.length);
+          if (supported.length) onPasteFiles(supported);
+        }
       }} placeholder={pageKind === 'work' ? t('composer.continueIn', { destination }) : t('composer.placeholder')} aria-label={t('composer.messageTo', { destination })} aria-describedby={disconnected ? connectionId : undefined} rows={1} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => {
         if (event.key === 'Enter' && !event.shiftKey && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); if (canSend && !busy && !pastingImage) send(); }
       }} />

@@ -104,10 +104,18 @@ const model = createServer(async (request, response) => {
     }
     const task = [...body.messages].reverse().find(message => message.role === 'user' && typeof message.content === 'string')?.content || '';
     if (!task.includes('[Attached workspace materials]')) return reply(response, { content: 'Ready. [Local HTTP fixture]' }, 'stop');
-    const material = JSON.parse(task.split('[Attached workspace materials]\n').at(-1).split('\n')[0]).files[0];
-    reply(response, { tool_calls: [{ index: 0, id: 'fixture-image-read', type: 'function', function: {
-      name: 'read_file', arguments: JSON.stringify({ path: material.path, expected_digest: material.sha256 }),
-    } }] }, 'tool_calls');
+    // The fixture must read *all* image materials the user attached. Reading
+    // only files[0] made a three-file draft look like a one-image model turn;
+    // that exercised a fixture shortcut rather than the native multi-source
+    // path. Real models can ask for several read_file calls in one round.
+    const materials = JSON.parse(task.split('[Attached workspace materials]\n').at(-1).split('\n')[0]).files;
+    const images = materials.filter(material => /\.(png|jpe?g)$/i.test(material.name));
+    assert.ok(images.length, 'The test message must contain at least one image');
+    reply(response, { tool_calls: images.map((material, index) => ({
+      index, id: 'fixture-image-read-' + index, type: 'function', function: {
+        name: 'read_file', arguments: JSON.stringify({ path: material.path, expected_digest: material.sha256 }),
+      },
+    })) }, 'tool_calls');
   } catch (error) {
     errors.push('HTTP fixture: ' + error.message);
     response.writeHead(500).end();
@@ -265,22 +273,22 @@ try {
   assert.ok(scaledNote, 'The model is told it receives a scaled copy');
   checks.push('Large screenshot paste: attached instead of refused, preview and model receive a scaled copy, original downloads');
 
-  // Dragging an image onto the Home composer uses the same durable draft
-  // upload as paste. Dragging a non-image does not attach it or navigate away.
+  // Dragging files into Home uses the durable draft upload, not model Send.
+  // Unsupported binary data remains outside the draft and cannot navigate away.
   await page.evaluate(() => {
     const target = document.querySelector('.composer textarea');
     const transfer = new DataTransfer();
-    transfer.items.add(new File(['hello'], 'notes.txt', { type: 'text/plain' }));
+    transfer.items.add(new File(['binary'], 'unknown.exe', { type: 'application/octet-stream' }));
     const event = new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true });
     if (target.dispatchEvent(event)) throw new Error('File drop should not navigate away');
   });
-  await page.locator('.composer-hint').getByText('Drop a PNG or JPEG image.', { exact: false }).waitFor();
-  assert.equal(await page.locator('.composer-materials li').count(), 0, 'Non-image drops do not change the draft');
+  await page.locator('.composer-hint').getByText('Unsupported file.', { exact: false }).waitFor();
+  assert.equal(await page.locator('.composer-materials li').count(), 0, 'Unsupported binary drops do not change the draft');
 
   const droppedBytes = examples.get('JPEG');
   const beforeDrop = seenPixels.length;
   await page.locator('.composer textarea').fill('Inspect the dropped photograph.');
-  await page.locator('.composer-hint').getByText('Paste or drop a PNG/JPEG', { exact: false }).waitFor();
+  await page.locator('.composer-hint').getByText('Paste or drop text, PDFs and images', { exact: false }).waitFor();
   const droppedUpload = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/materials?'));
   await page.evaluate(encoded => {
     const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
@@ -291,7 +299,7 @@ try {
     if (target.dispatchEvent(event)) throw new Error('Image dragover must be accepted');
   }, droppedBytes.toString('base64'));
   await page.locator('.composer.composer-drag-target').waitFor();
-  await page.locator('.composer-hint').getByText('Drop a PNG or JPEG to attach', { exact: false }).waitFor();
+  await page.locator('.composer-hint').getByText('Drop files to attach', { exact: false }).waitFor();
   await page.evaluate(encoded => {
     const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
     const transfer = new DataTransfer();
@@ -311,7 +319,68 @@ try {
   await wait(async () => seenPixels.length === beforeDrop + 1 &&
     (await view()).messages.at(-1)?.role === 'assistant', 'dropped image reaches native model request');
   assert.ok(seenPixels.at(-1).equals(droppedBytes));
-  checks.push('Home image drag/drop: visible target, non-image feedback, durable unsent draft, exact image bytes only on Send');
+  checks.push('Home image drag/drop: visible target, unsupported-binary feedback, durable unsent draft, exact image bytes only on Send');
+
+  // A single drop containing several supported file kinds attaches every
+  // file to the same unsent draft, in order. The native HTTP upload and source
+  // receipts remain authoritative; the model sees nothing until Send.
+  const multiBefore = seenPixels.length;
+  const multiRequestsBefore = requests.length;
+  const mixedText = 'Cross-source notes from a single drop.\n';
+  await page.locator('.composer textarea').fill('Compare these three original sources.');
+  await page.evaluate(([png, jpeg, note]) => {
+    const data = new DataTransfer();
+    const bytes = encoded => Uint8Array.from(atob(encoded), ch => ch.charCodeAt(0));
+    data.items.add(new File([bytes(png)], 'Batch diagram.png', { type: 'image/png' }));
+    data.items.add(new File([bytes(jpeg)], 'Batch photo.jpg', { type: 'image/jpeg' }));
+    data.items.add(new File([note], 'Batch notes.txt', { type: 'text/plain' }));
+    const target = document.querySelector('.composer textarea');
+    if (target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }))) {
+      throw new Error('Multi-file drop must not navigate away');
+    }
+  }, [pastedBytes.toString('base64'), droppedBytes.toString('base64'), mixedText]);
+  await wait(async () => await page.locator('.composer-materials li').count() === 3
+    && !(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled()),
+  'three mixed drop attachments ready');
+  assert.equal(requests.length, multiRequestsBefore, 'A file drop cannot invoke the model');
+  await page.reload();
+  for (const name of ['Batch diagram.png', 'Batch photo.jpg', 'Batch notes.txt']) {
+    await page.getByRole('button', { name: 'Inspect ' + name + ' before sending' }).waitFor();
+  }
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Compare these three original sources.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => seenPixels.length === multiBefore + 2 && (await view()).messages.at(-1)?.role === 'assistant',
+    'both images reach the native model after explicit Send');
+  assert.ok(seenPixels[multiBefore].equals(pastedBytes));
+  assert.ok(seenPixels[multiBefore + 1].equals(droppedBytes));
+  const batchMessage = [...(await view()).messages].reverse()
+    .find(message => message.materials?.some(material => material.name === 'Batch notes.txt'));
+  assert.deepEqual(batchMessage.materials.map(material => material.name),
+    ['Batch diagram.png', 'Batch photo.jpg', 'Batch notes.txt']);
+  checks.push('Three-file image/text drop: all native receipts in one unsent draft, reload persistence, two exact model images and source materials on Send');
+
+  // The sixth file is left unprocessed with a visible partial note. The
+  // first five remain removable unsent attachments; no model request occurs.
+  const beforeFull = requests.length;
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    for (let index = 0; index < 6; index++) {
+      data.items.add(new File(['draft-' + index], 'Batch limit ' + index + '.txt', { type: 'text/plain' }));
+    }
+    const target = document.querySelector('.composer textarea');
+    if (target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }))) {
+      throw new Error('Six-file drop must not navigate away');
+    }
+  });
+  await wait(async () => await page.locator('.composer-materials li').count() === 5
+    && !(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled()),
+  'five attachments and completed bounded batch');
+  await page.getByText('Added 5 file(s) before stopping.', { exact: false }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Inspect Batch limit 5.txt before sending' }).count(), 0);
+  assert.equal(requests.length, beforeFull);
+  for (let index = 0; index < 5; index++) await page.locator('.composer-material-remove').first().click();
+  assert.equal(await page.locator('.composer-materials li').count(), 0);
+  checks.push('Overflow drop attaches five, reports the unprocessed sixth file and keeps draft edits under user control');
 
   // The same composer path works inside a Work. Its attachment must not
   // appear in Home merely because their files share the World workspace.
