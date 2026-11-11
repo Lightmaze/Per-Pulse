@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a13
+
+- Help later Works discover shared Habitat regions without being told their names: `habitat_observe(list)` lists the World regions, `habitat_observe(find)` searches across them with source-linked excerpts and explicit incomplete-search continuation, and a bounded region index appears before ordinary model decisions (#245, #246, #247).
+- Protect Habitat changes made from an older read: `habitat_write` can verify `fullCurrentSha256` at execution time, including after one-time approval. A stale edit reports the version change and directs the Work to reread instead of overwriting newer work (#244).
+- Let Activity close while a native weekly-allowance update is pending, so the Home source link remains usable. The already requested pause continues and can be confirmed against the native weekly state (#248).
+- Habitat changes still require Allow once and have no Undo. The region index and tools create an opportunity to revisit old work; live-provider autonomous retrieval and improved later choices remain untested.
+
 ## 0.1.0a12
 
 - Visit a shared native Habitat region from Home or separate Works. A Work can write a file with the original Kernel action's one-time approval; a later Work can read and append to that same physical file, and Home can revisit it after restart, with verified writer provenance (#181).
