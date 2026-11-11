@@ -194,7 +194,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
     && typeof budgetEvidence.partialKnownExcessTokens === 'number'
     ? budgetEvidence.partialKnownExcessTokens : 0;
 
-  return <Dialog title={t('pulse.title')} onClose={() => { if (!busy) onClose(); }} className="pulse-activity-dialog">
+  return <Dialog title={t('pulse.title')} onClose={onClose} className="pulse-activity-dialog">
     <p className="dialog-description">{t('pulse.description')}</p>
     {error ? <p className="form-error" role="alert"><span>{error}</span> {identityChanged
       ? <button className="text-button" type="button" onClick={() => window.location.reload()}>{t('pulse.reloadWorkspace')}</button>
