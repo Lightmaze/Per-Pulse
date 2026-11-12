@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a16
+
+- Inspect the exact text previously delivered by a native public HTTPS `read_web` call from a Work's Web sources, including the original URL, observation time, extracted-text range and digest. The saved observation survives later webpage changes and service restart; inspecting it does not fetch the page again (#259).
+- Select an exact passage from that saved webpage observation and save it as an operator-authored example in the existing World-owned Posture journal. It becomes eligible for later Works while retaining a source path; saving remains possible with the provider disconnected and does not copy the original private Work history (#260).
+- Carry that example into a later Work's existing pre-action expert material with explicit `native_web_example` provenance and an unverified-past-observation status. Source-only URLs and receipts stay private. This makes the input attributable; it does not prove a live model used the example or improved its decision (#261).
+
 ## 0.1.0a15
 
 - Retain an exact passage from an actually completed native HTTPS `read_web` observation as an existing Posture example, with the observed URL, text version and source Work. Later Works can use that example without copying the original private conversation (#256).
