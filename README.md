@@ -30,8 +30,9 @@ Kernel implementation.
   Reading an image sends it to your configured model, which must support image
   input; a large image is sent as a copy scaled to fit 2048 px and 1 MiB. Replies can include headings, tables and code blocks.
 - Read public HTTPS text pages with their source URL and reading time.
-  Retain an exact observed passage as a sourced example for later Works, or
-  return to the original observation through its source Work.
+  Inspect the exact text that was originally read even if the webpage later changes,
+  then select a passage to keep as a sourced example for later Works; return to
+  the original observation through its source Work.
 - Let pages continue: background pulses within an hourly budget, or type
   `/tick 3` to give a page three more steps.
 - Start autonomous practice from Activity with a weekly request allowance. Work and
@@ -55,13 +56,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a15-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a15)
+[`per_pulse-0.1.0a16-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a16)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a15-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a16-py3-none-any.whl
 per-pulse --example
 ```
 
