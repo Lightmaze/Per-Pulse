@@ -318,6 +318,36 @@ class PageLearning:
                 raise PageError("invalid_experience_source", str(error), 422) from error
             return {"experience": self._public(record, context_id, page_id)}
 
+    def create_web_example(self, page_id, data):
+        """Keep an operator-selected exact passage from an existing native web receipt.
+
+        The user chooses the passage after inspecting a saved observation. The
+        host validates the original delivered action in this Work's history,
+        and the same World/Posture journal makes the selected passage available
+        to later Works. This does not fetch the URL or run a model.
+        """
+        from pulse_system.service.web_experience import capture_web_example
+
+        with self.pages._lock:
+            memory = self._memory()
+            context_id, subject_id = self._context(page_id), self._subject(page_id)
+            scope = self.pages.execution._scope(page_id)
+            try:
+                captured = capture_web_example(
+                    self.pages.runtime, scope, data["receiptId"], data["excerpt"])
+                record = memory.add_experience(
+                    subject_id=subject_id, context_id=context_id, representation="example",
+                    title=data["title"], excerpt=data["excerpt"], note=data.get("note", ""),
+                    encounter=captured["encounter"],
+                    source={**captured["source"], "capture_kind": "operator_selected_web_example"},
+                    record_type=captured["record_type"], scope="subject",
+                )
+            except (ValueError, RedactionRequired) as error:
+                raise self._invalid(error) from error
+            except ScopeConflict as error:
+                raise PageError("invalid_experience_source", str(error), 422) from error
+            return {"experience": self._public(record, context_id, page_id)}
+
     def revise(self, page_id, experience_id, revision, changes, evidence=None):
         with self.pages._lock:
             memory, record = self._owned(page_id, experience_id)
