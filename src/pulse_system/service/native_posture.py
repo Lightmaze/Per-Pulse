@@ -89,7 +89,7 @@ def descriptor() -> ToolDescriptor:
         "message IDs; when next_after_experience_id appears, page older ones with "
         "list(after_experience_id). find(query) searches titles, lessons, conditions, "
         "shifts and passages; page older matches with find(query, after_experience_id). "
-        "An oversized reference is not advice. get(experience_id) reads details; follow "
+        "get(experience_id) reads details; follow "
         "detail.next for large JSON records. "
         "remember(source_message_id, feedback_message_id, title, lesson, conditions, "
         "counterexamples, shift) keeps a lesson from the user's later feedback on an "
