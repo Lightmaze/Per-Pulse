@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a15
+
+- Retain an exact passage from an actually completed native HTTPS `read_web` observation as an existing Posture example, with the observed URL, text version and source Work. Later Works can use that example without copying the original private conversation (#256).
+- Continue native workspace browsing past the first batch of files. `browse_workspace` returns a bounded `nextCursor` and reports changed directories rather than silently losing later entries (#255).
+- Browse older verified file results in a long-lived Work. The UI loads earlier Kernel receipts on demand and keeps the original file version, download, handoff and conditional Undo behavior (#257).
+- Complete Chinese wording for source-to-Work and material recovery flows, so those paths use the same accessible language as the rest of the UI (#254).
+
 ## 0.1.0a14
 
 - Drop or paste several PNG/JPEG, text and PDF files together into a Home or Work composer. Keep up to five source-backed attachments in the unsent draft through refresh; only explicit Send calls the model. Preserve successfully attached files and explain what stopped the rest (#250).
