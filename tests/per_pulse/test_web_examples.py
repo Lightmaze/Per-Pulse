@@ -16,7 +16,7 @@ from pulse_harness.adapters import web_read
 from pulse_system.service.native_posture import validate
 from reading_example_fixture import ReadingExampleFixture
 from test_reading_examples import choose
-from test_pages import client_for
+from test_pages import client_for, new_page
 from test_reading_continuity import work
 
 
@@ -193,7 +193,10 @@ def test_operator_keeps_exact_web_observation_for_later_work_without_model(tmp_p
     page_text["text"] = "Different live page, do not use it."
     with client_for(tmp_path, posture=True, model_factory=None) as client:
         endpoint = f"/api/pages/{first}/posture/web-examples"
-        foreign = work(client)
+        # With the provider disconnected, a new Work is queued rather than
+        # receiving an assistant reply; its source access must still be scoped.
+        foreign = new_page(client, title="Another Work",
+                           instruction="Keep unrelated notes.")["page"]["id"]
         request = {"receiptId": receipt_id, "title": "What the webpage said",
                    "excerpt": selected, "note": "Check this detail before later work."}
         assert client.post(f"/api/pages/{foreign}/posture/web-examples", json=request).status_code == 422
