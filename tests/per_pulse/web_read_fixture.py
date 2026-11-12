@@ -69,6 +69,8 @@ class WebFixture:
                     return response(tool="read_web", arguments={"url": "http://reading.example/plain"})
                 assert results[-1]["error_code"] == "web_url_invalid"
                 return response("This URL uses HTTP. Try a public HTTPS text page.")
+            if task.startswith("Use the retained field observation for a new task"):
+                return response("The follow-up Work completed a separate field-note comparison.")
             if task.startswith("Independent conversation"):
                 return response("This independent Work has no web observation.")
             if task.startswith("Recall the original webpage"):

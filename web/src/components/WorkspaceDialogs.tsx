@@ -10,7 +10,7 @@ import { providerSetupCommand, type ProviderMode, type ProviderShell } from '../
 import { CopyButton } from './CopyButton';
 
 export type Modal =
-  | { kind: 'create'; message?: Message }
+  | { kind: 'create'; message?: Message; fromExperience?: boolean }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'picker'; mode: 'artifact'; artifact: Artifact }
   | { kind: 'return'; message: Message; content: string; needsExactExcerpt?: boolean }
@@ -23,7 +23,7 @@ export type Modal =
   | { kind: 'materials'; materialId?: string; pageId?: string }
   | { kind: 'rename' };
 
-export function CreatePageDialog({ initial, busy, error, close, create }: { initial?: Message; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
+export function CreatePageDialog({ initial, fromExperience, busy, error, close, create }: { initial?: Message; fromExperience?: boolean; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
   const { t } = useLanguage();
   const [title, setTitle] = useState('');
   const source = initialPageSource(initial, t('source.defaultRequest'));
@@ -31,6 +31,7 @@ export function CreatePageDialog({ initial, busy, error, close, create }: { init
   const [instruction, setInstruction] = useState(source.instruction);
   return <Dialog title={t("dialogs.createTitle")} onClose={close}>
     <p className="dialog-description">{t('dialogs.createDescription')}</p>
+    {fromExperience ? <p className="lesson-note">{t('webSources.continueHelp')}</p> : null}
     {initial?.materials?.length ? <p className="lesson-note">{t('materials.newPageSource')}</p> : null}
     <form onSubmit={event => { event.preventDefault(); if (title.trim() && instruction.trim() && !busy) create(title.trim(), instruction.trim(), initial ? excerpt : undefined); }}>
       <label className="field-label" htmlFor="new-page-title">{t('dialogs.pageName')}</label>
