@@ -61,6 +61,22 @@ it. Saving an example does not certify its success or future applicability.
 Real-provider learning benefits still need output comparison and review.
 Example mode remains model-free and does not enable experience learning.
 
+### Keep an observed webpage passage without a model request
+
+From a Work's **Web sources**, choose **View saved text**, copy a contiguous
+passage into **Keep a passage for later work**, name the example, and optionally
+add a note. The app validates those exact bytes against that Work's delivered
+native `read_web` receipt, not the live webpage. It saves the selected passage
+in the existing Posture journal even with the model disconnected. Later Works
+can use that passage and note; the original URL, full webpage and private
+encounter remain in the source Work. The user can refine or pause the saved
+example through **Lessons and examples**.
+
+The operator's selection is an attributed observation, not a model-generated
+lesson or a rating. Reopening the page and saving the example do not start an
+HTTP fetch or spend model requests. Cross-Work and restart behavior are covered
+by native and Chromium tests.
+
 ### Reading large experience details
 
 The native `posture.get(experience_id)` tool keeps small records in its normal

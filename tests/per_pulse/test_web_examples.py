@@ -16,7 +16,7 @@ from pulse_harness.adapters import web_read
 from pulse_system.service.native_posture import validate
 from reading_example_fixture import ReadingExampleFixture
 from test_reading_examples import choose
-from test_pages import client_for
+from test_pages import client_for, new_page
 from test_reading_continuity import work
 
 
@@ -173,3 +173,56 @@ def test_saved_web_observation_readback_keeps_exact_version_and_work_scope(tmp_p
         assert restored.status_code == 200
         assert restored.json() == item
         assert observed == initial_transport_requests
+
+
+def test_operator_keeps_exact_web_observation_for_later_work_without_model(tmp_path, monkeypatch):
+    """An explicit user choice reuses a prior delivered native receipt, offline."""
+    observed, page_text = prepare_web(monkeypatch)
+    fixture = ReadingExampleFixture(monkeypatch.setenv)
+    selected = "Keep  two spaces."
+    with client_for(tmp_path, posture=True, model_factory=fixture.factory) as client:
+        first = work(client)
+        result = choose(client, first, fixture, op="web_open",
+                        url="https://research.example/operator-choice")[0]
+        assert result["status"] == "succeeded"
+        receipt_id = result["output"]["receipt_id"]
+        assert len(observed) == 1
+
+    # The provider is disconnected and the remote page has changed. Only the
+    # original exact observed bytes may be selected by this Work's operator.
+    page_text["text"] = "Different live page, do not use it."
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        endpoint = f"/api/pages/{first}/posture/web-examples"
+        # With the provider disconnected, a new Work is queued rather than
+        # receiving an assistant reply; its source access must still be scoped.
+        foreign = new_page(client, title="Another Work",
+                           instruction="Keep unrelated notes.")["page"]["id"]
+        request = {"receiptId": receipt_id, "title": "What the webpage said",
+                   "excerpt": selected, "note": "Check this detail before later work."}
+        assert client.post(f"/api/pages/{foreign}/posture/web-examples", json=request).status_code == 422
+        for invalid in ("changed live page", "Keep two spaces.", "界" * 3000):
+            response = client.post(endpoint, json={**request, "excerpt": invalid})
+            assert response.status_code == 422
+        assert client.get(f"/api/pages/{first}/posture").json()["experiences"] == []
+        saved = client.post(endpoint, json=request)
+        assert saved.status_code == 201, saved.text
+        source = saved.json()["experience"]
+        assert source["representation"] == "example"
+        assert source["sourceKind"] == "web"
+        assert source["record_type"] == "observed_episode"
+        assert source["excerpt"] == selected
+        assert source["note"] == request["note"]
+        assert source["source"]["capture_kind"] == "operator_selected_web_example"
+        assert source["webSource"]["receiptId"] == receipt_id
+        shared = next(item for item in client.get(f"/api/pages/{foreign}/posture").json()["experiences"]
+                      if item["id"] == source["id"])
+        assert shared["excerpt"] == selected and shared["note"] == request["note"]
+        assert shared["sourcePageId"] == first
+        assert "webSource" not in shared and "source" not in shared
+        assert len(observed) == 1
+
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        restored = next(item for item in client.get(f"/api/pages/{foreign}/posture").json()["experiences"]
+                        if item["id"] == source["id"])
+        assert restored == shared
+        assert len(observed) == 1
