@@ -73,3 +73,22 @@ all its conditions, exceptions and source fields. Every response stays within
 Offsets count Unicode characters. Continuation binds the record's digest;
 if it changes, start get again without the old digest. Each page checks the
 same active-record and context visibility rules as the first get.
+
+### Reopen the text a Work actually read from the web
+
+After a native `read_web` action finishes, open **Web sources** in that Work
+and choose **View saved text**. The original extracted passage appears with the
+reading time, exact text range and SHA-256 digest. Copy it or follow the linked
+HTTPS URL to compare the current page; the two may differ. Reopening the saved
+text never visits the URL or starts a model request.
+
+Only text delivered by an action in the current Work's verified history can be
+opened. Another Work cannot read this private action by guessing its receipt ID;
+a deliberately retained posture example shares only its selected passage. The
+same saved text can be reopened after a process restart or with no model configured.
+
+The actual native action is exercised by
+`tests/per_pulse/test_web_examples.py`; the desktop/mobile
+`tests/browser/web_read_flow.mjs` checks rendered text, source navigation,
+restart and absence of a second fetch with explicitly synthetic model and
+website traffic.
