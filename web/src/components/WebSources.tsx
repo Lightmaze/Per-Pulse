@@ -8,7 +8,9 @@ import { CopyButton } from './CopyButton';
 import { MessageContent } from './MessageContent';
 import type { Navigate } from './SessionLink';
 
-export function WebSources({ view, navigate }: { view: PageView; navigate: Navigate }) {
+export function WebSources({ view, navigate, onReviewExperience, onContinueWork }: {
+  view: PageView; navigate: Navigate; onReviewExperience: () => void; onContinueWork: () => void;
+}) {
   const { t } = useLanguage();
   const sources = view.execution.webSources;
   const [opened, setOpened] = useState<string | null>(null);
@@ -143,7 +145,17 @@ export function WebSources({ view, navigate }: { view: PageView; navigate: Navig
                 onChange={event => { setNote(event.target.value); setSaved(false); }} />
             </label>
             {saveError ? <p role="alert">{saveError}</p> : null}
-            {saved ? <p role="status">{t('webSources.exampleSaved')}</p> : null}
+            {saved ? <>
+              <p role="status">{t('webSources.exampleSaved')}</p>
+              <div className="web-observation-next">
+                <button type="button" className="secondary-button" onClick={onReviewExperience}>
+                  {t('webSources.reviewSaved')}
+                </button>
+                <button type="button" className="secondary-button" onClick={onContinueWork}>
+                  {t('webSources.continueSaved')}
+                </button>
+              </div>
+            </> : null}
             <button type="submit" disabled={saving || !exampleTitle.trim() || !excerpt.trim()}>
               {t(saving ? 'webSources.exampleSaving' : 'webSources.exampleSave')}
             </button>

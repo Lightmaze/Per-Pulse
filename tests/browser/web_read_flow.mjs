@@ -119,6 +119,36 @@ try {
   assert.equal(retained.source.capture_kind, 'operator_selected_web_example');
   assert.equal((await get('/__web/status')).webRequests, 1);
   checks.push('the user retains an exact passage from the observed webpage in native Posture without new model or website requests');
+  await page.getByRole('button', { name: 'Review saved experience', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Lessons and examples' }).waitFor();
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue in a new Work', exact: true }).click();
+  await page.getByText('Write a task for the new Work.', { exact: false }).waitFor();
+  await page.locator('#new-page-title').fill('Follow-up comparison');
+  await page.locator('#new-page-focus').fill('Use the retained field observation for a new task: compare a second field note.');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Follow-up comparison', exact: true }).waitFor();
+  const followup = await wait(() => get('/api/bootstrap'),
+    value => value.pages.some(p => p.title === 'Follow-up comparison'), 'follow-up Work');
+  const followupId = followup.pages.find(p => p.title === 'Follow-up comparison').id;
+  const followupView = await wait(() => get('/api/pages/' + followupId),
+    value => value.messages.some(m => m.content === 'The follow-up Work completed a separate field-note comparison.'),
+    'follow-up Work finished');
+  assert.equal(followupView.page.sourcePageId, work);
+  assert.equal(followupView.page.sourceMessageId, null, 'source Work has no invented source message');
+  assert.ok((await get('/api/pages/' + followupId + '/posture')).experiences.some(item => item.id === retained.id));
+  assert.equal((await get('/__web/status')).webRequests, 1, 'new Work reuses retained experience without refetching');
+  await page.getByText('The follow-up Work completed a separate field-note comparison.', { exact: true }).waitFor();
+  await page.locator('.message-assistant').last().getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Bring this back to Home.' }).waitFor();
+  await page.getByRole('dialog').getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  const returned = await wait(() => get('/api/pages/home'), value => value.messages.some(
+    m => m.sourcePageId === followupId && m.content.includes('The follow-up Work completed a separate field-note comparison.')),
+    'follow-up result returns to Home');
+  assert.ok(returned.messages.some(m => m.sourcePageId === followupId));
+  checks.push('a saved observation opens its experience view and a user-authored later Work, then returns its sourced result to Home');
+  await page.goto(base + '/page/' + work);
+  await page.getByRole('heading', { name: 'Reading expedition', exact: true }).waitFor();
   await page.screenshot({ path: join(output, 'web-source-desktop.png') });
   checks.push('the browser opens the exact retained webpage text and source version alongside the original HTTPS link, without a second network read');
   const draft = 'Keep this reading draft.';
