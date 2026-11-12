@@ -191,6 +191,15 @@ class NewExample(Input):
     note: Annotated[str, StringConstraints(max_length=4000)] = ""
 
 
+class NewWebExample(Input):
+    receiptId: Identifier
+    title: Title
+    # Keep original whitespace; native capture verifies exact receipt membership
+    # and the UTF-8 byte limit before adding the example to the World journal.
+    excerpt: Annotated[str, StringConstraints(min_length=1, max_length=8000)]
+    note: Annotated[str, StringConstraints(max_length=4000)] = ""
+
+
 class ExperienceFeedback(Input):
     expectedRevision: int = Field(ge=1, strict=True)
     verdict: Literal["useful", "not_useful", "harmful", "withdrawn"]
@@ -617,6 +626,10 @@ def create_app(
     @app.post("/api/pages/{page_id}/posture/examples", status_code=201)
     def create_example(page_id: str, body: NewExample, request: Request):
         return pages(request).learning.create_example(page_id, body.model_dump())
+
+    @app.post("/api/pages/{page_id}/posture/web-examples", status_code=201)
+    def save_web_example(page_id: str, body: NewWebExample, request: Request):
+        return pages(request).learning.create_web_example(page_id, body.model_dump())
 
     @app.patch("/api/pages/{page_id}/posture/experiences/{experience_id}")
     def revise_experience(page_id: str, experience_id: str, body: ReviseExperience, request: Request):
