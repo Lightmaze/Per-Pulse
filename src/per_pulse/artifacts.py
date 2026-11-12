@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import base64
+import binascii
 import hashlib
 import json
 from pathlib import Path
@@ -174,7 +175,7 @@ class PageArtifacts:
             raise bad
         try:
             data = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
-        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        except (ValueError, UnicodeDecodeError, binascii.Error) as error:
             raise bad from error
         if (not isinstance(data, list) or len(data) != 4 or data[0] != 1
                 or any(not isinstance(value, str) or not value or len(value) > 512
