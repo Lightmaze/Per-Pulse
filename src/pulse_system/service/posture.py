@@ -402,6 +402,14 @@ class PostureMemory:
             item["source"].update(kind="native_command_example",
                                   meaning="retained_command_observation_not_quality_rating",
                                   command_observation=deepcopy(record["source"]["command_observation"]))
+        if record["source"].get("kind") == "native_web_example":
+            # A later Work receives the passage and its observation status,
+            # not the originating Work's URL, receipt or full private episode.
+            item["source"].update(
+                kind="native_web_example",
+                meaning="retained_web_text_observation_not_verified_claim_or_outcome",
+                current_webpage_checked=False,
+            )
         if record["source"].get("execution_regime") == "replay":
             # Share the meaning, not the original page's selected sources.
             item["source"]["execution_regime"] = "replay"
