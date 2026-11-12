@@ -84,6 +84,33 @@ def test_retained_web_passage_is_attributed_and_available_in_a_later_work(tmp_pa
         assert url not in json.dumps(shared)
         assert shared["sourcePageId"] == first and shared["sourceAnchor"]["resultMessageId"]
 
+        # This is the native material used by the existing expert pre-action
+        # advisor in Work B, not merely the learning-panel projection.
+        runtime = client.app.state.pages.runtime
+        front = runtime.world.get_task_front(another)
+        expert = ExpertRuntime(tmp_path / "web-example-expert.db", guard=lambda: None,
+                               posture_memory=runtime.harness.posture_memory,
+                               expert_active=False)
+        try:
+            scope = HarnessScope(runtime.world_id, front.focal_engram_id,
+                                 "session", 0, "owner",
+                                 context_id=f"work:{front.center_id}", turn_id="later")
+            materials = expert.posture_materials(scope)
+            offered = next(item for item in materials["episodes"]
+                           if item["id"] == source["id"])
+            assert offered["excerpt"] == selected
+            assert offered["source"]["kind"] == "native_web_example"
+            assert offered["source"]["meaning"] == (
+                "retained_web_text_observation_not_verified_claim_or_outcome")
+            assert offered["source"]["current_webpage_checked"] is False
+            assert "web_source" not in offered["source"]
+            assert "web_receipt_id" not in offered["source"]
+            assert "encounter" not in offered
+            assert url not in json.dumps(offered)
+            assert len(observed) == 1
+        finally:
+            expert.close()
+
     with client_for(tmp_path, posture=True, model_factory=None) as client:
         saved = next(x for x in client.get(f"/api/pages/{first}/posture").json()["experiences"]
                      if x["id"] == source["id"])
