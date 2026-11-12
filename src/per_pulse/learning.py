@@ -165,11 +165,13 @@ class PageLearning:
                     "truncated": observed["truncated"],
                     "receiptId": source["web_receipt_id"],
                 }
-        if reading or command or web:
-            # Navigation points to the actual reading turn's final reply. It
-            # does not claim that the selected material came from that reply.
+        original_turn_id = source.get("original_turn_id")
+        if (reading or command or web) and isinstance(original_turn_id, str) and original_turn_id:
+            # An observed action can outlive its originating model turn.
+            # Keep the source-page link even if no settled turn can be resolved;
+            # never invent an assistant-result anchor for the observation.
             turn = self.pages.runtime.causal_ledger.get_turn_for_world(
-                source["original_turn_id"], self.pages.runtime.world_id)
+                original_turn_id, self.pages.runtime.world_id)
             if source_page and turn and turn.result_event_id:
                 from pulse_system.service.native_posture import _settled_result
                 try:
