@@ -138,6 +138,8 @@ def test_saved_web_observation_readback_keeps_exact_version_and_work_scope(tmp_p
         assert response["status"] == "succeeded"
         output = response["output"]
         action_id = output["receipt_id"]
+        initial_transport_requests = observed.copy()
+        assert len(initial_transport_requests) == 1
         listed = client.get(f"/api/pages/{first}").json()["execution"]["webSources"]["items"]
         assert any(item["actionId"] == action_id for item in listed)
 
@@ -163,11 +165,11 @@ def test_saved_web_observation_readback_keeps_exact_version_and_work_scope(tmp_p
         page_text["text"] = "Now changed: " + page_text["text"]
         again = client.get(f"/api/pages/{first}/execution/web/{action_id}")
         assert again.status_code == 200 and again.json() == item
-        assert observed == [url]
+        assert observed == initial_transport_requests
 
     # Cold restart and disconnected provider: the same native saved bytes survive.
     with client_for(tmp_path, posture=True, model_factory=None) as client:
         restored = client.get(f"/api/pages/{first}/execution/web/{action_id}")
         assert restored.status_code == 200
         assert restored.json() == item
-        assert observed == [url]
+        assert observed == initial_transport_requests
