@@ -633,6 +633,10 @@ def create_app(
     def execution(page_id: str, request: Request):
         return pages(request).execution.snapshot(page_id)
 
+    @app.get("/api/pages/{page_id}/execution/web/{action_id}")
+    def web_observation(page_id: str, action_id: Identifier, request: Request):
+        return pages(request).execution.web_observation(page_id, action_id)
+
     @app.get('/api/pages/{page_id}/execution/commands/{action_id}/{stream}')
     def command_output(page_id: str, action_id: Identifier, stream: Literal['stdout', 'stderr'],
                        request: Request, offset: int = Query(0, ge=0), limit: int = Query(4000, ge=1, le=8000)):
