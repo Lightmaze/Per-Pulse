@@ -106,7 +106,7 @@ def descriptor() -> ToolDescriptor:
         "already shown by read_command_output; use its returned receipt_id. "
         "remember_web(receipt_id, title, excerpt, note?) keeps exact extracted text "
         "already shown by read_web, with its observed HTTPS URL and time. "
-        "The command's exit code and capture completeness stay attached. When a later "
+        "When a later "
         "user correction shows a lesson was wrong, feedback(experience_id, "
         "expected_revision, verdict, feedback_message_id) marks it not_useful, harmful or "
         "withdrawn; harmful and withdrawn turn it off. When a correction refines a lesson "
