@@ -125,3 +125,49 @@ def test_web_selection_does_not_accept_unseen_authority_or_oversized_text(extra)
     else:
         with pytest.raises(ValueError):
             validate(values)
+
+
+def test_saved_web_observation_readback_keeps_exact_version_and_work_scope(tmp_path, monkeypatch):
+    """The UI reads a native receipt, not today's changed webpage or a foreign Work."""
+    observed, page_text = prepare_web(monkeypatch)
+    fixture = ReadingExampleFixture(monkeypatch.setenv)
+    url = "https://research.example/original-text"
+    with client_for(tmp_path, posture=True, model_factory=fixture.factory) as client:
+        first = work(client)
+        response = choose(client, first, fixture, op="web_open", url=url)[0]
+        assert response["status"] == "succeeded"
+        output = response["output"]
+        action_id = output["receipt_id"]
+        listed = client.get(f"/api/pages/{first}").json()["execution"]["webSources"]["items"]
+        assert any(item["actionId"] == action_id for item in listed)
+
+        saved = client.get(f"/api/pages/{first}/execution/web/{action_id}")
+        assert saved.status_code == 200
+        item = saved.json()
+        assert item["pageId"] == first and item["actionId"] == action_id
+        assert item["source"]["url"] == url
+        assert item["source"]["fetchedAt"] == output["source"]["fetched_at"]
+        assert item["content"] == output["content"]
+        assert item["digest"] == hashlib.sha256(output["content"].encode()).hexdigest()
+        assert item["textStart"] == 0
+        assert item["textEnd"] == len(output["content"])
+
+        second = work(client)
+        unseen = client.get(f"/api/pages/{second}/execution/web/{action_id}")
+        assert unseen.status_code == 404
+        assert unseen.json()["error"]["code"] == "web_observation_not_found"
+        missing = client.get(f"/api/pages/{first}/execution/web/not-a-receipt")
+        assert missing.status_code == 404
+
+        # A later change to the original URL does not alter the saved text.
+        page_text["text"] = "Now changed: " + page_text["text"]
+        again = client.get(f"/api/pages/{first}/execution/web/{action_id}")
+        assert again.status_code == 200 and again.json() == item
+        assert observed == [url]
+
+    # Cold restart and disconnected provider: the same native saved bytes survive.
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        restored = client.get(f"/api/pages/{first}/execution/web/{action_id}")
+        assert restored.status_code == 200
+        assert restored.json() == item
+        assert observed == [url]
