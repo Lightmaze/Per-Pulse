@@ -294,9 +294,45 @@ class PageExecution:
             scope = self._scope(page_id)
             scopes = self._history_scopes(scope) if scopes is None else scopes
             actions = self._historical_actions(scopes, status=ActionStatus.SUCCEEDED, limit=129)
-        sources = [source for action in actions[:128]
+        sources = [source for action in actions[:128] if action.result_delivered
                    if (source := web_read.source_from_action(action)) is not None]
         return {"items": sources[:8], "truncated": len(actions) > 128 or len(sources) > 8}
+
+    def web_observation(self, page_id: str, action_id: str) -> dict:
+        """Read the exact delivered text of a prior observation, without a new HTTP request.
+
+        Only an action in this page's verified native context lineage is visible.
+        The normal action-record digest check rejects incomplete or altered
+        receipts. Opening a source never creates an action or a model turn.
+        """
+        scope = self._scope(page_id)
+        for previous in self._history_scopes(scope):
+            try:
+                action_scope = self._kernel.store.action_scope_for_session(previous, action_id)
+                action = self._kernel.store.get_action(action_scope, action_id)
+            except ScopeConflict:
+                continue
+            if not action.result_delivered:
+                continue
+            source = web_read.source_from_action(action)
+            if source is None:
+                continue
+            output = (action.result or {}).get("output", {})
+            raw = output.get("source", {})
+            return {
+                "pageId": page_id,
+                "actionId": action_id,
+                "source": source,
+                "content": output["content"],
+                "textStart": raw.get("text_start", 0),
+                "textEnd": raw.get("text_end", len(output["content"])),
+                "digest": raw["text_sha256"],
+                "readingNote": output.get("reading_note", ""),
+            }
+        raise ExecutionError(
+            "web_observation_not_found",
+            "This saved webpage observation is not available in this Work.", 404,
+        )
 
     def _command_action(self, page_id: str, action_id: str):
         scope = self._scope(page_id)
