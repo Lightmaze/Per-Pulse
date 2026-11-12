@@ -28,7 +28,7 @@ def prepare_web(monkeypatch):
     def serve(request):
         observed.append(str(request.url))
         return httpx.Response(200, headers={"content-type": "text/plain; charset=utf-8"},
-                              content=content["text"].encode("utf-8"))
+                              stream=httpx.ByteStream(content["text"].encode("utf-8")))
 
     monkeypatch.setattr(web_read, "_client", lambda: httpx.AsyncClient(
         transport=httpx.MockTransport(serve), trust_env=False))
