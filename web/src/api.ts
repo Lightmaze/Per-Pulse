@@ -76,6 +76,10 @@ export const api = {
     request<PageView>(pagePath(id) + (sourceMessageId ? `?sourceMessageId=${encodeURIComponent(sourceMessageId)}` : ''), { signal }),
   webObservation: (pageId: string, actionId: string, signal?: AbortSignal) =>
     request<WebObservation>(`${pagePath(pageId)}/execution/web/${encodeURIComponent(actionId)}`, { signal }),
+  saveWebExample: (pageId: string, data: { receiptId: string; title: string; excerpt: string; note: string }) =>
+    request<{ experience: PostureExperience }>(`${pagePath(pageId)}/posture/web-examples`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
   adaptiveChoices: (id: string, signal?: AbortSignal) =>
     request<AdaptiveWorkChoices>(`${pagePath(id)}/team/choices`, { signal }),
   rateAdaptiveChoice: (pageId: string, recordId: string, outcome: CollaboratorOutcome) =>
