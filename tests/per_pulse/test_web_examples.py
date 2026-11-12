@@ -13,6 +13,8 @@ import httpx
 import pytest
 
 from pulse_harness.adapters import web_read
+from pulse_harness.core import HarnessScope
+from pulse_system.service.expert_computation import ExpertRuntime
 from pulse_system.service.native_posture import validate
 from reading_example_fixture import ReadingExampleFixture
 from test_reading_examples import choose
