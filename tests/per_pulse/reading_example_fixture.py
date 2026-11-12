@@ -39,11 +39,16 @@ class ReadingExampleFixture(MaterialFixture):
         command = json.loads(instruction.rsplit("READING_EXAMPLE_FIXTURE:", 1)[1])
         results = [json.loads(item["content"]) for item in messages[current + 1:] if item["role"] == "tool"]
         if not results:
-            tool = "posture" if command["op"] in {"remember_reading", "revise", "get", "feedback"} else "reading"
-            return self.response(tool=tool, arguments={k: v for k, v in command.items() if k != "retain"})
+            tool = ("posture" if command["op"] in {"remember_reading", "remember_web", "revise", "get", "feedback"}
+                    else "read_web" if command["op"] == "web_open" else "reading")
+            arguments = {k: v for k, v in command.items() if k != "retain"}
+            if tool == "read_web":
+                arguments.pop("op")
+            return self.response(tool=tool, arguments=arguments)
         if len(results) == 1 and "retain" in command and results[0]["status"] == "succeeded":
             return self.response(tool="posture", sequence=1, arguments={
-                "op": "remember_reading", "receipt_id": results[0]["output"]["receipt_id"], **command["retain"]})
+                "op": "remember_web" if command["op"] == "web_open" else "remember_reading",
+                "receipt_id": results[0]["output"]["receipt_id"], **command["retain"]})
         self.outcomes.append(results)
         self.prepared = results[-1]
         if self.fail_after_prepare:

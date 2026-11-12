@@ -114,6 +114,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     <div className="lesson-heading"><h3>{experience.title}</h3><span>{t(experience.active ? 'learning.active' : 'learning.paused')} · v{experience.revision}</span></div>
     {experience.sourceRegime === 'replay' ? <p className="lesson-note replay-saved">{t('replay.saved')}</p> : null}
     {experience.sourceKind === 'reading' ? <p className="lesson-note">{t('learning.readingExample')}</p> : null}
+    {experience.sourceKind === 'web' ? <p className="lesson-note">{t('learning.webExample')}</p> : null}
     {experience.commandSource ? <p className="lesson-note">{t('learning.commandExample')} {t('learning.commandExit', { code: experience.commandSource.exitCode })}{!experience.commandSource.captureComplete ? ` ${t('learning.commandIncomplete')}` : ''}</p> : null}
     {example ? <div className="saved-example">
       <p className="lesson-scope">{t('learning.example')}</p>
@@ -135,13 +136,23 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
           <p>{experience.readingSource.receiptId}</p>
         </details>
       </div> : null}
+      {experience.webSource ? <div className="lesson-note">
+        <p>{t('learning.webSource')}: <a href={experience.webSource.url} target="_blank" rel="noopener noreferrer">{experience.webSource.title || experience.webSource.url}</a></p>
+        <p>{t('learning.webVersion')}{experience.webSource.truncated ? ` ${t('learning.webPartial')}` : ''}</p>
+        <details><summary>{t('learning.readingDetails')}</summary>
+          <p>{experience.webSource.url}</p>
+          <p>SHA-256: {experience.webSource.digest}</p>
+          <p>{experience.webSource.fetchedAt}</p>
+          <p>{experience.webSource.receiptId}</p>
+        </details>
+      </div> : null}
       {experience.encounter ? <SourceEncounter experience={experience} pageId={pageId} navigate={navigate} /> : <p className="lesson-scope">{t('learning.sourcePrivate')}</p>}
       {experience.revisionSource?.kind === 'model_reinterpreted_example' ? <div className="lesson-note">
         <p>{t('learning.pulseRefinement')}{['TEST_DOUBLE', 'EXPLICIT_MOCK'].includes(experience.revisionSource.selector_evidence_class ?? '') ? ` ${t('learning.testInterpretation')}` : ''}</p>
         {experience.sourcePageId && experience.revisionSource.resultMessageId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, experience.revisionSource!.resultMessageId!)}>{t('learning.openRefinement')}</button> : null}
       </div> : null}
       {experience.sourcePageId ? <div className="lesson-actions">
-        {originalId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, originalId)}>{t(experience.sourceKind === 'command' ? 'learning.commandTurn' : experience.sourceKind === 'reading' ? 'learning.readingTurn' : 'learning.original')}</button> : null}
+        {originalId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, originalId)}>{t(experience.sourceKind === 'command' ? 'learning.commandTurn' : experience.sourceKind === 'reading' ? 'learning.readingTurn' : experience.sourceKind === 'web' ? 'learning.webTurn' : 'learning.original')}</button> : null}
         {correctionId ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin, correctionId)}>{t('learning.correction')}</button> : null}
       </div> : null}
     </details> : null}

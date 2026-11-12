@@ -139,6 +139,7 @@ class PageLearning:
         source = record.get("source", {})
         reading = source.get("kind") == "native_reading_example"
         command = source.get("kind") == "native_command_example"
+        web = source.get("kind") == "native_web_example"
         if reading:
             result["sourceKind"] = "reading"
             if local:
@@ -153,7 +154,18 @@ class PageLearning:
             observed = source["command_observation"]
             result["commandSource"] = {"stream": observed["stream"], "exitCode": observed["exit_code"],
                                        "captureComplete": observed["capture_complete"]}
-        if reading or command:
+        if web:
+            result["sourceKind"] = "web"
+            if local:
+                observed = source["web_source"]
+                result["webSource"] = {
+                    "url": observed["url"], "title": observed["title"],
+                    "fetchedAt": observed["fetched_at"],
+                    "digest": observed["observation_sha256"],
+                    "truncated": observed["truncated"],
+                    "receiptId": source["web_receipt_id"],
+                }
+        if reading or command or web:
             # Navigation points to the actual reading turn's final reply. It
             # does not claim that the selected material came from that reply.
             turn = self.pages.runtime.causal_ledger.get_turn_for_world(
