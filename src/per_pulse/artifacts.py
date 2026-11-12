@@ -19,7 +19,10 @@ provider. It applies only while the file still has that change's content.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import base64
+import binascii
 import hashlib
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -156,35 +159,97 @@ class PageArtifacts:
     def _limits() -> dict:
         return {"limitBytes": MAX_FILE_BYTES, "previewLimitBytes": MAX_PREVIEW_BYTES}
 
-    def snapshot(self, page_id: str) -> dict:
-        """Return recent confirmed file versions, without opening any files.
+    @staticmethod
+    def _cursor(session_id: str, action: ActionRecord) -> str:
+        """Keep a stable position in the already-authorized durable action history."""
+        data = json.dumps([1, session_id, action.updated_at, action.action_request_id],
+                          separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
-        The bounded scan is explicit. An artifact outside this recent list is
-        still addressable by its action ID through ``read`` after a restart.
+    @staticmethod
+    def _resume(cursor: str) -> tuple[str, tuple[str, str]]:
+        bad = ArtifactError("artifact_cursor_invalid", "Reload the file results and try again.", 400)
+        if not isinstance(cursor, str) or not (0 < len(cursor) <= 2048):
+            raise bad
+        if re.fullmatch(r"[A-Za-z0-9_-]+", cursor) is None:
+            raise bad
+        try:
+            data = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+        except (ValueError, UnicodeDecodeError, binascii.Error) as error:
+            raise bad from error
+        if (not isinstance(data, list) or len(data) != 4 or data[0] != 1
+                or any(not isinstance(value, str) or not value or len(value) > 512
+                       or any(ord(ch) < 32 for ch in value) for value in data[1:])):
+            raise bad
+        return data[1], (data[2], data[3])
+
+    def snapshot(self, page_id: str, *, cursor: str | None = None) -> dict:
+        """Read a bounded page of durable file results, even after years of work.
+
+        The cursor is an observation position, never a file or action authority.
+        The current page's committed lineage is checked on every continuation.
+        Successful non-file actions still consume the per-request scan bound.
         """
         scope = self.execution._scope(page_id)
         try:
-            actions = self.execution._historical_actions(
-                self.execution._history_scopes(scope),
-                status=ActionStatus.SUCCEEDED, limit=MAX_ACTION_SCAN + 1,
-            )
-            truncated = len(actions) > MAX_ACTION_SCAN
-            items = []
-            for action in actions[:MAX_ACTION_SCAN]:
-                item = self._item(page_id, action)
-                if item is not None:
-                    if len(items) < MAX_ARTIFACTS:
-                        item["undone"] = self._undone(action)
-                    items.append(item)
-                elif action.tool_name == "mutate_file" and stored_payload_flags(action.result)[1]:
-                    # The native result bound can omit a large receipt's
-                    # identity fields. Do not silently claim a complete list.
-                    truncated = True
-            truncated = truncated or len(items) > MAX_ARTIFACTS
-            return {
-                "pageId": page_id, "artifacts": items[:MAX_ARTIFACTS],
-                "truncated": truncated, "scanLimit": MAX_ACTION_SCAN, **self._limits(),
-            }
+            scopes = self.execution._history_scopes(scope)
+            session_id, before = self._resume(cursor) if cursor is not None else (None, None)
+            if session_id is not None and session_id not in {item.session_id for item in scopes}:
+                raise ArtifactError("artifact_cursor_changed",
+                                    "This file history has changed. Start again from the latest results.", 409)
+            start = next((i for i, item in enumerate(scopes)
+                          if item.session_id == session_id), 0)
+            items: list[dict] = []
+            scanned = 0
+            truncated = False
+            next_cursor = None
+            store = self.execution._kernel.store
+            for index in range(start, len(scopes)):
+                remaining = MAX_ACTION_SCAN - scanned
+                if remaining <= 0:
+                    break
+                try:
+                    actions = list(reversed(store.actions_for_session(
+                        scopes[index], status=ActionStatus.SUCCEEDED,
+                        limit=remaining + 1, before=before if index == start else None,
+                    )))
+                except ScopeConflict as error:
+                    if str(error).startswith("unknown session:"):
+                        continue
+                    raise
+                # The extra row tells us whether this generation has older
+                # history without doing an unbounded full-session count.
+                for position, action in enumerate(actions[:remaining]):
+                    scanned += 1
+                    anchor = self._cursor(scopes[index].session_id, action)
+                    item = self._item(page_id, action)
+                    if item is not None:
+                        if len(items) < MAX_ARTIFACTS:
+                            item["undone"] = self._undone(action)
+                            items.append(item)
+                        else:
+                            truncated = True
+                        if len(items) >= MAX_ARTIFACTS:
+                            # Every shown result is original durable action evidence.
+                            # There may still be older non-file rows, or older
+                            # committed generations.
+                            more = position + 1 < len(actions) or index + 1 < len(scopes)
+                            next_cursor = anchor if more else None
+                            return {"pageId": page_id, "artifacts": items,
+                                    "truncated": truncated or more,
+                                    "nextCursor": next_cursor,
+                                    "scanLimit": MAX_ACTION_SCAN, **self._limits()}
+                    elif action.tool_name == "mutate_file" and stored_payload_flags(action.result)[1]:
+                        truncated = True
+                if len(actions) > remaining or scanned >= MAX_ACTION_SCAN:
+                    more = len(actions) > remaining or index + 1 < len(scopes)
+                    next_cursor = anchor if more and scanned else None
+                    break
+                before = None
+            return {"pageId": page_id, "artifacts": items,
+                    "truncated": truncated or next_cursor is not None,
+                    "nextCursor": next_cursor,
+                    "scanLimit": MAX_ACTION_SCAN, **self._limits()}
         except HarnessError as error:
             raise self.execution._translate(error) from error
 

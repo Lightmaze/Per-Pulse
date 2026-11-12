@@ -659,8 +659,8 @@ def create_app(
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.get("/api/pages/{page_id}/artifacts")
-    def artifacts(page_id: str, request: Request):
-        return pages(request).artifacts.snapshot(page_id)
+    def artifacts(page_id: str, request: Request, cursor: str | None = Query(default=None, max_length=2048)):
+        return pages(request).artifacts.snapshot(page_id, cursor=cursor)
 
     @app.get("/api/pages/{page_id}/artifacts/{artifact_id}")
     def artifact(page_id: str, artifact_id: str, request: Request):
