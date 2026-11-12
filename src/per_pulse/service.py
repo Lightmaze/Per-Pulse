@@ -935,6 +935,7 @@ class PageService:
                 "breadcrumbs": list(reversed(crumbs)), "provider": self.provider,
                 "execution": self.execution.snapshot(page_id),
                 "artifacts": artifacts["artifacts"], "artifactsTruncated": artifacts["truncated"],
+                "artifactsNextCursor": artifacts["nextCursor"],
                 "hasMore": has_more,
                 "historyBeforeMessageId": history_before,
                 "earlierSourceMessageId": earlier_source_id,

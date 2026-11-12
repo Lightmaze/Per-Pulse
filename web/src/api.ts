@@ -178,6 +178,9 @@ export const api = {
     }),
   stop: (id: string, turnId: string) => request<{ accepted: boolean; repeated: boolean; view: PageView }>(`${pagePath(id)}/execution/stop`, { method: 'POST', body: JSON.stringify({ turnId }) }),
   decide: (id: string, actionId: string, decision: 'allow_once' | 'deny' | 'cancel') => request<ActionReceipt>(`${pagePath(id)}/execution/actions/${encodeURIComponent(actionId)}`, { method: 'POST', body: JSON.stringify({ decision }) }),
+  artifacts: (id: string, cursor: string) =>
+    request<{ pageId: string; artifacts: Artifact[]; truncated: boolean; nextCursor: string | null }>(
+      `${pagePath(id)}/artifacts?cursor=${encodeURIComponent(cursor)}`),
   artifact: (id: string, artifactId: string) => request<ArtifactRead>(`${pagePath(id)}/artifacts/${encodeURIComponent(artifactId)}`),
   commandOutput: (id: string, actionId: string, stream: CommandOutputStream, offset: number, signal: AbortSignal) =>
     request<CommandOutputRead>(`${pagePath(id)}/execution/commands/${encodeURIComponent(actionId)}/${stream}?offset=${offset}&limit=4000`, { signal }),

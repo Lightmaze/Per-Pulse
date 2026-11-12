@@ -173,6 +173,53 @@ def test_successful_file_result_has_native_source_and_survives_restart(tmp_path,
         assert not runtime.kernel_service._runtimes
 
 
+
+def test_older_file_results_are_reachable_by_durable_page_scoped_cursor(tmp_path, monkeypatch):
+    """A long-lived Work can reach earlier file effects without replaying a model."""
+    import per_pulse.artifacts as module
+
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_FIRST": {"path": "first.txt", "expected_digest": None, "content": "First version.\n"},
+        "WRITE_SECOND": {"path": "second.txt", "expected_digest": None, "content": "Second version.\n"},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        execution = client.app.state.pages.execution
+        work = _page(client, "WRITE_FIRST")
+        first_id = _approve(execution, work)
+        response = client.post(f"/api/pages/{work}/messages", json={"content": "WRITE_SECOND"})
+        assert response.status_code in {200, 201, 202}, response.text
+        second_id = _approve(execution, work)
+        assert first_id != second_id
+        request_count = len(requests)
+        monkeypatch.setattr(module, "MAX_ARTIFACTS", 1)
+        monkeypatch.setattr(module, "MAX_ACTION_SCAN", 1)
+
+        recent = client.get(f"/api/pages/{work}/artifacts")
+        assert recent.status_code == 200, recent.text
+        recent_page = recent.json()
+        assert [entry["id"] for entry in recent_page["artifacts"]] == [second_id]
+        cursor = recent_page["nextCursor"]
+        assert isinstance(cursor, str) and cursor and recent_page["truncated"]
+        assert client.get(f"/api/pages/home/artifacts", params={"cursor": cursor}).status_code == 409
+        assert client.get(f"/api/pages/{work}/artifacts", params={"cursor": "bad!"}).status_code == 400
+
+        earlier = client.get(f"/api/pages/{work}/artifacts", params={"cursor": cursor})
+        assert earlier.status_code == 200, earlier.text
+        earlier_page = earlier.json()
+        assert [entry["id"] for entry in earlier_page["artifacts"]] == [first_id]
+        assert earlier_page["nextCursor"] is None
+        assert client.get(f"/api/pages/{work}/artifacts/{first_id}").json()["content"] == "First version.\n"
+        assert len(requests) == request_count
+
+    # Cursor positions, exact file versions and page ownership are durable.
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        earlier = client.get(f"/api/pages/{work}/artifacts", params={"cursor": cursor})
+        assert earlier.status_code == 200
+        assert [entry["id"] for entry in earlier.json()["artifacts"]] == [first_id]
+        assert client.get(f"/api/pages/{work}/artifacts/{first_id}").json()["content"] == "First version.\n"
+
+
 def test_original_work_effect_evidence_survives_native_succession_without_replay(tmp_path, monkeypatch):
     """A committed generation changes the holder, not the Work's file sources."""
     import per_pulse.execution as execution_module

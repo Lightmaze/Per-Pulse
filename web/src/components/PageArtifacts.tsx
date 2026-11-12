@@ -12,7 +12,7 @@ function unavailableReason(reason: string | null, t: Translate): string {
   return t('artifacts.missing');
 }
 
-export function PageArtifacts({ view, onUseInHome, onUseInWork, onChanged }: { view: PageView; onUseInHome?: (artifact: Artifact) => Promise<void>; onUseInWork?: (artifact: Artifact) => void; onChanged?: () => Promise<unknown> }) {
+export function PageArtifacts({ view, onUseInHome, onUseInWork, onChanged }: { view: PageView & { artifactsNextCursor?: string | null }; onUseInHome?: (artifact: Artifact) => Promise<void>; onUseInWork?: (artifact: Artifact) => void; onChanged?: () => Promise<unknown> }) {
   const { t, errorText } = useLanguage();
   const [opened, setOpened] = useState<string | null>(null);
   const [result, setResult] = useState<ArtifactRead | null>(null);
@@ -26,7 +26,58 @@ export function PageArtifacts({ view, onUseInHome, onUseInWork, onChanged }: { v
   const undoRequest = useRef(false);
   const downloadRequest = useRef<AbortController | null>(null);
   const requestId = useRef(0);
-  useEffect(() => () => { requestId.current++; downloadRequest.current?.abort(); }, []);
+  // The recent page stays cheap; older file results are loaded on demand from
+  // the same page-scoped Kernel history, not from a new artifacts database.
+  const [older, setOlder] = useState<Artifact[]>([]);
+  const [olderCursor, setOlderCursor] = useState<string | null | undefined>(undefined);
+  const [olderLoading, setOlderLoading] = useState(false);
+  const [olderError, setOlderError] = useState<unknown>(null);
+  const olderInFlight = useRef(false);
+  const olderEpoch = useRef(0);
+  const headId = view.artifacts?.[0]?.id ?? null;
+  useEffect(() => {
+    olderEpoch.current++;
+    setOlder([]);
+    setOlderCursor(undefined);
+    setOlderLoading(false);
+    setOlderError(null);
+    olderInFlight.current = false;
+  }, [headId]);
+  useEffect(() => () => {
+    requestId.current++;
+    olderEpoch.current++;
+    downloadRequest.current?.abort();
+  }, []);
+  const seen = new Set<string>();
+  const visibleArtifacts = [...(view.artifacts ?? []), ...older].filter(artifact => {
+    if (seen.has(artifact.id)) return false;
+    seen.add(artifact.id);
+    return true;
+  });
+  const nextCursor = olderCursor === undefined ? (view.artifactsNextCursor ?? null) : olderCursor;
+  const loadEarlier = async () => {
+    if (!nextCursor || olderInFlight.current) return;
+    const epoch = olderEpoch.current;
+    olderInFlight.current = true;
+    setOlderLoading(true);
+    setOlderError(null);
+    try {
+      const next = await api.artifacts(view.page.id, nextCursor);
+      if (epoch !== olderEpoch.current) return;
+      setOlder(current => {
+        const ids = new Set([...view.artifacts, ...current].map(item => item.id));
+        return [...current, ...next.artifacts.filter(item => !ids.has(item.id))];
+      });
+      setOlderCursor(next.nextCursor);
+    } catch (problem) {
+      if (epoch === olderEpoch.current) setOlderError(problem);
+    } finally {
+      if (epoch === olderEpoch.current) {
+        olderInFlight.current = false;
+        setOlderLoading(false);
+      }
+    }
+  };
   if (!view.artifacts?.length && !view.artifactsTruncated) return null;
 
   const read = async (artifact: Artifact, refresh = false) => {
@@ -80,6 +131,7 @@ export function PageArtifacts({ view, onUseInHome, onUseInWork, onChanged }: { v
     undoRequest.current = true; setUndoing(artifact.id); setUndoError(null);
     try {
       await api.undoArtifact(view.page.id, artifact.id);
+      setOlder(current => current.map(item => item.id === artifact.id ? { ...item, undone: true } : item));
       if (opened === artifact.id) { requestId.current++; setOpened(null); setResult(null); }
       await onChanged?.();
     } catch (problem) {
@@ -95,7 +147,7 @@ export function PageArtifacts({ view, onUseInHome, onUseInWork, onChanged }: { v
   return <section className="page-artifacts" aria-label={t('artifacts.title')}>
     <h2>{t('artifacts.title')}</h2>
     <p className="artifact-intro">{t('artifacts.intro')}</p>
-    <ul>{view.artifacts.map(artifact => <li key={artifact.id}>
+    <ul>{visibleArtifacts.map(artifact => <li key={artifact.id}>
       <div className="artifact-row">
         <button className="artifact-open" aria-expanded={opened === artifact.id} onClick={() => read(artifact)}>
           <span id={`artifact-path-${artifact.id}`}>{artifact.path}</span><small>{artifact.undone ? t('artifacts.undone') : t('artifacts.version', { digest: artifact.sha256.slice(0, 8) })}</small>
@@ -126,6 +178,10 @@ export function PageArtifacts({ view, onUseInHome, onUseInWork, onChanged }: { v
         {!loading ? <button type="button" className="text-button" onClick={() => void read(artifact, true)}>{t('artifacts.refresh')}</button> : null}
       </div> : null}
     </li>)}</ul>
-    {view.artifactsTruncated ? <p className="artifact-intro">{t('artifacts.more')}</p> : null}
+    {nextCursor ? <button type="button" className="text-button" disabled={olderLoading}
+      onClick={() => void loadEarlier()}>{t(olderLoading ? 'artifacts.loadingEarlier' : 'artifacts.showEarlier')}</button> : null}
+    {olderError ? <p role="alert">{errorText(olderError)}</p> : null}
+    {view.artifactsTruncated && !view.artifactsNextCursor
+      ? <p className="artifact-intro">{t('artifacts.more')}</p> : null}
   </section>;
 }
