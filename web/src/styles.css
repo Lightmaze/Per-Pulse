@@ -608,3 +608,7 @@ button, a, input, textarea { outline-offset: 4px; }
 .web-sources li { margin: 12px 0; overflow-wrap: anywhere; }
 .web-sources .message-content { font-size: 13px; }
 .web-sources .message-content p { margin: 4px 0; }
+
+.web-observation { margin: 10px 0 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
+.web-observation-meta { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.web-observation-text { max-height: 40vh; overflow: auto; margin: 8px 0; padding: 12px; border-radius: 6px; background: #f4f6f0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; line-height: 1.55; }

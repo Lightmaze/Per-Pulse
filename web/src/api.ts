@@ -1,4 +1,4 @@
-import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, WeeklyRequestUsage, PostureExperience, PostureView, ResponseLanguage, TickRun, WorkspaceSettings } from './types';
+import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, WeeklyRequestUsage, PostureExperience, PostureView, ResponseLanguage, TickRun, WorkspaceSettings, WebObservation } from './types';
 import type { AdaptiveWorkChoices, CollaboratorOutcome, CollaboratorFeedbackScope, CollaboratorFeedbackView, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 import type { CommandOutput, CommandOutputRead, CommandOutputStream } from './types';
 
@@ -74,6 +74,8 @@ export const api = {
   updateSettings: (responseLanguage: ResponseLanguage) => request<WorkspaceSettings>('/settings', { method: 'PATCH', body: JSON.stringify({ responseLanguage }) }),
   page: (id: string, signal?: AbortSignal, sourceMessageId?: string) =>
     request<PageView>(pagePath(id) + (sourceMessageId ? `?sourceMessageId=${encodeURIComponent(sourceMessageId)}` : ''), { signal }),
+  webObservation: (pageId: string, actionId: string, signal?: AbortSignal) =>
+    request<WebObservation>(`${pagePath(pageId)}/execution/web/${encodeURIComponent(actionId)}`, { signal }),
   adaptiveChoices: (id: string, signal?: AbortSignal) =>
     request<AdaptiveWorkChoices>(`${pagePath(id)}/team/choices`, { signal }),
   rateAdaptiveChoice: (pageId: string, recordId: string, outcome: CollaboratorOutcome) =>

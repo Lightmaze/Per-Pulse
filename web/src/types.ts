@@ -83,6 +83,11 @@ export type CommandOutputRead = {
   offset: number; next_offset: number | null; total_chars: number;
   offset_unit: string; encoding: string; redacted: boolean; content: string;
 };
+export type WebObservation = {
+  pageId: string; actionId: string;
+  source: { actionId: string; turnId: string; url: string; title: string; fetchedAt: string; truncated: boolean };
+  content: string; textStart: number; textEnd: number; digest: string; readingNote: string;
+};
 export type PageExecution = {
   pageId: string; sessionId: string | null; turnId: string | null;
   status: 'idle' | 'working' | 'needs_attention' | 'error' | 'stopped';
