@@ -106,6 +106,19 @@ try {
   assert.equal(originalReceipt.source.url, sourceUrl);
   assert.equal(originalReceipt.textEnd - originalReceipt.textStart, [...originalReceipt.content].length);
   assert.equal((await get('/__web/status')).webRequests, 1);
+  const selectedWebPassage = 'Original field observation: café 山川 🌍.';
+  await page.getByRole('textbox', { name: 'Exact original passage' }).fill(selectedWebPassage);
+  await page.getByRole('textbox', { name: 'What should later work notice? (optional)' })
+    .fill('Compare this observed version with the later task.');
+  await page.getByRole('button', { name: 'Keep this passage' }).click();
+  await page.getByText('Saved for your later Works.', { exact: false }).waitFor();
+  const retained = (await get('/api/pages/' + work + '/posture')).experiences.find(
+    item => item.sourceKind === 'web' && item.excerpt === selectedWebPassage);
+  assert.ok(retained);
+  assert.equal(retained.source.web_receipt_id, source.actionId);
+  assert.equal(retained.source.capture_kind, 'operator_selected_web_example');
+  assert.equal((await get('/__web/status')).webRequests, 1);
+  checks.push('the user retains an exact passage from the observed webpage in native Posture without new model or website requests');
   await page.screenshot({ path: join(output, 'web-source-desktop.png') });
   checks.push('the browser opens the exact retained webpage text and source version alongside the original HTTPS link, without a second network read');
   const draft = 'Keep this reading draft.';
@@ -130,6 +143,8 @@ try {
   await page.locator('.web-observation-text').waitFor();
   assert.equal(await page.locator('.web-observation-text').textContent(), originalReceipt.content);
   assert.equal((await get('/__web/status')).webRequests, 0);
+  assert.ok((await get('/api/pages/' + work + '/posture')).experiences.some(
+    item => item.id === retained.id && item.excerpt === selectedWebPassage));
   await page.locator('.web-sources').scrollIntoViewIfNeeded();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: join(output, 'web-source-mobile.png') });
