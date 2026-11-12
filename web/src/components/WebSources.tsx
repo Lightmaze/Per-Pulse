@@ -1,5 +1,6 @@
 /** Page-scoped native observations; selected exact passages can become experience. */
 import { useEffect, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
 import { api } from '../api';
 import { useLanguage } from '../i18n';
 import type { PageView, WebObservation } from '../types';
@@ -46,6 +47,7 @@ export function WebSources({ view, navigate }: { view: PageView; navigate: Navig
     reader.current = null;
     currentReceipt.current = opened === actionId ? null : actionId;
     setSaved(false);
+    setSaving(false);
     setSaveError('');
     setExampleTitle('');
     setExcerpt('');
@@ -77,7 +79,7 @@ export function WebSources({ view, navigate }: { view: PageView; navigate: Navig
     }
   };
 
-  const saveExample = async (event: React.FormEvent<HTMLFormElement>) => {
+  const saveExample = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!observation || saving) return;
     const receiptId = observation.actionId;
