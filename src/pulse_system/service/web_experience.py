@@ -21,7 +21,13 @@ def capture_web_example(runtime, scope, receipt_id: str, excerpt: str) -> dict:
     """Select only from a delivered read_web result in this Work's lineage."""
     store = runtime.kernel_service.store
     record = None
-    for session in runtime.harness._history_scopes(scope):
+    # The page's operator request has a session scope without a turn ID.
+    # Team history requires an executing turn and can include other Works;
+    # an operator may select only from this Work's own committed history.
+    # A running model retains its existing delegated-history visibility.
+    history_scopes = (runtime.harness._history_scopes(scope) if scope.turn_id
+                      else runtime.harness._own_history_scopes(scope))
+    for session in history_scopes:
         try:
             previous_scope = store.action_scope_for_session(session.session_scope(), receipt_id)
         except ScopeConflict:
