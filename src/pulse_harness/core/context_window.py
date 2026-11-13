@@ -216,12 +216,13 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
         if remaining <= 0:
             break
         entry = older[index]
+        original_cost = estimate_tokens(entry)
         reference = None
         if (entry.get("role") == "tool" and entry.get("message_id")
-                and estimate_tokens(entry) >= historical_result_threshold):
+                and (original_cost >= historical_result_threshold or original_cost > remaining)):
             reference = _project_saved_tool_result(entry)
         candidate = reference if reference is not None else entry
-        cost = estimate_tokens(candidate)
+        cost = estimate_tokens(reference) if reference is not None else original_cost
         if cost > remaining:
             break
         older[index] = candidate
