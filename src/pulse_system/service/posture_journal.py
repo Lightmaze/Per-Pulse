@@ -86,14 +86,29 @@ class PostureJournal:
         self.guard()
         return self.storage._posture_journal_read(read)
 
-    def list(self, *, subjects, context_id, include_inactive, history=True):
+    def list(self, *, subjects, context_id, include_inactive, history=True,
+             limit=None, prioritize_content=False, with_remaining=False):
+        """Return visible records. Limit material queries in SQL, not after JSON decoding."""
+        if limit is not None and (type(limit) is not int or limit < 1):
+            raise ValueError("experience limit must be positive")
+        if with_remaining and limit is None:
+            raise ValueError("remaining references require a bounded selection")
         def read(conn):
             if not self._ready(conn):
                 values = self.legacy()["experiences"].values()
                 records = [deepcopy(value) for value in values if value["subject_id"] in subjects
                            and (include_inactive or value["active"])
                            and (context_id is None or value["context_id"] == context_id or value["scope"] == "subject")]
-                return [(record, self.content_time(record)) for record in records]
+                pairs = [(record, self.content_time(record)) for record in records]
+                if limit is not None:
+                    pairs.sort(key=lambda pair: (
+                        pair[1] if prioritize_content else pair[0]["updated_at"],
+                        pair[0]["id"]), reverse=True)
+                    omitted = [{"id": row["id"], "revision": row["revision"]}
+                               for row, _ in pairs[limit:]] if with_remaining else []
+                    pairs = pairs[:limit]
+                    return (pairs, omitted) if with_remaining else pairs
+                return pairs
 
             # Read the visible current records and their child rows in batches.
             # Previously one SELECT per record (plus feedback/history SELECTs)
@@ -109,14 +124,29 @@ class PostureJournal:
                 where += " AND (e.context_id=? OR e.scope='subject')"
                 args.append(context_id)
 
+            order = "e.content_updated_at" if prioritize_content else "e.updated_at"
+            query = ("SELECT e.experience_id, e.record, e.content_updated_at "
+                     "FROM posture_experiences AS e" + where)
+            if limit is not None:
+                query += f" ORDER BY {order} DESC, e.experience_id DESC LIMIT ?"
             entries = {
                 identity: [json.loads(raw), content_time]
                 for identity, raw, content_time in conn.execute(
-                    "SELECT e.experience_id, e.record, e.content_updated_at "
-                    "FROM posture_experiences AS e" + where, args)
+                    query, [*args, limit] if limit is not None else args)
             }
             if not entries:
-                return []
+                return ([], []) if with_remaining else []
+            # Both the bounded candidates and the remaining ID/revision
+            # references come from one guarded World read. A concurrent
+            # revision cannot splice two different journal versions together.
+            omitted = []
+            if with_remaining:
+                omitted = [{"id": identity, "revision": revision}
+                           for identity, revision in conn.execute(
+                    "SELECT e.experience_id, json_extract(e.record, '$.revision') "
+                    "FROM posture_experiences AS e" + where
+                    + f" ORDER BY {order} DESC, e.experience_id DESC LIMIT -1 OFFSET ?",
+                    [*args, limit])]
             for record, _ in entries.values():
                 record["feedback"] = []
                 record["history"] = []
@@ -126,9 +156,14 @@ class PostureJournal:
             # afterwards. Indexed child rows arrive in stable position order.
             join = (" JOIN posture_experiences AS e ON "
                     "e.world_id=j.world_id AND e.experience_id=j.experience_id")
+            child_where, child_args = where, args
+            if limit is not None:
+                marks = ",".join("?" for _ in entries)
+                child_where += f" AND e.experience_id IN ({marks})"
+                child_args = [*args, *entries]
             for identity, raw in conn.execute(
                 "SELECT j.experience_id, j.record FROM posture_experience_feedback AS j"
-                + join + where + " ORDER BY j.experience_id, j.position", args
+                + join + child_where + " ORDER BY j.experience_id, j.position", child_args
             ):
                 entries[identity][0]["feedback"].append(json.loads(raw))
 
@@ -136,12 +171,13 @@ class PostureJournal:
                 for identity, raw, count in conn.execute(
                     "SELECT j.experience_id, j.record, j.feedback_count "
                     "FROM posture_experience_revisions AS j"
-                    + join + where + " ORDER BY j.experience_id, j.revision", args
+                    + join + child_where + " ORDER BY j.experience_id, j.revision", child_args
                 ):
                     previous = json.loads(raw)
                     previous["feedback"] = deepcopy(entries[identity][0]["feedback"][:count])
                     entries[identity][0]["history"].append(previous)
-            return [(record, content_time) for record, content_time in entries.values()]
+            pairs = [(record, content_time) for record, content_time in entries.values()]
+            return (pairs, omitted) if with_remaining else pairs
         self.guard()
         return self.storage._posture_journal_read(read)
 

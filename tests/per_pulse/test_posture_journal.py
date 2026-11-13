@@ -201,3 +201,91 @@ def test_v12_schema_upgrade_backs_up_original_components_before_any_import(tmp_p
         assert storage._conn.execute("SELECT COUNT(*) FROM posture_journals").fetchone()[0] == 0
     finally:
         storage.close()
+
+
+def test_bounded_model_materials_match_full_packet_without_decoding_old_bodies(tmp_path):
+    """A growing World still offers the same bounded prompt without loading every body.
+
+    The omitted refs remain exact for revision checks; inaccessible material
+    must not appear even in IDs. The user-facing native list stays unbounded.
+    """
+    from pulse_harness.plugins.posture import pack_posture_materials
+
+    path = tmp_path / "many.db"
+    storage = Storage(path)
+    memory = PostureMemory(storage, "world")
+    try:
+        for index in range(180):
+            memory.add_experience(**episode(
+                experience_id=f"experience-{index:03d}", scope="subject",
+                lesson=f"Use a concrete next action for case {index}.",
+            ))
+        memory.add_experience(**episode(
+            experience_id="other-subject", subject_id="stranger", scope="subject"))
+        memory.add_experience(**episode(
+            experience_id="other-context", context_id="private", scope="context"))
+        hidden = memory.add_experience(**episode(
+            experience_id="inactive", scope="subject"))
+        memory.record_feedback(hidden["id"], expected_revision=1,
+                               verdict="withdrawn", evidence="No longer applicable.")
+        first = memory.get_experience("experience-000")
+        memory.record_feedback(first["id"], expected_revision=1,
+                               verdict="not_useful", evidence="A later report without new content.")
+
+        full = memory.materials(subject_id="subject", context_id="origin", prioritize_content=True)
+        expected = pack_posture_materials(full)
+        assert len(full["episodes"]) == 180
+        trace = []
+        storage._conn.set_trace_callback(trace.append)
+        try:
+            bounded = memory.materials(
+                subject_id="subject", context_id="origin",
+                prioritize_content=True, max_records=128)
+        finally:
+            storage._conn.set_trace_callback(None)
+        packet = pack_posture_materials(bounded)
+        assert len(bounded["episodes"]) == 128
+        assert len(bounded["omitted_refs"]) == 52
+        assert packet == expected
+        assert packet["eligible_count"] == 180
+        assert set(item["id"] for item in bounded["omitted_refs"]).isdisjoint(
+            {"other-subject", "other-context", "inactive"})
+        assert all("PRIVATE_" not in json.dumps(ref) for ref in bounded["omitted_refs"])
+        queries = [sql for sql in trace if sql.lstrip().upper().startswith("SELECT")]
+        assert any("ORDER BY e.content_updated_at DESC" in sql and "LIMIT 128" in sql for sql in queries)
+        assert any("json_extract(e.record, '$.revision')" in sql for sql in queries)
+        assert not any("posture_experience_revisions" in sql for sql in queries)
+        assert len(memory.list_experiences(subject_id="subject")) == 181
+        storage.close()
+
+        storage = Storage(path)
+        memory = PostureMemory(storage, "world")
+        after_restart = memory.materials(
+            subject_id="subject", context_id="origin",
+            prioritize_content=True, max_records=128)
+        assert pack_posture_materials(after_restart) == expected
+    finally:
+        storage.close()
+
+
+def test_bounded_legacy_materials_do_not_migrate_on_read():
+    """A pre-journal World can read a bounded candidate view without a write."""
+    from pulse_harness.plugins.posture import pack_posture_materials
+
+    storage = Storage()
+    records = [PostureMemory.validate_experience(**episode(
+        experience_id=f"legacy-{index:03d}", scope="subject"))
+        for index in range(145)]
+    memory, original = legacy(storage, records)
+    try:
+        before = storage.load_component_state(memory.component)
+        full = pack_posture_materials(memory.materials(
+            subject_id="subject", context_id="origin", prioritize_content=True))
+        bounded = pack_posture_materials(memory.materials(
+            subject_id="subject", context_id="origin",
+            prioritize_content=True, max_records=128))
+        assert bounded == full
+        assert storage.load_component_state(memory.component) == before == original
+        assert storage._conn.execute("SELECT COUNT(*) FROM posture_journals").fetchone()[0] == 0
+    finally:
+        storage.close()

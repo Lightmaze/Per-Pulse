@@ -84,6 +84,9 @@ def pack_posture_materials(materials: dict | None, *, byte_budget: int = 16000) 
     omitted rather than changing its logical boundary.
     """
     entries = [] if materials is None else materials.get("episodes", [])
+    # IDs omitted by the bounded native SQL selection still matter for later
+    # revision/withdrawal checks. They are not model-visible lesson bodies.
+    additional_refs = [] if materials is None else materials.get("omitted_refs", [])
     packed, offered, omitted, used = [], [], [], 0
     for record in entries:
         item = deepcopy(record)
@@ -113,8 +116,9 @@ def pack_posture_materials(materials: dict | None, *, byte_budget: int = 16000) 
         packed.append(item)
         offered.append(ref)
         used += size
+    omitted.extend(deepcopy(additional_refs))
     return {"episodes": packed, "offered_posture_revisions": offered,
-            "omitted_posture_revisions": omitted, "eligible_count": len(entries),
+            "omitted_posture_revisions": omitted, "eligible_count": len(entries) + len(additional_refs),
             "packing": "newest_first_explicit_byte_budget", "semantic_applicability": "not_yet_assessed"}
 
 

@@ -439,7 +439,7 @@ class PostureMemory:
         return None if record is None else self._material_record(record, context_id)
 
     def materials(self, *, subject_id: str, context_id: str,
-                  prioritize_content: bool = False) -> dict:
+                  prioritize_content: bool = False, max_records: int | None = None) -> dict:
         """Offer eligible experiences, not allegedly relevant experiences.
 
         Context privacy is a hard boundary. Explicit subject transfer offers
@@ -452,11 +452,17 @@ class PostureMemory:
         candidates under the bounded prompt budget.
         """
         self.guard()
-        rows = self._journal.list(subjects=self._subjects(subject_id), context_id=context_id,
-                                  include_inactive=False, history=False)
+        subjects = self._subjects(subject_id)
+        selected = self._journal.list(
+            subjects=subjects, context_id=context_id, include_inactive=False,
+            history=False, limit=max_records, prioritize_content=prioritize_content,
+            with_remaining=max_records is not None)
+        rows, omitted_refs = selected if max_records is not None else (selected, [])
         rows.sort(key=lambda item: (item[1] if prioritize_content else item[0]["updated_at"],
                                    item[0]["id"]), reverse=True)
-        records = [record for record, _ in rows]
-        episodes = [self._material_record(record, context_id) for record in records]
+        episodes = [self._material_record(record, context_id) for record, _ in rows]
+        # The single guarded read preserves the complete eligible reference
+        # sequence even when the model packet loads only current candidates.
         return {"schema": SCHEMA, "episodes": episodes, "eligibility": "subject_scope_and_active_only",
-                "semantic_applicability": "not_yet_assessed", "source_context_id": context_id}
+                "semantic_applicability": "not_yet_assessed", "source_context_id": context_id,
+                **({"omitted_refs": omitted_refs} if max_records is not None else {})}
