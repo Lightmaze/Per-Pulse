@@ -25,12 +25,15 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const saveAttempt = useRef(0);
 
   useEffect(() => {
     // A new World, Work or service cannot inherit the earlier receipt's text.
     reader.current?.abort();
     reader.current = null;
     currentReceipt.current = null;
+    saveAttempt.current++;
+
     setOpened(null);
     setObservation(null);
     setReading(false);
@@ -45,6 +48,8 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
   }, [view.workspaceId, view.serviceInstanceId, view.page.id]);
 
   const inspect = async (actionId: string) => {
+    // Even reopening the same receipt is a new editor, not an old save completion.
+    saveAttempt.current++;
     reader.current?.abort();
     reader.current = null;
     currentReceipt.current = opened === actionId ? null : actionId;
@@ -85,6 +90,7 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
     event.preventDefault();
     if (!observation || saving) return;
     const receiptId = observation.actionId;
+    const attempt = ++saveAttempt.current;
     if (!excerpt.trim() || !observation.content.includes(excerpt)
         || new TextEncoder().encode(excerpt).length > 8000) {
       setSaveError(t('webSources.exampleMismatch'));
@@ -96,11 +102,11 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
       await api.saveWebExample(view.page.id, {
         receiptId, title: exampleTitle.trim(), excerpt, note,
       });
-      if (currentReceipt.current === receiptId) setSaved(true);
+      if (currentReceipt.current === receiptId && saveAttempt.current === attempt) setSaved(true);
     } catch {
-      if (currentReceipt.current === receiptId) setSaveError(t('webSources.exampleFailed'));
+      if (currentReceipt.current === receiptId && saveAttempt.current === attempt) setSaveError(t('webSources.exampleFailed'));
     } finally {
-      if (currentReceipt.current === receiptId) setSaving(false);
+      if (currentReceipt.current === receiptId && saveAttempt.current === attempt) setSaving(false);
     }
   };
 
@@ -133,15 +139,15 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
             <h4>{t('webSources.exampleHeading')}</h4>
             <p>{t('webSources.exampleHelp')}</p>
             <label>{t('webSources.exampleTitle')}
-              <input type="text" required maxLength={240} value={exampleTitle}
+              <input type="text" required maxLength={240} disabled={saving} value={exampleTitle}
                 onChange={event => { setExampleTitle(event.target.value); setSaved(false); }} />
             </label>
             <label>{t('webSources.exampleExcerpt')}
-              <textarea required rows={3} value={excerpt}
+              <textarea required rows={3} disabled={saving} value={excerpt}
                 onChange={event => { setExcerpt(event.target.value); setSaved(false); }} />
             </label>
             <label>{t('webSources.exampleNote')}
-              <textarea rows={2} value={note}
+              <textarea rows={2} disabled={saving} value={note}
                 onChange={event => { setNote(event.target.value); setSaved(false); }} />
             </label>
             {saveError ? <p role="alert">{saveError}</p> : null}
