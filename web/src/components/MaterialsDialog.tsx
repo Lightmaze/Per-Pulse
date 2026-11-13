@@ -20,7 +20,7 @@ const materialErrors: Record<string, MessageKey> = {
   empty_file: 'library.emptyFile', text_files_only: 'library.textOnly',
   pdf_unreadable: 'library.pdfUnreadable', pdf_encrypted: 'library.pdfEncrypted',
   protected_or_invalid_path: 'library.invalidPath',
-  invalid_directory_cursor: 'library.directoryChanged', directory_changed_retry: 'library.directoryChanged',
+  invalid_directory_cursor: 'library.directoryCursorInvalid', directory_changed_retry: 'library.directoryRetry',
   invalid_path: 'library.invalidPath', filename_only: 'library.invalidPath',
   file_changed_retry: 'library.changed', file_unavailable: 'library.unavailable',
   path_unavailable: 'library.unavailable', not_a_single_regular_file: 'library.invalidPath',
@@ -87,12 +87,14 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
     void perform(async (signal, current) => {
       const result = checked(await api.files(path, identity, signal, cursor));
       if (!current()) return;
+      if (result.continuedAfterChange) setNotice(t('library.directoryContinued'));
+      else if (result.restartedDueToChange) setNotice(t('library.directoryChanged'));
       if (cursor) {
         // A page continues the same anchored directory. Keep already-opened
         // files in view; sorting the collected pages avoids chunk boundaries
         // deciding whether a folder appears before a file.
         setListing(previous => {
-          if (!previous || previous.path !== result.path) return result;
+          if (!previous || previous.path !== result.path || result.restartedDueToChange) return result;
           const entries = new Map([...previous.entries, ...result.entries].map(entry => [entry.path, entry]));
           return { ...result, entries: [...entries.values()].sort((a, b) =>
             Number(a.kind === 'file') - Number(b.kind === 'file')

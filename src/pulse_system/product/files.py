@@ -104,9 +104,10 @@ def _directory_revision(directory: int) -> list[int]:
     return [int(info.st_dev), int(info.st_ino), int(info.st_mtime_ns), int(info.st_ctime_ns)]
 
 
-def _page_start(cursor: str | None, path: str, revision: list[int]) -> int:
+def _page_start(cursor: str | None, path: str, revision: list[int]) -> tuple[int, str | None, bool]:
+    """Return the offset, optional changed-directory anchor, and change status."""
     if cursor is None:
-        return 0
+        return 0, None, False
     if not isinstance(cursor, str) or len(cursor) > 4096 or not re.fullmatch(r"[A-Za-z0-9_-]+", cursor):
         raise FileAccessError("invalid_directory_cursor")
     try:
@@ -114,17 +115,29 @@ def _page_start(cursor: str | None, path: str, revision: list[int]) -> int:
         value = json.loads(raw)
     except (ValueError, UnicodeError, binascii.Error):
         raise FileAccessError("invalid_directory_cursor") from None
-    if (not isinstance(value, dict) or value.get("v") != 1 or value.get("path") != path
+    if (not isinstance(value, dict) or value.get("v") not in (1, 2)
+            or value.get("path") != path
             or type(value.get("offset")) is not int or value["offset"] < 1):
         raise FileAccessError("invalid_directory_cursor")
+    anchor = value.get("after")
+    if value["v"] == 2 and (not isinstance(anchor, str) or not 1 <= len(anchor) <= 255
+                             or "/" in anchor or "\x00" in anchor):
+        raise FileAccessError("invalid_directory_cursor")
     if value.get("revision") != revision:
-        raise FileAccessError("directory_changed_retry", 409)
-    return value["offset"]
+        # Resume at the last observed filename when it still exists. Older
+        # v1 cursors lack that anchor and visibly restart from the beginning.
+        return 0, anchor if value["v"] == 2 else None, True
+    return value["offset"], None, False
 
 
-def _page_cursor(path: str, offset: int, revision: list[int]) -> str:
-    body = json.dumps({"v": 1, "path": path, "offset": offset, "revision": revision},
-                      separators=(",", ":"), ensure_ascii=True)
+def _page_cursor(path: str, offset: int, revision: list[int], after: str | None) -> str:
+    # A cursor is base64, not encrypted. Never expose a protected raw filename.
+    # On pages containing only hidden entries, retain the revision-bound v1
+    # offset rather than embedding an internal name as an anchor.
+    value = {"v": 1, "path": path, "offset": offset, "revision": revision}
+    if after is not None:
+        value.update(v=2, after=after)
+    body = json.dumps(value, separators=(",", ":"), ensure_ascii=True)
     return base64.urlsafe_b64encode(body.encode("utf-8")).decode("ascii").rstrip("=")
 
 
@@ -170,9 +183,29 @@ class WorkspaceFiles:
             return self._list_windows(path, cursor=cursor, page_size=count)
         with self.directory(path) as directory:
             revision = _directory_revision(directory)
-            start = _page_start(cursor, path, revision)
+            start, anchor, changed = _page_start(cursor, path, revision)
+            continued = False
+            if anchor is not None:
+                with os.scandir(directory) as entries:
+                    position = None
+                    for offset, entry in enumerate(entries):
+                        if entry.name != anchor:
+                            continue
+                        # Cursors are editable base64. A forged after= value
+                        # must not reveal names excluded from normal listings.
+                        try:
+                            _parts(f"{path}/{anchor}" if path else anchor)
+                            info = entry.stat(follow_symlinks=False)
+                            if stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode):
+                                position = offset + 1
+                        except (OSError, FileAccessError):
+                            pass
+                        break
+                if position is not None:
+                    start, continued = position, True
             rows = []
             next_offset = start
+            last_scanned = None
             scanned_this_page = 0
             has_more = False
             with os.scandir(directory) as entries:
@@ -196,21 +229,40 @@ class WorkspaceFiles:
                         rows.append({"name": entry.name, "path": relative,
                                      "kind": "directory" if stat.S_ISDIR(info.st_mode) else "file",
                                      "bytes": info.st_size if stat.S_ISREG(info.st_mode) else None})
+                        last_scanned = entry.name
                     except (OSError, FileAccessError):
                         continue
             if _directory_revision(directory) != revision:
                 raise FileAccessError("directory_changed_retry", 409)
         rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold(), row["name"]))
         return {"path": path, "entries": rows, "truncated": has_more,
-                "nextCursor": _page_cursor(path, next_offset, revision) if has_more else None,
+                "nextCursor": _page_cursor(path, next_offset, revision, last_scanned) if has_more else None,
+                "directoryChanged": changed, "continuedAfterChange": changed and continued,
+                "restartedDueToChange": changed and not continued,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
     def _list_windows(self, path: str, *, cursor: str | None = None, page_size: int) -> dict:
         with self.directory(path) as directory:
             revision = _directory_revision(directory)
-            start = _page_start(cursor, path, revision)
+            start, anchor, changed = _page_start(cursor, path, revision)
+            continued = False
+            if anchor is not None:
+                position = None
+                for offset, (name, _is_dir, _size, reparse) in enumerate(winfiles.list_directory(directory)):
+                    if name != anchor:
+                        continue
+                    try:
+                        _parts(f"{path}/{name}" if path else name)
+                        if not reparse:
+                            position = offset + 1
+                    except FileAccessError:
+                        pass
+                    break
+                if position is not None:
+                    start, continued = position, True
             rows = []
             next_offset = start
+            last_scanned = None
             scanned_this_page = 0
             has_more = False
             for offset, (name, is_directory, size, reparse) in enumerate(winfiles.list_directory(directory)):
@@ -231,11 +283,14 @@ class WorkspaceFiles:
                 rows.append({"name": name, "path": relative,
                              "kind": "directory" if is_directory else "file",
                              "bytes": None if is_directory else size})
+                last_scanned = name
             if _directory_revision(directory) != revision:
                 raise FileAccessError("directory_changed_retry", 409)
         rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold(), row["name"]))
         return {"path": path, "entries": rows, "truncated": has_more,
-                "nextCursor": _page_cursor(path, next_offset, revision) if has_more else None,
+                "nextCursor": _page_cursor(path, next_offset, revision, last_scanned) if has_more else None,
+                "directoryChanged": changed, "continuedAfterChange": changed and continued,
+                "restartedDueToChange": changed and not continued,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
     def read_bytes(self, path: str) -> bytes:
