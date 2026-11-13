@@ -138,6 +138,40 @@ def test_clipped_tool_result_is_read_in_original_text_pages_without_reopening_th
 
 
 
+
+def test_earlier_saved_file_read_keeps_the_completed_turn_in_a_later_model_request(tmp_path, monkeypatch):
+    """The real native request sees the prior decision and a usable read_history pointer."""
+    monkeypatch.setenv("P_PULSE_CONTEXT_TOKENS", "2048")
+    fixture = HistoryFixture(monkeypatch)
+    pages = PageService(tmp_path, model_factory=fixture.factory)
+    try:
+        page_id, _, _ = create(pages, operations=())
+        (tmp_path / "workspace" / "large.txt").write_text(
+            "PRIOR_READ_MARKER:" + "q" * 18_000)
+        earlier, _ = activate(pages, page_id, operations=[("read_file", {"path": "large.txt"})])
+        saved = next(row for row in pages.runtime.kernel_service.store.transcript_rows(earlier)
+                     if row["role"] == "tool")
+        current, _ = activate(pages, page_id, text="Continue from the previous file inspection.")
+        model_messages = fixture.requests[-1][1]["messages"]
+        assert any(row["role"] == "user" and row["content"].startswith(PREFIX)
+                   and "large.txt" in row["content"] for row in model_messages)
+        prior_results = [row for row in model_messages if row["role"] == "tool"]
+        assert len(prior_results) == 1
+        reference = json.loads(prior_results[0]["content"])["output"]["context_window"]
+        assert reference["message_id"] == saved["message_id"]
+        assert reference["state"] == "saved_result_available_by_page"
+        assert "PRIOR_READ_MARKER" not in json.dumps(model_messages)
+        assert "PRIOR_READ_MARKER" in saved["content"]
+        recalled = recall(reader(pages), current, "read_history",
+                         message_id=saved["message_id"], role="tool")
+        assert recalled["source"]["message_id"] == saved["message_id"]
+        assert recalled["source"]["tool_name"] == "read_file"
+        assert len(pages.runtime.kernel_service.store.actions_for_turn(earlier)) == 1
+    finally:
+        pages.runtime.close()
+
+
+
 def test_one_large_tool_result_can_be_recalled_in_the_same_turn(tmp_path, monkeypatch):
     monkeypatch.setenv("P_PULSE_CONTEXT_TOKENS", "2048")
     fixture = HistoryFixture(monkeypatch)
