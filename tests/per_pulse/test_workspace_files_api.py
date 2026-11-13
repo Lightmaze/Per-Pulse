@@ -379,7 +379,7 @@ def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
         assert continuation["restartedDueToChange"] is False
         assert continuation["entries"]
         assert not {row["name"] for row in continuation["entries"]} & set(
-            row["name"] for row in first["entries"])
+            row["name"] for row in first.json()["entries"])
 
 
 def test_directory_cursor_continues_after_bounded_scan_of_protected_entries(tmp_path, monkeypatch):
