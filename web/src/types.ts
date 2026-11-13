@@ -5,7 +5,9 @@ export type PreviewSize = { width: number; height: number };
 export type WorkspaceFileIdentity = { workspaceId: string; serviceInstanceId: string };
 export type WorkspaceFileEntry = { name: string; path: string; kind: 'file' | 'directory'; bytes: number | null };
 export type WorkspaceFileList = WorkspaceFileIdentity & {
-  path: string; entries: WorkspaceFileEntry[]; truncated: boolean; nextCursor?: string | null; limit_bytes: number; scope: 'shared_native_workspace';
+  path: string; entries: WorkspaceFileEntry[]; truncated: boolean; nextCursor?: string | null;
+  directoryChanged?: boolean; continuedAfterChange?: boolean; restartedDueToChange?: boolean;
+  limit_bytes: number; scope: 'shared_native_workspace';
 };
 export type WorkspaceFile = WorkspaceFileIdentity & { path: string; content: string; bytes: number; sha256: string; format?: 'pdf_text' | 'image'; complete?: boolean; image?: ImageMetadata; previewImage?: PreviewSize; imageDataUrl?: string };
 export type WorkspaceUpload = WorkspaceFileIdentity & { path: string; name: string; bytes: number; sha256: string; source: 'user_upload' };
