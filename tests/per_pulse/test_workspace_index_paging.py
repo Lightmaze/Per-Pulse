@@ -41,18 +41,60 @@ def test_native_browse_reaches_every_file_across_pages(tmp_path):
     assert set(observed) == {f"note-{number:03}.txt" for number in range(73)}
 
 
-def test_native_browse_restarts_changed_directory_with_visible_note(tmp_path):
+def test_native_browse_continues_changed_directory_after_last_observed_entry(tmp_path):
     for number in range(45):
         (tmp_path / f"note-{number:03}.txt").write_text("Source.", encoding="utf-8")
     first = _browse(tmp_path)
     assert first["nextCursor"] and not first["restarted_due_to_change"]
     (tmp_path / "newly-added.txt").write_text("Another observation.", encoding="utf-8")
-    restarted = _browse(tmp_path, cursor=first["nextCursor"])
+    continued = _browse(tmp_path, cursor=first["nextCursor"])
+    assert continued["continued_after_change"] is True
+    assert continued["restarted_due_to_change"] is False
+    assert "continuing after" in continued["next_action"]
+    first_names = {row["name"] for row in first["entries"]}
+    later_names = {row["name"] for row in continued["entries"]}
+    assert not first_names & later_names
+    assert first_names | later_names == {f"note-{number:03}.txt" for number in range(45)} | {"newly-added.txt"}
+
+
+def test_native_browse_restarts_when_the_last_seen_entry_disappears(tmp_path):
+    import base64
+    import json
+
+    for number in range(45):
+        (tmp_path / f"note-{number:03}.txt").write_text("Source.", encoding="utf-8")
+    first = _browse(tmp_path)
+    cursor = first["nextCursor"]
+    decoded = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    anchor = decoded["after"]
+    assert anchor in {row["name"] for row in first["entries"]}
+    (tmp_path / anchor).unlink()
+    restarted = _browse(tmp_path, cursor=cursor)
     assert restarted["restarted_due_to_change"] is True
+    assert restarted["continued_after_change"] is False
     assert "restarted" in restarted["next_action"]
-    assert restarted["entries"] and restarted["nextCursor"]
-    assert set(row["name"] for row in first["entries"]) & set(
-        row["name"] for row in restarted["entries"])
+    assert restarted["entries"]
+    assert set(row["name"] for row in restarted["entries"]) & {
+        row["name"] for row in first["entries"]
+    }
+
+
+def test_native_browse_legacy_cursor_restarts_visibly_after_change(tmp_path):
+    import base64
+    import json
+
+    for number in range(45):
+        (tmp_path / f"note-{number:03}.txt").write_text("Source.", encoding="utf-8")
+    first = _browse(tmp_path)
+    cursor = first["nextCursor"]
+    value = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    value["v"] = 1
+    value.pop("after")
+    old = base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+    (tmp_path / "newly-added.txt").write_text("Another observation.", encoding="utf-8")
+    restarted = _browse(tmp_path, cursor=old)
+    assert restarted["restarted_due_to_change"] is True
+    assert restarted["continued_after_change"] is False
 
 
 @pytest.mark.parametrize("cursor", ["", 123, None, "x" * 4097])
