@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.0a17
+
+- Continue directly from a saved webpage observation in Work A to a new user-authored Work, with its original source retained and the existing Home/Work return path; no new session store or automatic source copying (#263).
+- Keep webpage excerpt editing consistent with the server save: prevent concurrent changes while the save is pending, and ignore stale responses from an earlier editor instance (#264).
+- Put the precise, persisted, operator-selected webpage experience into Work B's first native request as attributed historical data. The World verifies its source, state and sharing scope; no private source URL or entire transcript is copied (#265).
+- Continue long workspace directory browsing from the last visible file or folder after an intervening change. Explicitly restart when the anchor disappears; reject forged protected-name and symlink anchors (#266).
+- After a restart, open a saved native webpage example from its original Work's Lessons and examples and create a further Work without saving or fetching the page again (#267).
+- These are source, persistence, navigation and file-operation improvements. Browser-model responses in automated tests are explicit fixtures, not proof that a real model learned or improved its choices.
+
 ## 0.1.0a16
 
 - Inspect the exact text previously delivered by a native public HTTPS `read_web` call from a Work's Web sources, including the original URL, observation time, extracted-text range and digest. The saved observation survives later webpage changes and service restart; inspecting it does not fetch the page again (#259).
