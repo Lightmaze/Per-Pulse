@@ -145,8 +145,9 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
     .map(page => [page.id, page]));
   const recentEventIds = new Set(pulse?.recentActivations.map(event => event.eventId) ?? []);
   const olderResults = (history?.results ?? []).filter(
-    result => !recentEventIds.has(result.eventId) && !visitedIds.includes(result.eventId)
-      && knownWorks.has(result.pageId),
+    // Unlike the quiet recent preview, explicit history browsing must include
+    // already-viewed results: visited is not deleted or invalid evidence.
+    result => !recentEventIds.has(result.eventId) && knownWorks.has(result.pageId),
   );
   // Keep Home quiet until the native recent-20 window actually fills.
   // A single finished result is already directly visible without a history search.
