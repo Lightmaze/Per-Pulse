@@ -177,6 +177,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       <button className="text-button" disabled={busy || refineOpen} onClick={beginRefinement}>{t(example ? 'learning.refineExample' : 'learning.refine')}</button>
     </div> : experience.sourcePageId && !experience.sourceAnchor ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin)}>{t('learning.editSource')}</button> : null}
     {example && experience.active && experience.scope === 'subject' && experience.canEdit
+      && experience.record_type === 'observed_episode'
       && experience.sourcePageId === pageId && experience.sourceKind === 'web'
       && experience.source?.capture_kind === 'operator_selected_web_example' ? <div className="lesson-actions">
       <button type="button" className="secondary-button" disabled={busy}
