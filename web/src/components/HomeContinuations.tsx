@@ -148,8 +148,10 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
     result => !recentEventIds.has(result.eventId) && !visitedIds.includes(result.eventId)
       && knownWorks.has(result.pageId),
   );
+  // Keep Home quiet until the native recent-20 window actually fills.
+  // A single finished result is already directly visible without a history search.
   const canBrowseHistory = Boolean(freshPages && pulse
-    && (pulse.recentActivations.length > 0 || history));
+    && (pulse.recentActivations.length >= 20 || history));
   const readOlder = async () => {
     if (historyReading.current || !freshPages || !pulse || history?.nextBeforeSeq === null) return;
     historyReading.current = true;
