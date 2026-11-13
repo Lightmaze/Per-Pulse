@@ -99,6 +99,31 @@ def test_native_browse_legacy_cursor_restarts_visibly_after_change(tmp_path):
     assert restarted["continued_after_change"] is False
 
 
+def test_native_browse_forged_cursor_cannot_probe_unlisted_anchor(tmp_path):
+    """Editable base64 resume cursors must not disclose hidden or symlink names."""
+    import base64
+    import json
+    import os
+
+    for number in range(45):
+        (tmp_path / f"note-{number:03}.txt").write_text("Source.", encoding="utf-8")
+    (tmp_path / "private.pem").write_text("Not listed.", encoding="utf-8")
+    if os.name != "nt":
+        (tmp_path / "link.txt").symlink_to(tmp_path / "note-000.txt")
+    first = _browse(tmp_path)
+    cursor = first["nextCursor"]
+    value = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    assert value["v"] == 2
+
+    for forbidden in (["private.pem", "link.txt"] if os.name != "nt" else ["private.pem"]):
+        forged = {**value, "after": forbidden, "revision": [-1]}
+        raw = base64.urlsafe_b64encode(json.dumps(forged).encode()).decode().rstrip("=")
+        result = _browse(tmp_path, cursor=raw)
+        assert result["restarted_due_to_change"] is True
+        assert result["continued_after_change"] is False
+        assert forbidden not in {entry["name"] for entry in result["entries"]}
+
+
 @pytest.mark.parametrize("cursor", ["", 123, None, "x" * 4097])
 def test_native_browse_rejects_invalid_cursor_shape(cursor):
     with pytest.raises(ProviderProtocolError):
