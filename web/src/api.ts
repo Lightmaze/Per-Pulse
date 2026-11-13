@@ -101,7 +101,7 @@ export const api = {
     request<MessageHistory>(`${pagePath(id)}/messages?beforeMessageId=${encodeURIComponent(beforeMessageId)}`, { signal }),
   searchMessages: (id: string, query: string, beforeMessageId: string | null, signal?: AbortSignal) =>
     request<MessageHistory>(`${pagePath(id)}/messages/search?q=${encodeURIComponent(query)}${beforeMessageId ? `&beforeMessageId=${encodeURIComponent(beforeMessageId)}` : ''}`, { signal }),
-  createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null; sourceExcerpt?: string }) =>
+  createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null; sourceExcerpt?: string; sourceExperienceId?: string }) =>
     request<{ page: PageSummary; reference: PageReference; initialMessageId: string; view: PageView }>('/pages', { method: 'POST', body: JSON.stringify(data) }),
   send: (id: string, content: string, references: DraftReference[], materials: string[] = []) =>
     request<{ messageId: string; view: PageView }>(`${pagePath(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, references, materials }) }),
