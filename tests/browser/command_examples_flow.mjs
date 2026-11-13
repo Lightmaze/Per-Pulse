@@ -166,8 +166,37 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (screenshots) await page.screenshot({ path: join(screenshots, 'command-example-mobile-offline.png') });
   assert.equal((await json('/__command_examples/evidence')).commands, 1);
-  assert.deepEqual(errors, []);
   check('offline restart and phone layout retain exact experience and provenance without running the command again');
+
+  // Reuse the exact retained command observation in a genuinely new Work after
+  // restart. No model, shell command or previous Work transcript is replayed.
+  await example.getByText('Source experience', { exact: true }).click();
+  await example.getByRole('button', { name: 'Open output reading conversation', exact: true }).click();
+  await page.getByRole('heading', { name: 'Command practice', exact: true }).waitFor();
+  await openExperience();
+  const sourceExample = page.getByRole('dialog', { name: 'Lessons and examples', exact: true })
+    .getByRole('article').filter({ has: page.getByRole('heading', { name: saved.title, exact: true }) });
+  await sourceExample.getByRole('button', { name: 'Start another Work from this passage', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Command passage follow-up');
+  await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
+    .fill('Compare the saved command observation with the next task.');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Command passage follow-up', exact: true }).waitFor();
+  const followup = new URL(page.url()).pathname.split('/').pop();
+  const followupView = await json('/api/pages/' + followup);
+  const opening = followupView.messages.find(message => message.role === 'user' && message.content.includes('COMMAND_EXPERIENCE_JSON'));
+  assert.ok(opening, 'native follow-up contains a saved command observation');
+  assert.ok(opening.content.includes(saved.id) && opening.content.includes(saved.excerpt));
+  assert.ok(opening.content.includes('past_command_observation_not_reexecuted'));
+  assert.ok(!opening.content.includes(sourceDraft), 'original private draft stays in the source Work');
+  assert.equal((await json('/__command_examples/evidence')).commands, 1);
+  const crossSource = await fetch(base + '/api/pages', { method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'Wrong source', instruction: 'Should be refused.',
+      sourcePageId: followup, sourceExperienceId: saved.id }) });
+  assert.equal(crossSource.status, 404, 'receiving Work cannot impersonate source Work');
+  assert.deepEqual(errors, []);
+  check('saved command passage starts a separate offline Work with exact source identity; foreign reuse is denied');
   console.log(JSON.stringify({ passed: checks.length, checks, provider: 'explicit synthetic HTTP fixture' }));
 } catch (error) {
   console.error(serverLog); throw error;
