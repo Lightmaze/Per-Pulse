@@ -200,6 +200,23 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
         if messages != original and sum(map(estimate_tokens, messages)) <= max_tokens:
             return messages
         return original
+    # Keep earlier completed exchanges available for decisions, not just the
+    # latest exchange. A large, durably saved tool result from a prior turn
+    # should not evict the surrounding user correction or assistant answer:
+    # refer to its original saved output and let read_history page it on
+    # demand. Do not alter the active turn (handled above only if necessary)
+    # or invent a pointer to an unsaved tool result.
+    older = list(messages)
+    historical_result_threshold = max(1024, max_tokens // 4)
+    for index in range(latest):
+        entry = older[index]
+        if (entry.get("role") != "tool" or not entry.get("message_id")
+                or estimate_tokens(entry) < historical_result_threshold):
+            continue
+        reference = _project_saved_tool_result(entry)
+        if reference is not None:
+            older[index] = reference
+    messages = tuple(older)
     pinned = (messages[0],) if messages[0].get("role") == "user" else ()
     fixed = sum(estimate_tokens(message) for message in pinned) + estimate_tokens(note)
     suffix = [0] * (len(messages) + 1)
