@@ -209,6 +209,68 @@ def test_oversized_history_search_never_gets_an_unreadable_recall_pointer():
     assert fitted[-1] == result
     assert sum(estimate_tokens(message) for message in fitted) > 1200
 
+
+def test_old_saved_tool_output_is_paged_so_a_completed_correction_stays_in_context():
+    """The model sees the prior decision, without resending a huge saved read."""
+    large = {**_result("large-read", 18_000), "message_id": "durable-old-read"}
+    messages = [
+        _user("The project goal"), _answer("Beginning work."),
+        _user("Correction: deliver a finished file, not an outline."),
+        _call("large-read"), large,
+        _answer("I will write the finished file."),
+        _user("Continue the implementation now."),
+    ]
+    original = tuple(dict(message) for message in messages)
+    fitted = fit_context(messages, 1_200)
+    assert sum(estimate_tokens(message) for message in fitted) <= 1_200
+    assert messages[2] in fitted
+    assert messages[3] in fitted  # tool-call authority stays beside its result
+    assert messages[5:] == list(fitted[-2:])
+    compacted, = (message for message in fitted if message.get("role") == "tool")
+    reference = json.loads(compacted["content"])["output"]["context_window"]
+    assert reference["message_id"] == "durable-old-read"
+    assert reference["state"] == "saved_result_available_by_page"
+    assert "read_history" in reference["next_step"]
+    assert "x" * 18_000 not in compacted["content"]
+    assert tuple(messages) == original
+
+
+
+def test_older_result_that_blocks_a_whole_turn_is_paged_even_below_the_large_threshold():
+    """Page a modest saved output only when it blocks the prior decision."""
+    saved = {**_result("modest", 2_300), "message_id": "durable-modest-result"}
+    messages = [
+        _user("Opening"), _answer("Initial reply"),
+        _user("Correction: the actual deliverable must be finished."),
+        _call("modest"), saved, _answer("The correction is adopted."),
+        _user("Continue " + "c" * 1_700),
+    ]
+    assert estimate_tokens(saved) < 1024
+    fitted = fit_context(messages, 1_200)
+    assert sum(estimate_tokens(message) for message in fitted) <= 1_200
+    assert messages[2] in fitted and messages[5] in fitted
+    projected, = (message for message in fitted if message.get("role") == "tool")
+    assert json.loads(projected["content"])["output"]["context_window"]["message_id"] == "durable-modest-result"
+    assert saved["content"] != projected["content"]
+
+
+
+def test_old_unsaved_tool_output_cannot_be_replaced_with_an_unreadable_pointer():
+    """When no durable message ID exists, preserve the original authority."""
+    messages = [
+        _user("The project goal"), _answer("Beginning work."),
+        _user("Correction: deliver a finished file, not an outline."),
+        _call("large-read"), _result("large-read", 18_000),
+        _answer("I will write the finished file."),
+        _user("Continue the implementation now."),
+    ]
+    fitted = fit_context(messages, 1_200)
+    assert messages[2] not in fitted  # the oversized old turn must be omitted
+    assert fitted[-1] == messages[-1]
+    assert not any(message.get("role") == "tool" for message in fitted)
+
+
+
 def test_budget_must_be_positive():
     with pytest.raises(ValueError):
         fit_context([], 0)

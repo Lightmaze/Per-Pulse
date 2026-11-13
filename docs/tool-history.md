@@ -40,9 +40,14 @@ replay retains its discussion-only source selection.
 When a *current* tool result by itself is too large for the model request, the
 Harness projects only that result's text into a small JSON reference with its
 saved `message_id`, real tool status, and instructions for paging it with
-`read_history`. The surrounding user request and tool-call/result pairing stay
-in the request. The full saved result remains unchanged and the tool is not
-run again. An unaddressable result is never silently replaced.
+`read_history`. Once a result belongs to an earlier completed exchange, a
+large saved result can also be paged in the request projection instead of
+forcing the surrounding user correction and finished reply out of the model's
+context. The current exchange keeps its ordinary full result when it fits.
+Each original tool-call/result pair stays together, and the full saved result
+remains unchanged. The model can follow the reference with `read_history`;
+neither projection reruns the tool. An unaddressable result is never silently
+replaced.
 
 Tool sources retain the original session, subject, turn, message, event,
 transcript sequence, timestamp and content digest. They also report verified
