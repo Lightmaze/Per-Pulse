@@ -110,8 +110,29 @@ try {
   await page.getByRole('textbox', { name: 'Exact original passage' }).fill(selectedWebPassage);
   await page.getByRole('textbox', { name: 'What should later work notice? (optional)' })
     .fill('Compare this observed version with the later task.');
+  // Hold the actual POST so a slow save cannot make an edited passage look persisted.
+  let saveEntered;
+  let releaseSave;
+  const saveIntercepted = new Promise(resolve => { saveEntered = resolve; });
+  const savedResponseHeld = new Promise(resolve => { releaseSave = resolve; });
+  const savePattern = '**/api/pages/*/posture/web-examples';
+  await page.route(savePattern, async route => {
+    saveEntered();
+    await savedResponseHeld;
+    await route.continue();
+  });
   await page.getByRole('button', { name: 'Keep this passage' }).click();
+  try {
+    await saveIntercepted;
+    assert.equal(await page.getByRole('textbox', { name: 'Exact original passage' }).isDisabled(), true);
+    assert.equal(await page.getByRole('textbox', { name: 'What should later work notice? (optional)' }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: 'Continue in a new Work' }).count(), 0);
+  } finally {
+    releaseSave();
+  }
   await page.getByText('Saved for your later Works.', { exact: false }).waitFor();
+  await page.unroute(savePattern);
+  assert.equal(await page.getByRole('textbox', { name: 'Exact original passage' }).isEnabled(), true);
   const retained = (await get('/api/pages/' + work + '/posture')).experiences.find(
     item => item.sourceKind === 'web' && item.excerpt === selectedWebPassage);
   assert.ok(retained);
