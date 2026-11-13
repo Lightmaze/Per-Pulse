@@ -20,7 +20,7 @@ const materialErrors: Record<string, MessageKey> = {
   empty_file: 'library.emptyFile', text_files_only: 'library.textOnly',
   pdf_unreadable: 'library.pdfUnreadable', pdf_encrypted: 'library.pdfEncrypted',
   protected_or_invalid_path: 'library.invalidPath',
-  invalid_directory_cursor: 'library.directoryChanged', directory_changed_retry: 'library.directoryChanged',
+  invalid_directory_cursor: 'library.directoryCursorInvalid', directory_changed_retry: 'library.directoryRetry',
   invalid_path: 'library.invalidPath', filename_only: 'library.invalidPath',
   file_changed_retry: 'library.changed', file_unavailable: 'library.unavailable',
   path_unavailable: 'library.unavailable', not_a_single_regular_file: 'library.invalidPath',
