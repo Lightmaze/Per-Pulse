@@ -235,6 +235,26 @@ def test_old_saved_tool_output_is_paged_so_a_completed_correction_stays_in_conte
     assert tuple(messages) == original
 
 
+
+def test_older_result_that_blocks_a_whole_turn_is_paged_even_below_the_large_threshold():
+    """Page a modest saved output only when it blocks the prior decision."""
+    saved = {**_result("modest", 2_300), "message_id": "durable-modest-result"}
+    messages = [
+        _user("Opening"), _answer("Initial reply"),
+        _user("Correction: the actual deliverable must be finished."),
+        _call("modest"), saved, _answer("The correction is adopted."),
+        _user("Continue " + "c" * 1_700),
+    ]
+    assert estimate_tokens(saved) < 1024
+    fitted = fit_context(messages, 1_200)
+    assert sum(estimate_tokens(message) for message in fitted) <= 1_200
+    assert messages[2] in fitted and messages[5] in fitted
+    projected, = (message for message in fitted if message.get("role") == "tool")
+    assert json.loads(projected["content"])["output"]["context_window"]["message_id"] == "durable-modest-result"
+    assert saved["content"] != projected["content"]
+
+
+
 def test_old_unsaved_tool_output_cannot_be_replaced_with_an_unreadable_pointer():
     """When no durable message ID exists, preserve the original authority."""
     messages = [
