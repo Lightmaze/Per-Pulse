@@ -408,6 +408,64 @@ class PageService:
                 "pulse": self.pulse_status(),
             }
 
+    def pulse_result_history(self, *, before_seq: int | None = None, limit: int = 20) -> dict:
+        """Page native background answers beyond the bounded recent-activity window.
+
+        Only the original verified Kernel result and current Work lineage are
+        navigable; a settled activation alone is not a completed answer.
+        """
+        with self._lock:
+            world_id = self.runtime.world_id
+            centers = {front["center_id"]: front["id"]
+                       for front in self.runtime.list_task_fronts()}
+            with self.runtime.storage._lock:
+                rows = self.runtime.storage._conn.execute(
+                    "SELECT seq, id, center_id FROM causal_events "
+                    "WHERE world_id=? AND kind IN ('spontaneous', 'propagation') "
+                    "AND status='settled' AND (? IS NULL OR seq < ?) "
+                    "ORDER BY seq DESC LIMIT ?",
+                    (world_id, before_seq, before_seq, limit),
+                ).fetchall()
+            results = []
+            for _seq, event_id, center_id in rows:
+                page_id = centers.get(center_id)
+                if not page_id:
+                    continue
+                result_id = background_result_message(self.runtime, event_id, center_id)
+                if result_id is None:
+                    continue
+                try:
+                    self._check_message(page_id, result_id)
+                except PageError:
+                    continue
+                event = self.runtime.causal_ledger.get_event(event_id)
+                if event is None or event.world_id != world_id or event.center_id != center_id:
+                    continue
+                source_page_id = source_message_id = None
+                source = (self.runtime.causal_ledger.get_event(event.parent_event_id)
+                          if event.parent_event_id else None)
+                if source is not None and source.world_id == world_id:
+                    candidate = "home" if source.center_id is None else centers.get(source.center_id)
+                    if candidate is not None:
+                        try:
+                            self._check_message(candidate, source.id)
+                        except PageError:
+                            pass
+                        else:
+                            source_page_id, source_message_id = candidate, source.id
+                results.append({
+                    "eventId": event_id, "pageId": page_id,
+                    "resultMessageId": result_id, "kind": event.kind.value,
+                    "sourcePageId": source_page_id,
+                    "sourceMessageId": source_message_id,
+                })
+            return {
+                "workspaceId": world_id,
+                "serviceInstanceId": self.service_instance_id,
+                "results": results,
+                "nextBeforeSeq": rows[-1][0] if len(rows) == limit else None,
+            }
+
     def require_file_identity(self, world_id: str | None, instance_id: str | None = None) -> None:
         """Bind material access to the World the browser observed.
 

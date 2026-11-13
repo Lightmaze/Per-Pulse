@@ -1,4 +1,4 @@
-import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseState, WeeklyRequestUsage, PostureExperience, PostureView, ResponseLanguage, TickRun, WorkspaceSettings, WebObservation } from './types';
+import type { Artifact, ArtifactRead, Bootstrap, DraftReference, LessonCondition, LessonShift, LessonVerdict, Material, MaterialList, MaterialRead, MessageHistory, PageReference, PageSummary, PageView, PulseObservation, PulseResultHistory, PulseState, WeeklyRequestUsage, PostureExperience, PostureView, ResponseLanguage, TickRun, WorkspaceSettings, WebObservation } from './types';
 import type { AdaptiveWorkChoices, CollaboratorOutcome, CollaboratorFeedbackScope, CollaboratorFeedbackView, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList, WorkspaceUpload } from './types';
 import type { CommandOutput, CommandOutputRead, CommandOutputStream } from './types';
 
@@ -152,6 +152,8 @@ export const api = {
     }),
   pulse: (signal?: AbortSignal) => request<PulseState>('/pulse', { signal }),
   pulseObservation: (signal?: AbortSignal) => request<PulseObservation>('/pulse/observation', { signal }),
+  pulseResults: (beforeSeq?: number, signal?: AbortSignal) =>
+    request<PulseResultHistory>(`/pulse/results?limit=20${beforeSeq ? `&beforeSeq=${beforeSeq}` : ''}`, { signal }),
   weeklyUsage: (signal?: AbortSignal) =>
     request<{ usage: WeeklyRequestUsage }>('/pulse/weekly-usage', { signal }),
   beginAutonomousPractice: (weeklyLimit: number, identity: PulseWriteIdentity) =>

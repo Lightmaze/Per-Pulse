@@ -43,6 +43,30 @@ def test_spontaneous_answer_is_linked_without_inventing_an_activation_message(co
     assert observed['sourceMessageId'] == activation['sourceEventId']
 
 
+def test_saved_background_results_are_pageable_from_the_original_work(completed_background):
+    client, fixture, work, activation, result = completed_background
+    before = len(fixture.requests)
+    response = client.get('/api/pulse/results', params={'limit': 1})
+    assert response.status_code == 200, response.text
+    history = response.json()
+    assert history['workspaceId'] == client.get('/api/bootstrap').json()['workspaceId']
+    assert history['serviceInstanceId']
+    assert history['results'] == [{
+        'eventId': activation['eventId'], 'pageId': work,
+        'resultMessageId': result, 'kind': 'spontaneous',
+        'sourcePageId': work, 'sourceMessageId': activation['sourceEventId'],
+    }]
+    assert type(history['nextBeforeSeq']) is int
+    older = client.get('/api/pulse/results', params={
+        'beforeSeq': history['nextBeforeSeq'], 'limit': 1,
+    })
+    assert older.status_code == 200
+    assert older.json()['results'] == [] and older.json()['nextBeforeSeq'] is None
+    assert client.get('/api/pulse/results', params={'beforeSeq': 0}).status_code == 422
+    assert client.get('/api/pulse/results', params={'limit': 51}).status_code == 422
+    assert len(fixture.requests) == before, 'Browsing saved answers must not run a model.'
+
+
 def test_observer_counts_the_verified_answer_without_starting_work(completed_background, tmp_path):
     from per_pulse.pulse_observer import observe
     from test_pulse_observer import Clock, records
@@ -79,6 +103,8 @@ def test_background_result_link_survives_disconnected_reopen(tmp_path, monkeypat
     with client_for(tmp_path, pulse=settings, model_factory=None) as client:
         after = client.get('/api/pulse').json()['recentActivations']
         assert after == before
+        history = client.get('/api/pulse/results').json()['results']
+        assert len(history) == 1 and history[0]['resultMessageId'] == result
         assert view(client, work)['messages'] == finished['messages']
         assert len(fixture.requests) == count
 
@@ -111,3 +137,4 @@ def test_background_link_rejects_mismatched_native_evidence(completed_background
     assert current.get('resultMessageId') is None
     assert current['eventId'] == activation['eventId']
     assert current['messageId'] is None
+    assert client.get('/api/pulse/results').json()['results'] == []

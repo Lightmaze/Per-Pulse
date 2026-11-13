@@ -442,6 +442,11 @@ def create_app(
     def pulse_observation(request: Request):
         return pages(request).pulse_observation()
 
+    @app.get("/api/pulse/results")
+    def pulse_results(request: Request, beforeSeq: int | None = Query(default=None, ge=1),
+                      limit: int = Query(default=20, ge=1, le=50)):
+        return pages(request).pulse_result_history(before_seq=beforeSeq, limit=limit)
+
     @app.get("/api/pulse/weekly-usage")
     def pulse_weekly_usage(request: Request):
         return {"usage": request.app.state.weekly_requests.status()}

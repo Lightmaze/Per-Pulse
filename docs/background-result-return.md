@@ -26,3 +26,26 @@ transport replies. They cover an actual contentless spontaneous input, a later
 foreground answer, no model request while opening the old answer, mismatched
 native records, read-only observation and disconnected reopen. The frontend
 check preserves the original causal source and visited-activation behavior.
+
+
+## Browse older completed results from Home
+
+The live Home preview only contains the most recent twenty Pulse activations.
+Choose **Browse saved results** to read earlier finished Work answers from the
+original native World ledger, in pages of twenty. **Load earlier results**
+continues from the ledger sequence cursor. Reading never starts a model turn
+or repeats an action. This works after process restart, with Pulse paused,
+or when the model is disconnected.
+
+Every offered result is checked against the exact completed native Kernel
+turn and the original Work's durable message lineage. Unverified, failed,
+foreign-World or unopenable outputs are not returned. Source links are shown
+only when their own originating message can be opened. The Home client
+additionally compares the current World, service instance and fresh Work list
+before exposing a navigation link.
+
+`GET /api/pulse/results?limit=20&beforeSeq=<sequence>` returns a
+`nextBeforeSeq` cursor for further inspection. Sparse batches are possible
+when a completed activation has no source-verified displayable answer.
+Native tests cover the original result identity, cursor, offline reopen,
+tampered causal facts and absence of extra model requests.
