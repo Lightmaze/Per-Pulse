@@ -87,12 +87,14 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
     void perform(async (signal, current) => {
       const result = checked(await api.files(path, identity, signal, cursor));
       if (!current()) return;
+      if (result.continuedAfterChange) setNotice(t('library.directoryContinued'));
+      else if (result.restartedDueToChange) setNotice(t('library.directoryChanged'));
       if (cursor) {
         // A page continues the same anchored directory. Keep already-opened
         // files in view; sorting the collected pages avoids chunk boundaries
         // deciding whether a folder appears before a file.
         setListing(previous => {
-          if (!previous || previous.path !== result.path) return result;
+          if (!previous || previous.path !== result.path || result.restartedDueToChange) return result;
           const entries = new Map([...previous.entries, ...result.entries].map(entry => [entry.path, entry]));
           return { ...result, entries: [...entries.values()].sort((a, b) =>
             Number(a.kind === 'file') - Number(b.kind === 'file')
