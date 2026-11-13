@@ -122,23 +122,23 @@ try {
     !firstNames.some(text => text.includes(name)));
   assert.ok(missingName, 'some source must be after the first directory page');
 
-  // Refresh is an honest recovery when a folder changes between pages.
+  // A new file arriving during pagination must not force a fresh browse.
+  // Refresh remains available for entries inserted before our position.
   await writeFile(join(longFolder, 'new-entry.txt'), 'Newer source\n');
   await more.click();
-  await materialDialog.getByRole('alert').getByText('This folder changed. Refresh to browse it again.', { exact: true }).waitFor();
-  const refreshed = page.waitForResponse(response => response.url().includes('/api/workspace/files?path=many-notes')
-    && !response.url().includes('&cursor=') && response.status() === 200);
-  await materialDialog.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await refreshed;
-  await wait(() => more.isEnabled(), 'directory listing refreshed');
-  await more.click();
+  await materialDialog.getByText(
+    'This folder changed. Continued after the last file; refresh to see earlier additions.',
+    { exact: true },
+  ).waitFor();
+  assert.equal(await materialDialog.locator('.material-list button').count(), 226,
+    'The first and continued directory pages remain in one usable list');
   await materialDialog.locator('.material-list button').filter({ hasText: missingName }).waitFor();
   await materialDialog.locator('.material-list button').filter({ hasText: missingName }).click();
   assert.equal(await materialDialog.locator('.material-preview > h3').innerText(), missingName);
   assert.ok((await materialDialog.locator('.material-preview pre').innerText()).startsWith('Source note '));
   await close();
   await rm(longFolder, { recursive: true, force: true });
-  checks.push('Directory continuation loads older files in a 225-file folder, detects changes, refreshes and opens the original source');
+  checks.push('Directory continuation survives a new file, retains the previous listing and opens a later original source');
   await page.locator('.composer textarea').fill('Keep my question and its page link.');
   await page.getByRole('button', { name: 'Link a page', exact: true }).click();
   await page.getByRole('option', { name: /^Home\b/ }).click();
