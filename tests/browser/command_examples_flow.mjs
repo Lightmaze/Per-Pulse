@@ -173,6 +173,15 @@ try {
   await example.getByText('Source experience', { exact: true }).click();
   await example.getByRole('button', { name: 'Open output reading conversation', exact: true }).click();
   await page.getByRole('heading', { name: 'Command practice', exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname.split('/').pop(), source);
+  // The source title can render from the cached route before its native view
+  // finishes loading. Reopen the persisted source directly to verify that
+  // the offline restart, not the receiving Work's cached view, owns the action.
+  await page.reload();
+  await page.getByRole('heading', { name: 'Command practice', exact: true }).waitFor();
+  const retained = (await json(`/api/pages/${source}/posture`)).experiences.find(item => item.id === saved.id);
+  assert.equal(retained?.canEdit, true);
+  assert.equal(retained?.record_type, 'observed_episode');
   await openExperience();
   const sourceExample = page.getByRole('dialog', { name: 'Lessons and examples', exact: true })
     .getByRole('article').filter({ has: page.getByRole('heading', { name: saved.title, exact: true }) });
