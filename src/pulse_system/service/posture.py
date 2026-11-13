@@ -453,19 +453,16 @@ class PostureMemory:
         """
         self.guard()
         subjects = self._subjects(subject_id)
-        rows = self._journal.list(subjects=subjects, context_id=context_id,
-                                  include_inactive=False, history=False,
-                                  limit=max_records, prioritize_content=prioritize_content)
+        selected = self._journal.list(
+            subjects=subjects, context_id=context_id, include_inactive=False,
+            history=False, limit=max_records, prioritize_content=prioritize_content,
+            with_remaining=max_records is not None)
+        rows, omitted_refs = selected if max_records is not None else (selected, [])
         rows.sort(key=lambda item: (item[1] if prioritize_content else item[0]["updated_at"],
                                    item[0]["id"]), reverse=True)
         episodes = [self._material_record(record, context_id) for record, _ in rows]
-        # A model material window may read only the most recent candidates.
-        # Preserve all remaining scoped ID/revision references for stale-work
-        # suppression and the truthful eligible/omitted counts in the packet.
-        omitted_refs = (self._journal.refs_after(
-            subjects=subjects, context_id=context_id, include_inactive=False,
-            prioritize_content=prioritize_content, skip=max_records)
-            if max_records is not None else [])
+        # The single guarded read preserves the complete eligible reference
+        # sequence even when the model packet loads only current candidates.
         return {"schema": SCHEMA, "episodes": episodes, "eligibility": "subject_scope_and_active_only",
                 "semantic_applicability": "not_yet_assessed", "source_context_id": context_id,
                 **({"omitted_refs": omitted_refs} if max_records is not None else {})}
