@@ -10,7 +10,7 @@ import { homeContinuations, homeWorkNeedsAttention, verifiedHomePulse } from '..
 import { useLanguage } from '../i18n';
 import { markVisitedLocalEvent, readVisitedLocalEvents } from '../storage';
 import { pulseActivityLabel } from '../pulseActivityLabels';
-import type { Bootstrap, PageSummary, PulseObservation } from '../types';
+import type { Bootstrap, PageSummary, PulseHistoricalResult, PulseObservation, PulseResultHistory } from '../types';
 import type { Navigate } from './SessionLink';
 
 export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanceId, readWorkspace }: {
@@ -28,6 +28,10 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
   const [showAllPending, setShowAllPending] = useState(false);
   const [showAllResults, setShowAllResults] = useState(false);
   const [refreshRequest, setRefreshRequest] = useState(0);
+  const [olderHistory, setOlderHistory] = useState<PulseResultHistory | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(false);
+  const historyReading = useRef(false);
   const [visited, setVisited] = useState<{ workspaceId: string; eventIds: string[] }>(() => ({
     workspaceId, eventIds: readVisitedLocalEvents(workspaceId),
   }));
@@ -135,6 +139,45 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
     freshPages ? pulse : null, freshPages ?? [], freshPages?.length ?? 0, new Set(visitedIds),
   );
   const items = showAllResults ? availableResults : availableResults.slice(0, 3);
+  const history = olderHistory?.workspaceId === workspaceId
+    && olderHistory.serviceInstanceId === serviceInstanceId ? olderHistory : null;
+  const knownWorks = new Map((freshPages ?? []).filter(page => page.kind === 'work')
+    .map(page => [page.id, page]));
+  const recentEventIds = new Set(pulse?.recentActivations.map(event => event.eventId) ?? []);
+  const olderResults = (history?.results ?? []).filter(
+    // Unlike the quiet recent preview, explicit history browsing must include
+    // already-viewed results: visited is not deleted or invalid evidence.
+    result => !recentEventIds.has(result.eventId) && knownWorks.has(result.pageId),
+  );
+  // Keep Home quiet until the native recent-20 window actually fills.
+  // A single finished result is already directly visible without a history search.
+  const canBrowseHistory = Boolean(freshPages && pulse
+    && (pulse.recentActivations.length >= 20 || history));
+  const readOlder = async () => {
+    if (historyReading.current || !freshPages || !pulse || history?.nextBeforeSeq === null) return;
+    historyReading.current = true;
+    setHistoryLoading(true);
+    setHistoryError(false);
+    try {
+      const next = await api.pulseResults(history?.nextBeforeSeq ?? undefined);
+      if (next.workspaceId !== workspaceId || next.serviceInstanceId !== serviceInstanceId) {
+        setHistoryError(true);
+        return;
+      }
+      setOlderHistory(previous => {
+        const prior = previous?.workspaceId === workspaceId
+          && previous.serviceInstanceId === serviceInstanceId ? previous.results : [];
+        const unique = new Map<string, PulseHistoricalResult>();
+        for (const row of [...prior, ...next.results]) unique.set(row.eventId, row);
+        return { ...next, results: [...unique.values()] };
+      });
+    } catch {
+      setHistoryError(true);
+    } finally {
+      historyReading.current = false;
+      setHistoryLoading(false);
+    }
+  };
   // Show the first three without burying additional decisions or failed Works.
   // Expansion uses the same live, World-verified bootstrap; never cached page names.
   const pending = homeWorkNeedsAttention(freshPages ?? [], freshPages?.length ?? 0);
@@ -149,7 +192,7 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
   ).slice(0, 3) : [];
   const stalePending = currentSnapshot?.workspaceUnavailable
     ? homeWorkNeedsAttention(lastKnownPages, lastKnownPages.length).slice(0, 3) : [];
-  if (!items.length && !needAttention.length && !unavailable) return null;
+  if (!items.length && !needAttention.length && !unavailable && !canBrowseHistory) return null;
 
   const titleOf = (id: string) => id === 'home' ? t('app.home')
     : currentPages.find(page => page.id === id)?.title ?? '';
@@ -196,10 +239,10 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
         {showAllPending ? t('pulse.homeReview.showFewer') : t('pulse.homeReview.showAll', { count: pending.length })}
       </button> : null}
     </section> : null}
-    {items.length ? <section className="home-continuations" aria-label={t('pulse.home.title')}>
+    {items.length || canBrowseHistory ? <section className="home-continuations" aria-label={t('pulse.home.title')}>
       <h2>{t('pulse.home.title')}</h2>
       <p className="home-continuations-intro">{t('pulse.home.info')}</p>
-      <ol id="home-local-results" className="home-continuations-list">
+      {items.length ? <ol id="home-local-results" className="home-continuations-list">
         {items.map(({ event, page, receiver, source }) => <li key={event.eventId}>
           <button type="button" className="home-continuation-open" onClick={() => openLocalResult(event.eventId, receiver.pageId, receiver.messageId)}>
             {t('pulse.home.open', { title: pageTitle(page) })}
@@ -213,12 +256,38 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
           </button> : null}
           <span className="home-continuation-event" title={event.eventId}>{t('pulse.home.provenance')}</span>
         </li>)}
-      </ol>
+      </ol> : null}
       {availableResults.length > 3 ? <button type="button" className="text-button"
         aria-controls="home-local-results" aria-expanded={showAllResults}
         onClick={() => setShowAllResults(value => !value)}>
         {showAllResults ? t('pulse.home.showFewer') : t('pulse.home.showAll', { count: availableResults.length })}
       </button> : null}
+      {canBrowseHistory ? <>
+        {olderResults.length ? <ol className="home-continuations-list" aria-label={t('pulse.home.historyTitle')}>
+          {olderResults.map(result => <li key={result.eventId}>
+            <button type="button" className="home-continuation-open"
+              onClick={() => openLocalResult(result.eventId, result.pageId, result.resultMessageId)}>
+              {t('pulse.home.open', { title: pageTitle(knownWorks.get(result.pageId)!) })}
+            </button>
+            <span className="home-continuation-detail">{pulseActivityLabel(t, 'kind', result.kind)}</span>
+            {result.sourcePageId && result.sourceMessageId
+              && (result.sourcePageId === 'home' || knownWorks.has(result.sourcePageId))
+              ? <button type="button" className="home-continuation-source"
+                  onClick={() => open(result.sourcePageId!, result.sourceMessageId!)}>
+                  {t('pulse.home.source', { title: titleOf(result.sourcePageId) })}
+                </button> : null}
+            <span className="home-continuation-event">{t('pulse.home.provenance')}</span>
+          </li>)}
+        </ol> : null}
+        {historyError ? <p role="alert">{t('pulse.home.historyError')}</p> : null}
+        {(!history || history.nextBeforeSeq !== null)
+          ? <button type="button" className="text-button" disabled={historyLoading}
+              onClick={() => void readOlder()}>
+              {historyLoading ? t('pulse.home.historyLoading')
+                : history ? t('pulse.home.historyMore') : t('pulse.home.historyBrowse')}
+            </button>
+          : <p className="home-continuations-intro">{t('pulse.home.historyEnd')}</p>}
+      </> : null}
     </section> : null}
   </>;
 }

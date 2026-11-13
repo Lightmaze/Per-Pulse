@@ -284,6 +284,31 @@ try {
   assert.equal(await localResults.count(), 4, 'reading one result does not hide the other four');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   checks.push('With autonomous Pulse actually disabled, Chinese mobile Home still opens an earlier native result and expands five source-verified Work messages; drafts and receipts persist.');
+  // Browser-only window fixture: pretend twenty newer activation records
+  // pushed the genuine earlier answer out of the native recent-20 preview.
+  // The older answer returned by /api/pulse/results remains an actual
+  // source-verified Kernel result; no extra model turns are claimed here.
+  await page.unroute('**/api/pulse/observation');
+  await page.route('**/api/pulse/observation', async route => {
+    const upstream = await route.fetch();
+    const observation = await upstream.json();
+    observation.pulse.recentActivations = Array.from({ length: 20 }, (_, index) => ({
+      ...otherResults[0], eventId: 'synthetic-newer-window-' + index,
+    }));
+    await route.fulfill({ response: upstream, json: observation });
+  });
+  await page.goto(base);
+  await page.getByRole('button', { name: '浏览已保存的结果', exact: true }).click();
+  const olderResult = page.locator('ol[aria-label="较早完成的工作"] .home-continuation-open');
+  await olderResult.waitFor();
+  assert.equal(await olderResult.count(), 1);
+  assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
+  await olderResult.click();
+  await wait(() => new URL(page.url()).hash === '#message-' + activation.resultMessageId,
+    'paged earlier result returns to its native message');
+  assert.equal(await page.locator('.composer textarea').inputValue(), workDraft);
+  checks.push('Chinese Home reopens a durable original answer after a synthetic later-activity window evicts it from the recent preview.');
+
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
 } catch (error) {

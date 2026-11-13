@@ -376,6 +376,23 @@ export type PulseState = {
   recentActivations: PulseActivation[];
 };
 
+/** Historical Home results are always source-checked original native answers. */
+export type PulseHistoricalResult = {
+  eventId: string;
+  pageId: string;
+  resultMessageId: string;
+  kind: string;
+  sourcePageId: string | null;
+  sourceMessageId: string | null;
+};
+
+export type PulseResultHistory = {
+  workspaceId: string;
+  serviceInstanceId: string;
+  results: PulseHistoricalResult[];
+  nextBeforeSeq: number | null;
+};
+
 /** One native Pulse read bound to the World and the serving process. */
 export type PulseObservation = {
   workspaceId: string;
