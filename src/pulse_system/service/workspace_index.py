@@ -38,8 +38,9 @@ def descriptor() -> ToolDescriptor:
         "conversation. path='' lists the root; pass a returned directory path to look "
         "inside it. Shows names and sizes only: read a file with read_file or reading to "
         "see what it says. If nextCursor is present, pass it as cursor with the same path "
-        "to see further entries. A changed directory starts a fresh listing, visibly marked "
-        "as restarted; earlier entries may repeat.",
+        "to see further entries. If a directory changes, listing continues after the last "
+        "observed entry when it still exists; otherwise it visibly restarts. Refresh "
+        "to include files inserted before the previous position.",
         mutable=False, requires_approval=False, capability="workspace.read",
         source="pulse.native-workspace-index",
     )
@@ -91,12 +92,16 @@ def browse(
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "entries": [], "truncated": listing["truncated"],
             "nextCursor": listing["nextCursor"],
-            "restarted_due_to_change": restarted,
+            "restarted_due_to_change": restarted or listing.get("restartedDueToChange", False),
+            "continued_after_change": listing.get("continuedAfterChange", False),
             "content_included": False,
             "next_action": (
-                "Directory changed; listing restarted from the beginning. Earlier entries "
-                "may repeat. Continue with nextCursor, if present."
-                if restarted else
+                "Directory changed; continuing after the previously observed entry. "
+                "Refresh to see files added earlier. Pass nextCursor to continue."
+                if listing.get("continuedAfterChange") else
+                "Directory changed; the previous position is gone, so listing restarted. "
+                "Earlier entries may repeat. Continue with nextCursor, if present."
+                if restarted or listing.get("restartedDueToChange") else
                 "Pass nextCursor as cursor with the same path to browse further entries."
                 if listing["nextCursor"] else
                 "All observed entries on this listing are shown. Read files with read_file or reading."
