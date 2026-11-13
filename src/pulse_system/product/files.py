@@ -187,8 +187,20 @@ class WorkspaceFiles:
             continued = False
             if anchor is not None:
                 with os.scandir(directory) as entries:
-                    position = next((offset + 1 for offset, entry in enumerate(entries)
-                                     if entry.name == anchor), None)
+                    position = None
+                    for offset, entry in enumerate(entries):
+                        if entry.name != anchor:
+                            continue
+                        # Cursors are editable base64. A forged after= value
+                        # must not reveal names excluded from normal listings.
+                        try:
+                            _parts(f"{path}/{anchor}" if path else anchor)
+                            info = entry.stat(follow_symlinks=False)
+                            if stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode):
+                                position = offset + 1
+                        except (OSError, FileAccessError):
+                            pass
+                        break
                 if position is not None:
                     start, continued = position, True
             rows = []
@@ -235,9 +247,17 @@ class WorkspaceFiles:
             start, anchor, changed = _page_start(cursor, path, revision)
             continued = False
             if anchor is not None:
-                position = next((offset + 1 for offset, row in
-                                 enumerate(winfiles.list_directory(directory))
-                                 if row[0] == anchor), None)
+                position = None
+                for offset, (name, _is_dir, _size, reparse) in enumerate(winfiles.list_directory(directory)):
+                    if name != anchor:
+                        continue
+                    try:
+                        _parts(f"{path}/{name}" if path else name)
+                        if not reparse:
+                            position = offset + 1
+                    except FileAccessError:
+                        pass
+                    break
                 if position is not None:
                     start, continued = position, True
             rows = []
