@@ -144,7 +144,7 @@ try {
   await page.getByRole('dialog', { name: 'Lessons and examples' }).waitFor();
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.getByRole('button', { name: 'Continue in a new Work', exact: true }).click();
-  await page.getByText('Write a task for the new Work.', { exact: false }).waitFor();
+  await page.getByText('This saved passage will accompany your new Work', { exact: false }).waitFor();
   await page.locator('#new-page-title').fill('Follow-up comparison');
   await page.locator('#new-page-focus').fill('Use the retained field observation for a new task: compare a second field note.');
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
@@ -157,6 +157,13 @@ try {
     'follow-up Work finished');
   assert.equal(followupView.page.sourcePageId, work);
   assert.equal(followupView.page.sourceMessageId, null, 'source Work has no invented source message');
+  const firstInput = followupView.messages.find(m => m.role === 'user');
+  assert.ok(firstInput.content.includes('WEB_EXPERIENCE_JSON'));
+  assert.ok(firstInput.content.includes(retained.id));
+  assert.ok(firstInput.content.includes(selectedWebPassage));
+  assert.ok(firstInput.content.includes('Compare this observed version with the later task.'));
+  assert.ok(firstInput.content.includes('My request for this Work:'));
+  assert.ok(!firstInput.content.includes(sourceUrl), 'do not copy the source Work private URL');
   assert.ok((await get('/api/pages/' + followupId + '/posture')).experiences.some(item => item.id === retained.id));
   assert.equal((await get('/__web/status')).webRequests, 1, 'new Work reuses retained experience without refetching');
   await page.getByText('The follow-up Work completed a separate field-note comparison.', { exact: true }).waitFor();

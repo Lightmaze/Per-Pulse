@@ -248,6 +248,31 @@ def test_operator_keeps_exact_web_observation_for_later_work_without_model(tmp_p
         assert shared["excerpt"] == selected and shared["note"] == request["note"]
         assert shared["sourcePageId"] == first
         assert "webSource" not in shared and "source" not in shared
+        # The chosen passage actually enters the new Work before its first
+        # decision, even with the provider offline; the raw URL stays in A.
+        followup = new_page(client, title="A sourced follow-up",
+                            instruction="Compare the later observation.",
+                            sourcePageId=first, sourceExperienceId=source["id"])
+        first_input = next(m for m in followup["view"]["messages"] if m["role"] == "user")
+        assert "WEB_EXPERIENCE_JSON" in first_input["content"]
+        assert selected in first_input["content"]
+        assert source["note"] in first_input["content"]
+        assert "past_web_observation_not_rechecked" in first_input["content"]
+        assert "Compare the later observation." in first_input["content"]
+        assert "https://research.example/operator-choice" not in first_input["content"]
+        assert followup["page"]["sourcePageId"] == first
+        assert followup["page"]["sourceMessageId"] is None
+        before = len(client.get("/api/bootstrap").json()["pages"])
+        for invalid in (
+            {"sourcePageId": foreign, "sourceExperienceId": source["id"]},
+            {"sourcePageId": first, "sourceExperienceId": "unseen"},
+            {"sourcePageId": first, "sourceExperienceId": source["id"],
+             "sourceMessageId": first_input["id"]},
+        ):
+            result = client.post("/api/pages", json={
+                "title": "Invalid", "instruction": "Do not create.", **invalid})
+            assert result.status_code in {404, 422}, result.text
+        assert len(client.get("/api/bootstrap").json()["pages"]) == before
         assert len(observed) == 1
 
     with client_for(tmp_path, posture=True, model_factory=None) as client:

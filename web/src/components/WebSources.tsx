@@ -9,7 +9,8 @@ import { MessageContent } from './MessageContent';
 import type { Navigate } from './SessionLink';
 
 export function WebSources({ view, navigate, onReviewExperience, onContinueWork }: {
-  view: PageView; navigate: Navigate; onReviewExperience: () => void; onContinueWork: () => void;
+  view: PageView; navigate: Navigate; onReviewExperience: () => void;
+  onContinueWork: (experience: { id: string; title: string; excerpt: string }) => void;
 }) {
   const { t } = useLanguage();
   const sources = view.execution.webSources;
@@ -24,6 +25,7 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [savedExperience, setSavedExperience] = useState<{ id: string; title: string; excerpt: string } | null>(null);
   const [saveError, setSaveError] = useState('');
   const saveAttempt = useRef(0);
 
@@ -43,6 +45,7 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
     setNote('');
     setSaving(false);
     setSaved(false);
+    setSavedExperience(null);
     setSaveError('');
     return () => reader.current?.abort();
   }, [view.workspaceId, view.serviceInstanceId, view.page.id]);
@@ -54,6 +57,7 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
     reader.current = null;
     currentReceipt.current = opened === actionId ? null : actionId;
     setSaved(false);
+    setSavedExperience(null);
     setSaving(false);
     setSaveError('');
     setExampleTitle('');
@@ -99,10 +103,15 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
     setSaving(true);
     setSaveError('');
     try {
-      await api.saveWebExample(view.page.id, {
+      const response = await api.saveWebExample(view.page.id, {
         receiptId, title: exampleTitle.trim(), excerpt, note,
       });
-      if (currentReceipt.current === receiptId && saveAttempt.current === attempt) setSaved(true);
+      if (response.experience.representation !== 'example') throw new Error('Not a saved passage');
+      if (currentReceipt.current === receiptId && saveAttempt.current === attempt) {
+        setSavedExperience({ id: response.experience.id, title: response.experience.title,
+          excerpt: response.experience.excerpt });
+        setSaved(true);
+      }
     } catch {
       if (currentReceipt.current === receiptId && saveAttempt.current === attempt) setSaveError(t('webSources.exampleFailed'));
     } finally {
@@ -140,24 +149,24 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
             <p>{t('webSources.exampleHelp')}</p>
             <label>{t('webSources.exampleTitle')}
               <input type="text" required maxLength={240} disabled={saving} value={exampleTitle}
-                onChange={event => { setExampleTitle(event.target.value); setSaved(false); }} />
+                onChange={event => { setExampleTitle(event.target.value); setSaved(false); setSavedExperience(null); }} />
             </label>
             <label>{t('webSources.exampleExcerpt')}
               <textarea required rows={3} disabled={saving} value={excerpt}
-                onChange={event => { setExcerpt(event.target.value); setSaved(false); }} />
+                onChange={event => { setExcerpt(event.target.value); setSaved(false); setSavedExperience(null); }} />
             </label>
             <label>{t('webSources.exampleNote')}
               <textarea rows={2} disabled={saving} value={note}
-                onChange={event => { setNote(event.target.value); setSaved(false); }} />
+                onChange={event => { setNote(event.target.value); setSaved(false); setSavedExperience(null); }} />
             </label>
             {saveError ? <p role="alert">{saveError}</p> : null}
-            {saved ? <>
+            {saved && savedExperience ? <>
               <p role="status">{t('webSources.exampleSaved')}</p>
               <div className="web-observation-next">
                 <button type="button" className="secondary-button" onClick={onReviewExperience}>
                   {t('webSources.reviewSaved')}
                 </button>
-                <button type="button" className="secondary-button" onClick={onContinueWork}>
+                <button type="button" className="secondary-button" onClick={() => onContinueWork(savedExperience)}>
                   {t('webSources.continueSaved')}
                 </button>
               </div>
