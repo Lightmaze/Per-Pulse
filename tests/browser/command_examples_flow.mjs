@@ -195,8 +195,18 @@ try {
     body: JSON.stringify({ title: 'Wrong source', instruction: 'Should be refused.',
       sourcePageId: followup, sourceExperienceId: saved.id }) });
   assert.equal(crossSource.status, 404, 'receiving Work cannot impersonate source Work');
+  const paused = await fetch(base + '/api/pages/' + source + '/posture/experiences/' + saved.id, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ expectedRevision: saved.revision, changes: { active: false } }),
+  });
+  assert.equal(paused.status, 200);
+  const unavailable = await fetch(base + '/api/pages', { method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'Paused source', instruction: 'Should be refused.',
+      sourcePageId: source, sourceExperienceId: saved.id }) });
+  assert.equal(unavailable.status, 422, 'paused observation cannot seed a later Work');
   assert.deepEqual(errors, []);
-  check('saved command passage starts a separate offline Work with exact source identity; foreign reuse is denied');
+  check('saved command passage starts a separate offline Work; foreign or paused reuse is denied');
   console.log(JSON.stringify({ passed: checks.length, checks, provider: 'explicit synthetic HTTP fixture' }));
 } catch (error) {
   console.error(serverLog); throw error;
