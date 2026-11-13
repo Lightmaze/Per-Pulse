@@ -207,6 +207,37 @@ try {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: join(output, 'web-source-mobile.png') });
   checks.push('restart preserves the source and unsent draft; mobile recall reads the original history without refetching or autonomous spending');
+  // A saved passage remains usable as a source after restart, without saving it again.
+  const savedAfterRestart = (await get('/api/pages/' + work + '/posture')).experiences.filter(
+    item => item.sourceKind === 'web' && item.excerpt === selectedWebPassage);
+  assert.equal(savedAfterRestart.length, 1);
+  await page.locator('.nav-toggle').click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Lessons and examples' }).waitFor();
+  await page.getByRole('button', { name: 'Start another Work from this passage', exact: true }).click();
+  await page.getByText('This saved passage will accompany your new Work', { exact: false }).waitFor();
+  await page.locator('#new-page-title').fill('Resumed field comparison');
+  await page.locator('#new-page-focus').fill('Use the retained field observation for a new task: compare a third field note.');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  const resumed = await wait(() => get('/api/bootstrap'),
+    value => value.pages.some(p => p.title === 'Resumed field comparison'), 'continued Work after restart');
+  const resumedId = resumed.pages.find(p => p.title === 'Resumed field comparison').id;
+  const resumedView = await wait(() => get('/api/pages/' + resumedId),
+    value => value.messages.some(m => m.content === 'The follow-up Work completed a separate field-note comparison.'),
+    'resumed Work result');
+  assert.equal(resumedView.page.sourcePageId, work);
+  const resumedInput = resumedView.messages.find(m => m.role === 'user');
+  assert.ok(resumedInput.content.includes(retained.id));
+  assert.ok(resumedInput.content.includes(selectedWebPassage));
+  assert.ok(resumedInput.content.includes('Compare this observed version with the later task.'));
+  assert.ok(!resumedInput.content.includes(sourceUrl));
+  assert.equal((await get('/api/pages/' + work + '/posture')).experiences.filter(
+    item => item.id === retained.id).length, 1, 'continuation does not save a duplicate experience');
+  assert.equal((await get('/__web/status')).webRequests, 0, 'restart continuation does not refetch webpage');
+  checks.push('saved web experiences can start a new native Work after restart without resaving or refetching');
+  await page.goto(base + '/page/' + work);
+  await page.getByRole('heading', { name: 'Reading expedition', exact: true }).waitFor();
   await composer.fill('Read an unsupported webpage.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('This URL uses HTTP. Try a public HTTPS text page.', { exact: true }).waitFor();
