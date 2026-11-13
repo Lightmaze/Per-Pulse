@@ -45,12 +45,13 @@ function describeCondition(value: LessonCondition, t: Translate): string {
 
 type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; note?: string; conditions?: LessonCondition; counterexamples?: string[]; shift?: LessonShift };
 
-function Experience({ experience, pageId, results, busy, hidden, revise, feedback, navigate }: {
+function Experience({ experience, pageId, results, busy, hidden, revise, feedback, navigate, continueWebWork }: {
   experience: PostureExperience; pageId: string; busy: boolean; hidden: boolean;
   results: Message[];
   revise: (experience: PostureExperience, changes: LessonRevision, evidence?: string) => Promise<void>;
   feedback: (experience: PostureExperience, verdict: LessonVerdict, evidence: string, resultMessageId?: string) => Promise<void>;
   navigate: Navigate;
+  continueWebWork: (selected: { id: string; title: string; excerpt: string }) => void;
 }) {
   const { t } = useLanguage();
   const example = experience.representation === 'example' ? experience : undefined;
@@ -175,6 +176,14 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { scope: experience.scope === 'context' ? 'subject' : 'context' }).catch(() => {}); }}>{t(experience.scope === 'context' ? 'learning.share' : 'learning.keepLocal')}</button>
       <button className="text-button" disabled={busy || refineOpen} onClick={beginRefinement}>{t(example ? 'learning.refineExample' : 'learning.refine')}</button>
     </div> : experience.sourcePageId && !experience.sourceAnchor ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin)}>{t('learning.editSource')}</button> : null}
+    {example && experience.active && experience.scope === 'subject' && experience.canEdit
+      && experience.sourcePageId === pageId && experience.sourceKind === 'web'
+      && experience.source?.capture_kind === 'operator_selected_web_example' ? <div className="lesson-actions">
+      <button type="button" className="secondary-button" disabled={busy}
+        onClick={() => continueWebWork({ id: experience.id, title: experience.title, excerpt: example.excerpt })}>
+        {t('learning.continueWebWork')}
+      </button>
+    </div> : null}
     {experience.canReport ? <div className="lesson-actions"><button type="button" className="text-button" disabled={busy} onClick={() => setFeedbackOpen(value => !value)}>{t('learning.giveFeedback')}</button></div> : null}
     {refineOpen && experience.canEdit ? <div className="lesson-feedback">
       <p className="lesson-note">{t(example ? 'learning.refineExampleHelp' : 'learning.refineHelp')}</p>
@@ -231,7 +240,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   </article>;
 }
 
-export function LearningDialog({ pageId, pageTitle, messages, close, navigate }: { pageId: string; pageTitle: string; messages: Message[]; close: () => void; navigate: Navigate }) {
+export function LearningDialog({ pageId, pageTitle, messages, close, navigate, continueWebWork }: { pageId: string; pageTitle: string; messages: Message[]; close: () => void; navigate: Navigate; continueWebWork: (selected: { id: string; title: string; excerpt: string }) => void }) {
   const { t, errorText } = useLanguage();
   const [view, setView] = useState<PostureView | null>(null);
   // Keep the error code so an interface-language switch updates the message
@@ -290,7 +299,7 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate }:
     {view?.enabled && view.experiences.length > 0 && !visibleExperiences.length ? <p className="lesson-note" role="status">{t('learning.noMatches')}</p> : null}
     {/* Filtering only hides authorized lessons; unmounting their editors would
         discard unsent reports and refinements when the search changes. */}
-    {(view?.experiences ?? []).map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} busy={busy || refreshing} hidden={!visibleIds.has(experience.id)} navigate={navigate}
+    {(view?.experiences ?? []).map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} busy={busy || refreshing} hidden={!visibleIds.has(experience.id)} navigate={navigate} continueWebWork={continueWebWork}
       revise={(item, changes, evidence) => update(() => api.reviseExperience(pageId, item, changes, evidence))}
       feedback={(item, verdict, evidence, resultMessageId) => update(() => api.experienceFeedback(pageId, item, verdict, evidence, resultMessageId))} />)}
   </Dialog>;
