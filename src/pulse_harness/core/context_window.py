@@ -208,14 +208,24 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
     # or invent a pointer to an unsaved tool result.
     older = list(messages)
     historical_result_threshold = max(1024, max_tokens // 4)
-    for index in range(latest):
+    # Walk back only as far as the active exchange could admit, even with
+    # all eligible saved outputs paged. A long-lived page must not reparse
+    # tool results from thousands of already-omitted turns every round.
+    remaining = max_tokens - latest_cost - estimate_tokens(note)
+    for index in range(latest - 1, -1, -1):
+        if remaining <= 0:
+            break
         entry = older[index]
-        if (entry.get("role") != "tool" or not entry.get("message_id")
-                or estimate_tokens(entry) < historical_result_threshold):
-            continue
-        reference = _project_saved_tool_result(entry)
-        if reference is not None:
-            older[index] = reference
+        reference = None
+        if (entry.get("role") == "tool" and entry.get("message_id")
+                and estimate_tokens(entry) >= historical_result_threshold):
+            reference = _project_saved_tool_result(entry)
+        candidate = reference if reference is not None else entry
+        cost = estimate_tokens(candidate)
+        if cost > remaining:
+            break
+        older[index] = candidate
+        remaining -= cost
     messages = tuple(older)
     pinned = (messages[0],) if messages[0].get("role") == "user" else ()
     fixed = sum(estimate_tokens(message) for message in pinned) + estimate_tokens(note)
