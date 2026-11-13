@@ -53,6 +53,7 @@ class NewPage(Input):
     instruction: Content
     sourcePageId: Identifier = "home"
     sourceMessageId: Identifier | None = None
+    sourceExperienceId: Identifier | None = None
 
 
 class NewMessage(Input):
@@ -508,7 +509,8 @@ def create_app(
     @app.post("/api/pages", status_code=201)
     def create(body: NewPage, request: Request):
         return pages(request).create_page(
-            body.title, body.instruction, body.sourcePageId, body.sourceMessageId, source_excerpt=body.sourceExcerpt,
+            body.title, body.instruction, body.sourcePageId, body.sourceMessageId,
+            source_excerpt=body.sourceExcerpt, source_experience_id=body.sourceExperienceId,
         )
 
     @app.post("/api/pages/{page_id}/messages", status_code=202)
