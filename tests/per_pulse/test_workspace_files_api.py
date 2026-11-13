@@ -384,6 +384,7 @@ def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
 
 def test_directory_cursor_continues_after_bounded_scan_of_protected_entries(tmp_path, monkeypatch):
     """A scan bound is a per-page bound, not an irreversible directory cutoff."""
+    import base64
     import pulse_system.product.files as files_module
 
     monkeypatch.setattr(files_module, "MAX_SCAN_ENTRIES", 3)
@@ -395,6 +396,13 @@ def test_directory_cursor_continues_after_bounded_scan_of_protected_entries(tmp_
             (root / f"hidden-{index}.pem").write_text("Do not list", encoding="utf-8")
         (root / "visible.txt").write_text("Can be reached", encoding="utf-8")
         page = client.get("/api/workspace/files", headers=identity).json()
+        # Cursors are base64, not encryption. A page scanning only protected
+        # entries must not leak an internal filename through its resume token.
+        first_cursor = page["nextCursor"]
+        assert first_cursor
+        decoded = base64.urlsafe_b64decode(first_cursor + "=" * (-len(first_cursor) % 4))
+        assert b"hidden-" not in decoded
+        assert json.loads(decoded)["v"] == 1
         found = [row["name"] for row in page["entries"]]
         for _ in range(8):
             if not page["nextCursor"]:
