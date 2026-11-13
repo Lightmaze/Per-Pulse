@@ -130,10 +130,14 @@ def _page_start(cursor: str | None, path: str, revision: list[int]) -> tuple[int
     return value["offset"], None, False
 
 
-def _page_cursor(path: str, offset: int, revision: list[int], after: str) -> str:
-    body = json.dumps({"v": 2, "path": path, "offset": offset,
-                       "revision": revision, "after": after},
-                      separators=(",", ":"), ensure_ascii=True)
+def _page_cursor(path: str, offset: int, revision: list[int], after: str | None) -> str:
+    # A cursor is base64, not encrypted. Never expose a protected raw filename.
+    # On pages containing only hidden entries, retain the revision-bound v1
+    # offset rather than embedding an internal name as an anchor.
+    value = {"v": 1, "path": path, "offset": offset, "revision": revision}
+    if after is not None:
+        value.update(v=2, after=after)
+    body = json.dumps(value, separators=(",", ":"), ensure_ascii=True)
     return base64.urlsafe_b64encode(body.encode("utf-8")).decode("ascii").rstrip("=")
 
 
@@ -204,7 +208,6 @@ class WorkspaceFiles:
                         break
                     scanned_this_page += 1
                     next_offset = offset + 1
-                    last_scanned = entry.name
                     relative = f"{path}/{entry.name}" if path else entry.name
                     try:
                         _parts(relative)
@@ -214,6 +217,7 @@ class WorkspaceFiles:
                         rows.append({"name": entry.name, "path": relative,
                                      "kind": "directory" if stat.S_ISDIR(info.st_mode) else "file",
                                      "bytes": info.st_size if stat.S_ISREG(info.st_mode) else None})
+                        last_scanned = entry.name
                     except (OSError, FileAccessError):
                         continue
             if _directory_revision(directory) != revision:
@@ -249,7 +253,6 @@ class WorkspaceFiles:
                     break
                 scanned_this_page += 1
                 next_offset = offset + 1
-                last_scanned = name
                 relative = f"{path}/{name}" if path else name
                 if reparse:
                     continue
@@ -260,6 +263,7 @@ class WorkspaceFiles:
                 rows.append({"name": name, "path": relative,
                              "kind": "directory" if is_directory else "file",
                              "bytes": None if is_directory else size})
+                last_scanned = name
             if _directory_revision(directory) != revision:
                 raise FileAccessError("directory_changed_retry", 409)
         rows.sort(key=lambda row: (row["kind"] != "directory", row["name"].casefold(), row["name"]))
