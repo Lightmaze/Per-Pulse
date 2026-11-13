@@ -47,21 +47,39 @@ class PageLearning:
             raise PageError("experience_not_found", "Edit this experience from its source page.", 404)
         return memory, record
 
-    def selected_web_example(self, page_id, experience_id):
-        """Resolve a saved exact passage from its original Work for an explicit follow-up.
+    def selected_saved_observation(self, page_id, experience_id):
+        """Resolve a retained source passage from its original Work for a new task.
 
-        Only the attributed selection crosses contexts; the receipt and original
-        conversation remain behind the existing source-page navigation.
+        Native web, reading and command examples already have host-verified
+        delivered receipts. Only their selected text travels; original files,
+        commands, webpage URLs and surrounding conversations stay at source.
         """
         _, record = self._owned(page_id, experience_id)
         source = record.get("source") or {}
+        kind = source.get("kind")
+        # The file/command bytes and delivered receipts are genuine native
+        # observations even when their *selector* was a test model. Preserve
+        # that distinction in the later task instead of promoting a fixture to
+        # an observed model decision or making the selected passage unusable.
+        fixture_selector = (
+            record.get("record_type") == "constructed_fixture"
+            and kind in {"native_reading_example", "native_command_example"}
+            and source.get("selector_evidence_class") in {"TEST_DOUBLE", "EXPLICIT_MOCK"}
+        )
         if (not record["active"] or record["scope"] != "subject"
                 or record.get("representation") != "example"
-                or source.get("kind") != "native_web_example"
-                or source.get("capture_kind") != "operator_selected_web_example"):
+                or not (record.get("record_type") == "observed_episode" or fixture_selector)
+                or kind not in {"native_web_example", "native_reading_example", "native_command_example"}
+                or (kind == "native_web_example"
+                    and source.get("capture_kind") != "operator_selected_web_example")):
             raise PageError("web_experience_unavailable",
-                            "Choose an active saved webpage passage from this Work.", 422)
-        return {key: record[key] for key in ("id", "title", "excerpt", "note")}
+                            "Choose an active, shared, saved source passage from this Work.", 422)
+        selected = {**{key: record[key] for key in ("id", "title", "excerpt", "note")},
+                    "source_kind": kind}
+        if fixture_selector:
+            selected["record_type"] = "constructed_fixture"
+            selected["selector_evidence_class"] = source["selector_evidence_class"]
+        return selected
 
     @staticmethod
     def _invalid(error):
