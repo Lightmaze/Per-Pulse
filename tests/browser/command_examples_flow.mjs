@@ -181,7 +181,10 @@ try {
   await page.getByRole('heading', { name: 'Command practice', exact: true }).waitFor();
   const retained = (await json(`/api/pages/${source}/posture`)).experiences.find(item => item.id === saved.id);
   assert.equal(retained?.canEdit, true);
-  assert.equal(retained?.record_type, 'observed_episode');
+  // The command receipt is real, but the selector was an explicit test model.
+  // The later Work must retain that classification rather than laundering it.
+  assert.equal(retained?.record_type, 'constructed_fixture');
+  assert.equal(retained?.source?.selector_evidence_class, 'TEST_DOUBLE');
   await openExperience();
   const sourceExample = page.getByRole('dialog', { name: 'Lessons and examples', exact: true })
     .getByRole('article').filter({ has: page.getByRole('heading', { name: saved.title, exact: true }) });
@@ -197,6 +200,8 @@ try {
   assert.ok(opening, 'native follow-up contains a saved command observation');
   assert.ok(opening.content.includes(saved.id) && opening.content.includes(saved.excerpt));
   assert.ok(opening.content.includes('past_command_observation_not_reexecuted'));
+  assert.ok(opening.content.includes('"record_type": "constructed_fixture"'));
+  assert.ok(opening.content.includes('"selector_evidence_class": "TEST_DOUBLE"'));
   assert.ok(!opening.content.includes(sourceDraft), 'original private draft stays in the source Work');
   assert.equal((await json('/__command_examples/evidence')).commands, 1);
   const crossSource = await fetch(base + '/api/pages', { method: 'POST',
