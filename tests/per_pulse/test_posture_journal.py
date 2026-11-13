@@ -253,7 +253,7 @@ def test_bounded_model_materials_match_full_packet_without_decoding_old_bodies(t
         assert all("PRIVATE_" not in json.dumps(ref) for ref in bounded["omitted_refs"])
         queries = [sql for sql in trace if sql.lstrip().upper().startswith("SELECT")]
         assert any("ORDER BY e.content_updated_at DESC" in sql and "LIMIT 128" in sql for sql in queries)
-        assert any("json_extract(record, '$.revision')" in sql for sql in queries)
+        assert any("json_extract(e.record, '$.revision')" in sql for sql in queries)
         assert not any("posture_experience_revisions" in sql for sql in queries)
         assert len(memory.list_experiences(subject_id="subject")) == 181
         storage.close()
