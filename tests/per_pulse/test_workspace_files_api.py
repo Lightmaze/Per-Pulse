@@ -372,8 +372,14 @@ def test_directory_pages_reach_later_sources_and_survive_restart(tmp_path):
         (tmp_path / "workspace" / "late-note.txt").write_text("New note", encoding="utf-8")
         changed = client.get("/api/workspace/files", params={"cursor": saved_cursor},
                              headers=_identity(client))
-        assert changed.status_code == 409
-        assert changed.json()["error"]["code"] == "directory_changed_retry"
+        assert changed.status_code == 200, changed.text
+        continuation = changed.json()
+        assert continuation["directoryChanged"] is True
+        assert continuation["continuedAfterChange"] is True
+        assert continuation["restartedDueToChange"] is False
+        assert continuation["entries"]
+        assert not {row["name"] for row in continuation["entries"]} & set(
+            row["name"] for row in first["entries"])
 
 
 def test_directory_cursor_continues_after_bounded_scan_of_protected_entries(tmp_path, monkeypatch):
