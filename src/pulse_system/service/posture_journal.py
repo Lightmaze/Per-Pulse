@@ -87,10 +87,12 @@ class PostureJournal:
         return self.storage._posture_journal_read(read)
 
     def list(self, *, subjects, context_id, include_inactive, history=True,
-             limit=None, prioritize_content=False):
+             limit=None, prioritize_content=False, with_remaining=False):
         """Return visible records. Limit material queries in SQL, not after JSON decoding."""
         if limit is not None and (type(limit) is not int or limit < 1):
             raise ValueError("experience limit must be positive")
+        if with_remaining and limit is None:
+            raise ValueError("remaining references require a bounded selection")
         def read(conn):
             if not self._ready(conn):
                 values = self.legacy()["experiences"].values()
@@ -102,7 +104,10 @@ class PostureJournal:
                     pairs.sort(key=lambda pair: (
                         pair[1] if prioritize_content else pair[0]["updated_at"],
                         pair[0]["id"]), reverse=True)
+                    omitted = [{"id": row["id"], "revision": row["revision"]}
+                               for row, _ in pairs[limit:]] if with_remaining else []
                     pairs = pairs[:limit]
+                    return (pairs, omitted) if with_remaining else pairs
                 return pairs
 
             # Read the visible current records and their child rows in batches.
@@ -130,7 +135,18 @@ class PostureJournal:
                     query, [*args, limit] if limit is not None else args)
             }
             if not entries:
-                return []
+                return ([], []) if with_remaining else []
+            # Both the bounded candidates and the remaining ID/revision
+            # references come from one guarded World read. A concurrent
+            # revision cannot splice two different journal versions together.
+            omitted = []
+            if with_remaining:
+                omitted = [{"id": identity, "revision": revision}
+                           for identity, revision in conn.execute(
+                    "SELECT e.experience_id, json_extract(e.record, '$.revision') "
+                    "FROM posture_experiences AS e" + where
+                    + f" ORDER BY {order} DESC, e.experience_id DESC LIMIT -1 OFFSET ?",
+                    [*args, limit])]
             for record, _ in entries.values():
                 record["feedback"] = []
                 record["history"] = []
@@ -160,47 +176,8 @@ class PostureJournal:
                     previous = json.loads(raw)
                     previous["feedback"] = deepcopy(entries[identity][0]["feedback"][:count])
                     entries[identity][0]["history"].append(previous)
-            return [(record, content_time) for record, content_time in entries.values()]
-        self.guard()
-        return self.storage._posture_journal_read(read)
-
-    def refs_after(self, *, subjects, context_id, include_inactive=False,
-                   prioritize_content=False, skip=0):
-        """Lightweight remaining eligible IDs/revisions for accurate omission receipts.
-
-        Does not decode entire experience, source, feedback or revision histories.
-        Scope predicates match the material read, so other Works stay private.
-        """
-        if type(skip) is not int or skip < 0:
-            raise ValueError("experience reference offset must be nonnegative")
-        def read(conn):
-            if not self._ready(conn):
-                records = [value for value in self.legacy()["experiences"].values()
-                           if value["subject_id"] in subjects and (include_inactive or value["active"])
-                           and (context_id is None or value["context_id"] == context_id
-                                or value["scope"] == "subject")]
-                records.sort(key=lambda record: (
-                    self.content_time(record) if prioritize_content else record["updated_at"],
-                    record["id"]), reverse=True)
-                return [{"id": record["id"], "revision": record["revision"]}
-                        for record in records[skip:]]
-            members = sorted(subjects)
-            if not members:
-                return []
-            marks = ",".join("?" for _ in members)
-            where = f" WHERE world_id=? AND subject_id IN ({marks})"
-            args = [self.world_id, *members]
-            if not include_inactive:
-                where += " AND active=1"
-            if context_id is not None:
-                where += " AND (context_id=? OR scope='subject')"
-                args.append(context_id)
-            order = "content_updated_at" if prioritize_content else "updated_at"
-            return [{"id": identity, "revision": revision} for identity, revision in conn.execute(
-                "SELECT experience_id, json_extract(record, '$.revision') "
-                "FROM posture_experiences" + where
-                + f" ORDER BY {order} DESC, experience_id DESC LIMIT -1 OFFSET ?",
-                [*args, skip])]
+            pairs = [(record, content_time) for record, content_time in entries.values()]
+            return (pairs, omitted) if with_remaining else pairs
         self.guard()
         return self.storage._posture_journal_read(read)
 
