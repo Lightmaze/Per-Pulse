@@ -350,8 +350,19 @@ def test_real_tls_drip_cannot_extend_deadline_or_delay_stop(monkeypatch, phase, 
         if timer:
             timer.start()
         started = time.monotonic()
-        with pytest.raises(CancellationRequested if cancel else web.WebReadError):
-            read(token=token)
+        if phase == "body" and not cancel:
+            # A slow real TLS stream can produce a usable observed prefix,
+            # while a machine that spent the deadline on TLS still times out.
+            try:
+                observed = read(token=token)
+            except web.WebReadError as error:
+                assert error.code == "web_read_timeout"
+            else:
+                assert observed["content"] and observed["source"]["network_interrupted"]
+                assert observed["source"]["truncated"]
+        else:
+            with pytest.raises(CancellationRequested if cancel else web.WebReadError):
+                read(token=token)
         assert time.monotonic() - started < 1, "new bytes must not restart the whole deadline"
     finally:
         if timer:
@@ -401,8 +412,48 @@ def test_receiving_http_never_retries_another_address(monkeypatch, failure):
             headers={"content-type": "text/plain"}, stream=Chunks(body()))
     calls = network(monkeypatch, respond)
     monkeypatch.setattr(web, "_resolve", lambda *args: ("8.8.8.8", "1.1.1.1"))
-    with pytest.raises(web.WebReadError):
+    if failure == "http":
+        with pytest.raises(web.WebReadError):
+            read()
+    else:
+        observed = read()
+        assert observed["content"] == "Partial observation"
+        assert observed["source"]["truncated"] is True
+        assert observed["source"]["network_interrupted"] is True
+        assert observed["source"]["network_truncated"] is True
+        assert observed["available_eof"] is True
+        assert "only the observed prefix" in observed["reading_note"]
+    assert len(calls) == 1
+
+
+def test_interrupted_stream_with_no_text_remains_an_error(monkeypatch):
+    def empty_body():
+        raise httpx.ReadError("no text ever arrived")
+        yield b""
+    calls = network(monkeypatch, lambda request: httpx.Response(
+        200, headers={"content-type": "text/plain"}, stream=Chunks(empty_body())))
+    with pytest.raises(web.WebReadError) as error:
         read()
+    assert error.value.code == "web_connection_failed"
+    assert len(calls) == 1
+
+
+def test_total_timeout_preserves_observed_prefix_without_refetch(monkeypatch):
+    class StalledBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b"Observed before the page stalled."
+            await asyncio.sleep(1)
+            yield b"Unobserved tail"
+    calls = network(monkeypatch, lambda request: httpx.Response(
+        200, headers={"content-type": "text/plain"}, stream=StalledBody()))
+    monkeypatch.setattr(web, "TOTAL_SECONDS", .12)
+    observed = read()
+    assert observed["content"] == "Observed before the page stalled."
+    assert observed["source"]["observed_bytes"] == len(b"Observed before the page stalled.")
+    assert observed["source"]["truncated"] is True
+    assert observed["source"]["network_interrupted"] is True
+    assert observed["next"] is None
+    assert "only the observed prefix" in observed["reading_note"]
     assert len(calls) == 1
 
 
