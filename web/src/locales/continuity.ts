@@ -345,7 +345,7 @@ export const continuityChinese: Record<keyof typeof continuityEnglish, string> =
   "webSources.exampleHeading": "将一段原文留给之后的工作",
   "webSources.exampleHelp": "选中上方原文，点击「使用所选原文」，也可手动粘贴连续原文（最多 8 KB）。其他工作可使用这段文字及备注，网页全文仍留在来源工作中。",
   "webSources.useSelection": "使用所选原文",
-  "webSources.selectHelp": "请先在上方保存的原文中选择一段文字，再点击「使用所选原文」。"
+  "webSources.selectHelp": "请先在上方保存的原文中选择一段文字，再点击「使用所选原文」。",
   "webSources.exampleDefaultTitle": "网页观察实例",
   "webSources.exampleTitle": "实例名称",
   "webSources.exampleExcerpt": "准确的原文摘录",
