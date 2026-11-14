@@ -376,6 +376,35 @@ try {
   assert.equal(batch.provider.configured, false, 'A batch can be prepared without a model');
   checks.push('Multi-select picker: three source-versioned uploads, draft survives reload, explicit Send records all files in one Work');
 
+  // A second batch must stop at the five-file draft bound without discarding
+  // any earlier verified attachment or silently uploading the sixth file.
+  const four = Array.from({ length: 4 }, (_, i) => ({
+    name: 'Capacity ' + (i + 1) + '.txt', mimeType: 'text/plain',
+    buffer: Buffer.from('Material ' + (i + 1) + '\n'),
+  }));
+  await page.locator('.composer textarea').fill('Keep five source files in this draft.');
+  await open();
+  await page.getByLabel('Choose a file', { exact: true }).setInputFiles(four);
+  await page.getByRole('button', { name: 'Upload and attach 4 files', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'detached' });
+  await wait(async () => await page.locator('.composer-materials li').count() === 4, 'four picker files attached');
+  const beforeCap = (await files()).length;
+  await open();
+  await page.getByLabel('Choose a file', { exact: true }).setInputFiles([
+    { name: 'Capacity 5.txt', mimeType: 'text/plain', buffer: Buffer.from('Fifth\n') },
+    { name: 'Capacity 6.txt', mimeType: 'text/plain', buffer: Buffer.from('Sixth\n') },
+  ]);
+  await page.getByRole('button', { name: 'Upload and attach 2 files', exact: true }).click();
+  await page.getByText('1 of 2 files attached to your draft. Nothing has been sent.', { exact: true }).waitFor();
+  await page.getByRole('alert').waitFor();
+  assert.equal((await files()).length, beforeCap + 1, 'Over-capacity source was not uploaded');
+  assert.equal(await page.locator('.composer-materials li').count(), 5);
+  await close();
+  await page.reload();
+  assert.equal(await page.locator('.composer-materials li').count(), 5, 'Confirmed sources survive a partial batch and reload');
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Keep five source files in this draft.');
+  checks.push('Partial picker batch: five-file bound, no sixth upload, all confirmed unsent attachments survive reload');
+
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ ok: true, checks, browserErrors: errors, provider: 'disconnected', source: 'synthetic authored material' }, null, 2));
 } catch (error) {
