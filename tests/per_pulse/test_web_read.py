@@ -428,8 +428,8 @@ def test_receiving_http_never_retries_another_address(monkeypatch, failure):
 
 def test_interrupted_stream_with_no_text_remains_an_error(monkeypatch):
     def empty_body():
+        yield b""  # A zero-byte chunk is not an observed text passage.
         raise httpx.ReadError("no text ever arrived")
-        yield b""
     calls = network(monkeypatch, lambda request: httpx.Response(
         200, headers={"content-type": "text/plain"}, stream=Chunks(empty_body())))
     with pytest.raises(web.WebReadError) as error:
