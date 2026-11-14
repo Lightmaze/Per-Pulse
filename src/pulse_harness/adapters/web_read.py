@@ -223,7 +223,7 @@ async def _request(current, address, cancellation, deadline):
                         if len(chunk) > room:
                             result["partial"] = True
                             break
-                except (httpx.ReadError, httpx.ReadTimeout, WebReadError) as error:
+                except (httpx.ReadError, httpx.ReadTimeout, httpx.RemoteProtocolError, WebReadError) as error:
                     # A connection that never yielded text is a failure, not
                     # an empty observation. Stop/cancellation always wins.
                     cancellation.raise_if_cancelled()
