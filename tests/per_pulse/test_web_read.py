@@ -402,11 +402,13 @@ def test_connection_timeout_can_fall_back_to_a_validated_address(monkeypatch):
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("failure", ["http", "body_error", "body_timeout"])
+@pytest.mark.parametrize("failure", ["http", "body_error", "body_timeout", "body_disconnect"])
 def test_receiving_http_never_retries_another_address(monkeypatch, failure):
     def body():
         yield b"Partial observation"
-        raise (httpx.ReadTimeout if failure == "body_timeout" else httpx.ReadError)("synthetic body failure")
+        error = (httpx.ReadTimeout if failure == "body_timeout" else
+                 httpx.RemoteProtocolError if failure == "body_disconnect" else httpx.ReadError)
+        raise error("synthetic body failure")
     def respond(request):
         return httpx.Response(503 if failure == "http" else 200,
             headers={"content-type": "text/plain"}, stream=Chunks(body()))
