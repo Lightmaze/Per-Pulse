@@ -289,3 +289,72 @@ def test_bounded_legacy_materials_do_not_migrate_on_read():
         assert storage._conn.execute("SELECT COUNT(*) FROM posture_journals").fetchone()[0] == 0
     finally:
         storage.close()
+
+
+
+def test_compact_historical_experience_can_fill_remaining_model_packet(tmp_path):
+    """A long-lived World should not starve every older short lesson.
+
+    The native read still decodes a fixed maximum of 144 full bodies; the
+    other references survive for stale-decision checks. This is a fit-based
+    reserve, not a relevance assertion or model effectiveness result.
+    """
+    from pulse_harness.plugins.posture import pack_posture_materials
+
+    path = tmp_path / "compact-backfill.db"
+    storage = Storage(path)
+    memory = PostureMemory(storage, "world")
+    try:
+        for index in range(10):
+            memory.add_experience(**episode(
+                experience_id=f"compact-{index:02d}", scope="subject",
+                lesson=f"An older compact but actionable lesson {index}."))
+        oversized = {key: char * 2600
+                     for key, char in (("situation", "S"), ("action", "A"), ("outcome", "O"))}
+        for index in range(140):
+            memory.add_experience(**episode(
+                experience_id=f"large-new-{index:03d}", scope="subject",
+                encounter=oversized))
+        memory.add_experience(**episode(
+            experience_id="other-subject", subject_id="unrelated", scope="subject"))
+        memory.add_experience(**episode(
+            experience_id="private-context", context_id="private", scope="context"))
+        withdrawn = memory.add_experience(**episode(
+            experience_id="withdrawn", scope="subject"))
+        memory.record_feedback(withdrawn["id"], expected_revision=1,
+                               verdict="withdrawn", evidence="No longer applicable.")
+
+        ordinary = memory.materials(
+            subject_id="subject", context_id="origin",
+            prioritize_content=True, max_records=128)
+        backfilled = memory.materials(
+            subject_id="subject", context_id="origin",
+            prioritize_content=True, max_records=128, compact_backfill=16)
+        full = memory.materials(
+            subject_id="subject", context_id="origin", prioritize_content=True)
+        assert len(ordinary["episodes"]) == 128
+        assert len(backfilled["episodes"]) == 138
+        assert len(backfilled["omitted_refs"]) == 12
+        assert all(not item["id"].startswith("compact-") for item in ordinary["episodes"])
+        assert all(any(item["id"] == f"compact-{i:02d}" for item in backfilled["episodes"])
+                   for i in range(10))
+        assert all(ref["id"] not in {"other-subject", "private-context", "withdrawn"}
+                   for ref in backfilled["omitted_refs"])
+        offered = lambda materials: [
+            ref["id"] for ref in pack_posture_materials(materials)["offered_posture_revisions"]]
+        assert any(identity.startswith("compact-") for identity in offered(backfilled))
+        assert offered(backfilled) == offered(full)
+        assert len(pack_posture_materials(backfilled)["omitted_posture_revisions"]) == (
+            len(full["episodes"]) - len(offered(backfilled)))
+        storage.close()
+
+        storage = Storage(path)
+        memory = PostureMemory(storage, "world")
+        reopened = memory.materials(
+            subject_id="subject", context_id="origin",
+            prioritize_content=True, max_records=128, compact_backfill=16)
+        assert offered(reopened) == offered(full)
+        with pytest.raises(ValueError, match="compact backfill"):
+            memory.materials(subject_id="subject", context_id="origin", compact_backfill=17)
+    finally:
+        storage.close()
