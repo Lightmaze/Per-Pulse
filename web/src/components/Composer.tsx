@@ -49,19 +49,29 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
       }}
       onSubmit={event => { event.preventDefault(); if (canSend && !busy && !pastingImage) send(); }}>
       {draft.materials?.length ? <ul className="composer-materials" aria-label={t('materials.forMessage')}>{draft.materials.map(material => <li key={material.id}>{onInspectMaterial ? <button type="button" className="composer-material-inspect" aria-label={t('materials.inspectDraft', { name: material.name })} onClick={() => onInspectMaterial(material.id)}>{material.name}</button> : <span>{material.name}</span>}<button type="button" className="composer-material-remove" aria-label={t('materials.remove', { name: material.name })} onClick={() => changeDraft({ ...draft, materials: draft.materials?.filter(item => item.id !== material.id) })}><Icon name="close" size={14} /></button></li>)}</ul> : null}
-      <textarea ref={inputRef} value={draft.text} onChange={event => { setUnsupportedDrop(false); changeDraft({ ...draft, text: event.target.value }); }} onPaste={event => {
+      <textarea ref={inputRef} value={draft.text} onChange={event => changeDraft({ ...draft, text: event.target.value })} onPaste={event => {
         if (!onPasteFiles) return;
         const files = Array.from(event.clipboardData.items)
           .filter(item => item.kind === 'file')
           .map(item => item.getAsFile())
           .filter((file): file is File => file !== null);
         if (files.length) {
-          event.preventDefault();
           const supported = files.filter(isSupportedUpload);
           setUnsupportedDrop(supported.length !== files.length);
-          if (supported.length) onPasteFiles(supported);
+          // Only consume the paste when a real attachment can be saved. Some
+          // clipboards carry text alongside an unsupported file; cancelling
+          // their paste used to silently discard the user's text as well.
+          if (supported.length) {
+            event.preventDefault();
+            onPasteFiles(supported);
+          }
+        } else {
+          setUnsupportedDrop(false);
         }
       }} placeholder={pageKind === 'work' ? t('composer.continueIn', { destination }) : t('composer.placeholder')} aria-label={t('composer.messageTo', { destination })} aria-describedby={disconnected ? connectionId : undefined} rows={1} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={event => {
+        // Keep an unsupported-attachment notice visible through the browser's
+        // native text paste; clear it on the next intentional keyboard edit.
+        if (!['Control', 'Meta', 'Alt', 'Shift'].includes(event.key)) setUnsupportedDrop(false);
         if (event.key === 'Enter' && !event.shiftKey && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); if (canSend && !busy && !pastingImage) send(); }
       }} />
       <div className="composer-toolbar">
