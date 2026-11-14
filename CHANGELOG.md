@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.0a18
+
+- Start a new Work directly from an operator-saved native file reading or command-output passage, with the original source Work, observation type and test-selector evidence carried forward. It does not re-read the file or re-run the command (#269).
+- Keep earlier user corrections and completed decisions in long model sessions when an old tool output is too large: replace the in-context output with a durable, paged `read_history` reference instead of discarding its entire turn (#270).
+- From Home, browse and reopen older completed Work results after they fall outside the latest activity window. Already-visited results remain findable; the original result is still linked to its source Work (#271).
+- Limit automatic pre-decision experience-body reads to recent SQL candidates while retaining earlier visible experience IDs and revisions for omission and stale-decision checks; explicit historical lookup remains available (#272).
+- Preserve the single World/Kernel/SQLite and original source and permission boundaries throughout these additions.
+
 ## 0.1.0a17
 
 - Continue directly from a saved webpage observation in Work A to a new user-authored Work, with its original source retained and the existing Home/Work return path; no new session store or automatic source copying (#263).
