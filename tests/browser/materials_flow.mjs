@@ -401,6 +401,10 @@ try {
   assert.equal(await page.locator('.composer-materials li').count(), 5);
   await close();
   await page.reload();
+  // A reload renders the app shell before the asynchronous native bootstrap
+  // restores the Composer. Wait for the actual persisted draft, as above.
+  await wait(async () => await page.locator('.composer-materials li').count() === 5,
+    'confirmed sources restored after partial batch reload');
   assert.equal(await page.locator('.composer-materials li').count(), 5, 'Confirmed sources survive a partial batch and reload');
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Keep five source files in this draft.');
   checks.push('Partial picker batch: five-file bound, no sixth upload, all confirmed unsent attachments survive reload');
