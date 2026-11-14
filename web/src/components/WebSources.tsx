@@ -28,6 +28,8 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
   const [savedExperience, setSavedExperience] = useState<{ id: string; title: string; excerpt: string } | null>(null);
   const [saveError, setSaveError] = useState('');
   const saveAttempt = useRef(0);
+  const savedText = useRef<HTMLPreElement | null>(null);
+  const excerptInput = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     // A new World, Work or service cannot inherit the earlier receipt's text.
@@ -90,6 +92,33 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
     }
   };
 
+  const useSelectedPassage = () => {
+    const selection = window.getSelection();
+    const text = savedText.current;
+    if (!observation || !text || !selection || selection.rangeCount !== 1 || selection.isCollapsed) {
+      setSaveError(t('webSources.selectHelp'));
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    // Only the original displayed observation can supply the exact passage.
+    // A selection extending into another source or the editor is not evidence.
+    if (!text.contains(range.startContainer) || !text.contains(range.endContainer)) {
+      setSaveError(t('webSources.selectHelp'));
+      return;
+    }
+    const passage = range.toString();
+    if (!passage.trim() || !observation.content.includes(passage)
+        || new TextEncoder().encode(passage).length > 8000) {
+      setSaveError(t('webSources.exampleMismatch'));
+      return;
+    }
+    setExcerpt(passage);
+    setSaveError('');
+    setSaved(false);
+    setSavedExperience(null);
+    excerptInput.current?.focus();
+  };
+
   const saveExample = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!observation || saving) return;
@@ -141,9 +170,11 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
           <p className="web-observation-meta">{t('webSources.range', {
             start: observation.textStart, end: observation.textEnd,
           })} · {t('webSources.digest', { digest: observation.digest })}</p>
-          <pre tabIndex={0} className="web-observation-text">{observation.content}</pre>
+          <pre ref={savedText} tabIndex={0} className="web-observation-text">{observation.content}</pre>
           {observation.readingNote ? <p>{observation.readingNote}</p> : null}
           <CopyButton text={observation.content} label={t('webSources.copy')} />
+          <button type="button" className="text-button" disabled={saving}
+            onClick={useSelectedPassage}>{t('webSources.useSelection')}</button>
           <form className="web-observation-example" onSubmit={event => void saveExample(event)}>
             <h4>{t('webSources.exampleHeading')}</h4>
             <p>{t('webSources.exampleHelp')}</p>
@@ -152,8 +183,8 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
                 onChange={event => { setExampleTitle(event.target.value); setSaved(false); setSavedExperience(null); }} />
             </label>
             <label>{t('webSources.exampleExcerpt')}
-              <textarea required rows={3} disabled={saving} value={excerpt}
-                onChange={event => { setExcerpt(event.target.value); setSaved(false); setSavedExperience(null); }} />
+              <textarea ref={excerptInput} required rows={3} disabled={saving} value={excerpt}
+                onChange={event => { setExcerpt(event.target.value); setSaveError(''); setSaved(false); setSavedExperience(null); }} />
             </label>
             <label>{t('webSources.exampleNote')}
               <textarea rows={2} disabled={saving} value={note}
