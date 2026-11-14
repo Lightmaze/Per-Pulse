@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0a20
+
+- Select an exact passage directly in a saved HTTPS webpage observation and place it in that Work's existing experience editor. Keep the original observation and source Work, the 8 KiB excerpt bound, and the normal later-Work handoff (#278).
+- Preserve ordinary text pasting in Home and Work when a clipboard also contains unsupported files. Show a file notice without cancelling the text paste; keep supported attachments on their existing durable draft path (#279).
+
 ## 0.1.0a19
 
 - Reconsider up to 16 older, compact, still-authorized experiences alongside the newest 128 full experience candidates before a later Work decision. Keep original subject/source/feedback filtering, omission tracking and the same World-owned journal (#274).
