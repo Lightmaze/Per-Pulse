@@ -227,8 +227,8 @@ async def _request(current, address, cancellation, deadline):
                     # A connection that never yielded text is a failure, not
                     # an empty observation. Stop/cancellation always wins.
                     cancellation.raise_if_cancelled()
-                    if not chunks or (isinstance(error, WebReadError)
-                                      and error.code != "web_read_timeout"):
+                    if size == 0 or (isinstance(error, WebReadError)
+                                     and error.code != "web_read_timeout"):
                         raise
                     result["partial"] = True
                     result["interrupted"] = True
@@ -249,7 +249,7 @@ async def _request(current, address, cancellation, deadline):
     except TimeoutError:
         cancellation.raise_if_cancelled()
         received = progress["result"]
-        if received is not None and progress["chunks"]:
+        if received is not None and any(progress["chunks"]):
             # The deadline cancels the body stream; never retry this HTTP
             # observation or pretend the received prefix was the full page.
             received["body"] = b"".join(progress["chunks"])
