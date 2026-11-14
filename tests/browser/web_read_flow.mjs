@@ -107,7 +107,36 @@ try {
   assert.equal(originalReceipt.textEnd - originalReceipt.textStart, [...originalReceipt.content].length);
   assert.equal((await get('/__web/status')).webRequests, 1);
   const selectedWebPassage = 'Original field observation: café 山川 🌍.';
-  await page.getByRole('textbox', { name: 'Exact original passage' }).fill(selectedWebPassage);
+  const useSelection = page.getByRole('button', { name: 'Use selected passage', exact: true });
+  const excerptEditor = page.getByRole('textbox', { name: 'Exact original passage' });
+  await useSelection.click();
+  await page.getByText('Select text within the saved observation above, then choose Use selected passage.', { exact: true }).waitFor();
+  assert.equal(await excerptEditor.inputValue(), '', 'no selection cannot create an attributed excerpt');
+  await saved.evaluate((element, passage) => {
+    const original = element.firstChild;
+    const start = element.textContent.indexOf(passage);
+    if (!original || start < 0) throw new Error('Expected exact saved passage');
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(original, start);
+    range.setEnd(original, start + passage.length);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, selectedWebPassage);
+  await useSelection.click();
+  assert.equal(await excerptEditor.inputValue(), selectedWebPassage);
+  await excerptEditor.fill('Manual edit');
+  await page.locator('.web-observation-example h4').evaluate(element => {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await useSelection.click();
+  assert.equal(await excerptEditor.inputValue(), 'Manual edit',
+    'a selection outside the saved observation cannot overwrite a manual excerpt');
+  await excerptEditor.fill(selectedWebPassage);
   await page.getByRole('textbox', { name: 'What should later work notice? (optional)' })
     .fill('Compare this observed version with the later task.');
   // Hold the actual POST so a slow save cannot make an edited passage look persisted.
