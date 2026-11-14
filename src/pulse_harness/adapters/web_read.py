@@ -215,10 +215,11 @@ async def _request(current, address, cancellation, deadline):
                 progress["result"], progress["chunks"] = result, chunks
                 try:
                     async for chunk in response.aiter_raw():
-                        _check(cancellation, deadline)
+                        cancellation.raise_if_cancelled()
                         room = MAX_BYTES - size
                         chunks.append(chunk[:room])
                         size += min(len(chunk), room)
+                        _check(cancellation, deadline)
                         if len(chunk) > room:
                             result["partial"] = True
                             break
