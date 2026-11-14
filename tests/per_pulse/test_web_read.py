@@ -3,6 +3,7 @@
 Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 import asyncio
+import gzip
 import json
 from pathlib import Path
 import socket
@@ -150,12 +151,62 @@ def test_redirect_loop_is_bounded(monkeypatch):
 
 
 @pytest.mark.parametrize("headers", [{"content-type": "application/pdf"},
-    {"content-type": "image/png"}, {"content-type": "text/html", "content-encoding": "gzip"}])
+    {"content-type": "image/png"}, {"content-type": "text/html", "content-encoding": "br"}])
 def test_unsupported_or_compressed_body_is_not_read(monkeypatch, headers):
     def body():
         raise AssertionError("unacceptable content must not be consumed")
         yield b""
     network(monkeypatch, lambda request: httpx.Response(200, headers=headers, stream=Chunks(body())))
+    with pytest.raises(web.WebReadError) as error:
+        read()
+    assert error.value.code == "web_content_unsupported"
+
+
+def test_gzip_html_is_read_as_text_without_escaping_the_original_source(monkeypatch):
+    original = '<title>Gzip field report</title><p>Observed café 🌍 result.</p>'
+    compressed = gzip.compress(original.encode("utf-8"))
+    def serve(_request):
+        return httpx.Response(200, headers={"content-type": "text/html", "content-encoding": "gzip"},
+                              stream=Chunks([compressed[:7], compressed[7:19], compressed[19:]]))
+    calls = network(monkeypatch, serve)
+    result = read()
+    assert calls[0].headers["accept-encoding"] == "gzip, identity"
+    assert result["content"] == "Gzip field report\nObserved café 🌍 result."
+    assert result["source"]["truncated"] is False
+    assert result["source"]["network_truncated"] is False
+    assert result["available_eof"] is True
+    assert result["source"]["observed_bytes"] == len(original.encode("utf-8"))
+
+
+def test_gzip_expansion_is_bounded_before_the_whole_page_is_allocated(monkeypatch):
+    monkeypatch.setattr(web, "MAX_BYTES", 256)
+    body = gzip.compress(b"A" * 100_000)
+    network(monkeypatch, lambda request: httpx.Response(
+        200, headers={"content-type": "text/plain", "content-encoding": "gzip"},
+        stream=Chunks([body])))
+    result = read()
+    assert result["content"] == "A" * 256
+    assert result["source"]["observed_bytes"] == 256
+    assert result["source"]["network_truncated"] is True
+    assert result["available_eof"] is True
+
+
+def test_truncated_gzip_keeps_only_decoded_observed_prefix(monkeypatch):
+    body = gzip.compress(b"Verified passage. Additional detail.")[:-8]
+    network(monkeypatch, lambda request: httpx.Response(
+        200, headers={"content-type": "text/plain", "content-encoding": "gzip"},
+        stream=Chunks([body[:9], body[9:]])))
+    result = read()
+    assert result["content"] == "Verified passage. Additional detail."
+    assert result["source"]["network_truncated"] is True
+    assert result["source"]["network_interrupted"] is True
+    assert "observed prefix" in result["reading_note"]
+
+
+def test_invalid_gzip_without_extracted_text_is_a_failure(monkeypatch):
+    network(monkeypatch, lambda request: httpx.Response(
+        200, headers={"content-type": "text/plain", "content-encoding": "gzip"},
+        stream=Chunks([b"not a gzip stream"])))
     with pytest.raises(web.WebReadError) as error:
         read()
     assert error.value.code == "web_content_unsupported"
