@@ -31,8 +31,11 @@ def test_first_self_departure_has_a_native_web_reading_tool(tmp_path, monkeypatc
         pages.runtime.close()
 
 
-def test_self_reading_creates_sourced_file_then_recalls_old_observation_after_restart(tmp_path, monkeypatch):
+@pytest.mark.parametrize("gzip_response", [False, True])
+def test_self_reading_creates_sourced_file_then_recalls_old_observation_after_restart(
+        tmp_path, monkeypatch, gzip_response):
     fixture = WebFixture(monkeypatch)
+    fixture.gzip = gzip_response
     def app():
         return create_app(tmp_path, model_factory=fixture.factory, posture=True,
             allow_workspace_actions=True, auto_apply_edits=True,
