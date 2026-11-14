@@ -10,8 +10,10 @@ The observation keeps its URL, read time and extracted text in the original
 Work history. **Web sources** opens those URLs; a source's live webpage may
 have changed since it was read. History recall reads the saved observation.
 Images, interactive content and page layout require opening the original page.
-Each read observes up to 512 KiB of response bytes and returns up to 24,576
-text characters, marking partial text explicitly. Long observations provide
+Each read accepts identity or gzip-encoded text. It observes no more than
+512 KiB of encoded network bytes or 512 KiB of decoded text, and returns up
+to 24,576 text characters, marking partial text explicitly. An incomplete
+gzip stream keeps only the decoded prefix with a partial-reading note. Long observations provide
 `next` arguments for another `read_web` call: the requested URL, Unicode-character
 offset, page size and observation digest. Each call fetches a fresh observation
 and verifies that its extracted text and resolved URL still match before

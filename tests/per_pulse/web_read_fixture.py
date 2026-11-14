@@ -2,6 +2,7 @@
 
 Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
+import gzip
 import json
 
 import httpx
@@ -40,14 +41,19 @@ class WebFixture:
         monkeypatch.setenv("PER_PULSE_WEB_FIXTURE_KEY", "explicit-synthetic-credential")
         self.requests, self.web_requests = [], []
         self.follow_all = False
+        self.gzip = False
         self.body = '<title>Field observations</title><script>not evidence</script><p>' + ORIGINAL + '</p>'
         monkeypatch.setattr(web_read, "_resolve", lambda host, token, deadline: ("8.8.8.8",))
         def website(request):
             self.web_requests.append(str(request.url))
             assert request.headers["host"] == "reading.example"
             assert request.extensions["sni_hostname"] == "reading.example"
-            return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8"},
-                                  stream=Body(self.body.encode()))
+            content = self.body.encode()
+            if self.gzip:
+                content = gzip.compress(content)
+            return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8",
+                                                **({"content-encoding": "gzip"} if self.gzip else {})},
+                                  stream=Body(content))
         monkeypatch.setattr(web_read, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(website), trust_env=False))
 
     def factory(self, scope):
