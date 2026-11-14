@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a19
+
+- Reconsider up to 16 older, compact, still-authorized experiences alongside the newest 128 full experience candidates before a later Work decision. Keep original subject/source/feedback filtering, omission tracking and the same World-owned journal (#274).
+- When an HTTPS webpage body times out or disconnects after delivering usable text, retain the observed prefix as an explicitly partial source rather than discarding it or claiming a complete read (#275).
+- Read public gzip-compressed HTTPS webpages with bounded input and decompressed output (512 KiB each). Carry the original observation through the existing Work, Home and restart/source path; incomplete compressed streams remain marked as partial observations (#276).
+
 ## 0.1.0a18
 
 - Start a new Work directly from an operator-saved native file reading or command-output passage, with the original source Work, observation type and test-selector evidence carried forward. It does not re-read the file or re-run the command (#269).
