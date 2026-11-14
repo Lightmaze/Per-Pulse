@@ -189,7 +189,13 @@ def _connection_url(current, address):
 
 
 async def _request(current, address, cancellation, deadline):
-    """A short-lived event loop bounds even trickling TLS/response headers."""
+    """A short-lived event loop bounds even trickling TLS/response headers.
+
+    Once validated text bytes arrive, a later stream failure returns the
+    observed prefix rather than throwing away the user's field reading.
+    """
+    progress = {"result": None, "chunks": []}
+
     async def fetch():
         async with _client() as client:
             async with client.stream("GET", _connection_url(current, address),
@@ -206,14 +212,25 @@ async def _request(current, address, cancellation, deadline):
                         or result["media_type"] not in {"text/html", "text/plain"}):
                     return result
                 chunks, size = [], 0
-                async for chunk in response.aiter_raw():
-                    _check(cancellation, deadline)
-                    room = MAX_BYTES - size
-                    chunks.append(chunk[:room])
-                    size += min(len(chunk), room)
-                    if len(chunk) > room:
-                        result["partial"] = True
-                        break
+                progress["result"], progress["chunks"] = result, chunks
+                try:
+                    async for chunk in response.aiter_raw():
+                        _check(cancellation, deadline)
+                        room = MAX_BYTES - size
+                        chunks.append(chunk[:room])
+                        size += min(len(chunk), room)
+                        if len(chunk) > room:
+                            result["partial"] = True
+                            break
+                except (httpx.ReadError, httpx.ReadTimeout, WebReadError) as error:
+                    # A connection that never yielded text is a failure, not
+                    # an empty observation. Stop/cancellation always wins.
+                    cancellation.raise_if_cancelled()
+                    if not chunks or (isinstance(error, WebReadError)
+                                      and error.code != "web_read_timeout"):
+                        raise
+                    result["partial"] = True
+                    result["interrupted"] = True
                 result["body"] = b"".join(chunks)
                 return result
 
@@ -229,6 +246,15 @@ async def _request(current, address, cancellation, deadline):
         async with asyncio.timeout(_check(cancellation, deadline)):
             return await task
     except TimeoutError:
+        cancellation.raise_if_cancelled()
+        received = progress["result"]
+        if received is not None and progress["chunks"]:
+            # The deadline cancels the body stream; never retry this HTTP
+            # observation or pretend the received prefix was the full page.
+            received["body"] = b"".join(progress["chunks"])
+            received["partial"] = True
+            received["interrupted"] = True
+            return received
         raise WebReadError("The webpage took too long to read. Try the source again.", code="web_read_timeout") from None
     except asyncio.CancelledError:
         cancellation.raise_if_cancelled()
@@ -274,7 +300,10 @@ def read(arguments, cancellation, *, action_request_id):
                     _check(cancellation, deadline)
                     if index == len(addresses) - 1:
                         raise
-            _check(cancellation, deadline)
+            if response.get("interrupted"):
+                cancellation.raise_if_cancelled()
+            else:
+                _check(cancellation, deadline)
             if response["status"] in {301, 302, 303, 307, 308}:
                 location = response["location"]
                 if not location or hop == MAX_REDIRECTS:
@@ -291,6 +320,7 @@ def read(arguments, cancellation, *, action_request_id):
                 raise WebReadError("The server returned compressed content despite the text-only request. Use another text source.",
                                    code="web_content_unsupported")
             body, partial = response["body"], response["partial"]
+            interrupted = response.get("interrupted", False)
             try:
                 decoded = body.decode(response["encoding"], errors="replace")
             except LookupError:
@@ -299,7 +329,10 @@ def read(arguments, cancellation, *, action_request_id):
             if mime == "text/html":
                 parser = _Text(str(current))
                 for offset in range(0, len(decoded), 8192):
-                    _check(cancellation, deadline)
+                    if interrupted:
+                        cancellation.raise_if_cancelled()
+                    else:
+                        _check(cancellation, deadline)
                     parser.feed(decoded[offset:offset + 8192])
                 parser.close()
                 text = "\n".join(" ".join(line.split()) for line in "".join(parser.parts).splitlines() if line.strip())
@@ -318,16 +351,21 @@ def read(arguments, cancellation, *, action_request_id):
             next_range = ({"url": str(requested), "offset": end, "max_chars": count,
                            "expected_digest": observed_digest} if end < len(text) else None)
             note = ("Partial extracted text. Follow next to read the remaining observed text."
-                    if next_range else "The network byte bound was reached; unobserved original content remains unknown."
+                    if next_range else "The webpage stopped delivering text; this is only the observed prefix."
+                    if interrupted else "The network byte bound was reached; unobserved original content remains unknown."
                     if partial else "Extracted text; images, interactive content and layout are not read.")
-            _check(cancellation, deadline)
+            if interrupted:
+                cancellation.raise_if_cancelled()
+            else:
+                _check(cancellation, deadline)
             return {"kind": KIND, "receipt_id": action_request_id,
                 "source": {"requested_url": str(requested), "url": str(current), "title": title,
                     "fetched_at": datetime.now(timezone.utc).isoformat(), "media_type": mime,
                     "scope": "extracted_text", "truncated": partial or start > 0 or end < len(text),
                     "observed_bytes": len(body), "text_sha256": hashlib.sha256(content.encode()).hexdigest(),
                     "observation_sha256": observed_digest, "observed_text_chars": len(text),
-                    "network_truncated": partial, "text_start": start, "text_end": end},
+                    "network_truncated": partial, "network_interrupted": interrupted,
+                    "text_start": start, "text_end": end},
                 "content": content, "links": links, "next": next_range,
                 "available_eof": end == len(text), "reading_note": note}
     except httpx.TimeoutException:
