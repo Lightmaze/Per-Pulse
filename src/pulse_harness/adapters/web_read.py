@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import time
+import zlib
 from urllib.parse import urljoin
 
 import httpx
@@ -200,27 +201,44 @@ async def _request(current, address, cancellation, deadline):
         async with _client() as client:
             async with client.stream("GET", _connection_url(current, address),
                     headers={"Host": current.netloc.decode("ascii"), "Accept": "text/html, text/plain",
-                             "Accept-Encoding": "identity", "User-Agent": "PerPulse/0.1 web-reading"},
+                             "Accept-Encoding": "gzip, identity", "User-Agent": "PerPulse/0.1 web-reading"},
                     extensions={"sni_hostname": current.raw_host.decode("ascii")},
                     timeout=httpx.Timeout(min(5.0, _check(cancellation, deadline)))) as response:
+                coding = response.headers.get("content-encoding", "identity").strip().lower()
                 result = {"status": response.status_code, "location": response.headers.get("location"),
                     "media_type": response.headers.get("content-type", "").split(";", 1)[0].strip().lower(),
                     "encoding": response.charset_encoding or "utf-8",
-                    "compressed": response.headers.get("content-encoding", "identity").strip().lower() != "identity",
-                    "body": b"", "partial": False}
-                if (response.status_code >= 300 or result["compressed"]
+                    "content_coding": coding, "body": b"", "partial": False}
+                if (response.status_code >= 300 or coding not in {"", "identity", "gzip"}
                         or result["media_type"] not in {"text/html", "text/plain"}):
                     return result
-                chunks, size = [], 0
+                # Bound the encoded network bytes AND the decoded text bytes.
+                # Streaming zlib with max_length avoids allocating a gzip bomb
+                # before deciding whether it fits the observation envelope.
+                decoder = zlib.decompressobj(16 + zlib.MAX_WBITS) if coding == "gzip" else None
+                chunks, size, wire_size = [], 0, 0
                 progress["result"], progress["chunks"] = result, chunks
                 try:
                     async for chunk in response.aiter_raw():
                         cancellation.raise_if_cancelled()
+                        wire_room = MAX_BYTES - wire_size
+                        raw = chunk[:wire_room]
+                        wire_size += len(raw)
                         room = MAX_BYTES - size
-                        chunks.append(chunk[:room])
-                        size += min(len(chunk), room)
+                        try:
+                            decoded = decoder.decompress(raw, room + 1) if decoder else raw
+                        except zlib.error:
+                            if size == 0:
+                                raise WebReadError("The webpage's gzip response could not be decoded.",
+                                                   code="web_content_unsupported") from None
+                            result["partial"] = True
+                            result["interrupted"] = True
+                            break
+                        if decoded:
+                            chunks.append(decoded[:room])
+                            size += min(len(decoded), room)
                         _check(cancellation, deadline)
-                        if len(chunk) > room:
+                        if len(chunk) > wire_room or len(decoded) > room:
                             result["partial"] = True
                             break
                 except (httpx.ReadError, httpx.ReadTimeout, httpx.RemoteProtocolError, WebReadError) as error:
@@ -230,6 +248,12 @@ async def _request(current, address, cancellation, deadline):
                     if size == 0 or (isinstance(error, WebReadError)
                                      and error.code != "web_read_timeout"):
                         raise
+                    result["partial"] = True
+                    result["interrupted"] = True
+                if decoder and not result["partial"] and (not decoder.eof or decoder.unused_data):
+                    if size == 0:
+                        raise WebReadError("The webpage's gzip response was incomplete.",
+                                           code="web_content_unsupported")
                     result["partial"] = True
                     result["interrupted"] = True
                 result["body"] = b"".join(chunks)
@@ -317,8 +341,8 @@ def read(arguments, cancellation, *, action_request_id):
             if mime not in {"text/html", "text/plain"}:
                 raise WebReadError("This URL is not an HTML or plain-text page. Open the original source to inspect it.",
                                    code="web_content_unsupported")
-            if response["compressed"]:
-                raise WebReadError("The server returned compressed content despite the text-only request. Use another text source.",
+            if response["content_coding"] not in {"", "identity", "gzip"}:
+                raise WebReadError("This webpage uses an unsupported response encoding. Try another text source.",
                                    code="web_content_unsupported")
             body, partial = response["body"], response["partial"]
             interrupted = response.get("interrupted", False)
