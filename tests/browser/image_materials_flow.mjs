@@ -242,6 +242,46 @@ try {
   assert.ok(sentImage, 'Pasted image retains its source on the saved message');
   checks.push('Clipboard image paste: no auto-send, persisted draft after reload, original pixels and source on explicit Send');
 
+  // A browser clipboard can provide text and an unsupported file together.
+  // A synthetic event cannot insert text by itself, but its cancel flag
+  // proves the composer leaves the native text-paste path available.
+  await page.locator('.composer textarea').fill('Keep this draft');
+  const beforeUnsupportedPaste = seenPixels.length;
+  await page.evaluate(() => {
+    const clipboard = new DataTransfer();
+    clipboard.items.add('A passage from the clipboard', 'text/plain');
+    clipboard.items.add(new File(['binary'], 'unsupported.exe', { type: 'application/octet-stream' }));
+    const target = document.querySelector('.composer textarea');
+    const event = new ClipboardEvent('paste', {
+      clipboardData: clipboard, bubbles: true, cancelable: true,
+    });
+    if (!target.dispatchEvent(event) || event.defaultPrevented) {
+      throw new Error('Unsupported attachment suppressed the browser text paste');
+    }
+  });
+  await page.locator('.composer-hint').getByText('Unsupported file.', { exact: false }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Keep this draft',
+    'Synthetic paste has no native insertion; the existing draft remains intact');
+  // Model the browser's subsequent native input step explicitly: a synthetic
+  // ClipboardEvent alone cannot produce it. React must retain the warning
+  // through insertFromPaste, while still accepting the new draft text.
+  await page.evaluate(() => {
+    const target = document.querySelector('.composer textarea');
+    const text = 'Keep this draft — pasted passage';
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(target, text);
+    target.dispatchEvent(new InputEvent('input', {
+      bubbles: true, inputType: 'insertFromPaste', data: ' — pasted passage',
+    }));
+  });
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Keep this draft — pasted passage');
+  await page.locator('.composer-hint').getByText('Unsupported file.', { exact: false }).waitFor();
+  assert.equal(await page.locator('.composer-materials li').count(), 0);
+  assert.equal(seenPixels.length, beforeUnsupportedPaste, 'Unsupported paste cannot send a model turn');
+  await page.locator('.composer textarea').press('x');
+  await page.locator('.composer-hint').getByText('Paste or drop text, PDFs and images', { exact: false }).waitFor();
+  checks.push('Unsupported clipboard file: native text paste allowed, visible file warning, no upload or model send');
+
+
   // A screenshot over 1 MiB is attached, not refused. The model receives a
   // scaled copy; the Materials preview says so and the original downloads.
   const largeCount = seenPixels.length;
