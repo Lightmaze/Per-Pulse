@@ -87,12 +87,21 @@ class PostureJournal:
         return self.storage._posture_journal_read(read)
 
     def list(self, *, subjects, context_id, include_inactive, history=True,
-             limit=None, prioritize_content=False, with_remaining=False):
-        """Return visible records. Limit material queries in SQL, not after JSON decoding."""
+             limit=None, prioritize_content=False, with_remaining=False,
+             compact_backfill=0):
+        """Read newest full records, optionally reserving older compact candidates.
+
+        A raw-record byte size is a cheap *fit hint*, not a relevance or
+        trust score. All selected records retain native visibility checks.
+        """
         if limit is not None and (type(limit) is not int or limit < 1):
             raise ValueError("experience limit must be positive")
         if with_remaining and limit is None:
             raise ValueError("remaining references require a bounded selection")
+        if type(compact_backfill) is not int or not 0 <= compact_backfill <= 16:
+            raise ValueError("compact backfill must be 0..16")
+        if compact_backfill and (limit is None or not with_remaining):
+            raise ValueError("compact backfill requires bounded material references")
         def read(conn):
             if not self._ready(conn):
                 values = self.legacy()["experiences"].values()
@@ -104,9 +113,18 @@ class PostureJournal:
                     pairs.sort(key=lambda pair: (
                         pair[1] if prioritize_content else pair[0]["updated_at"],
                         pair[0]["id"]), reverse=True)
+                    older = pairs[limit:]
+                    reserved = []
+                    if compact_backfill:
+                        reserved = [
+                            pair for pair in older
+                            if len(_json({key: value for key, value in pair[0].items()
+                                          if key not in {"history", "feedback"}}).encode("utf-8")) <= 4096
+                        ][:compact_backfill]
+                    reserved_ids = {row["id"] for row, _ in reserved}
                     omitted = [{"id": row["id"], "revision": row["revision"]}
-                               for row, _ in pairs[limit:]] if with_remaining else []
-                    pairs = pairs[:limit]
+                               for row, _ in older if row["id"] not in reserved_ids] if with_remaining else []
+                    pairs = pairs[:limit] + reserved
                     return (pairs, omitted) if with_remaining else pairs
                 return pairs
 
@@ -141,12 +159,33 @@ class PostureJournal:
             # revision cannot splice two different journal versions together.
             omitted = []
             if with_remaining:
-                omitted = [{"id": identity, "revision": revision}
-                           for identity, revision in conn.execute(
+                # The previous ID/revision sweep already visits each older row.
+                # Check small raw sizes there without decoding full old bodies;
+                # keep at most 16 older candidates under the same SQLite
+                # snapshot. These remain after newer candidates in time order.
+                size_column = ", length(CAST(e.record AS BLOB))" if compact_backfill else ""
+                remaining = list(conn.execute(
                     "SELECT e.experience_id, json_extract(e.record, '$.revision') "
-                    "FROM posture_experiences AS e" + where
+                    + size_column + " FROM posture_experiences AS e" + where
                     + f" ORDER BY {order} DESC, e.experience_id DESC LIMIT -1 OFFSET ?",
-                    [*args, limit])]
+                    [*args, limit]))
+                reserved_ids = [
+                    identity for identity, revision, raw_bytes in remaining
+                    if raw_bytes <= 4096
+                ][:compact_backfill] if compact_backfill else []
+                if reserved_ids:
+                    marks = ",".join("?" for _ in reserved_ids)
+                    for identity, raw, content_time in conn.execute(
+                        "SELECT e.experience_id, e.record, e.content_updated_at "
+                        "FROM posture_experiences AS e" + where
+                        + f" AND e.experience_id IN ({marks})",
+                        [*args, *reserved_ids]):
+                        entries[identity] = [json.loads(raw), content_time]
+                reserved = set(reserved_ids)
+                omitted = [
+                    {"id": row[0], "revision": row[1]}
+                    for row in remaining if row[0] not in reserved
+                ]
             for record, _ in entries.values():
                 record["feedback"] = []
                 record["history"] = []

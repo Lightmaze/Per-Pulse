@@ -439,7 +439,8 @@ class PostureMemory:
         return None if record is None else self._material_record(record, context_id)
 
     def materials(self, *, subject_id: str, context_id: str,
-                  prioritize_content: bool = False, max_records: int | None = None) -> dict:
+                  prioritize_content: bool = False, max_records: int | None = None,
+                  compact_backfill: int = 0) -> dict:
         """Offer eligible experiences, not allegedly relevant experiences.
 
         Context privacy is a hard boundary. Explicit subject transfer offers
@@ -456,7 +457,7 @@ class PostureMemory:
         selected = self._journal.list(
             subjects=subjects, context_id=context_id, include_inactive=False,
             history=False, limit=max_records, prioritize_content=prioritize_content,
-            with_remaining=max_records is not None)
+            with_remaining=max_records is not None, compact_backfill=compact_backfill)
         rows, omitted_refs = selected if max_records is not None else (selected, [])
         rows.sort(key=lambda item: (item[1] if prioritize_content else item[0]["updated_at"],
                                    item[0]["id"]), reverse=True)
