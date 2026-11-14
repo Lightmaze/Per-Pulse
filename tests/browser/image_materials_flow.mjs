@@ -262,6 +262,19 @@ try {
   await page.locator('.composer-hint').getByText('Unsupported file.', { exact: false }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Keep this draft',
     'Synthetic paste has no native insertion; the existing draft remains intact');
+  // Model the browser's subsequent native input step explicitly: a synthetic
+  // ClipboardEvent alone cannot produce it. React must retain the warning
+  // through insertFromPaste, while still accepting the new draft text.
+  await page.evaluate(() => {
+    const target = document.querySelector('.composer textarea');
+    const text = 'Keep this draft — pasted passage';
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(target, text);
+    target.dispatchEvent(new InputEvent('input', {
+      bubbles: true, inputType: 'insertFromPaste', data: ' — pasted passage',
+    }));
+  });
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Keep this draft — pasted passage');
+  await page.locator('.composer-hint').getByText('Unsupported file.', { exact: false }).waitFor();
   assert.equal(await page.locator('.composer-materials li').count(), 0);
   assert.equal(seenPixels.length, beforeUnsupportedPaste, 'Unsupported paste cannot send a model turn');
   await page.locator('.composer textarea').press('x');
