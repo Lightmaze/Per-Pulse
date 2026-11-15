@@ -294,9 +294,11 @@ try {
   assert.equal(pdfSource.url, sourceUrl);
   assert.equal(pdfSource.truncated, false);
   const pdfReceipt = await get('/api/pages/' + pdfWork + '/execution/web/' + pdfSource.actionId);
-  assert.equal(pdfReceipt.source.media_type, 'application/pdf');
-  assert.equal(pdfReceipt.source.pdf_pages, 2);
-  assert.equal(pdfReceipt.source.pdf_text_complete, true);
+  // The browser endpoint intentionally returns a verified, normalized UI
+  // source, not the raw Kernel metadata (covered by the native PDF tests).
+  assert.equal(pdfReceipt.source.actionId, pdfSource.actionId);
+  assert.equal(pdfReceipt.source.url, sourceUrl);
+  assert.equal(pdfReceipt.textEnd - pdfReceipt.textStart, [...pdfReceipt.content].length);
   assert.match(pdfReceipt.content, /\[Page 1\][\s\S]*\[Page 2\]/);
   await page.goto(base + '/page/' + pdfWork);
   await page.getByRole('heading', { name: 'Public PDF paper', exact: true }).waitFor();
