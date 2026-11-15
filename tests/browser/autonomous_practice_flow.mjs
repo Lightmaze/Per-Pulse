@@ -93,8 +93,15 @@ try {
   const draft = 'Keep this practice draft across pause and restart.';
   await page.getByRole('textbox', { name: /^Message / }).fill(draft);
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  // Editing the next allowance must not accidentally lower it when the
+  // person clicks Pause rather than Save limit.
+  await page.getByRole('spinbutton', { name: 'Requests per week', exact: true }).fill('2');
   await page.getByRole('button', { name: 'Pause autonomous practice', exact: true }).click();
   await page.getByText('Autonomous model requests are disabled.', { exact: true }).waitFor();
+  const paused = await get('/api/pulse/weekly-usage');
+  assert.equal(paused.usage.enabled, false);
+  assert.equal(paused.usage.weekly_limit, 20);
+  assert.equal(await page.getByRole('spinbutton', { name: 'Requests per week', exact: true }).inputValue(), '20');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.locator('#interface-language').selectOption('zh-CN');
@@ -104,9 +111,15 @@ try {
   await wait(() => get('/api/pulse/weekly-usage'), value => value.usage.enabled, 'Chinese resume');
   assert.equal((await get('/__autonomous/status')).requests, complete.requests);
   assert.equal((await get('/__autonomous/status')).departures[0].id, complete.departures[0].id);
+  // An unfinished empty/invalid edit must never make Pause unavailable.
+  await page.locator('.pulse-activity-section input[type="number"]').first().fill('');
   await page.getByRole('button', { name: '暂停自主实践', exact: true }).click();
   await page.getByText('自主模型请求目前未启用。', { exact: true }).waitFor();
-  checks.push('English and Chinese pause and resume keep the same first departure and retain consumed allowance');
+  const pausedAgain = await get('/api/pulse/weekly-usage');
+  assert.equal(pausedAgain.usage.enabled, false);
+  assert.equal(pausedAgain.usage.weekly_limit, 20);
+  assert.equal(await page.locator('.pulse-activity-section input[type="number"]').first().inputValue(), '20');
+  checks.push('English and Chinese Pause ignore unsaved or invalid limit drafts, preserve the weekly policy, and resume the same SELF departure');
   await stop(server);
   server = start();
   await wait(() => fetch(base + '/api/health'), value => value.ok, 'restarted native server');
