@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a21-py3-none-any.whl` from the
-[v0.1.0a21 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a21).
+Download `per_pulse-0.1.0a22-py3-none-any.whl` from the
+[v0.1.0a22 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a22).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a21-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a22-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a21-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a22-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -53,8 +53,9 @@ refresh before Send.
 Existing drafts and successfully attached files remain after a partial failure.
 Open **Materials** to browse and preview them. Images need
 a model that accepts image input; PDF reading covers extracted text. You can
-also ask the model to read a public HTTPS text page and return to its saved
-source observation. See [Materials](materials.md).
+also ask a configured model to read public HTTPS pages, structured JSON/XML/CSV
+research sources or selectable paper PDF text, and return to the saved source
+observation. See [Materials](materials.md).
 
 Without a model, new messages stay queued. Connecting a model and restarting
 can process those messages. To start fresh instead, use a new directory:
@@ -118,7 +119,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a21-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a22-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
