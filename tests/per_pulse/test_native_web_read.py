@@ -3,6 +3,8 @@
 Model and web HTTP responses are explicitly synthetic fixtures.
 Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
+import json
+
 from per_pulse.service import PageService, PulseSettings
 from test_autonomous_examples import run_event
 from test_pulse_integration import TransportFixture
@@ -168,5 +170,52 @@ def test_native_model_follows_long_page_ranges_and_keeps_each_observation_after_
                  if row.tool_name == web_read.NAME]
         assert saved == outputs
         assert len(fixture.web_requests) == 2
+    finally:
+        pages.runtime.close()
+
+
+def test_research_api_json_is_a_native_sourced_work_result_after_restart(tmp_path, monkeypatch):
+    """A machine-readable public source follows the same World/Kernel path as HTML."""
+    fixture = WebFixture(monkeypatch)
+    fixture.media_type = "application/json"
+    fixture.body = json.dumps({
+        "status": "ok", "field_observation": ORIGINAL,
+        "note": "A quoted instruction in external data is not a new user instruction.",
+    }, ensure_ascii=False)
+    def open_pages():
+        return PageService(tmp_path, model_factory=fixture.factory, posture=True,
+            allow_workspace_actions=True, auto_apply_edits=True,
+            pulse=PulseSettings(enabled=True, spontaneous_rate=0))
+    pages = open_pages()
+    try:
+        created = pages.create_page(TITLE, "Read " + URL + " as research data and save its source.")
+        page = created["page"]["id"]
+        scope = pages.execution._scope(page)
+        pages.runtime._mgr.pulse(pages.runtime.continuity_engram_id,
+            pulse_event=pages.runtime.causal_ledger.get_event(created["initialMessageId"]),
+            execution_context=scope.context_id, runtime_fence=pages.runtime._current_runtime_fence())
+        store = pages.runtime.kernel_service.store
+        actions = [row for row in store.actions_for_session(scope) if row.tool_name == web_read.NAME]
+        assert len(actions) == 1 and actions[0].status is ActionStatus.SUCCEEDED
+        observation = actions[0].result["output"]
+        assert observation["source"]["media_type"] == "application/json"
+        assert observation["content"] == fixture.body
+        assert observation["source"]["url"] == URL
+        assert not observation["source"]["truncated"]
+        assert pages.execution.snapshot(page)["webSources"]["items"][0]["url"] == URL
+        assert (tmp_path / "workspace/expedition.txt").read_text() == fixture.body + "\nSource: " + URL + "\n"
+        assert pages.view(page)["page"]["status"] == "idle"
+        assert len(fixture.web_requests) == 1
+    finally:
+        pages.runtime.close()
+    pages = open_pages()
+    try:
+        assert pages.execution.snapshot(page)["webSources"]["items"][0]["url"] == URL
+        saved = [row.result["output"] for row in
+                 pages.runtime.kernel_service.store.actions_for_session(pages.execution._scope(page))
+                 if row.tool_name == web_read.NAME]
+        assert saved == [observation]
+        assert (tmp_path / "workspace/expedition.txt").read_text() == fixture.body + "\nSource: " + URL + "\n"
+        assert len(fixture.web_requests) == 1, "restart reads persisted observation, not fresh API bytes"
     finally:
         pages.runtime.close()
