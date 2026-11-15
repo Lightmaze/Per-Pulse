@@ -30,6 +30,17 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
   const saveAttempt = useRef(0);
   const savedText = useRef<HTMLPreElement | null>(null);
   const excerptInput = useRef<HTMLTextAreaElement | null>(null);
+  const matchRef = useRef<HTMLElement | null>(null);
+  const [findQuery, setFindQuery] = useState('');
+  const [matchStart, setMatchStart] = useState(-1);
+  const [findSearched, setFindSearched] = useState(false);
+  const foundMatch = observation !== null && matchStart >= 0 && findQuery.length > 0
+    && observation.content.slice(matchStart, matchStart + findQuery.length) === findQuery;
+
+  useEffect(() => {
+    if (foundMatch) matchRef.current?.scrollIntoView({ block: 'center', inline: 'nearest' });
+  }, [foundMatch, matchStart]);
+
 
   useEffect(() => {
     // A new World, Work or service cannot inherit the earlier receipt's text.
@@ -49,6 +60,9 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
     setSaved(false);
     setSavedExperience(null);
     setSaveError('');
+    setFindQuery('');
+    setMatchStart(-1);
+    setFindSearched(false);
     return () => reader.current?.abort();
   }, [view.workspaceId, view.serviceInstanceId, view.page.id]);
 
@@ -65,6 +79,9 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
     setExampleTitle('');
     setExcerpt('');
     setNote('');
+    setFindQuery('');
+    setMatchStart(-1);
+    setFindSearched(false);
     if (opened === actionId) {
       setOpened(null);
       setObservation(null);
@@ -90,6 +107,27 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
       if (reader.current === request) reader.current = null;
       if (!request.signal.aborted) setReading(false);
     }
+  };
+
+  const findNext = () => {
+    if (!observation || !findQuery.trim()) return;
+    const from = matchStart < 0 ? 0 : matchStart + findQuery.length;
+    let next = observation.content.indexOf(findQuery, from);
+    if (next < 0) next = observation.content.indexOf(findQuery);
+    setMatchStart(next);
+    setFindSearched(true);
+  };
+
+  const useFoundPassage = () => {
+    if (!observation || !foundMatch || saving) return;
+    // Keep exact adjacent source text, not an AI-authored paraphrase.
+    const start = Math.max(0, matchStart - 180);
+    const end = Math.min(observation.content.length, matchStart + findQuery.length + 180);
+    setExcerpt(observation.content.slice(start, end));
+    setSaveError('');
+    setSaved(false);
+    setSavedExperience(null);
+    excerptInput.current?.focus();
   };
 
   const useSelectedPassage = () => {
@@ -170,7 +208,21 @@ export function WebSources({ view, navigate, onReviewExperience, onContinueWork 
           <p className="web-observation-meta">{t('webSources.range', {
             start: observation.textStart, end: observation.textEnd,
           })} · {t('webSources.digest', { digest: observation.digest })}</p>
-          <pre ref={savedText} tabIndex={0} className="web-observation-text">{observation.content}</pre>
+          <form className="web-observation-find" onSubmit={event => { event.preventDefault(); findNext(); }}>
+            <label>{t('webSources.find')}
+              <input type="search" maxLength={160} value={findQuery}
+                onChange={event => { setFindQuery(event.target.value); setMatchStart(-1); setFindSearched(false); }} />
+            </label>
+            <button type="submit" className="secondary-button" disabled={!findQuery.trim()}>{t('webSources.findNext')}</button>
+            {findSearched ? <span role="status">{foundMatch
+              ? t('webSources.foundAt', { start: observation.textStart + [...observation.content.slice(0, matchStart)].length })
+              : t('webSources.notFound')}</span> : null}
+          </form>
+          <pre ref={savedText} tabIndex={0} className="web-observation-text">{foundMatch
+            ? <>{observation.content.slice(0, matchStart)}<mark ref={matchRef}>{observation.content.slice(matchStart, matchStart + findQuery.length)}</mark>{observation.content.slice(matchStart + findQuery.length)}</>
+            : observation.content}</pre>
+          {foundMatch ? <button type="button" className="text-button" disabled={saving}
+            onClick={useFoundPassage}>{t('webSources.useFound')}</button> : null}
           {observation.readingNote ? <p>{observation.readingNote}</p> : null}
           <CopyButton text={observation.content} label={t('webSources.copy')} />
           <button type="button" className="text-button" disabled={saving}
