@@ -222,7 +222,7 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
     </form>
     {error ? <p className="form-error" id={`${inputId}-error`} role="alert">{error}</p> : null}
     {stale ? <button className="secondary-button" onClick={() => window.location.reload()}>{t('library.reload')}</button> : null}
-    <p className="material-notice" role="status" aria-live="polite">{busy ? t('library.working') : notice}</p>
+    <p className="material-notice" role="status" aria-live="polite">{busy && !notice ? t('library.working') : notice}</p>
     <section className="material-browser" aria-label={t('library.existing')}>
       <div className="material-browser-heading"><h3>{t('library.existing')}</h3><button className="text-button" disabled={disabled} onClick={() => browse(directory)}>{t('library.refresh')}</button></div>
       <div className="material-location"><button className="text-button" disabled={disabled || !directory} onClick={() => browse('')}>{t('library.workspace')}</button>{directory ? <><span aria-hidden="true">/</span><span>{directory}</span><button className="text-button" disabled={disabled} onClick={() => browse(directory.split('/').slice(0, -1).join('/'))}>{t('library.up')}</button></> : null}</div>

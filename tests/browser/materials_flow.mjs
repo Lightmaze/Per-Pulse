@@ -353,9 +353,30 @@ try {
   const fileCountBeforeBatch = (await files()).length;
   await page.getByLabel('Choose a file', { exact: true }).setInputFiles(batchFiles);
   assert.equal((await files()).length, fileCountBeforeBatch, 'Choosing multiple files must not upload or send');
+  // Hold the second request to observe progress after a real confirmed first
+  // receipt. The draft must show ongoing progress, not only generic "Working".
+  let releaseSecondUpload;
+  const secondUploadReleased = new Promise(resolve => { releaseSecondUpload = resolve; });
+  const uploadPattern = '**/api/pages/*/materials*';
+  const holdSecondUpload = async route => {
+    if (route.request().method() === 'POST'
+        && new URL(route.request().url()).searchParams.get('name') === 'Field B.csv') {
+      await secondUploadReleased;
+    }
+    await route.continue();
+  };
+  await page.route(uploadPattern, holdSecondUpload);
   await page.getByRole('button', { name: 'Upload and attach 3 files', exact: true }).click();
+  try {
+    await page.getByText('1 of 3 files attached to your draft. Nothing has been sent.', { exact: true }).waitFor();
+    assert.equal(await page.locator('.composer-materials li').count(), 1);
+  } finally {
+    releaseSecondUpload();
+    await page.unroute(uploadPattern, holdSecondUpload);
+  }
+  await wait(async () => await page.locator('.composer-materials li').count() === 3,
+    'all three picker files attached', 45000);
   await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'detached' });
-  await wait(async () => await page.locator('.composer-materials li').count() === 3, 'all three picker files attached');
   assert.equal(await page.locator('.composer textarea').inputValue(), batchText);
   await page.reload();
   for (const file of batchFiles) {
@@ -386,8 +407,9 @@ try {
   await open();
   await page.getByLabel('Choose a file', { exact: true }).setInputFiles(four);
   await page.getByRole('button', { name: 'Upload and attach 4 files', exact: true }).click();
+  await wait(async () => await page.locator('.composer-materials li').count() === 4,
+    'four picker files attached before closing the dialog', 45000);
   await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'detached' });
-  await wait(async () => await page.locator('.composer-materials li').count() === 4, 'four picker files attached');
   const beforeCap = (await files()).length;
   await open();
   await page.getByLabel('Choose a file', { exact: true }).setInputFiles([
