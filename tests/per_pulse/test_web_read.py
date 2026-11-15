@@ -673,7 +673,7 @@ def test_public_pdf_page_text_is_sourced_and_continuable(monkeypatch):
         parts.append(observation["content"])
         sources.append(observation["source"])
         arguments = observation["next"]
-    assert "".join(parts) == "[Page 1]\\nField experiment A.\\n\\n[Page 2]\\nField experiment B."
+    assert "".join(parts) == "[Page 1]\nField experiment A.\n\n[Page 2]\nField experiment B."
     assert len(calls) == len(parts) and len(parts) > 2
     assert "application/pdf" in calls[0].headers["accept"]
     assert len({source["observation_sha256"] for source in sources}) == 1
@@ -727,7 +727,7 @@ def test_partial_or_malformed_external_pdf_is_not_a_false_observation(monkeypatc
     assert error.value.code == "web_pdf_incomplete"
     monkeypatch.setattr(web, "MAX_WEB_PDF_BYTES", len(document) + 100)
     network(monkeypatch, lambda request: httpx.Response(200,
-        headers={"content-type": "application/pdf"}, stream=Chunks([b"%PDF-1.4\\nBroken document"])))
+        headers={"content-type": "application/pdf"}, stream=Chunks([b"%PDF-1.4\nBroken document"])))
     with pytest.raises(web.WebReadError) as error:
         read("https://papers.example/broken.pdf")
     assert error.value.code == "web_pdf_unreadable"
