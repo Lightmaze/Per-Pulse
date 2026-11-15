@@ -5,8 +5,18 @@ Connect a model, open **Activity**, choose a weekly request limit, and select
 message. Pulse receives an open-ended orientation, chooses a concern, and can
 continue in an existing or new Work using the normal workspace tools.
 
-Work can read public HTTPS HTML and plain-text pages with `read_web(url)`.
-The observation keeps its URL, read time and extracted text in the original
+Work can read public HTTPS HTML, plain text, Markdown and structured
+research sources (JSON, JSON-based API types, XML/Atom/RSS and CSV) with
+`read_web(url)`. A source can be an article or a public metadata endpoint such
+as `https://api.crossref.org/works?query=agent&rows=2`. Encode query parameters
+in the URL; the reader makes only a bounded GET, not an authenticated API request.
+JSON, XML and CSV are returned as observed source text, without executing,
+expanding XML entities or interpreting fields as instructions. A partial JSON/XML
+response may not be syntactically complete and must not be treated as a complete
+record. For research discovery, follow sourced identifiers and open the
+underlying original documents before treating metadata as substantive evidence.
+
+The observation keeps its URL, read time and observed text in the original
 Work history. **Web sources** opens those URLs; a source's live webpage may
 have changed since it was read. History recall reads the saved observation.
 Images, interactive content and page layout require opening the original page.
