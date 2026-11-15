@@ -372,11 +372,13 @@ try {
     assert.equal(await page.locator('.composer-materials li').count(), 1);
   } finally {
     releaseSecondUpload();
-    await page.unroute(uploadPattern, holdSecondUpload);
   }
+  // The held route must finish before it is unregistered. Unrouting while
+  // route.continue() is still pending can auto-handle the route a second time.
   await wait(async () => await page.locator('.composer-materials li').count() === 3,
     'all three picker files attached', 45000);
   await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'detached' });
+  await page.unroute(uploadPattern, holdSecondUpload);
   assert.equal(await page.locator('.composer textarea').inputValue(), batchText);
   await page.reload();
   for (const file of batchFiles) {
