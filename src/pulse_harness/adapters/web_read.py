@@ -454,6 +454,10 @@ def read(arguments, cancellation, *, action_request_id):
                     note = "No matching phrase in the observed extracted text from this offset."
                 else:
                     match_start, match_end = start + found.start(), start + found.end()
+                    if mime == "application/pdf":
+                        page_markers = list(re.finditer(r"(?m)^\[Page ([0-9]+)\]$", text[:match_start]))
+                        pdf_metadata["match_page"] = (int(page_markers[-1].group(1))
+                                                      if page_markers else None)
                     # Return a *contiguous exact source passage* so the existing
                     # Work source viewer can preserve ranges and saved selections.
                     context = min(160, max(0, (count - (match_end - match_start)) // 3))
