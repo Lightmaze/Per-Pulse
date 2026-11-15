@@ -11,6 +11,7 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "per_pulse"))
 from web_read_fixture import WebFixture
+from pdf_samples import synthetic_pdf
 from per_pulse.app import create_app
 from per_pulse.service import PulseSettings
 
@@ -30,6 +31,13 @@ if __name__ == "__main__":
     app = create_app(args.data_dir, model_factory=fixture.factory, posture=True,
         allow_workspace_actions=True, auto_apply_edits=True,
         pulse=PulseSettings(enabled=True, spontaneous_rate=0))
+
+    @app.post("/__web/read-pdf")
+    def read_pdf_fixture():
+        fixture.media_type = "application/pdf"
+        fixture.expected_text = "Public PDF paper: reproducible field findings."
+        fixture.body = synthetic_pdf([fixture.expected_text, "Second page: observed validation."])
+        return {"mediaType": fixture.media_type}
 
     @app.get("/__web/status")
     def status():
