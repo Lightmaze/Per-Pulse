@@ -4,6 +4,7 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 import asyncio
 import gzip
+import hashlib
 import json
 from pathlib import Path
 import socket
@@ -18,6 +19,8 @@ import httpx
 import pytest
 
 from pulse_harness.adapters import web_read as web
+from pdf_samples import synthetic_pdf
+from pulse_harness.adapters.document_text import read_pdf
 from pulse_harness.core.provider import CancellationRequested, CancellationToken
 
 
@@ -150,8 +153,8 @@ def test_redirect_loop_is_bounded(monkeypatch):
     assert len(calls) == web.MAX_REDIRECTS + 1
 
 
-@pytest.mark.parametrize("headers", [{"content-type": "application/pdf"},
-    {"content-type": "image/png"}, {"content-type": "text/html", "content-encoding": "br"}])
+@pytest.mark.parametrize("headers", [{"content-type": "image/png"},
+    {"content-type": "text/html", "content-encoding": "br"}])
 def test_unsupported_or_compressed_body_is_not_read(monkeypatch, headers):
     def body():
         raise AssertionError("unacceptable content must not be consumed")
@@ -648,8 +651,7 @@ def test_large_api_json_keeps_partial_data_and_declares_network_bound(monkeypatc
     assert result["source"]["media_type"] == "application/json"
 
 
-@pytest.mark.parametrize("media_type", ["application/octet-stream", "application/javascript",
-                                        "image/svg+xml", "application/pdf"])
+@pytest.mark.parametrize("media_type", ["application/octet-stream", "application/javascript", "image/svg+xml"])
 def test_structured_text_reader_rejects_binary_and_scripts_without_body_read(monkeypatch, media_type):
     def unreadable():
         raise AssertionError("unsupported binary/script content must not be read")
@@ -659,3 +661,73 @@ def test_structured_text_reader_rejects_binary_and_scripts_without_body_read(mon
     with pytest.raises(web.WebReadError) as error:
         read("https://api.example/records")
     assert error.value.code == "web_content_unsupported"
+
+
+def test_public_pdf_page_text_is_sourced_and_continuable(monkeypatch):
+    document = synthetic_pdf(["Field experiment A.", "Field experiment B."])
+    calls = network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "application/pdf"}, stream=Chunks([document[:17], document[17:]])))
+    parts, sources, arguments = [], [], {"url": "https://papers.example/article.pdf", "max_chars": 17}
+    while arguments is not None:
+        observation = web.read(arguments, CancellationToken(), action_request_id="pdf-read")
+        parts.append(observation["content"])
+        sources.append(observation["source"])
+        arguments = observation["next"]
+    assert "".join(parts) == "[Page 1]\\nField experiment A.\\n\\n[Page 2]\\nField experiment B."
+    assert len(calls) == len(parts) and len(parts) > 2
+    assert "application/pdf" in calls[0].headers["accept"]
+    assert len({source["observation_sha256"] for source in sources}) == 1
+    assert all(source["pdf_sha256"] == hashlib.sha256(document).hexdigest() for source in sources)
+    assert all(source["pdf_pages"] == source["pdf_pages_read"] == 2 for source in sources)
+    assert all(source["pdf_text_complete"] for source in sources)
+    assert sources[-1]["truncated"] is True  # The continuation starts after character zero.
+    assert observation["available_eof"] and observation["next"] is None
+    assert "PDF selectable text" in observation["reading_note"]
+
+
+def test_pdf_binary_revision_is_caught_even_when_selectable_text_matches(monkeypatch):
+    state = {"document": synthetic_pdf(["Same readable abstract."], padding=1)}
+    network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "application/pdf"}, stream=Chunks([state["document"]])))
+    first = web.read({"url": "https://papers.example/paper.pdf", "max_chars": 8},
+                     CancellationToken(), action_request_id="first")
+    assert first["next"] is not None
+    state["document"] = synthetic_pdf(["Same readable abstract."], padding=2)
+    assert read_pdf(state["document"]).text == read_pdf(
+        synthetic_pdf(["Same readable abstract."], padding=1)).text
+    with pytest.raises(web.WebReadError) as error:
+        web.read(first["next"], CancellationToken(), action_request_id="pdf-revised")
+    assert error.value.code == "web_observation_changed"
+
+
+def test_pdf_extraction_limit_and_scanned_page_are_visible(monkeypatch):
+    document = synthetic_pdf(["", "Selectable findings on page two."], scan_marker=True)
+    network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "application/pdf"}, stream=Chunks([document])))
+    complete = read("https://papers.example/scanned.pdf")
+    assert "[Page 1]" in complete["content"] and "Selectable findings" in complete["content"]
+    assert complete["source"]["pdf_pages_without_selectable_text"] is True
+    assert "visual content was not inspected" in complete["reading_note"]
+    monkeypatch.setattr(web, "MAX_WEB_PDF_PAGES", 1)
+    limited = read("https://papers.example/scanned.pdf")
+    assert limited["source"]["pdf_pages"] == 2 and limited["source"]["pdf_pages_read"] == 1
+    assert limited["source"]["pdf_text_complete"] is False
+    assert limited["source"]["truncated"] is True
+    assert limited["next"] is None and limited["available_eof"] is True
+    assert "extraction bound" in limited["reading_note"]
+
+
+def test_partial_or_malformed_external_pdf_is_not_a_false_observation(monkeypatch):
+    document = synthetic_pdf(["Original PDF results."])
+    monkeypatch.setattr(web, "MAX_WEB_PDF_BYTES", 96)
+    network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "application/pdf"}, stream=Chunks([document])))
+    with pytest.raises(web.WebReadError) as error:
+        read("https://papers.example/large.pdf")
+    assert error.value.code == "web_pdf_incomplete"
+    monkeypatch.setattr(web, "MAX_WEB_PDF_BYTES", len(document) + 100)
+    network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "application/pdf"}, stream=Chunks([b"%PDF-1.4\\nBroken document"])))
+    with pytest.raises(web.WebReadError) as error:
+        read("https://papers.example/broken.pdf")
+    assert error.value.code == "web_pdf_unreadable"
