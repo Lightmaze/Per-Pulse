@@ -271,3 +271,49 @@ def test_public_pdf_url_survives_native_work_and_restart_with_page_source(tmp_pa
         assert fixture.expected_text in (tmp_path / "workspace/expedition.txt").read_text()
     finally:
         pages.runtime.close()
+
+
+def test_native_work_finds_late_public_source_and_keeps_exact_excerpt_after_restart(tmp_path, monkeypatch):
+    """A Work can act on evidence beyond its first 24 KiB without copying the whole website."""
+    fixture = WebFixture(monkeypatch)
+    fixture.media_type = "text/plain"
+    fixture.find_phrase = "Critical correction"
+    fixture.expected_text = "Critical correction: check the primary evidence."
+    fixture.body = ("Earlier unrelated field records.\n" * 1400) + fixture.expected_text
+    def open_pages():
+        return PageService(tmp_path, model_factory=fixture.factory, posture=True,
+            allow_workspace_actions=True, auto_apply_edits=True,
+            pulse=PulseSettings(enabled=True, spontaneous_rate=0))
+    pages = open_pages()
+    try:
+        created = pages.create_page(TITLE, "Find the critical correction in " + URL + " and save it.")
+        page = created["page"]["id"]
+        scope = pages.execution._scope(page)
+        pages.runtime._mgr.pulse(pages.runtime.continuity_engram_id,
+            pulse_event=pages.runtime.causal_ledger.get_event(created["initialMessageId"]),
+            execution_context=scope.context_id, runtime_fence=pages.runtime._current_runtime_fence())
+        actions = [row for row in pages.runtime.kernel_service.store.actions_for_session(scope)
+                   if row.tool_name == web_read.NAME]
+        assert len(actions) == 1 and actions[0].status is ActionStatus.SUCCEEDED
+        observed = actions[0].result["output"]
+        assert observed["source"]["match_start"] > web_read.MAX_CHARS
+        assert observed["source"]["text_end"] - observed["source"]["text_start"] == len(observed["content"])
+        assert fixture.expected_text in observed["content"]
+        assert observed["source"]["truncated"] and observed["next"] is None
+        assert web_read.source_from_action(actions[0]) is not None
+        listed = pages.execution.snapshot(page)["webSources"]["items"]
+        assert len(listed) == 1 and listed[0]["url"] == URL
+        assert fixture.expected_text in (tmp_path / "workspace/expedition.txt").read_text()
+        assert pages.view(page)["page"]["status"] == "idle"
+        assert len(fixture.web_requests) == 1
+    finally:
+        pages.runtime.close()
+    pages = open_pages()
+    try:
+        action, = [row for row in pages.runtime.kernel_service.store.actions_for_session(pages.execution._scope(page))
+                   if row.tool_name == web_read.NAME]
+        assert action.result["output"] == observed
+        assert pages.execution.snapshot(page)["webSources"]["items"] == listed
+        assert len(fixture.web_requests) == 1, "reopening the sourced Work must not refetch live data"
+    finally:
+        pages.runtime.close()
