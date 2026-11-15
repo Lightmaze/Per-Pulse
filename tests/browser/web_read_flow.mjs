@@ -106,6 +106,21 @@ try {
   assert.equal(originalReceipt.source.url, sourceUrl);
   assert.equal(originalReceipt.textEnd - originalReceipt.textStart, [...originalReceipt.content].length);
   assert.equal((await get('/__web/status')).webRequests, 1);
+  const savedFind = page.getByRole('searchbox', { name: 'Find exact text in this saved observation' });
+  const savedExcerpt = page.getByRole('textbox', { name: 'Exact original passage' });
+  await savedFind.fill('café 山川 🌍');
+  await page.getByRole('button', { name: 'Find next match' }).click();
+  assert.equal(await saved.locator('mark').textContent(), 'café 山川 🌍');
+  await page.getByRole('button', { name: 'Use passage around match' }).click();
+  assert.ok((await savedExcerpt.inputValue()).includes('Original field observation: café 山川 🌍.'),
+    'finding a retained source can stage an exact contextual passage for later Work');
+  await savedFind.fill('absent evidence term');
+  await page.getByRole('button', { name: 'Find next match' }).click();
+  await page.locator('.web-observation-find [role="status"]').getByText('No match in the saved observation.').waitFor();
+  await savedFind.fill('');
+  await savedExcerpt.fill('');
+  assert.equal((await get('/__web/status')).webRequests, 1, 'finding saved text must not re-fetch live source');
+  checks.push('find exact retained evidence, stage its context for another Work, and report local misses without re-fetch');
   const selectedWebPassage = 'Original field observation: café 山川 🌍.';
   const useSelection = page.getByRole('button', { name: 'Use selected passage', exact: true });
   const excerptEditor = page.getByRole('textbox', { name: 'Exact original passage' });
