@@ -45,6 +45,7 @@ class WebFixture:
         self.media_type = "text/html"
         self.body = '<title>Field observations</title><script>not evidence</script><p>' + ORIGINAL + '</p>'
         self.expected_text = ORIGINAL
+        self.output_path = "expedition.txt"
         monkeypatch.setattr(web_read, "_resolve", lambda host, token, deadline: ("8.8.8.8",))
         def website(request):
             self.web_requests.append(str(request.url))
@@ -103,7 +104,7 @@ class WebFixture:
                     assert observation["source"]["scope"] == "extracted_text"
                     text = "".join(row["content"] for row in observations)
                     assert self.expected_text in text
-                    return response(tool="mutate_file", arguments={"path": "expedition.txt", "expected_digest": None,
+                    return response(tool="mutate_file", arguments={"path": self.output_path, "expected_digest": None,
                         "content": text + "\nSource: " + observation["source"]["url"] + "\n"})
                 if len(results) == len(observations) + 1:
                     return response(tool="work", arguments={"op": "report", "kind": "result", "note": ANSWER})
