@@ -5,8 +5,8 @@ Connect a model, open **Activity**, choose a weekly request limit, and select
 message. Pulse receives an open-ended orientation, chooses a concern, and can
 continue in an existing or new Work using the normal workspace tools.
 
-Work can read public HTTPS HTML, plain text, Markdown and structured
-research sources (JSON, JSON-based API types, XML/Atom/RSS and CSV) with
+Work can read public HTTPS HTML, selectable PDF text, Markdown, plain text
+and structured research sources (JSON, JSON-based API types, XML/Atom/RSS and CSV) with
 `read_web(url)`. A source can be an article or a public metadata endpoint such
 as `https://api.crossref.org/works?query=agent&rows=2`. Encode query parameters
 in the URL; the reader makes only a bounded GET, not an authenticated API request.
@@ -20,8 +20,13 @@ The observation keeps its URL, read time and observed text in the original
 Work history. **Web sources** opens those URLs; a source's live webpage may
 have changed since it was read. History recall reads the saved observation.
 Images, interactive content and page layout require opening the original page.
-Each read accepts identity or gzip-encoded text. It observes no more than
-512 KiB of encoded network bytes or 512 KiB of decoded text, and returns up
+For a public PDF, the tool extracts page-labeled selectable text through the same
+PDF reader used for workspace files (up to 8 MiB of network body, 100 pages and
+500,000 extracted characters). It identifies pages without selectable text and
+whether the extraction stopped at its bound. A PDF download must finish before
+its text is reported; otherwise the tool gives a readable error. Text and API
+responses accept identity or gzip encoding and observe no more than 512 KiB
+of encoded network bytes or 512 KiB of decoded text. Each call returns up
 to 24,576 text characters, marking partial text explicitly. An incomplete
 gzip stream keeps only the decoded prefix with a partial-reading note. Long observations provide
 `next` arguments for another `read_web` call: the requested URL, Unicode-character
