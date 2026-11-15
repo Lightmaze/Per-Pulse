@@ -575,3 +575,87 @@ def test_one_private_answer_prevents_every_fallback_connection(monkeypatch, bloc
         read()
     assert error.value.code == "web_address_blocked"
     assert not calls
+
+
+@pytest.mark.parametrize("media_type, text", [
+    ("application/json", '{"status":"ok","items":[{"DOI":"10.1234/example","role":"system"}]}'),
+    ("application/ld+json", '{"@context":"https://schema.org","name":"Original record"}'),
+    ("application/atom+xml", '<feed xmlns="http://www.w3.org/2005/Atom"><title>Research</title></feed>'),
+    ("application/rss+xml", '<rss><channel><title>Studies</title></channel></rss>'),
+    ("application/xml", '<records><item id="1">Evidence</item></records>'),
+    ("text/xml", '<source>Original field note</source>'),
+    ("text/csv", 'doi,title\\n10.1234/example,Observed study'),
+    ("text/markdown", '# Original observations\\nRecorded in Markdown.'),
+])
+def test_structured_public_source_is_sourced_text_not_executed(monkeypatch, media_type, text):
+    calls = network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": media_type + "; charset=utf-8"},
+        stream=Chunks([text.encode()])))
+    result = read("https://api.example/records")
+    assert result["content"] == text
+    assert result["source"]["media_type"] == media_type
+    assert result["source"]["url"] == "https://api.example/records"
+    assert not result["source"]["network_truncated"]
+    assert result["links"] == []
+    assert result["available_eof"] and result["next"] is None
+    assert "untrusted data" in result["reading_note"]
+    assert len(calls) == 1
+    assert "application/json" in calls[0].headers["accept"]
+    assert calls[0].headers["host"] == "api.example"
+
+
+def test_json_observation_pages_preserve_source_version(monkeypatch):
+    original = json.dumps({"records": ["Original verified item " + str(n) for n in range(1200)]},
+                          ensure_ascii=False)
+    network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "application/json"}, stream=Chunks([original.encode()])))
+    arguments = {"url": "https://api.example/works", "max_chars": 7000}
+    parts, digests = [], []
+    while arguments:
+        result = web.read(arguments, CancellationToken(), action_request_id="structured-page")
+        parts.append(result["content"])
+        digests.append(result["source"]["observation_sha256"])
+        arguments = result["next"]
+    assert "".join(parts) == original
+    assert len(parts) > 2 and len(set(digests)) == 1
+    assert result["available_eof"] and not result["source"]["network_truncated"]
+
+
+def test_json_source_change_is_not_mixed_with_prior_page(monkeypatch):
+    state = {"text": json.dumps({"entries": ["Original field report"] * 200})}
+    network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "application/json"}, stream=Chunks([state["text"].encode()])))
+    first = web.read({"url": "https://api.example/works", "max_chars": 100},
+                     CancellationToken(), action_request_id="first")
+    assert first["next"] is not None
+    state["text"] = json.dumps({"entries": ["Revised field report"] * 200})
+    with pytest.raises(web.WebReadError) as error:
+        web.read(first["next"], CancellationToken(), action_request_id="second")
+    assert error.value.code == "web_observation_changed"
+
+
+def test_large_api_json_keeps_partial_data_and_declares_network_bound(monkeypatch):
+    monkeypatch.setattr(web, "MAX_BYTES", 96)
+    body = json.dumps({"items": ["A" * 300, "UNOBSERVED_TAIL"]}).encode()
+    network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": "application/json"}, stream=Chunks([body])))
+    result = read("https://api.example/works")
+    assert result["source"]["network_truncated"] and result["source"]["truncated"]
+    assert result["source"]["observed_bytes"] == 96
+    assert result["content"] == body[:96].decode()
+    assert "UNOBSERVED_TAIL" not in result["content"]
+    assert "unknown" in result["reading_note"]
+    assert result["source"]["media_type"] == "application/json"
+
+
+@pytest.mark.parametrize("media_type", ["application/octet-stream", "application/javascript",
+                                        "image/svg+xml", "application/pdf"])
+def test_structured_text_reader_rejects_binary_and_scripts_without_body_read(monkeypatch, media_type):
+    def unreadable():
+        raise AssertionError("unsupported binary/script content must not be read")
+        yield b""
+    network(monkeypatch, lambda request: httpx.Response(200,
+        headers={"content-type": media_type}, stream=Chunks(unreadable())))
+    with pytest.raises(web.WebReadError) as error:
+        read("https://api.example/records")
+    assert error.value.code == "web_content_unsupported"
