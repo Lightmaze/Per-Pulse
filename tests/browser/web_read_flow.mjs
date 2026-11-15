@@ -106,6 +106,35 @@ try {
   assert.equal(originalReceipt.source.url, sourceUrl);
   assert.equal(originalReceipt.textEnd - originalReceipt.textStart, [...originalReceipt.content].length);
   assert.equal((await get('/__web/status')).webRequests, 1);
+  const savedFind = page.getByRole('searchbox', { name: 'Find exact text in this saved observation' });
+  const savedExcerpt = page.getByRole('textbox', { name: 'Exact original passage' });
+  await savedFind.fill('café 山川 🌍');
+  await page.getByRole('button', { name: 'Find next match' }).click();
+  assert.equal(await saved.locator('mark').textContent(), 'café 山川 🌍');
+  await page.getByRole('button', { name: 'Use passage around match' }).click();
+  // React updates the controlled textarea asynchronously. Wait for the exact
+  // source slice instead of sampling a stale value after the click.
+  await page.waitForFunction(content => {
+    const value = document.querySelector('.web-observation-example textarea')?.value;
+    return Boolean(value && value.includes('Original field observation: café 山川 🌍.')
+      && content.includes(value));
+  }, originalReceipt.content);
+  const searchedPassage = await savedExcerpt.inputValue();
+  assert.ok(searchedPassage.includes('Original field observation: café 山川 🌍.'),
+    'finding a retained source can stage an exact contextual passage for later Work');
+  assert.ok(originalReceipt.content.includes(searchedPassage),
+    'the staged context must be one exact contiguous piece of the retained source: '
+    + JSON.stringify({ expectedLength: originalReceipt.content.length, excerptLength: searchedPassage.length,
+      expectedHead: originalReceipt.content.slice(0, 260),
+      excerptHead: searchedPassage.slice(0, 260),
+      index: originalReceipt.content.indexOf(searchedPassage) }));
+  await savedFind.fill('absent evidence term');
+  await page.getByRole('button', { name: 'Find next match' }).click();
+  await page.locator('.web-observation-find [role="status"]').getByText('No match in the saved observation.').waitFor();
+  await savedFind.fill('');
+  await savedExcerpt.fill('');
+  assert.equal((await get('/__web/status')).webRequests, 1, 'finding saved text must not re-fetch live source');
+  checks.push('find exact retained evidence, stage its context for another Work, and report local misses without re-fetch');
   const selectedWebPassage = 'Original field observation: café 山川 🌍.';
   const useSelection = page.getByRole('button', { name: 'Use selected passage', exact: true });
   const excerptEditor = page.getByRole('textbox', { name: 'Exact original passage' });
@@ -136,7 +165,7 @@ try {
   await useSelection.click();
   assert.equal(await excerptEditor.inputValue(), 'Manual edit',
     'a selection outside the saved observation cannot overwrite a manual excerpt');
-  await excerptEditor.fill(selectedWebPassage);
+  await excerptEditor.fill(searchedPassage);
   await page.getByRole('textbox', { name: 'What should later work notice? (optional)' })
     .fill('Compare this observed version with the later task.');
   // Hold the actual POST so a slow save cannot make an edited passage look persisted.
@@ -163,7 +192,7 @@ try {
   await page.unroute(savePattern);
   assert.equal(await page.getByRole('textbox', { name: 'Exact original passage' }).isEnabled(), true);
   const retained = (await get('/api/pages/' + work + '/posture')).experiences.find(
-    item => item.sourceKind === 'web' && item.excerpt === selectedWebPassage);
+    item => item.sourceKind === 'web' && item.excerpt === searchedPassage);
   assert.ok(retained);
   assert.equal(retained.source.web_receipt_id, source.actionId);
   assert.equal(retained.source.capture_kind, 'operator_selected_web_example');
@@ -189,7 +218,11 @@ try {
   const firstInput = followupView.messages.find(m => m.role === 'user');
   assert.ok(firstInput.content.includes('WEB_EXPERIENCE_JSON'));
   assert.ok(firstInput.content.includes(retained.id));
-  assert.ok(firstInput.content.includes(selectedWebPassage));
+  // The originating experience is embedded as JSON in the new Work user input:
+  // literal LF characters in a saved passage are serialized as \\n.
+  const serializedPassage = JSON.stringify(searchedPassage).slice(1, -1);
+  assert.ok(firstInput.content.includes(serializedPassage),
+    'the full verbatim example, including JSON-escaped line breaks, reaches the later Work');
   assert.ok(firstInput.content.includes('Compare this observed version with the later task.'));
   assert.ok(firstInput.content.includes('My request for this Work:'));
   assert.ok(!firstInput.content.includes(sourceUrl), 'do not copy the source Work private URL');
@@ -231,14 +264,14 @@ try {
   assert.equal(await page.locator('.web-observation-text').textContent(), originalReceipt.content);
   assert.equal((await get('/__web/status')).webRequests, 0);
   assert.ok((await get('/api/pages/' + work + '/posture')).experiences.some(
-    item => item.id === retained.id && item.excerpt === selectedWebPassage));
+    item => item.id === retained.id && item.excerpt === searchedPassage));
   await page.locator('.web-sources').scrollIntoViewIfNeeded();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: join(output, 'web-source-mobile.png') });
   checks.push('restart preserves the source and unsent draft; mobile recall reads the original history without refetching or autonomous spending');
   // A saved passage remains usable as a source after restart, without saving it again.
   const savedAfterRestart = (await get('/api/pages/' + work + '/posture')).experiences.filter(
-    item => item.sourceKind === 'web' && item.excerpt === selectedWebPassage);
+    item => item.sourceKind === 'web' && item.excerpt === searchedPassage);
   assert.equal(savedAfterRestart.length, 1);
   await page.locator('.nav-toggle').click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -258,7 +291,8 @@ try {
   assert.equal(resumedView.page.sourcePageId, work);
   const resumedInput = resumedView.messages.find(m => m.role === 'user');
   assert.ok(resumedInput.content.includes(retained.id));
-  assert.ok(resumedInput.content.includes(selectedWebPassage));
+  assert.ok(resumedInput.content.includes(serializedPassage),
+    'restart must preserve the full JSON-serialized original passage');
   assert.ok(resumedInput.content.includes('Compare this observed version with the later task.'));
   assert.ok(!resumedInput.content.includes(sourceUrl));
   assert.equal((await get('/api/pages/' + work + '/posture')).experiences.filter(
