@@ -112,8 +112,11 @@ try {
   await page.getByRole('button', { name: 'Find next match' }).click();
   assert.equal(await saved.locator('mark').textContent(), 'café 山川 🌍');
   await page.getByRole('button', { name: 'Use passage around match' }).click();
-  assert.ok((await savedExcerpt.inputValue()).includes('Original field observation: café 山川 🌍.'),
+  const searchedPassage = await savedExcerpt.inputValue();
+  assert.ok(searchedPassage.includes('Original field observation: café 山川 🌍.'),
     'finding a retained source can stage an exact contextual passage for later Work');
+  assert.ok(originalReceipt.content.includes(searchedPassage),
+    'the staged context must be one exact contiguous piece of the retained source');
   await savedFind.fill('absent evidence term');
   await page.getByRole('button', { name: 'Find next match' }).click();
   await page.locator('.web-observation-find [role="status"]').getByText('No match in the saved observation.').waitFor();
@@ -151,7 +154,7 @@ try {
   await useSelection.click();
   assert.equal(await excerptEditor.inputValue(), 'Manual edit',
     'a selection outside the saved observation cannot overwrite a manual excerpt');
-  await excerptEditor.fill(selectedWebPassage);
+  await excerptEditor.fill(searchedPassage);
   await page.getByRole('textbox', { name: 'What should later work notice? (optional)' })
     .fill('Compare this observed version with the later task.');
   // Hold the actual POST so a slow save cannot make an edited passage look persisted.
@@ -178,7 +181,7 @@ try {
   await page.unroute(savePattern);
   assert.equal(await page.getByRole('textbox', { name: 'Exact original passage' }).isEnabled(), true);
   const retained = (await get('/api/pages/' + work + '/posture')).experiences.find(
-    item => item.sourceKind === 'web' && item.excerpt === selectedWebPassage);
+    item => item.sourceKind === 'web' && item.excerpt === searchedPassage);
   assert.ok(retained);
   assert.equal(retained.source.web_receipt_id, source.actionId);
   assert.equal(retained.source.capture_kind, 'operator_selected_web_example');
@@ -204,7 +207,7 @@ try {
   const firstInput = followupView.messages.find(m => m.role === 'user');
   assert.ok(firstInput.content.includes('WEB_EXPERIENCE_JSON'));
   assert.ok(firstInput.content.includes(retained.id));
-  assert.ok(firstInput.content.includes(selectedWebPassage));
+  assert.ok(firstInput.content.includes(searchedPassage));
   assert.ok(firstInput.content.includes('Compare this observed version with the later task.'));
   assert.ok(firstInput.content.includes('My request for this Work:'));
   assert.ok(!firstInput.content.includes(sourceUrl), 'do not copy the source Work private URL');
