@@ -731,3 +731,83 @@ def test_partial_or_malformed_external_pdf_is_not_a_false_observation(monkeypatc
     with pytest.raises(web.WebReadError) as error:
         read("https://papers.example/broken.pdf")
     assert error.value.code == "web_pdf_unreadable"
+
+
+def test_find_phrase_beyond_initial_passage_in_public_pdf_and_follow_matches(monkeypatch):
+    """Find a late PDF passage without sending 24 KiB of preceding text to the model."""
+    document = synthetic_pdf([
+        "Introductory notes " + "filler " * 4800,
+        "Target evidence: the source recommends version checks.",
+        "Follow-up target evidence: version checks prevent mixed observations.",
+    ])
+    calls = network(monkeypatch, lambda request: httpx.Response(
+        200, headers={"content-type": "application/pdf"}, stream=Chunks([document])))
+    first = web.read({"url": "https://papers.example/field.pdf", "find": "target evidence",
+                      "max_chars": 140}, CancellationToken(), action_request_id="pdf-find-one")
+    extracted = read_pdf(document).text
+    assert first["source"]["match_start"] > web.MAX_CHARS
+    assert first["source"]["match_page"] == 2
+    assert first["content"] == extracted[first["source"]["text_start"]:first["source"]["text_end"]]
+    assert "Target evidence:" in first["content"]
+    assert first["source"]["truncated"] and first["next"] is not None
+    second = web.read(first["next"], CancellationToken(), action_request_id="pdf-find-two")
+    assert second["source"]["match_page"] == 3
+    assert "target evidence:" in second["content"]
+    assert second["source"]["observation_sha256"] == first["source"]["observation_sha256"]
+    assert second["next"] is None and second["available_eof"]
+    assert len(calls) == 2
+    assert all(call.headers["host"] == "papers.example" for call in calls)
+
+
+def test_find_public_json_after_first_window_and_refuse_changed_follow(monkeypatch):
+    original = json.dumps({"entries": ["unrelated " * 2200, "Target correction", "target correction"]})
+    state = {"text": original}
+    network(monkeypatch, lambda request: httpx.Response(
+        200, headers={"content-type": "application/json"}, stream=Chunks([state["text"].encode()])))
+    first = web.read({"url": "https://api.example/records", "find": "target correction",
+                      "max_chars": 130}, CancellationToken(), action_request_id="find-json")
+    assert first["source"]["match_start"] > 20000
+    assert first["source"]["match_start"] == original.lower().index("target correction")
+    assert first["source"]["text_sha256"] == hashlib.sha256(first["content"].encode()).hexdigest()
+    assert first["content"] == original[first["source"]["text_start"]:first["source"]["text_end"]]
+    assert first["next"] is not None
+    second = web.read(first["next"], CancellationToken(), action_request_id="find-json-next")
+    assert second["source"]["match_start"] > first["source"]["match_end"]
+    assert second["next"] is None
+    state["text"] = original.replace("unrelated", "revised")
+    with pytest.raises(web.WebReadError) as changed:
+        web.read(first["next"], CancellationToken(), action_request_id="stale-find")
+    assert changed.value.code == "web_observation_changed"
+
+
+def test_find_misses_report_observed_scope_not_visual_or_unread_tail(monkeypatch):
+    document = synthetic_pdf(["", "Selectable description only."], scan_marker=True)
+    network(monkeypatch, lambda request: httpx.Response(
+        200, headers={"content-type": "application/pdf"}, stream=Chunks([document])))
+    missed = web.read({"url": "https://papers.example/scanned.pdf", "find": "image-only result"},
+                      CancellationToken(), action_request_id="missed")
+    assert missed["content"] == "" and missed["next"] is None
+    assert missed["source"]["match_start"] is None
+    assert missed["source"]["pdf_pages_without_selectable_text"]
+    assert "Only selectable PDF text was searched" in missed["reading_note"]
+    monkeypatch.setattr(web, "MAX_WEB_PDF_PAGES", 1)
+    bounded = web.read({"url": "https://papers.example/scanned.pdf", "find": "Selectable description"},
+                       CancellationToken(), action_request_id="bounded")
+    assert bounded["content"] == "" and not bounded["source"]["pdf_text_complete"]
+    assert "beyond the extraction bound" in bounded["reading_note"]
+
+
+@pytest.mark.parametrize("fields", [
+    {"find": ""}, {"find": " "}, {"find": "a"}, {"find": "x" * 121},
+    {"find": "target\nline"}, {"find": 7},
+    {"find": "target", "case_sensitive": "true"},
+    {"find": "target", "max_chars": 2},
+    {"find": "target", "offset": 3},
+    {"case_sensitive": True},
+])
+def test_find_invalid_arguments_do_not_dispatch(monkeypatch, fields):
+    calls = network(monkeypatch, lambda request: html("Never fetched"))
+    with pytest.raises(web.WebReadError):
+        web.read({"url": "https://page.example/target", **fields}, CancellationToken(),
+                 action_request_id="invalid-find")
+    assert not calls
