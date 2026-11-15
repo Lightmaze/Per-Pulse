@@ -517,8 +517,9 @@ def read(arguments, cancellation, *, action_request_id):
                     **({"find_query": phrase, "match_start": match_start,
                         "match_end": match_end} if finding else {})},
                 "content": content, "links": links, "next": next_range,
-                "available_eof": next_range is None if finding else end == len(text),
-                "reading_note": note}
+                # EOF describes the returned passage, not whether find has
+                # exhausted later matches in the observed text.
+                "available_eof": end == len(text), "reading_note": note}
     except httpx.TimeoutException:
         raise WebReadError("The webpage took too long to read. Try the source again.", code="web_read_timeout") from None
     except (httpx.HTTPError, OSError):
