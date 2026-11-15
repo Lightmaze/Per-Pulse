@@ -42,6 +42,7 @@ class WebFixture:
         self.requests, self.web_requests = [], []
         self.follow_all = False
         self.gzip = False
+        self.media_type = "text/html"
         self.body = '<title>Field observations</title><script>not evidence</script><p>' + ORIGINAL + '</p>'
         monkeypatch.setattr(web_read, "_resolve", lambda host, token, deadline: ("8.8.8.8",))
         def website(request):
@@ -51,7 +52,7 @@ class WebFixture:
             content = self.body.encode()
             if self.gzip:
                 content = gzip.compress(content)
-            return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8",
+            return httpx.Response(200, headers={"content-type": self.media_type + "; charset=utf-8",
                                                 **({"content-encoding": "gzip"} if self.gzip else {})},
                                   stream=Body(content))
         monkeypatch.setattr(web_read, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(website), trust_env=False))
