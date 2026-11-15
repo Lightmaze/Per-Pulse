@@ -338,7 +338,9 @@ try {
   const foundSaved = page.locator('.web-observation-text');
   await foundSaved.waitFor();
   assert.equal(await foundSaved.textContent(), foundReceipt.content);
-  assert.equal((await get('/__web/status')).webRequests, 3);
+  // The browser journey restarted the service before the PDF and find Works;
+  // both post-restart reads are counted, not the earlier pre-restart request.
+  assert.equal((await get('/__web/status')).webRequests, 2);
   checks.push('a native Work finds and saves a late public-source passage beyond 24 KiB, and the browser displays the exact sourced excerpt');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks, installed: Boolean(installedPython), provider: 'synthetic model and website HTTP', output }));
