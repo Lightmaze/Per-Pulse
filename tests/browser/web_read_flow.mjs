@@ -249,14 +249,14 @@ try {
   assert.equal(await page.locator('.web-observation-text').textContent(), originalReceipt.content);
   assert.equal((await get('/__web/status')).webRequests, 0);
   assert.ok((await get('/api/pages/' + work + '/posture')).experiences.some(
-    item => item.id === retained.id && item.excerpt === selectedWebPassage));
+    item => item.id === retained.id && item.excerpt === searchedPassage));
   await page.locator('.web-sources').scrollIntoViewIfNeeded();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: join(output, 'web-source-mobile.png') });
   checks.push('restart preserves the source and unsent draft; mobile recall reads the original history without refetching or autonomous spending');
   // A saved passage remains usable as a source after restart, without saving it again.
   const savedAfterRestart = (await get('/api/pages/' + work + '/posture')).experiences.filter(
-    item => item.sourceKind === 'web' && item.excerpt === selectedWebPassage);
+    item => item.sourceKind === 'web' && item.excerpt === searchedPassage);
   assert.equal(savedAfterRestart.length, 1);
   await page.locator('.nav-toggle').click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -276,7 +276,7 @@ try {
   assert.equal(resumedView.page.sourcePageId, work);
   const resumedInput = resumedView.messages.find(m => m.role === 'user');
   assert.ok(resumedInput.content.includes(retained.id));
-  assert.ok(resumedInput.content.includes(selectedWebPassage));
+  assert.ok(resumedInput.content.includes(searchedPassage));
   assert.ok(resumedInput.content.includes('Compare this observed version with the later task.'));
   assert.ok(!resumedInput.content.includes(sourceUrl));
   assert.equal((await get('/api/pages/' + work + '/posture')).experiences.filter(
