@@ -36,6 +36,7 @@ if __name__ == "__main__":
     def read_pdf_fixture():
         fixture.media_type = "application/pdf"
         fixture.expected_text = "Public PDF paper: reproducible field findings."
+        fixture.output_path = "public-pdf-paper.txt"
         fixture.body = synthetic_pdf([fixture.expected_text, "Second page: observed validation."])
         return {"mediaType": fixture.media_type}
 
