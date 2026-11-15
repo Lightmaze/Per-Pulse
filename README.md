@@ -29,7 +29,7 @@ Kernel implementation.
   50 megapixels). Preview them in Materials and send an exact source version.
   Reading an image sends it to your configured model, which must support image
   input; a large image is sent as a copy scaled to fit 2048 px and 1 MiB. Replies can include headings, tables and code blocks.
-- Read public HTTPS pages and research API responses (HTML, plain text, JSON, XML/Atom, CSV) with their source URL and reading time.
+- Read public HTTPS pages, PDF selectable text with page markers, and research API responses (HTML, plain text, JSON, XML/Atom, CSV) with their source URL and reading time.
   Inspect the exact text that was originally read even if the webpage later changes,
   then select a passage to keep as a sourced example for later Works; return to
   the original observation through its source Work.
