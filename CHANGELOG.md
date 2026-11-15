@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0a22
+
+- Read public structured HTTPS research responses (JSON/JSON-LD, XML/Atom/RSS, CSV and Markdown) through the native sourced `read_web` tool, with original bounded observations, provenance, pagination and restart history (#284).
+- Read selectable text from public HTTPS PDFs with page markers, original PDF hash, bounded extraction and explicit incomplete/scanned-page status. Inspect the exact prior observation from its Work after restart (#285).
+
 ## 0.1.0a21
 
 - Select multiple text, PDF, or PNG/JPEG files at once in the Materials system picker and attach them to one unsent Home/Work draft. The original source files and draft persist across refresh, with a five-attachment limit and partial-success preservation (#281).
