@@ -111,9 +111,11 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
     }
   };
 
-  const saveWeekly = async (enabled: boolean, beginPractice = false) => {
+  const saveWeekly = async (enabled: boolean, beginPractice = false, keepCurrentLimit = false) => {
     if (!gate.beginWrite()) return;
-    const requestedLimit = Number(weeklyLimit);
+    // Pause is always available, even if an unfinished limit edit is invalid.
+    // The Pause action must not silently commit a different weekly allowance.
+    const requestedLimit = keepCurrentLimit ? weekly?.weekly_limit ?? 0 : Number(weeklyLimit);
     if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100000) {
       gate.finishWrite();
       setError(t('pulse.weeklyInvalid'));
@@ -267,7 +269,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
           <button type="button" disabled={busy || identityChanged}
             onClick={() => void saveWeekly(weekly.enabled)}>{t('pulse.weeklySave')}</button>
           <button type="button" disabled={busy || identityChanged || (!weekly.enabled && (!pulse.providerConfigured || !pulse.enabled))}
-            onClick={() => void saveWeekly(!weekly.enabled, !weekly.enabled)}>
+            onClick={() => void saveWeekly(!weekly.enabled, !weekly.enabled, weekly.enabled)}>
             {weekly.enabled ? t('pulse.weeklyDisable') : t('pulse.weeklyEnable')}
           </button>
         </div>
