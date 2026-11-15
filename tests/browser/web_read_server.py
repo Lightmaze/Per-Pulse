@@ -40,6 +40,15 @@ if __name__ == "__main__":
         fixture.body = synthetic_pdf([fixture.expected_text, "Second page: observed validation."])
         return {"mediaType": fixture.media_type}
 
+    @app.post("/__web/find-evidence")
+    def find_evidence_fixture():
+        fixture.media_type = "text/plain"
+        fixture.find_phrase = "Critical correction"
+        fixture.expected_text = "Critical correction: validate the primary source before deciding."
+        fixture.output_path = "found-public-evidence.txt"
+        fixture.body = ("Earlier unrelated field records.\n" * 1400) + fixture.expected_text
+        return {"mediaType": fixture.media_type}
+
     @app.get("/__web/status")
     def status():
         return {"requests": len(fixture.requests), "webRequests": len(fixture.web_requests), "installed": args.installed}
