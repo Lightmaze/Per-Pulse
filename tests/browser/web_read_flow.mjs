@@ -112,6 +112,13 @@ try {
   await page.getByRole('button', { name: 'Find next match' }).click();
   assert.equal(await saved.locator('mark').textContent(), 'café 山川 🌍');
   await page.getByRole('button', { name: 'Use passage around match' }).click();
+  // React updates the controlled textarea asynchronously. Wait for the exact
+  // source slice instead of sampling a stale value after the click.
+  await page.waitForFunction(content => {
+    const value = document.querySelector('.web-observation-example textarea')?.value;
+    return Boolean(value && value.includes('Original field observation: café 山川 🌍.')
+      && content.includes(value));
+  }, originalReceipt.content);
   const searchedPassage = await savedExcerpt.inputValue();
   assert.ok(searchedPassage.includes('Original field observation: café 山川 🌍.'),
     'finding a retained source can stage an exact contextual passage for later Work');
@@ -211,7 +218,11 @@ try {
   const firstInput = followupView.messages.find(m => m.role === 'user');
   assert.ok(firstInput.content.includes('WEB_EXPERIENCE_JSON'));
   assert.ok(firstInput.content.includes(retained.id));
-  assert.ok(firstInput.content.includes(searchedPassage));
+  // The originating experience is embedded as JSON in the new Work user input:
+  // literal LF characters in a saved passage are serialized as \\n.
+  const serializedPassage = JSON.stringify(searchedPassage).slice(1, -1);
+  assert.ok(firstInput.content.includes(serializedPassage),
+    'the full verbatim example, including JSON-escaped line breaks, reaches the later Work');
   assert.ok(firstInput.content.includes('Compare this observed version with the later task.'));
   assert.ok(firstInput.content.includes('My request for this Work:'));
   assert.ok(!firstInput.content.includes(sourceUrl), 'do not copy the source Work private URL');
@@ -280,7 +291,8 @@ try {
   assert.equal(resumedView.page.sourcePageId, work);
   const resumedInput = resumedView.messages.find(m => m.role === 'user');
   assert.ok(resumedInput.content.includes(retained.id));
-  assert.ok(resumedInput.content.includes(searchedPassage));
+  assert.ok(resumedInput.content.includes(serializedPassage),
+    'restart must preserve the full JSON-serialized original passage');
   assert.ok(resumedInput.content.includes('Compare this observed version with the later task.'));
   assert.ok(!resumedInput.content.includes(sourceUrl));
   assert.equal((await get('/api/pages/' + work + '/posture')).experiences.filter(
