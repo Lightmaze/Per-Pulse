@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0a21
+
+- Select multiple text, PDF, or PNG/JPEG files at once in the Materials system picker and attach them to one unsent Home/Work draft. The original source files and draft persist across refresh, with a five-attachment limit and partial-success preservation (#281).
+- Show the number of confirmed attachments while the rest of a selected batch uploads. Preserve confirmed sources and keep the native UI/browser completion checks for delayed uploads (#282).
+
 ## 0.1.0a20
 
 - Select an exact passage directly in a saved HTTPS webpage observation and place it in that Work's existing experience editor. Keep the original observation and source Work, the 8 KiB excerpt bound, and the normal later-Work handoff (#278).

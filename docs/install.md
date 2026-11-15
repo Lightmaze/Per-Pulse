@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a20-py3-none-any.whl` from the
-[v0.1.0a20 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a20).
+Download `per_pulse-0.1.0a21-py3-none-any.whl` from the
+[v0.1.0a21 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a21).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a20-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a21-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a20-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a21-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -46,8 +46,10 @@ You need a model that supports streaming, tool calls and usage reporting.
    original page and message.
 4. Stop and restart the service; your pages and messages remain available.
 
-Drag several text, PDF or PNG/JPEG files onto the Home or Work composer to
-attach them to an unsent draft (up to five total); you can refresh before Send.
+Drag several text, PDF or PNG/JPEG files onto the Home or Work composer, or
+choose several at once in the Materials file picker, to attach them to an unsent draft
+(up to five total). The picker shows confirmed progress during a batch; you can
+refresh before Send.
 Existing drafts and successfully attached files remain after a partial failure.
 Open **Materials** to browse and preview them. Images need
 a model that accepts image input; PDF reading covers extracted text. You can
@@ -116,7 +118,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a20-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a21-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
