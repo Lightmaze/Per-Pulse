@@ -338,6 +338,77 @@ try {
     'Bringing a finding Home must leave the receiving Work history unchanged',
   );
   checks.push('An authored selected finding returns Home with its exact original Work and message source');
+  // Select a batch from the normal file picker, without relying on drop.
+  // Native receipts join one unsent Work; they never invoke a model.
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Home', exact: true }).click();
+  const batchId = await create('Batch sources');
+  const batchText = 'Compare these three authored source files.';
+  const batchFiles = [
+    { name: 'Field A.md', mimeType: 'text/markdown', buffer: Buffer.from('A: original note\n') },
+    { name: 'Field B.csv', mimeType: 'text/csv', buffer: Buffer.from('item,value\nB,2\n') },
+    { name: 'Field C.json', mimeType: 'application/json', buffer: Buffer.from('{"case":"C"}\n') },
+  ];
+  await page.locator('.composer textarea').fill(batchText);
+  await open();
+  const fileCountBeforeBatch = (await files()).length;
+  await page.getByLabel('Choose a file', { exact: true }).setInputFiles(batchFiles);
+  assert.equal((await files()).length, fileCountBeforeBatch, 'Choosing multiple files must not upload or send');
+  await page.getByRole('button', { name: 'Upload and attach 3 files', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'detached' });
+  await wait(async () => await page.locator('.composer-materials li').count() === 3, 'all three picker files attached');
+  assert.equal(await page.locator('.composer textarea').inputValue(), batchText);
+  await page.reload();
+  for (const file of batchFiles) {
+    await page.getByRole('button', { name: 'Inspect ' + file.name + ' before sending' }).waitFor();
+  }
+  assert.equal(await page.locator('.composer textarea').inputValue(), batchText);
+  assert.equal((await files()).length, fileCountBeforeBatch + 3, 'All three source files persist in the workspace');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => (await fetch(base + '/api/pages/' + batchId).then(r => r.json())).messages.some(m =>
+    m.materials?.length === 3 && m.content.includes(batchText)), 'batch reaches native Work history on Send');
+  const batch = await fetch(base + '/api/pages/' + batchId).then(r => r.json());
+  const batchMessage = batch.messages.find(m => m.materials?.length === 3 && m.content.includes(batchText));
+  assert.deepEqual(batchMessage.materials.map(m => m.name), batchFiles.map(f => f.name));
+  for (const file of batchFiles) {
+    const sourceMaterial = batchMessage.materials.find(m => m.name === file.name);
+    assert.equal(sourceMaterial.sha256, createHash('sha256').update(file.buffer).digest('hex'));
+  }
+  assert.equal(batch.provider.configured, false, 'A batch can be prepared without a model');
+  checks.push('Multi-select picker: three source-versioned uploads, draft survives reload, explicit Send records all files in one Work');
+
+  // A second batch must stop at the five-file draft bound without discarding
+  // any earlier verified attachment or silently uploading the sixth file.
+  const four = Array.from({ length: 4 }, (_, i) => ({
+    name: 'Capacity ' + (i + 1) + '.txt', mimeType: 'text/plain',
+    buffer: Buffer.from('Material ' + (i + 1) + '\n'),
+  }));
+  await page.locator('.composer textarea').fill('Keep five source files in this draft.');
+  await open();
+  await page.getByLabel('Choose a file', { exact: true }).setInputFiles(four);
+  await page.getByRole('button', { name: 'Upload and attach 4 files', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'detached' });
+  await wait(async () => await page.locator('.composer-materials li').count() === 4, 'four picker files attached');
+  const beforeCap = (await files()).length;
+  await open();
+  await page.getByLabel('Choose a file', { exact: true }).setInputFiles([
+    { name: 'Capacity 5.txt', mimeType: 'text/plain', buffer: Buffer.from('Fifth\n') },
+    { name: 'Capacity 6.txt', mimeType: 'text/plain', buffer: Buffer.from('Sixth\n') },
+  ]);
+  await page.getByRole('button', { name: 'Upload and attach 2 files', exact: true }).click();
+  await page.getByText('1 of 2 files attached to your draft. Nothing has been sent.', { exact: true }).waitFor();
+  await page.getByRole('alert').waitFor();
+  assert.equal((await files()).length, beforeCap + 1, 'Over-capacity source was not uploaded');
+  assert.equal(await page.locator('.composer-materials li').count(), 5);
+  await close();
+  await page.reload();
+  // A reload renders the app shell before the asynchronous native bootstrap
+  // restores the Composer. Wait for the actual persisted draft, as above.
+  await wait(async () => await page.locator('.composer-materials li').count() === 5,
+    'confirmed sources restored after partial batch reload');
+  assert.equal(await page.locator('.composer-materials li').count(), 5, 'Confirmed sources survive a partial batch and reload');
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Keep five source files in this draft.');
+  checks.push('Partial picker batch: five-file bound, no sixth upload, all confirmed unsent attachments survive reload');
+
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ ok: true, checks, browserErrors: errors, provider: 'disconnected', source: 'synthetic authored material' }, null, 2));
 } catch (error) {

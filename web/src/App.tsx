@@ -623,7 +623,7 @@ export default function App() {
     {modal?.kind === 'history' ? <HistoryDialog key={`${workspaceId}/${route.id}`} pageId={route.id} beforeMessageId={modal.beforeMessageId} close={closeModal} navigate={navigate} /> : null}
     {modal?.kind === 'message-search' ? <MessageSearchDialog key={`${workspaceId}/${route.id}`} pageId={route.id} close={closeModal} navigate={navigate} /> : null}
     {modal?.kind === 'materials' && modal.materialId && bootstrap && workspaceId ? <MaterialDialog key={`${workspaceId}/${bootstrap.serviceInstanceId}`} identity={bootstrap} pageId={modal.pageId ?? route.id} materialId={modal.materialId} close={closeModal} browse={() => openModal({ kind: 'materials' })} pages={pages} navigate={navigate} /> : null}
-    {modal?.kind === 'materials' && !modal.materialId && bootstrap && workspaceId ? <MaterialsDialog key={`${workspaceId}/${bootstrap.serviceInstanceId}/${route.id}/${route.serial}`} pageId={route.id} identity={bootstrap} selectedIds={draft.materials?.map(item => item.id) ?? []} close={closeModal} add={material => {
+    {modal?.kind === 'materials' && !modal.materialId && bootstrap && workspaceId ? <MaterialsDialog key={`${workspaceId}/${bootstrap.serviceInstanceId}/${route.id}/${route.serial}`} pageId={route.id} identity={bootstrap} selectedIds={draft.materials?.map(item => item.id) ?? []} close={closeModal} add={(material, keepOpen = false) => {
       if (material.pageId !== route.id) return false;
       const current = draftsRef.current[draftKey] ?? readDraft(workspaceId, route.id);
       const materials = current.materials ?? [];
@@ -631,8 +631,10 @@ export default function App() {
         if (materials.length >= 5) return false;
         changeDraft({ ...current, materials: [...materials, { id: material.id, name: material.name }] });
       }
-      setModal(null);
-      requestAnimationFrame(() => input.current?.focus());
+      if (!keepOpen) {
+        setModal(null);
+        requestAnimationFrame(() => input.current?.focus());
+      }
       return true;
     }} /> : null}
   </div>;
