@@ -41,6 +41,7 @@ class WebFixture:
         monkeypatch.setenv("PER_PULSE_WEB_FIXTURE_KEY", "explicit-synthetic-credential")
         self.requests, self.web_requests = [], []
         self.follow_all = False
+        self.find_phrase = None
         self.gzip = False
         self.media_type = "text/html"
         self.body = '<title>Field observations</title><script>not evidence</script><p>' + ORIGINAL + '</p>'
@@ -94,7 +95,10 @@ class WebFixture:
                 return response("Recovered the original saved webpage observation.")
             if scope.context_id.startswith("work:"):
                 if not results:
-                    return response(tool="read_web", arguments={"url": URL})
+                    arguments = {"url": URL}
+                    if self.find_phrase is not None:
+                        arguments.update({"find": self.find_phrase, "max_chars": 1200})
+                    return response(tool="read_web", arguments=arguments)
                 observations = [row["output"] for row in results if row.get("output", {}).get("kind") == web_read.KIND]
                 if self.follow_all and observations and observations[-1]["next"]:
                     return response(tool="read_web", arguments=observations[-1]["next"],

@@ -309,6 +309,39 @@ try {
   assert.equal(await pdfSaved.textContent(), pdfReceipt.content);
   assert.equal(await page.locator('.web-sources a').first().getAttribute('href'), sourceUrl);
   checks.push('browser opens the page-attributed public PDF originally read by a native Work, with exact source history and file effect');
+
+  // A separate Work searches source text beyond its first 24 KiB while keeping
+  // the exact returned passage in the existing native source viewer.
+  const findReady = await fetch(base + '/__web/find-evidence', { method: 'POST' });
+  assert.ok(findReady.ok);
+  const findCreate = await fetch(base + '/api/pages', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'Public evidence search',
+      instruction: 'Locate the critical correction in the public source and save a sourced result.' }),
+  });
+  assert.ok(findCreate.ok);
+  const findWork = (await findCreate.json()).page.id;
+  const foundView = await wait(() => get('/api/pages/' + findWork), value =>
+    value.page.status === 'idle' && value.artifacts.length > 0
+    && value.execution.webSources.items.length === 1, 'late public evidence Work');
+  const foundSource = foundView.execution.webSources.items[0];
+  assert.equal(foundSource.url, sourceUrl);
+  assert.equal(foundSource.truncated, true);
+  const foundReceipt = await get('/api/pages/' + findWork + '/execution/web/' + foundSource.actionId);
+  assert.ok(foundReceipt.textStart > 24 * 1024);
+  assert.match(foundReceipt.content, /Critical correction: validate the primary source/);
+  assert.equal(foundReceipt.textEnd - foundReceipt.textStart, [...foundReceipt.content].length);
+  await page.goto(base + '/page/' + findWork);
+  await page.getByRole('heading', { name: 'Public evidence search', exact: true }).waitFor();
+  await page.locator('.web-sources summary').click();
+  await page.getByRole('button', { name: 'View saved text', exact: true }).click();
+  const foundSaved = page.locator('.web-observation-text');
+  await foundSaved.waitFor();
+  assert.equal(await foundSaved.textContent(), foundReceipt.content);
+  // The browser journey restarted the service before the PDF and find Works;
+  // both post-restart reads are counted, not the earlier pre-restart request.
+  assert.equal((await get('/__web/status')).webRequests, 2);
+  checks.push('a native Work finds and saves a late public-source passage beyond 24 KiB, and the browser displays the exact sourced excerpt');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks, installed: Boolean(installedPython), provider: 'synthetic model and website HTTP', output }));
 } catch (error) {
