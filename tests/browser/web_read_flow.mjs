@@ -297,7 +297,7 @@ try {
   assert.equal(pdfReceipt.source.media_type, 'application/pdf');
   assert.equal(pdfReceipt.source.pdf_pages, 2);
   assert.equal(pdfReceipt.source.pdf_text_complete, true);
-  assert.match(pdfReceipt.content, /\\[Page 1\\][\\s\\S]*\\[Page 2\\]/);
+  assert.match(pdfReceipt.content, /\[Page 1\][\s\S]*\[Page 2\]/);
   await page.goto(base + '/page/' + pdfWork);
   await page.getByRole('heading', { name: 'Public PDF paper', exact: true }).waitFor();
   await page.locator('.web-sources summary').click();
