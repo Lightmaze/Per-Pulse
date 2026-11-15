@@ -3,7 +3,9 @@
 Model and web HTTP responses are explicitly synthetic fixtures.
 Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
+import hashlib
 import json
+from pdf_samples import synthetic_pdf
 
 from per_pulse.service import PageService, PulseSettings
 from test_autonomous_examples import run_event
@@ -217,5 +219,55 @@ def test_research_api_json_is_a_native_sourced_work_result_after_restart(tmp_pat
         assert saved == [observation]
         assert (tmp_path / "workspace/expedition.txt").read_text() == fixture.body + "\nSource: " + URL + "\n"
         assert len(fixture.web_requests) == 1, "restart reads persisted observation, not fresh API bytes"
+    finally:
+        pages.runtime.close()
+
+
+def test_public_pdf_url_survives_native_work_and_restart_with_page_source(tmp_path, monkeypatch):
+    """An actual World/Kernel reads public PDF bytes through the native web tool."""
+    fixture = WebFixture(monkeypatch)
+    fixture.media_type = "application/pdf"
+    fixture.expected_text = "Original public PDF field observation."
+    fixture.body = synthetic_pdf([fixture.expected_text, "Follow-up result."])
+    original_bytes = fixture.body
+    def open_pages():
+        return PageService(tmp_path, model_factory=fixture.factory, posture=True,
+            allow_workspace_actions=True, auto_apply_edits=True,
+            pulse=PulseSettings(enabled=True, spontaneous_rate=0))
+    pages = open_pages()
+    try:
+        created = pages.create_page(TITLE, "Read " + URL + " as a PDF and save its sourced text.")
+        page = created["page"]["id"]
+        scope = pages.execution._scope(page)
+        pages.runtime._mgr.pulse(pages.runtime.continuity_engram_id,
+            pulse_event=pages.runtime.causal_ledger.get_event(created["initialMessageId"]),
+            execution_context=scope.context_id, runtime_fence=pages.runtime._current_runtime_fence())
+        actions = [row for row in pages.runtime.kernel_service.store.actions_for_session(scope)
+                   if row.tool_name == web_read.NAME]
+        assert len(actions) == 1 and actions[0].status is ActionStatus.SUCCEEDED
+        observation = actions[0].result["output"]
+        source = observation["source"]
+        assert source["media_type"] == "application/pdf"
+        assert source["pdf_sha256"] == hashlib.sha256(original_bytes).hexdigest()
+        assert source["pdf_pages"] == source["pdf_pages_read"] == 2
+        assert source["pdf_text_complete"] is True
+        assert source["url"] == URL and observation["next"] is None
+        assert "[Page 1]" in observation["content"] and "[Page 2]" in observation["content"]
+        assert fixture.expected_text in (tmp_path / "workspace/expedition.txt").read_text()
+        assert pages.execution.snapshot(page)["webSources"]["items"][0]["url"] == URL
+        assert pages.view(page)["page"]["status"] == "idle"
+        assert len(fixture.web_requests) == 1
+    finally:
+        pages.runtime.close()
+    fixture.body = synthetic_pdf(["A revised PDF; history should not refetch it."])
+    pages = open_pages()
+    try:
+        store = pages.runtime.kernel_service.store
+        saved = [row.result["output"] for row in store.actions_for_session(pages.execution._scope(page))
+                 if row.tool_name == web_read.NAME]
+        assert saved == [observation]
+        assert pages.execution.snapshot(page)["webSources"]["items"][0]["url"] == URL
+        assert len(fixture.web_requests) == 1
+        assert fixture.expected_text in (tmp_path / "workspace/expedition.txt").read_text()
     finally:
         pages.runtime.close()
