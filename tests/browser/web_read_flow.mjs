@@ -277,6 +277,36 @@ try {
   await wait(() => get('/api/pages/' + work), value => value.page.status === 'idle'
     && value.messages.filter(m => m.content === 'Recovered the original saved webpage observation.').length === 2, 'continue after unreadable URL');
   checks.push('an unreadable URL has a useful visible reason; the existing source survives and the next message can continue');
+  // A second, real native Work follows a public PDF source rather than making
+  // the person download and reattach it. Only model and website HTTP are fixtures.
+  const pdfFixtureResponse = await fetch(base + '/__web/read-pdf', { method: 'POST' });
+  assert.ok(pdfFixtureResponse.ok);
+  const pdfCreateResponse = await fetch(base + '/api/pages', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'Public PDF paper',
+      instruction: 'Read ' + sourceUrl + ' as a public PDF, preserve page markers and save a sourced result.' }),
+  });
+  assert.ok(pdfCreateResponse.ok);
+  const pdfWork = (await pdfCreateResponse.json()).page.id;
+  const pdfView = await wait(() => get('/api/pages/' + pdfWork), value => value.page.status === 'idle'
+    && value.artifacts.length > 0 && value.execution.webSources.items.length === 1, 'public PDF Work');
+  const pdfSource = pdfView.execution.webSources.items[0];
+  assert.equal(pdfSource.url, sourceUrl);
+  assert.equal(pdfSource.truncated, false);
+  const pdfReceipt = await get('/api/pages/' + pdfWork + '/execution/web/' + pdfSource.actionId);
+  assert.equal(pdfReceipt.source.media_type, 'application/pdf');
+  assert.equal(pdfReceipt.source.pdf_pages, 2);
+  assert.equal(pdfReceipt.source.pdf_text_complete, true);
+  assert.match(pdfReceipt.content, /\\[Page 1\\][\\s\\S]*\\[Page 2\\]/);
+  await page.goto(base + '/page/' + pdfWork);
+  await page.getByRole('heading', { name: 'Public PDF paper', exact: true }).waitFor();
+  await page.locator('.web-sources summary').click();
+  await page.getByRole('button', { name: 'View saved text', exact: true }).click();
+  const pdfSaved = page.locator('.web-observation-text');
+  await pdfSaved.waitFor();
+  assert.equal(await pdfSaved.textContent(), pdfReceipt.content);
+  assert.equal(await page.locator('.web-sources a').first().getAttribute('href'), sourceUrl);
+  checks.push('browser opens the page-attributed public PDF originally read by a native Work, with exact source history and file effect');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks, installed: Boolean(installedPython), provider: 'synthetic model and website HTTP', output }));
 } catch (error) {
