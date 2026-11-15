@@ -116,7 +116,11 @@ try {
   assert.ok(searchedPassage.includes('Original field observation: café 山川 🌍.'),
     'finding a retained source can stage an exact contextual passage for later Work');
   assert.ok(originalReceipt.content.includes(searchedPassage),
-    'the staged context must be one exact contiguous piece of the retained source');
+    'the staged context must be one exact contiguous piece of the retained source: '
+    + JSON.stringify({ expectedLength: originalReceipt.content.length, excerptLength: searchedPassage.length,
+      expectedHead: originalReceipt.content.slice(0, 260),
+      excerptHead: searchedPassage.slice(0, 260),
+      index: originalReceipt.content.indexOf(searchedPassage) }));
   await savedFind.fill('absent evidence term');
   await page.getByRole('button', { name: 'Find next match' }).click();
   await page.locator('.web-observation-find [role="status"]').getByText('No match in the saved observation.').waitFor();
