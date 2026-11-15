@@ -44,12 +44,13 @@ class WebFixture:
         self.gzip = False
         self.media_type = "text/html"
         self.body = '<title>Field observations</title><script>not evidence</script><p>' + ORIGINAL + '</p>'
+        self.expected_text = ORIGINAL
         monkeypatch.setattr(web_read, "_resolve", lambda host, token, deadline: ("8.8.8.8",))
         def website(request):
             self.web_requests.append(str(request.url))
             assert request.headers["host"] == "reading.example"
             assert request.extensions["sni_hostname"] == "reading.example"
-            content = self.body.encode()
+            content = self.body if isinstance(self.body, bytes) else self.body.encode()
             if self.gzip:
                 content = gzip.compress(content)
             return httpx.Response(200, headers={"content-type": self.media_type + "; charset=utf-8",
@@ -101,7 +102,7 @@ class WebFixture:
                     observation = observations[-1]
                     assert observation["source"]["scope"] == "extracted_text"
                     text = "".join(row["content"] for row in observations)
-                    assert ORIGINAL in text
+                    assert self.expected_text in text
                     return response(tool="mutate_file", arguments={"path": "expedition.txt", "expected_digest": None,
                         "content": text + "\nSource: " + observation["source"]["url"] + "\n"})
                 if len(results) == len(observations) + 1:
