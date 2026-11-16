@@ -45,6 +45,16 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
         const files = Array.from(event.dataTransfer.files);
         const supported = files.filter(isSupportedUpload);
         setUnsupportedDrop(supported.length !== files.length);
+        // A browser-origin drag can contain both file(s) and meaningful plain
+        // text. Preventing default is necessary to keep a file drop from
+        // navigating away, so explicitly retain the accompanying instruction
+        // in the same durable draft before the asynchronous attachment upload.
+        // Pure file drops and text-only native drops keep their former path.
+        const droppedText = event.dataTransfer.getData('text/plain');
+        if (droppedText) changeDraft({
+          ...draft,
+          text: draft.text ? `${draft.text}\n\n${droppedText}` : droppedText,
+        });
         if (supported.length) onPasteFiles(supported); // The existing durable draft upload path.
       }}
       onSubmit={event => { event.preventDefault(); if (canSend && !busy && !pastingImage) send(); }}>
