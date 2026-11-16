@@ -69,7 +69,7 @@ def test_older_turns_leave_the_request_but_stay_in_the_page(tmp_path, monkeypatc
         assert len(replies(client, page_id)) == TURNS  # the page keeps everything
         last = requests[-1]
         contents = [message.get("content") or "" for message in last]
-        assert OMITTED_NOTE in contents
+        assert any(content.startswith(OMITTED_NOTE) for content in contents)
         # Real persisted user turns have original addressable source IDs. The
         # ordinary long-running request exposes recent omitted user input,
         # rather than offering only a generic suggestion to search history.
