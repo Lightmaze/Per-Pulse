@@ -564,6 +564,48 @@ try {
     'Work image reaches native model request');
   assert.ok(seenPixels.at(-1).equals(pastedBytes));
   checks.push('Work paste: original Work draft survives navigation; Home isolation; original image only on explicit Send');
+
+  // Rich browser drags use the exact same Composer in a Work. Verify the
+  // accompanying instruction remains local to that Work and survives a Home
+  // detour before the user's explicit Send.
+  const workRichBefore = seenPixels.length;
+  const workRichText = 'Also compare the source annotations.';
+  const workRichDraft = 'Original Work plan.';
+  await page.locator('.composer textarea').fill(workRichDraft);
+  const workRichUpload = page.waitForResponse(response =>
+    response.request().method() === 'POST' && response.url().includes('/materials?'));
+  await page.evaluate(([encoded, note]) => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const data = new DataTransfer();
+    data.items.add(note, 'text/plain');
+    data.items.add(new File([bytes], 'Work rich drop.png', { type: 'image/png' }));
+    const target = document.querySelector('.composer textarea');
+    if (target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }))) {
+      throw new Error('Mixed Work drop must not navigate');
+    }
+  }, [pastedBytes.toString('base64'), workRichText]);
+  const workRichReceipt = await (await workRichUpload).json();
+  assert.equal(workRichReceipt.material.pageId, workId);
+  assert.equal(workRichReceipt.material.sha256, createHash('sha256').update(pastedBytes).digest('hex'));
+  await page.getByRole('button', { name: 'Inspect Work rich drop.png before sending' }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), `${workRichDraft}\n\n${workRichText}`);
+  await page.goto(base);
+  await page.locator('.composer textarea').waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Inspect Work rich drop.png before sending' }).count(), 0);
+  await page.goto(base + '/page/' + workId);
+  await page.getByRole('button', { name: 'Inspect Work rich drop.png before sending' }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), `${workRichDraft}\n\n${workRichText}`);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => seenPixels.length === workRichBefore + 1 &&
+    (await fetch(base + '/api/pages/' + workId).then(response => response.json())).messages.at(-1)?.role === 'assistant',
+    'Work mixed drag reaches native model request');
+  const workRichMessage = [...(await fetch(base + '/api/pages/' + workId).then(response => response.json())).messages]
+    .reverse().find(message => message.role === 'user'
+      && message.materials?.some(material => material.name === 'Work rich drop.png'));
+  assert.ok(workRichMessage?.content.includes(workRichDraft) && workRichMessage.content.includes(workRichText));
+  assert.ok(seenPixels.at(-1).equals(pastedBytes));
+  checks.push('Work mixed text + image drag: persisted local draft and source isolation after Home detour; explicit Send');
+
   await page.goto(base);
   await page.locator('.composer textarea').waitFor();
 
