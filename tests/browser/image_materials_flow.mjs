@@ -242,6 +242,53 @@ try {
   assert.ok(sentImage, 'Pasted image retains its source on the saved message');
   checks.push('Clipboard image paste: no auto-send, persisted draft after reload, original pixels and source on explicit Send');
 
+  // A copied image can carry meaningful plain text in the same clipboard.
+  // Its text must remain a normal native paste, while its image is attached
+  // to the *same* unsent draft and reaches the model only after Send.
+  const mixedPasteCount = seenPixels.length;
+  await page.locator('.composer textarea').fill('Please ');
+  const mixedPasteUpload = page.waitForResponse(response =>
+    response.request().method() === 'POST' && response.url().includes('/materials?'));
+  await page.evaluate(encoded => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const clipboard = new DataTransfer();
+    clipboard.items.add('describe the pasted figure', 'text/plain');
+    clipboard.items.add(new File([bytes], 'Figure with text.png', { type: 'image/png' }));
+    const target = document.querySelector('.composer textarea');
+    const event = new ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true });
+    if (!target.dispatchEvent(event) || event.defaultPrevented) {
+      throw new Error('Supported image attachment suppressed the clipboard text paste');
+    }
+  }, pastedBytes.toString('base64'));
+  const mixedPasteReceipt = await (await mixedPasteUpload).json();
+  assert.equal(mixedPasteReceipt.material.sha256, createHash('sha256').update(pastedBytes).digest('hex'));
+  // Synthetic ClipboardEvent does not itself invoke the browser's default
+  // text insertion. Follow it with the real textarea input notification.
+  await page.evaluate(() => {
+    const target = document.querySelector('.composer textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(
+      target, 'Please describe the pasted figure');
+    target.dispatchEvent(new InputEvent('input', {
+      bubbles: true, inputType: 'insertFromPaste', data: 'describe the pasted figure',
+    }));
+  });
+  await page.getByRole('button', { name: 'Inspect Figure with text.png before sending' }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Please describe the pasted figure');
+  assert.equal(seenPixels.length, mixedPasteCount, 'Mixed clipboard paste cannot send a model request');
+  await page.reload();
+  await page.getByRole('button', { name: 'Inspect Figure with text.png before sending' }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Please describe the pasted figure');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => seenPixels.length === mixedPasteCount + 1 &&
+    (await view()).messages.at(-1)?.role === 'assistant', 'mixed text and screenshot reach the native model request');
+  assert.ok(seenPixels.at(-1).equals(pastedBytes));
+  const mixedSent = [...(await view()).messages].reverse().find(message =>
+    message.role === 'user' && message.materials?.some(item => item.name === 'Figure with text.png'));
+  assert.ok(mixedSent, 'The uploaded source image is attached to the sent message');
+  assert.ok(mixedSent.content.includes('Please describe the pasted figure'),
+    'The original pasted instruction survives together with the image');
+  checks.push('Mixed clipboard text + supported image: native text insertion, durable source, reload and explicit Send');
+
   // A browser clipboard can provide text and an unsupported file together.
   // A synthetic event cannot insert text by itself, but its cancel flag
   // proves the composer leaves the native text-paste path available.

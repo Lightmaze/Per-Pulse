@@ -68,7 +68,11 @@ export function Composer({ draft, changeDraft, send, busy, onLink, onMaterials, 
           // clipboards carry text alongside an unsupported file; cancelling
           // their paste used to silently discard the user's text as well.
           if (supported.length) {
-            event.preventDefault();
+            // When a clipboard carries a usable image/file AND real text,
+            // keep the browser's ordinary text insertion while saving the
+            // attachment through the same durable draft path. Consuming the
+            // event here silently discards a user's pasted instructions.
+            if (!event.clipboardData.getData('text/plain')) event.preventDefault();
             onPasteFiles(supported);
           }
         } else {
