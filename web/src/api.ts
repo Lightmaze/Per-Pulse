@@ -160,7 +160,7 @@ export const api = {
     request<{ usage: WeeklyRequestUsage; departureEventId: string }>('/pulse/practice', {
       method: 'POST', headers: pulseWriteHeaders(identity), body: JSON.stringify({ weeklyLimit }),
     }),
-  setWeeklyUsage: (enabled: boolean, weeklyLimit: number, identity: PulseWriteIdentity) =>
+  setWeeklyUsage: (enabled: boolean, weeklyLimit: number | undefined, identity: PulseWriteIdentity) =>
     request<{ usage: WeeklyRequestUsage }>('/pulse/weekly-usage', {
       method: 'PATCH', headers: pulseWriteHeaders(identity),
       body: JSON.stringify({ enabled, weeklyLimit }),
