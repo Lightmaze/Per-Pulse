@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.0a24
+
+- Preserve task text and supported images when pasted together into the same Home or Work draft. Keep both across refresh and send them together after explicit Send (#291).
+- Pause autonomous practice without overwriting a newer weekly request allowance saved from another view. Keep the current persisted allowance and require an explicit value when enabling practice again (#292).
+
 ## 0.1.0a23
 
 - Find exact phrases beyond the first passage of public webpages, structured research responses and selectable PDF text with source-version checks and follow-on matches. Retain bounded excerpts, observed coverage and page attribution (#287).
