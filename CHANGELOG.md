@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a23
+
+- Find exact phrases beyond the first passage of public webpages, structured research responses and selectable PDF text with source-version checks and follow-on matches. Retain bounded excerpts, observed coverage and page attribution (#287).
+- Search an existing saved Work observation without fetching the live page again, use an exact continuous passage in the existing experience editor, and carry the sourced lesson into later Works and Home after restart (#288).
+- Pause autonomous practice even when the weekly-limit field has an unsaved or invalid draft. Keep the persisted allowance unchanged and preserve the existing SELF/World identity and consumption history (#289).
+
 ## 0.1.0a22
 
 - Read public structured HTTPS research responses (JSON/JSON-LD, XML/Atom/RSS, CSV and Markdown) through the native sourced `read_web` tool, with original bounded observations, provenance, pagination and restart history (#284).

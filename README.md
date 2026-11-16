@@ -32,8 +32,9 @@ Kernel implementation.
 - Read public HTTPS pages, PDF selectable text with page markers, and research API responses (HTML, plain text, JSON, XML/Atom, CSV) with their source URL and reading time.
   In a Work, `read_web` can find a phrase beyond the first passage and return an exact sourced excerpt; follow `next` for later matches of that source version. Search covers the observed text layer, not images or scans.
   Inspect the exact text that was originally read even if the webpage later changes,
-  then select a passage to keep as a sourced example for later Works; return to
-  the original observation through its source Work.
+  search within that saved observation, then place a continuous passage in the
+  existing experience editor for later Works; return to the original observation
+  through its source Work.
 - Let pages continue: background pulses within an hourly budget, or type
   `/tick 3` to give a page three more steps.
 - Start autonomous practice from Activity with a weekly request allowance. Work and
@@ -57,13 +58,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a22-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a22)
+[`per_pulse-0.1.0a23-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a23)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a22-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a23-py3-none-any.whl
 per-pulse --example
 ```
 
