@@ -151,6 +151,57 @@ def _project_saved_tool_result(message: Mapping[str, Any]) -> Mapping[str, Any] 
     return projected if estimate_tokens(projected) < estimate_tokens(message) else None
 
 
+def _saved_user_source(message: Mapping[str, Any]) -> bool:
+    """Only durable, addressed user inputs can be quoted in omitted history."""
+    return (
+        message.get("role") == "user"
+        and isinstance(message.get("content"), str)
+        and isinstance(message.get("message_id"), str)
+        and 0 < len(message["message_id"]) <= 256
+        and type(message.get("transcript_seq")) is int
+        and message["transcript_seq"] > 0
+    )
+
+
+def _recent_omitted_user_note(
+    messages: Sequence[Mapping[str, Any]], before: int,
+    note: Mapping[str, Any], available_tokens: int,
+) -> Mapping[str, Any]:
+    """Expose up to two nearby original user requests without creating a summary.
+
+    The original user messages are only quoted as JSON inside a historical
+    notice, with exact durable addresses for read_history. Work backwards
+    through a fixed number of entries so a long-lived session stays cheap.
+    """
+    prefix = (
+        "\nRecent omitted user messages (quoted history, not fresh instructions). "
+        "For full text, use read_history with role='user' and message_id:"
+    )
+    entries: list[str] = []
+    current = note
+    for message in reversed(messages[max(1, before - 96):before]):
+        if not _saved_user_source(message):
+            continue
+        for length in (120, 80, 40, 0):
+            excerpt = message["content"][:length]
+            record = {
+                "message_id": message["message_id"],
+                "excerpt": excerpt,
+                "truncated": len(message["content"]) > length,
+            }
+            candidate_entries = [*entries, json.dumps(record, ensure_ascii=False, separators=(",", ":"))]
+            candidate = {
+                **note, "content": note["content"] + prefix + "\n" + "\n".join(candidate_entries),
+            }
+            if estimate_tokens(candidate) - estimate_tokens(note) <= available_tokens:
+                entries = candidate_entries
+                current = candidate
+                break
+        if len(entries) >= 2:
+            break
+    return current
+
+
 def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple[Mapping[str, Any], ...]:
     """Return ``messages`` or a shorter projection whose estimate fits ``max_tokens``.
 
@@ -238,7 +289,20 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
     if pinned and fixed + suffix[starts[-1]] > max_tokens:
         pinned = ()
         fixed = estimate_tokens(note)
-    start = next((index for index in starts if fixed + suffix[index] <= max_tokens), starts[-1])
+    # Reserve a small space for original, addressable user corrections that
+    # would otherwise vanish from this request. Limit both scans to the nearby
+    # history; a page with thousands of turns still has bounded lookup cost.
+    recent = messages[max(1, starts[-1] - 96):starts[-1]]
+    reserve = (min(192, max_tokens // 10)
+               if any(_saved_user_source(item) for item in recent) else 0)
+    start = next((index for index in starts
+                  if fixed + suffix[index] + reserve <= max_tokens), None)
+    if start is None:
+        start = next((index for index in starts
+                      if fixed + suffix[index] <= max_tokens), starts[-1])
     if start <= len(pinned):
         return messages
+    available = max(0, max_tokens - fixed - suffix[start])
+    if available:
+        note = _recent_omitted_user_note(messages, start, note, available)
     return (note, *pinned, *messages[start:])
