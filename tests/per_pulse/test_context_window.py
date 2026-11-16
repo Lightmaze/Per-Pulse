@@ -274,3 +274,55 @@ def test_old_unsaved_tool_output_cannot_be_replaced_with_an_unreadable_pointer()
 def test_budget_must_be_positive():
     with pytest.raises(ValueError):
         fit_context([], 0)
+
+
+
+def test_omitted_user_corrections_keep_exact_recall_sources_without_a_new_instruction():
+    """A long Work exposes an older correction and keeps the active turn whole."""
+    messages = []
+    for index in range(28):
+        messages.extend((
+            {"role": "user", "message_id": f"user-{index}",
+             "transcript_seq": index * 2 + 1,
+             "content": f"Correction {index}: ship a finished working artifact. " + "detail " * 90},
+            {"role": "assistant", "message_id": f"answer-{index}",
+             "transcript_seq": index * 2 + 2,
+             "content": f"Acknowledged {index}. " + "response " * 35},
+        ))
+    before = tuple(dict(item) for item in messages)
+    budget = 1_600
+    fitted = fit_context(messages, budget)
+    assert sum(estimate_tokens(message) for message in fitted) <= budget
+    assert fitted[-1] == messages[-1]
+    assert fitted[0]["role"] == "system"
+    note = fitted[0]["content"]
+    assert OMITTED_NOTE in note
+    assert "Recent omitted user messages" in note
+    assert "role='user'" in note
+    assert "not fresh instructions" in note
+    source_lines = [line for line in note.splitlines() if line.startswith('{"message_id":')]
+    assert 1 <= len(source_lines) <= 2
+    omitted = [item for item in messages[2:] if item["role"] == "user"
+               and item not in fitted]
+    assert omitted
+    for line in source_lines:
+        entry = json.loads(line)
+        source = next(item for item in omitted if item["message_id"] == entry["message_id"])
+        assert source["content"].startswith(entry["excerpt"])
+        assert entry["truncated"] is True
+        assert source["content"] not in note
+    assert tuple(messages) == before
+
+
+def test_omitted_user_previews_never_create_addresses_for_unsaved_messages():
+    """Only the real native transcript may supply read_history identities."""
+    messages = _turns(24, size=500)
+    # A supplied string alone does not make an address; boolean seq values
+    # must not accidentally count as integers either.
+    for index, item in enumerate(messages):
+        if item["role"] == "user" and index:
+            item["message_id"] = f"unverified-{index}"
+            item["transcript_seq"] = True
+    result = fit_context(messages, 1_600)
+    assert result[0]["content"] == OMITTED_NOTE
+    assert sum(estimate_tokens(item) for item in result) <= 1_600
