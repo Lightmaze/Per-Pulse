@@ -386,9 +386,37 @@ try {
   }
   assert.equal(await page.locator('.composer textarea').inputValue(), batchText);
   assert.equal((await files()).length, fileCountBeforeBatch + 3, 'All three source files persist in the workspace');
-  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  // Hold the native Send response while the user starts their next message.
+  // Its three already-sent sources must leave that next draft on success,
+  // without losing the newer text or touching the saved original message.
+  let releaseFirstSend;
+  let firstSendEntered;
+  const firstSendEnteredPromise = new Promise(resolve => { firstSendEntered = resolve; });
+  const firstSendReleased = new Promise(resolve => { releaseFirstSend = resolve; });
+  const holdFirstSend = async route => {
+    if (route.request().method() === 'POST'
+      && new URL(route.request().url()).pathname === '/api/pages/' + batchId + '/messages') {
+      firstSendEntered();
+      await firstSendReleased;
+    }
+    await route.continue();
+  };
+  await page.route('**/api/pages/*/messages', holdFirstSend);
+  try {
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await firstSendEnteredPromise;
+    await page.locator('.composer textarea').fill('Keep five source files in this draft.');
+    assert.equal(await page.locator('.composer-materials li').count(), 3,
+      'The outgoing attachment list remains visible until Send is confirmed');
+  } finally {
+    releaseFirstSend();
+  }
   await wait(async () => (await fetch(base + '/api/pages/' + batchId).then(r => r.json())).messages.some(m =>
     m.materials?.length === 3 && m.content.includes(batchText)), 'batch reaches native Work history on Send');
+  await wait(async () => await page.locator('.composer-materials li').count() === 0,
+    'confirmed sent sources detached from the next draft');
+  await page.unroute('**/api/pages/*/messages', holdFirstSend);
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Keep five source files in this draft.');
   const batch = await fetch(base + '/api/pages/' + batchId).then(r => r.json());
   const batchMessage = batch.messages.find(m => m.materials?.length === 3 && m.content.includes(batchText));
   assert.deepEqual(batchMessage.materials.map(m => m.name), batchFiles.map(f => f.name));
@@ -405,7 +433,6 @@ try {
     name: 'Capacity ' + (i + 1) + '.txt', mimeType: 'text/plain',
     buffer: Buffer.from('Material ' + (i + 1) + '\n'),
   }));
-  await page.locator('.composer textarea').fill('Keep five source files in this draft.');
   await open();
   await page.getByLabel('Choose a file', { exact: true }).setInputFiles(four);
   await page.getByRole('button', { name: 'Upload and attach 4 files', exact: true }).click();
