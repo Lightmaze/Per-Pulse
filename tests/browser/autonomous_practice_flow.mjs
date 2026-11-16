@@ -93,15 +93,28 @@ try {
   const draft = 'Keep this practice draft across pause and restart.';
   await page.getByRole('textbox', { name: /^Message / }).fill(draft);
   await page.getByRole('button', { name: 'Activity', exact: true }).click();
-  // Editing the next allowance must not accidentally lower it when the
-  // person clicks Pause rather than Save limit.
+  // Editing the next allowance must not lower it on Pause. A different tab
+  // may also save a *newer* World limit while this Activity view is open.
   await page.getByRole('spinbutton', { name: 'Requests per week', exact: true }).fill('2');
+  const observation = await get('/api/pulse/observation');
+  const changedElsewhere = await fetch(base + '/api/pulse/weekly-usage', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json',
+      'X-Per-Pulse-World': observation.workspaceId,
+      'X-Per-Pulse-Service-Instance': observation.serviceInstanceId },
+    body: JSON.stringify({ enabled: true, weeklyLimit: 23 }),
+  });
+  assert.equal(changedElsewhere.status, 200, await changedElsewhere.text());
+  const pauseRequest = page.waitForRequest(request => request.url().endsWith('/api/pulse/weekly-usage')
+    && request.method() === 'PATCH' && request.postDataJSON()?.enabled === false);
   await page.getByRole('button', { name: 'Pause autonomous practice', exact: true }).click();
+  assert.deepEqual((await pauseRequest).postDataJSON(), { enabled: false },
+    'Pause must not send an allowance from an outdated Activity view');
   await page.getByText('Autonomous model requests are disabled.', { exact: true }).waitFor();
   const paused = await get('/api/pulse/weekly-usage');
   assert.equal(paused.usage.enabled, false);
-  assert.equal(paused.usage.weekly_limit, 20);
-  assert.equal(await page.getByRole('spinbutton', { name: 'Requests per week', exact: true }).inputValue(), '20');
+  assert.equal(paused.usage.weekly_limit, 23);
+  assert.equal(await page.getByRole('spinbutton', { name: 'Requests per week', exact: true }).inputValue(), '23');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.locator('#interface-language').selectOption('zh-CN');
@@ -117,9 +130,9 @@ try {
   await page.getByText('自主模型请求目前未启用。', { exact: true }).waitFor();
   const pausedAgain = await get('/api/pulse/weekly-usage');
   assert.equal(pausedAgain.usage.enabled, false);
-  assert.equal(pausedAgain.usage.weekly_limit, 20);
-  assert.equal(await page.locator('.pulse-activity-section input[type="number"]').first().inputValue(), '20');
-  checks.push('English and Chinese Pause ignore unsaved or invalid limit drafts, preserve the weekly policy, and resume the same SELF departure');
+  assert.equal(pausedAgain.usage.weekly_limit, 23);
+  assert.equal(await page.locator('.pulse-activity-section input[type="number"]').first().inputValue(), '23');
+  checks.push('English and Chinese Pause omit allowance updates, preserve a newer policy saved from another view, and resume the same SELF departure');
   await stop(server);
   server = start();
   await wait(() => fetch(base + '/api/health'), value => value.ok, 'restarted native server');
