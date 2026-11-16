@@ -113,10 +113,10 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
 
   const saveWeekly = async (enabled: boolean, beginPractice = false, keepCurrentLimit = false) => {
     if (!gate.beginWrite()) return;
-    // Pause is always available, even if an unfinished limit edit is invalid.
-    // The Pause action must not silently commit a different weekly allowance.
-    const requestedLimit = keepCurrentLimit ? weekly?.weekly_limit ?? 0 : Number(weeklyLimit);
-    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100000) {
+    // Pause has no weeklyLimit at all: the server preserves the latest World
+    // policy even if another tab changed it after our most recent read.
+    const requestedLimit = Number(weeklyLimit);
+    if (!keepCurrentLimit && (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100000)) {
       gate.finishWrite();
       setError(t('pulse.weeklyInvalid'));
       return;
@@ -128,7 +128,7 @@ export function PulseActivity({ pageId, pages, workspaceId, serviceInstanceId, n
       const identity = { workspaceId, serviceInstanceId };
       const result = beginPractice
         ? await api.beginAutonomousPractice(requestedLimit, identity)
-        : await api.setWeeklyUsage(enabled, requestedLimit, identity);
+        : await api.setWeeklyUsage(enabled, keepCurrentLimit ? undefined : requestedLimit, identity);
       if (result.usage.world_id !== workspaceId) {
         setWeekly(null);
         setPulse(null);
