@@ -390,13 +390,12 @@ try {
   // Its three already-sent sources must leave that next draft on success,
   // without losing the newer text or touching the saved original message.
   let releaseFirstSend;
-  let firstSendEntered;
-  const firstSendEnteredPromise = new Promise(resolve => { firstSendEntered = resolve; });
+  let firstSendEntered = false;
   const firstSendReleased = new Promise(resolve => { releaseFirstSend = resolve; });
   const holdFirstSend = async route => {
     if (route.request().method() === 'POST'
       && new URL(route.request().url()).pathname === '/api/pages/' + batchId + '/messages') {
-      firstSendEntered();
+      firstSendEntered = true;
       await firstSendReleased;
     }
     await route.continue();
@@ -404,7 +403,7 @@ try {
   await page.route('**/api/pages/*/messages', holdFirstSend);
   try {
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
-    await firstSendEnteredPromise;
+    await wait(async () => firstSendEntered, 'native Send intercepted before new draft edit', 20000);
     await page.locator('.composer textarea').fill('Keep five source files in this draft.');
     assert.equal(await page.locator('.composer-materials li').count(), 3,
       'The outgoing attachment list remains visible until Send is confirmed');
