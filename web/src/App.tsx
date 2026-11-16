@@ -280,7 +280,19 @@ export default function App() {
         : command.count === 1 ? t('tick.startedOne') : t('tick.started', { count: command.count }));
       const empty = { text: '', references: [] };
       const currentDraft = draftsRef.current[draftKey] ?? readDraft(workspaceId, id);
-      const nextDraft = currentDraft.text === outgoing.text && JSON.stringify(currentDraft.references) === JSON.stringify(outgoing.references) && JSON.stringify(currentDraft.materials ?? []) === JSON.stringify(outgoing.materials ?? []) ? empty : currentDraft;
+      const unchanged = currentDraft.text === outgoing.text
+        && JSON.stringify(currentDraft.references) === JSON.stringify(outgoing.references)
+        && JSON.stringify(currentDraft.materials ?? []) === JSON.stringify(outgoing.materials ?? []);
+      // A user can start composing the next message while the previous Send
+      // awaits its native receipt. Preserve those new edits, but do not carry
+      // attachments that are already part of the confirmed sent message into
+      // the next draft (or silently send the same source a second time).
+      const sentMaterials = new Set((outgoing.materials ?? []).map(material => material.id));
+      const nextDraft: Draft = unchanged ? empty : {
+        ...currentDraft,
+        text: currentDraft.text === outgoing.text ? '' : currentDraft.text,
+        materials: currentDraft.materials?.filter(material => !sentMaterials.has(material.id)),
+      };
       const updated = { ...draftsRef.current, [draftKey]: nextDraft };
       draftsRef.current = updated;
       setDrafts(updated);
