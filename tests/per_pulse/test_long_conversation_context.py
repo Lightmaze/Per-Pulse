@@ -70,6 +70,17 @@ def test_older_turns_leave_the_request_but_stay_in_the_page(tmp_path, monkeypatc
         last = requests[-1]
         contents = [message.get("content") or "" for message in last]
         assert OMITTED_NOTE in contents
+        # Real persisted user turns have original addressable source IDs. The
+        # ordinary long-running request exposes recent omitted user input,
+        # rather than offering only a generic suggestion to search history.
+        note = next(content for content in contents if OMITTED_NOTE in content)
+        assert "Recent omitted user messages" in note
+        source_entries = [json.loads(line) for line in note.splitlines()
+                          if line.startswith('{"message_id":')]
+        assert source_entries
+        assert all(entry["message_id"] and entry["excerpt"]
+                   and "Message " in entry["excerpt"] for entry in source_entries)
+        assert all("Message 2." not in content for content in contents)
         assert any(content.startswith("OPENING:") for content in contents)
         assert any(content.startswith(f"Message {TURNS}.") for content in contents)
         assert not any(content.startswith("Message 2.") for content in contents)
