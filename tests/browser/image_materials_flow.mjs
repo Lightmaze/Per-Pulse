@@ -408,6 +408,66 @@ try {
   assert.ok(seenPixels.at(-1).equals(droppedBytes));
   checks.push('Home image drag/drop: visible target, unsupported-binary feedback, durable unsent draft, exact image bytes only on Send');
 
+  // A browser-origin drag may carry both a file and its accompanying
+  // text/plain instruction. A file drop must not navigate away, and neither
+  // the instruction nor the existing draft may disappear behind preventDefault.
+  const richDropText = 'Describe the chart using this source note.';
+  const existingDropDraft = 'Compare the evidence already in this draft.';
+  const richDropBefore = seenPixels.length;
+  const richDropRequestsBefore = requests.length;
+  await page.locator('.composer textarea').fill(existingDropDraft);
+  const richUpload = page.waitForResponse(response =>
+    response.request().method() === 'POST' && response.url().includes('/materials?'));
+  await page.evaluate(([encoded, note]) => {
+    const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+    const data = new DataTransfer();
+    data.items.add(note, 'text/plain');
+    data.items.add(new File([bytes], 'Rich drop.png', { type: 'image/png' }));
+    const target = document.querySelector('.composer textarea');
+    if (target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }))) {
+      throw new Error('Rich file drop must not navigate or trigger native file insertion');
+    }
+  }, [pastedBytes.toString('base64'), richDropText]);
+  const richReceipt = await (await richUpload).json();
+  assert.equal(richReceipt.material.sha256, createHash('sha256').update(pastedBytes).digest('hex'));
+  await page.getByRole('button', { name: 'Inspect Rich drop.png before sending' }).waitFor();
+  const expectedRichDraft = `${existingDropDraft}\n\n${richDropText}`;
+  assert.equal(await page.locator('.composer textarea').inputValue(), expectedRichDraft);
+  assert.equal(requests.length, richDropRequestsBefore, 'Rich drop cannot send a model request');
+  await page.reload();
+  await page.getByRole('button', { name: 'Inspect Rich drop.png before sending' }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), expectedRichDraft);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => seenPixels.length === richDropBefore + 1 &&
+    (await view()).messages.at(-1)?.role === 'assistant', 'rich file drop reaches native model request');
+  assert.ok(seenPixels.at(-1).equals(pastedBytes));
+  const richMessage = [...(await view()).messages].reverse()
+    .find(message => message.role === 'user' && message.materials?.some(item => item.name === 'Rich drop.png'));
+  assert.ok(richMessage?.content.includes(existingDropDraft) && richMessage.content.includes(richDropText),
+    'Both the original draft and dropped instruction reach the native saved message');
+  checks.push('Mixed drag text + PNG: original draft, dropped instructions and pixels survive refresh until explicit Send');
+
+  // A text drag with an unsupported file still retains the text and reports
+  // the refused attachment. It does not create an upload or invoke the model.
+  const unsupportedRichBefore = requests.length;
+  await page.locator('.composer textarea').fill('Existing text.');
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.items.add('Keep this passage.', 'text/plain');
+    data.items.add(new File(['binary'], 'unsupported-rich.exe', { type: 'application/octet-stream' }));
+    const target = document.querySelector('.composer textarea');
+    if (target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }))) {
+      throw new Error('Unsupported mixed drop must not navigate away');
+    }
+  });
+  await page.locator('.composer-hint').getByText('Unsupported file.', { exact: false }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Existing text.\n\nKeep this passage.');
+  assert.equal(await page.locator('.composer-materials li').count(), 0);
+  assert.equal(requests.length, unsupportedRichBefore, 'Unsupported rich drop cannot trigger the model');
+  await page.reload();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Existing text.\n\nKeep this passage.');
+  checks.push('Unsupported mixed drag: text persists without attaching unsupported files or sending');
+
   // A single drop containing several supported file kinds attaches every
   // file to the same unsent draft, in order. The native HTTP upload and source
   // receipts remain authoritative; the model sees nothing until Send.
