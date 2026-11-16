@@ -151,7 +151,8 @@ class PulseControlInput(Input):
 
 class WeeklyUsageInput(Input):
     enabled: bool = Field(strict=True)
-    weeklyLimit: int = Field(ge=0, le=100_000, strict=True)
+    # Omission is a Pause-only operation: preserve the latest World allowance.
+    weeklyLimit: int | None = Field(default=None, ge=0, le=100_000, strict=True)
 
 
 class AutonomousPracticeInput(Input):
@@ -484,6 +485,8 @@ def create_app(
             raise PageError("example_mode", "The example workspace cannot enable model spending.", 409)
         if body.enabled and not service.configured:
             raise PageError("provider_unconfigured", "Connect a model before enabling autonomous requests.", 409)
+        if body.enabled and body.weeklyLimit is None:
+            raise PageError("invalid_weekly_usage", "Enabling autonomous requests requires a weekly limit.", 422)
         try:
             budget = request.app.state.weekly_requests
             budget.configure(enabled=body.enabled, weekly_limit=body.weeklyLimit)

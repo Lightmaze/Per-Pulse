@@ -74,6 +74,23 @@ def test_one_enable_creates_native_self_work_file_and_report_then_reopens_withou
         assert len(fixture.requests) == before
 
 
+def test_weekly_api_pause_only_preserves_a_second_view_limit(tmp_path, monkeypatch):
+    fixture = AutonomousPracticeFixture(monkeypatch.setenv)
+    with TestClient(create_app(tmp_path, pulse=PulseSettings(enabled=True, spontaneous_rate=0),
+                               model_factory=fixture.factory), base_url="http://localhost") as client:
+        assert client.patch("/api/pulse/weekly-usage", json={"enabled": True, "weeklyLimit": 7}).status_code == 200
+        assert client.patch("/api/pulse/weekly-usage", json={"enabled": True, "weeklyLimit": 23}).status_code == 200
+        paused = client.patch("/api/pulse/weekly-usage", json={"enabled": False})
+        assert paused.status_code == 200, paused.text
+        assert paused.json()["usage"]["enabled"] is False
+        assert paused.json()["usage"]["weekly_limit"] == 23
+        missing = client.patch("/api/pulse/weekly-usage", json={"enabled": True})
+        assert missing.status_code == 422
+        assert client.get("/api/pulse/weekly-usage").json()["usage"]["enabled"] is False
+        resumed = client.patch("/api/pulse/weekly-usage", json={"enabled": True, "weeklyLimit": 23})
+        assert resumed.status_code == 200 and resumed.json()["usage"]["enabled"] is True
+
+
 @pytest.mark.parametrize("mode", ["offline", "example", "profile-disabled"])
 def test_unavailable_practice_does_not_enable_spending_or_create_a_self_origin(tmp_path, monkeypatch, mode):
     fixture = AutonomousPracticeFixture(monkeypatch.setenv)

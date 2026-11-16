@@ -87,13 +87,20 @@ class WeeklyRequestBudget:
     def _save_week(self, state: dict, transaction=None) -> None:
         (transaction or self.storage).save_component_state(self._key_prefix + state["week"], state)
 
-    def configure(self, *, enabled: bool, weekly_limit: int) -> dict:
-        if type(enabled) is not bool or type(weekly_limit) is not int or not 0 <= weekly_limit <= 100_000:
+    def configure(self, *, enabled: bool, weekly_limit: int | None = None) -> dict:
+        if type(enabled) is not bool or (weekly_limit is not None and
+                (type(weekly_limit) is not int or not 0 <= weekly_limit <= 100_000)):
             raise ValueError("weekly request settings must be a boolean and 0..100000 requests")
-        if enabled and weekly_limit == 0:
-            raise ValueError("enabled autonomous requests need a positive weekly allowance")
+        if enabled and (weekly_limit is None or weekly_limit == 0):
+            raise ValueError("enabled autonomous requests need an explicit positive weekly allowance")
         with self._write() as (transaction, _fence):
-            policy = {"version": 1, "enabled": enabled, "weekly_limit": weekly_limit}
+            # An omitted limit means Pause only: read the latest durable policy
+            # in the same write transaction. A second Activity tab can change
+            # the allowance while the first tab still displays an older value.
+            # Never round-trip that stale number into the World on Pause.
+            actual_limit = (self._load_policy(transaction)["weekly_limit"]
+                            if weekly_limit is None else weekly_limit)
+            policy = {"version": 1, "enabled": enabled, "weekly_limit": actual_limit}
             transaction.save_component_state(self._policy_key, policy)
             return dict(policy)
 

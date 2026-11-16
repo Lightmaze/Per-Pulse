@@ -42,6 +42,22 @@ def test_disabled_until_explicitly_enabled_and_persists_between_instances():
     assert replacement.status(now=NOW)["consumed"] == 2
 
 
+def test_pause_without_an_allowance_preserves_the_latest_durable_policy():
+    ledger = WeeklyRequestBudget(_Storage(), "world")
+    ledger.configure(enabled=True, weekly_limit=7)
+    # Two Activity views can have different policy snapshots. The stale view
+    # must send only Pause, not the older number it last read.
+    ledger.configure(enabled=True, weekly_limit=23)
+    paused = ledger.configure(enabled=False)
+    assert paused == {"version": 1, "enabled": False, "weekly_limit": 23}
+    assert ledger.status(now=NOW)["weekly_limit"] == 23
+    with pytest.raises(ValueError):
+        ledger.configure(enabled=True)  # No implicit authorization to resume.
+    assert ledger.status(now=NOW)["enabled"] is False
+    ledger.configure(enabled=True, weekly_limit=23)
+    assert ledger.status(now=NOW)["enabled"] is True
+
+
 def test_retry_is_a_second_physical_attempt_and_cannot_refund_dispatch():
     ledger = WeeklyRequestBudget(_Storage(), "world")
     ledger.configure(enabled=True, weekly_limit=2)
