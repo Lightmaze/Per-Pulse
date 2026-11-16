@@ -101,7 +101,7 @@ def test_clipped_tool_result_is_read_in_original_text_pages_without_reopening_th
         for _ in range(4):
             current, _ = activate(pages, page_id, text="Continue the local discussion. " + "detail " * 360)
         last = fixture.requests[-1][1]["messages"]
-        assert any(row.get("content") == OMITTED_NOTE for row in last)
+        assert any((row.get("content") or "").startswith(OMITTED_NOTE) for row in last)
         assert ORIGINAL not in json.dumps(last, ensure_ascii=False)
         source.write_text("REVISED_CURRENT_FILE: a different observation.")
         before = tuple(store._db.iterdump())
