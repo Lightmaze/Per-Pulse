@@ -122,6 +122,8 @@ try {
   await lesson.getByText('In use · v1', { exact: true }).waitFor();
   await lesson.getByRole('button', { name: 'Keep in this page', exact: true }).click();
   await lesson.getByText('In use · v2', { exact: true }).waitFor();
+  assert.equal(await lesson.getByRole('button', { name: 'Start a Work from this saved experience', exact: true }).count(), 0,
+    'A locally held correction cannot be a cross-Work starting point.');
   await lesson.getByText('Source experience', { exact: true }).click();
   assert.match(await lesson.innerText(), /twelve-field intake form/);
   checks.push('ordinary Work correction forms an inspectable sourced experience');
@@ -140,7 +142,31 @@ try {
   await openLessons();
   await lesson.getByRole('button', { name: 'Use in other pages', exact: true }).click();
   await lesson.getByText('In use · v3', { exact: true }).waitFor();
-  await closeDialog();
+  const selectedCorrection = (await (await fetch(base + '/api/pages/' + originalId + '/posture')).json()).experiences[0];
+  assert.equal(selectedCorrection.source.interpretation, 'model_proposed_lesson_from_user_followup');
+  await lesson.getByRole('button', { name: 'Start a Work from this saved experience', exact: true }).click();
+  await page.locator('#new-page-title').fill('Correction-guided follow-up');
+  await page.locator('#new-page-focus').fill('Review the initial interaction in a fresh Work.');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Correction-guided follow-up', exact: true }).waitFor();
+  const selectedWorkId = new URL(page.url()).pathname.split('/').pop();
+  const selectedView = await (await fetch(base + '/api/pages/' + selectedWorkId)).json();
+  const selectedInput = selectedView.messages.find(message => message.content?.includes('LESSON_EXPERIENCE_JSON')).content;
+  const selectedMaterial = JSON.parse(selectedInput.split('LESSON_EXPERIENCE_JSON\n')[1]
+    .split('\n\nMy request for this Work:')[0]);
+  assert.equal(selectedMaterial.id, selectedCorrection.id);
+  assert.equal(selectedMaterial.revision, selectedCorrection.revision);
+  assert.deepEqual(selectedMaterial.conditions, selectedCorrection.conditions);
+  assert.deepEqual(selectedMaterial.counterexamples, selectedCorrection.counterexamples);
+  assert.deepEqual(selectedMaterial.shift, selectedCorrection.shift);
+  assert.equal(selectedMaterial.record_type, selectedCorrection.record_type);
+  assert.equal(selectedView.page.sourcePageId, originalId);
+  assert.ok(!selectedInput.includes('The intake form hides the product.'),
+    'The user correction remains in its original Work.');
+  assert.ok(!selectedInput.includes('The first screen is a twelve-field intake form.'),
+    'The earlier private result remains in its original Work.');
+  await page.goto(base + '/page/' + originalId);
+  checks.push('rendered lesson-to-Work handoff carries attributed conditions but not the original conversation');
   const learnedId = await create('Informed delivery', 'BUILD_PRACTICE_ARTIFACT');
   await page.getByText('Your approval is needed', { exact: true }).waitFor();
   assert.match(await page.locator('body').innerText(), /practice\.txt/);

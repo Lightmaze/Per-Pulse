@@ -240,7 +240,7 @@ type ExperienceBase = {
   encounter?: { situation: string; action: string; outcome?: string };
   encounterSources?: Partial<Record<'situation' | 'action' | 'outcome', ExperienceMessageSource>>;
   source?: { source_message_id?: string; feedback_message_id?: string; capture_kind?: string;
-    selector_evidence_class?: string };
+    interpretation?: string; selector_evidence_class?: string };
   revisionSource?: { kind: string; selector_evidence_class?: string; resultMessageId?: string };
   feedback?: { verdict: string; evidence: string; evidenceSource?: ExperienceMessageSource; source?: {
     kind?: string; page_id?: string; relation?: string;

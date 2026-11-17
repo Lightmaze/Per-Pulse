@@ -202,7 +202,7 @@ try {
   await page.getByRole('dialog', { name: 'Lessons and examples' }).waitFor();
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.getByRole('button', { name: 'Continue in a new Work', exact: true }).click();
-  await page.getByText('This saved passage will accompany your new Work', { exact: false }).waitFor();
+  await page.getByText('This saved experience will accompany the new Work as attributed material', { exact: false }).waitFor();
   await page.locator('#new-page-title').fill('Follow-up comparison');
   await page.locator('#new-page-focus').fill('Use the retained field observation for a new task: compare a second field note.');
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
@@ -277,8 +277,8 @@ try {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
   await page.getByRole('dialog', { name: 'Lessons and examples' }).waitFor();
-  await page.getByRole('button', { name: 'Start another Work from this passage', exact: true }).click();
-  await page.getByText('This saved passage will accompany your new Work', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Start a Work from this saved experience', exact: true }).click();
+  await page.getByText('This saved experience will accompany the new Work as attributed material', { exact: false }).waitFor();
   await page.locator('#new-page-title').fill('Resumed field comparison');
   await page.locator('#new-page-focus').fill('Use the retained field observation for a new task: compare a third field note.');
   await page.getByRole('button', { name: 'Create page', exact: true }).click();

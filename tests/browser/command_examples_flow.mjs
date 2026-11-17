@@ -188,7 +188,7 @@ try {
   await openExperience();
   const sourceExample = page.getByRole('dialog', { name: 'Lessons and examples', exact: true })
     .getByRole('article').filter({ has: page.getByRole('heading', { name: saved.title, exact: true }) });
-  await sourceExample.getByRole('button', { name: 'Start another Work from this passage', exact: true }).click();
+  await sourceExample.getByRole('button', { name: 'Start a Work from this saved experience', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Command passage follow-up');
   await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
     .fill('Compare the saved command observation with the next task.');

@@ -48,11 +48,11 @@ class PageLearning:
         return memory, record
 
     def selected_saved_observation(self, page_id, experience_id):
-        """Resolve a retained source passage from its original Work for a new task.
+        """Resolve an explicitly selected experience from its source Work.
 
-        Native web, reading and command examples already have host-verified
-        delivered receipts. Only their selected text travels; original files,
-        commands, webpage URLs and surrounding conversations stay at source.
+        Native observations retain their delivered receipt; a correction
+        retains its host-verified earlier result and later user follow-up.
+        Only the selected abstraction travels, not private source history.
         """
         _, record = self._owned(page_id, experience_id)
         source = record.get("source") or {}
@@ -61,6 +61,18 @@ class PageLearning:
         # observations even when their *selector* was a test model. Preserve
         # that distinction in the later task instead of promoting a fixture to
         # an observed model decision or making the selected passage unusable.
+        # Both a person's selected correction and a native model-retained
+        # correction have original result and user-follow-up authority.
+        # Selecting one for a new Work does not replay either original message,
+        # or promote a synthetic model result into an observed outcome.
+        correction = (source.get("capture_kind") == "operator_selected_correction"
+                      or source.get("interpretation") == "model_proposed_lesson_from_user_followup")
+        if (record["active"] and record["scope"] == "subject"
+                and record.get("representation", "lesson") == "lesson" and correction):
+            return {key: deepcopy(record[key]) for key in (
+                "id", "revision", "title", "lesson", "conditions",
+                "counterexamples", "shift", "record_type",
+            )} | {"source_kind": "native_correction_lesson"}
         fixture_selector = (
             record.get("record_type") == "constructed_fixture"
             and kind in {"native_reading_example", "native_command_example"}
@@ -73,7 +85,7 @@ class PageLearning:
                 or (kind == "native_web_example"
                     and source.get("capture_kind") != "operator_selected_web_example")):
             raise PageError("web_experience_unavailable",
-                            "Choose an active, shared, saved source passage from this Work.", 422)
+                            "Choose an active, shared, saved experience from its source Work.", 422)
         selected = {**{key: record[key] for key in ("id", "title", "excerpt", "note")},
                     "source_kind": kind}
         if fixture_selector:
