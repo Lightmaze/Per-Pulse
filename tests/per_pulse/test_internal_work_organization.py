@@ -658,3 +658,36 @@ def test_sourced_work_handoff_rejects_forged_or_unowned_history(local):
         assert fixture.outcomes[0]["status"] == "failed"
     assert runtime.storage.native_work_requests() == []
     assert len(runtime.list_task_fronts()) == 2  # Owned source plus foreign front.
+
+
+def test_unavailable_historical_handoff_does_not_leave_an_empty_new_work(local):
+    """Reverification precedes creation if the durable source is inconsistent."""
+    pages, fixture = local
+    runtime = pages.runtime
+    source = pages.create_page("Original evidence", "Preserve the real source.")
+    source_id = source["page"]["id"]
+    run_event(runtime, runtime.causal_ledger.get_event(source["initialMessageId"]))
+    sent = pages.send(source_id, "Decision: preserve the real observation.")
+    run_event(runtime, runtime.causal_ledger.get_event(sent["messageId"]))
+    home(pages, fixture, [("work", {
+        "op": "create", "title": "Next Work",
+        "instruction": "Continue from the verified source.",
+        "source_work_id": source_id, "source_event_id": sent["messageId"],
+        "source_excerpt": "Decision: preserve the real observation.",
+    })])
+    receipt = fixture.outcomes[0]["output"]
+    assert receipt["status"] == "prepared"
+    record = runtime.storage.load_component_state(receipt["request_id"])
+    assert record["source_reference"]["event_id"] == sent["messageId"]
+
+    # Mimic source becoming unverifiable between accepted Home action and
+    # deferred admission. Do not silently manufacture an empty successor Work.
+    record["source_reference"]["excerpt"] = "This text never appeared in Work A."
+    runtime.storage.save_component_state(receipt["request_id"], record)
+    runtime._native_work.drain()
+    persisted = runtime.storage.load_component_state(receipt["request_id"])
+    assert persisted["status"] == "blocked"
+    assert persisted["event_id"] is None
+    assert runtime.world.get_task_front(receipt["work_id"]) is None
+    assert runtime.causal_ledger.get_event(sent["messageId"]).content == (
+        "Decision: preserve the real observation.")
