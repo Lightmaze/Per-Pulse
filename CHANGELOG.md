@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a25
+
+- Preserve plain text dropped together with supported image material in the same Home or Work draft, including Work/Home return and refresh; send both only on explicit Send (#294).
+- Make up to two recently omitted original user messages recognizable in bounded long-context model requests with exact historical message IDs and `read_history` addresses, without changing the saved transcript or action authority (#295).
+- When a prior source-backed Send succeeds after the user has started the next draft, detach only confirmed sent material IDs while retaining the new draft text and attachments; failed sends remain recoverable (#296).
+
 ## 0.1.0a24
 
 - Preserve task text and supported images when pasted together into the same Home or Work draft. Keep both across refresh and send them together after explicit Send (#291).
