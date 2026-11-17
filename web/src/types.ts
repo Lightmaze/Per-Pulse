@@ -166,10 +166,16 @@ export type AdaptiveWorkChoices = {
   }[];
 };
 
+export type SourceExperienceStatus = {
+  id: string; revision: number; currentRevision: number | null;
+  status: 'current' | 'revised' | 'withdrawn' | 'unavailable';
+};
+
 export type PageView = {
   workspaceId: string;
   serviceInstanceId: string;
   page: PageSummary;
+  sourceExperience?: SourceExperienceStatus | null;
   messages: Message[];
   references: PageReference[];
   backlinks: PageReference[];
