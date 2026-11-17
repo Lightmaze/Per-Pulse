@@ -506,8 +506,7 @@ def test_home_history_search_shows_the_actual_long_source_match_after_restart(lo
 
     # The SQL query is Unicode case-insensitive. The shown result must use
     # original source offsets even when one letter expands during casefold.
-    args = {"op": "inspect", "work_id": work_id, "query": "i\\u0307stanbul_scope"}
-    args["query"] = "i\u0307stanbul_scope"
+    args = {"op": "inspect", "work_id": work_id, "query": "i\u0307stanbul_scope"}
     home(pages, fixture, [("work", args)])
     output = fixture.outcomes[0]["output"]
     message, = output["recent_messages"]
