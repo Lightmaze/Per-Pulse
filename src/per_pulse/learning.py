@@ -47,14 +47,15 @@ class PageLearning:
             raise PageError("experience_not_found", "Edit this experience from its source page.", 404)
         return memory, record
 
-    def source_status(self, page_id):
+    def source_status(self, page_id, *, origin=None):
         """Read the current source revision for a Work created from an experience.
 
         Its first task is immutable history. The current source may have been
         revised, paused, or kept local since then; report that difference
         without silently rewriting the Work or admitting a new model turn.
         """
-        origin = self.pages._state["origins"].get(page_id, {})
+        if origin is None:
+            origin = self.pages._state["origins"].get(page_id, {})
         experience_id = origin.get("experienceId")
         revision = origin.get("experienceRevision")
         if not isinstance(experience_id, str) or type(revision) is not int:
@@ -76,6 +77,43 @@ class PageLearning:
         else:
             result["status"] = "current"
         return result
+
+    def decision_source(self, scope):
+        """Get host-verified source status for the next native Work decision.
+
+        Read the persisted World origin rather than a UI snapshot. A later
+        correction can change while this Work is open; the original user
+        message and earlier action receipts stay historical. No journal-wide
+        scan is needed: only this Work's explicitly selected experience is read.
+        """
+        runtime = self.pages.runtime
+        if (scope.world_id != runtime.world_id
+                or not scope.context_id.startswith("work:")):
+            return None
+        center_id = scope.context_id.removeprefix("work:")
+        front = next((front for front in runtime.world.list_task_fronts()
+                      if front.center_id == center_id), None)
+        if front is None:
+            return None
+        state = runtime.storage.load_component_state(self.pages._state_key) or {}
+        origin = state.get("origins", {}).get(front.id, {})
+        status = self.source_status(front.id, origin=origin)
+        if status is None:
+            return None
+        if status["status"] == "revised":
+            try:
+                current = self.selected_saved_observation(
+                    origin["pageId"], status["id"])
+            except (KeyError, PageError):
+                # Source permissions may have changed between the two reads.
+                # Never ship the old selected lesson as a current revision.
+                status["status"] = "unavailable"
+            else:
+                if current["revision"] == status["currentRevision"]:
+                    status["selected"] = current
+                else:
+                    status["status"] = "unavailable"
+        return status
 
     def selected_saved_observation(self, page_id, experience_id):
         """Resolve an explicitly selected experience from its source Work.
