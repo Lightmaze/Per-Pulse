@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a27
+
+- Run the complete saved-correction → next Work → approved file → sourced Home return → restart journey against an isolated cold-installed wheel, not the source checkout (#302).
+- Search and page through owned historical Work messages from Home, retaining original event identity and SQLite persistence (#303).
+- Return the exact continuous match from a long historical message, including original character offsets and truncation status (#304).
+- Attach a World-verified original Work event and exact quote when creating or continuing another Work, checking source ownership and text again before native delivery (#305).
+
 ## 0.1.0a26
 
 - Start a new Work from an explicitly selected, saved correction in its original Work, carrying its verified revision, applicability and source attribution into the next task while leaving the private source conversation in place (#298).

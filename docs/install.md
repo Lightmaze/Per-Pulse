@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a26-py3-none-any.whl` from the
-[v0.1.0a26 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a26).
+Download `per_pulse-0.1.0a27-py3-none-any.whl` from the
+[v0.1.0a27 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a27).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a26-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a27-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a26-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a27-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -89,6 +89,14 @@ a new user request or approve a file change. Workspace actions continue to use
 the existing Allow once or Undo controls. Without a configured model, you can
 still inspect the saved source, but no new AI action runs.
 
+## Continue from an earlier Work decision
+
+With a configured model, ask Home to revisit an earlier Work's decisions before starting a related task. Native `work.list` and `work.search` locate your Works; `work.inspect` reads their original admitted messages. Use a phrase with `query` to find older messages, or `before_seq` to continue beyond the latest 12. Long matches return an exact continuous excerpt, original event ID and character offsets.
+
+Ask Home to compare that decision with the current task and, where relevant, continue an existing Work or create another. Native `work.create` and `work.send` can include `source_work_id`, `source_event_id` and a verbatim `source_excerpt`. Per Pulse verifies all three against the owned source event again at delivery. The destination receives attributed historical evidence, not a new user instruction or file-action permission. You can reopen the original Work, review the later Work's actual files and return its selected result to Home.
+
+This gives the model access to an earlier decision; it does not guarantee the model will look for it without a prompt or that a later artifact will be better.
+
 ## Continue in a shared Habitat region
 
 With a configured model, Home and focused Works can revisit the same Habitat
@@ -138,7 +146,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a26-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a27-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
