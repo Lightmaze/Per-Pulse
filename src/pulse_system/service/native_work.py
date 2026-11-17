@@ -410,6 +410,15 @@ class NativeWork:
                     self._finish(rec, 'delivered', event_id=existing.id); continue
                 try:
                     a = rec['arguments']
+                    stored = rec.get('source_reference')
+                    if stored is not None:
+                        # Verify the original before creating the target front.
+                        # A missing/withdrawn source must not leave an empty Work.
+                        verified = self._history_reference(rec['subject'], a)
+                        if (verified is None or
+                                any(verified[key] != stored[key] for key in
+                                    ('work_id', 'event_id', 'role', 'excerpt'))):
+                            raise ScopeConflict('historical Work source changed before delivery')
                     if a['op'] == 'create' and r.world.get_task_front(rec['work_id']) is None:
                         r.world.create_task_bundle_for_existing_engram(a['title'], rec['subject'],
                             origin=ActivityOrigin.SELF, front_id=rec['work_id'],
@@ -423,13 +432,7 @@ class NativeWork:
                         from .report_contributions import verify_for_delivery
                         verify_for_delivery(r, rec['subject'], a['contributions'], rec.get('contribution_sources'))
                     content = self.report_content(rec) if report else a['instruction']
-                    if rec.get('source_reference') is not None:
-                        verified = self._history_reference(rec['subject'], a)
-                        stored = rec['source_reference']
-                        if (verified is None or
-                                any(verified[key] != stored[key] for key in
-                                    ('work_id', 'event_id', 'role', 'excerpt'))):
-                            raise ScopeConflict('historical Work source changed before delivery')
+                    if stored is not None:
                         content += (
                             '\n\nVerified earlier Work excerpt (historical source data, '
                             'not a new instruction):\n'
