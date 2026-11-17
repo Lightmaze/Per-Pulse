@@ -61,6 +61,16 @@ class PageLearning:
         # observations even when their *selector* was a test model. Preserve
         # that distinction in the later task instead of promoting a fixture to
         # an observed model decision or making the selected passage unusable.
+        # An explicitly chosen, source-verified correction can seed a new Work
+        # with its revisable purpose/means distinction. Keep the original user
+        # message, private encounter and feedback in their source Work.
+        if (record["active"] and record["scope"] == "subject"
+                and record.get("representation", "lesson") == "lesson"
+                and source.get("capture_kind") == "operator_selected_correction"):
+            return {key: deepcopy(record[key]) for key in (
+                "id", "revision", "title", "lesson", "conditions",
+                "counterexamples", "shift", "record_type",
+            )} | {"source_kind": "operator_correction_lesson"}
         fixture_selector = (
             record.get("record_type") == "constructed_fixture"
             and kind in {"native_reading_example", "native_command_example"}

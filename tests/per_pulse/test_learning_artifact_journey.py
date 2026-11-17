@@ -47,6 +47,13 @@ def fixture_factory(monkeypatch, requests):
             else:
                 response = "PASS"
             delta, finish = {"content": response}, "stop"
+        elif "BUILD_SAVED_LESSON_ARTIFACT" in task and not any(m["role"] == "tool" for m in current):
+            learned = LESSON in model_view
+            arguments = {"path": "selected-practice.txt" if learned else "selected-intake.txt",
+                         "expected_digest": None, "content": EXPERIENCE if learned else INTAKE}
+            delta = {"tool_calls": [{"index": 0, "id": "fixture-selected-artifact", "type": "function",
+                                    "function": {"name": "mutate_file", "arguments": json.dumps(arguments)}}]}
+            finish = "tool_calls"
         elif "BUILD_PRACTICE_ARTIFACT" in task and not any(m["role"] == "tool" for m in current):
             learned = LESSON in model_view
             arguments = {"path": "practice.txt" if learned else "intake.txt",
@@ -134,6 +141,14 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         assert record["sourcePageId"] == source_page and record["revision"] == 1
         assert record["source"]["capture_kind"] == "operator_selected_correction"
 
+        # A local-only correction cannot be used as a source for a new Work.
+        blocked = client.post("/api/pages", json={
+            "title": "Not shared", "instruction": "BUILD_SAVED_LESSON_ARTIFACT",
+            "sourcePageId": source_page, "sourceExperienceId": record["id"],
+        })
+        assert blocked.status_code == 422, blocked.text
+        assert blocked.json()["error"]["code"] == "web_experience_unavailable"
+
         # Before sharing, an unrelated Work cannot access the source correction.
         baseline = create_work(client, "Practice delivery", "BUILD_PRACTICE_ARTIFACT")
         # A pending action may be visible before its owning turn finishes the
@@ -208,10 +223,67 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         assert (client.get(f"/api/pages/{source_page}").json()["messages"][0]["id"]
                 == source_view["messages"][0]["id"])
 
+        # Start a distinct actual Work from the selected, shared correction.
+        # Only the attributed abstraction and logical bounds enter the new
+        # native request; the original correction and encounter stay at source.
+        selected = client.post("/api/pages", json={
+            "title": "Source-guided practice",
+            "instruction": "BUILD_SAVED_LESSON_ARTIFACT",
+            "sourcePageId": source_page, "sourceExperienceId": record["id"],
+        })
+        assert selected.status_code == 201, selected.text
+        selected_work = selected.json()["page"]["id"]
+        initial = next(m["content"] for m in selected.json()["view"]["messages"]
+                       if m["role"] == "user")
+        assert "LESSON_EXPERIENCE_JSON" in initial
+        payload = json.loads(initial.split("LESSON_EXPERIENCE_JSON\n", 1)[1]
+                             .split("\n\nMy request for this Work:", 1)[0])
+        assert payload["id"] == record["id"] and payload["revision"] == 2
+        assert payload["lesson"] == LESSON
+        assert payload["conditions"] == {"all": [
+            "A visitor asks for an exploratory experience",
+            "The central experience can be tried immediately",
+        ]}
+        assert payload["counterexamples"] == ["The user explicitly needs a fixed registration form."]
+        assert payload["record_type"] == record["record_type"]
+        assert "encounter" not in payload and "feedback" not in payload
+        assert CORRECTION not in initial and source_result["content"] not in initial
+        assert selected.json()["view"]["page"]["sourcePageId"] == source_page
+
+        selected_pending = await_view(client, f"/api/pages/{selected_work}/execution",
+                                      lambda x: any(a["canResolve"] for a in x["pendingActions"]),
+                                      "selected Work actionable approval")
+        selected_action = next(a for a in selected_pending["pendingActions"] if a["canResolve"])
+        assert selected_action["arguments"]["path"] == "selected-practice.txt"
+        assert selected_action["arguments"]["content"] == EXPERIENCE
+        assert not (tmp_path / "workspace" / "selected-practice.txt").exists()
+        selected_approval = client.post(
+            f"/api/pages/{selected_work}/execution/actions/{selected_action['actionId']}",
+            json={"decision": "allow_once"})
+        assert selected_approval.status_code == 200, selected_approval.text
+        await_view(client, f"/api/pages/{selected_work}/execution",
+                   lambda x: x["status"] == "idle", "selected Work finished")
+        assert (tmp_path / "workspace" / "selected-practice.txt").read_text() == EXPERIENCE
+        selected_artifact = PageArtifacts(pages.runtime).snapshot(selected_work)["artifacts"][0]
+        assert selected_artifact["path"] == "selected-practice.txt"
+        selected_reply = await_view(client, f"/api/pages/{selected_work}",
+                                    lambda x: any(m["role"] == "assistant" for m in x["messages"]),
+                                    "selected Work reply")
+        selected_result = [m for m in selected_reply["messages"] if m["role"] == "assistant"][-1]
+        selected_home = client.post(f"/api/pages/{selected_work}/return", json={
+            "content": selected_result["content"], "messageId": selected_result["id"]})
+        assert selected_home.status_code == 201, selected_home.text
+        assert selected_home.json()["view"]["messages"][-1]["sourcePageId"] == selected_work
+
     # World, Kernel, posture journal, file receipts and Home return survive restart.
     with TestClient(create_app(tmp_path, posture=True, allow_workspace_actions=True,
                                model_factory=None), base_url="http://localhost") as client:
-        assert client.get("/api/pages/home").json()["messages"][-1]["sourcePageId"] == work
+        home_messages = client.get("/api/pages/home").json()["messages"]
+        assert home_messages[-1]["sourcePageId"] == selected_work
+        assert any(message["sourcePageId"] == work for message in home_messages)
+        assert client.get(f"/api/pages/{selected_work}").json()["page"]["sourcePageId"] == source_page
+        assert PageArtifacts(client.app.state.pages.runtime).read(
+            selected_work, selected_action["actionId"])["content"] == EXPERIENCE
         original = client.get(f"/api/pages/{work}", params={"sourceMessageId": result_message["id"]})
         assert original.status_code == 200
         assert any(m["id"] == result_message["id"] for m in original.json()["messages"])
