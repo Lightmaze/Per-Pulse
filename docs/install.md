@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a25-py3-none-any.whl` from the
-[v0.1.0a25 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a25).
+Download `per_pulse-0.1.0a26-py3-none-any.whl` from the
+[v0.1.0a26 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a26).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a25-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a26-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a25-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a26-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -71,6 +71,23 @@ pages can continue in the background, up to 12 turns per hour by default.
 Use `--pulse-budget N` to change this or `--no-pulse` to switch it off. Model
 file changes apply by default and offer Undo; `--ask-before-edits` asks first.
 See [workspace actions](workspace-actions.md) for what Undo can restore.
+
+## Continue from a saved correction
+
+In a Work with a configured model, correct a mistaken approach and open that
+Work's saved experiences. When an active correction is available, select
+**Start a Work from this saved experience** and enter the next task. The new
+Work keeps a link to the source, its selected revision and the specific lesson;
+it does not copy the entire source conversation. You can inspect its source
+status and return to the original Work.
+
+If you revise, pause or keep the original experience local, the later Work
+will show that change. On subsequent ordinary model requests, Per Pulse checks
+the original World-owned record again and passes the current shared revision or
+the withdrawn/unavailable status as attributed source data. This does not send
+a new user request or approve a file change. Workspace actions continue to use
+the existing Allow once or Undo controls. Without a configured model, you can
+still inspect the saved source, but no new AI action runs.
 
 ## Continue in a shared Habitat region
 
@@ -121,7 +138,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a25-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a26-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails

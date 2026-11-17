@@ -42,7 +42,12 @@ Kernel implementation.
   its sources persist through pauses, budget holds and restarts. Pausing keeps
   the latest saved weekly allowance, even when another browser view changed it.
 - Keep examples and lessons from your corrections. They are available across
-  your pages unless you keep one to its page.
+  your pages unless you keep one to its page. From a saved correction in its
+  original Work, select **Start a Work from this saved experience** to begin
+  another Work with a source-linked lesson. The new Work shows if that lesson
+  is revised, withdrawn or unavailable; later model turns recheck the source
+  before using it as current advice. The original private conversation stays
+  with its source Work.
 - Let the model change files in its workspace, and undo any change from the
   page that made it.
 - Visit a shared Habitat region across Home and Works: approve a regional file
@@ -60,13 +65,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a25-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a25)
+[`per_pulse-0.1.0a26-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a26)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a25-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a26-py3-none-any.whl
 per-pulse --example
 ```
 
