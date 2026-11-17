@@ -478,3 +478,56 @@ def test_home_can_recover_exact_older_work_history_after_restart(local):
             found["recent_messages"][0]["event_id"]]
     finally:
         reopened.runtime.close()
+
+
+def test_home_history_search_shows_the_actual_long_source_match_after_restart(local):
+    """A search hit beyond the first 2,000 characters must remain readable."""
+    pages, fixture = local
+    runtime = pages.runtime
+    created = pages.create_page("Source-heavy investigation", "Investigate the source.")
+    work_id = created["page"]["id"]
+    run_event(runtime, runtime.causal_ledger.get_event(created["initialMessageId"]))
+    content = ("Long historical context with concrete observations. " * 85
+               + "\nLater decision: use İSTANBUL_SCOPE for the comparison; "
+                 "keep the original evidence attached.")
+    sent = pages.send(work_id, content)
+    run_event(runtime, runtime.causal_ledger.get_event(sent["messageId"]))
+    original = runtime.causal_ledger.get_event(sent["messageId"])
+    assert original.content == content
+    assert content.index("İSTANBUL_SCOPE") > 2000
+
+    home(pages, fixture, [("work", {"op": "inspect", "work_id": work_id})])
+    recent = next(m for m in fixture.outcomes[0]["output"]["recent_messages"]
+                  if m["event_id"] == original.id)
+    assert "İSTANBUL_SCOPE" not in recent["content"]
+    assert recent["content_excerpt_start"] == 0
+    assert recent["content_original_chars"] == len(content)
+    assert recent["content_truncated"] is True
+
+    # The SQL query is Unicode case-insensitive. The shown result must use
+    # original source offsets even when one letter expands during casefold.
+    args = {"op": "inspect", "work_id": work_id, "query": "i\u0307stanbul_scope"}
+    home(pages, fixture, [("work", args)])
+    output = fixture.outcomes[0]["output"]
+    message, = output["recent_messages"]
+    assert message["event_id"] == original.id
+    assert "İSTANBUL_SCOPE" in message["content"]
+    assert message["content_excerpt_start"] > 0
+    assert message["content_excerpt_end"] <= len(content)
+    assert content[message["content_excerpt_start"]:message["content_excerpt_end"]] == message["content"]
+    assert message["content_original_chars"] == len(content)
+    assert message["content_truncated"] is True
+    assert output["search_complete"] is True
+
+    pages.runtime.close()
+    reopened = PageService(pages.data_dir, model_factory=fixture.factory,
+                           posture=False, allow_workspace_actions=False,
+                           pulse=PulseSettings(enabled=False))
+    try:
+        home(reopened, fixture, [("work", args)])
+        recovered, = fixture.outcomes[0]["output"]["recent_messages"]
+        assert recovered["event_id"] == original.id
+        assert recovered["content"] == message["content"]
+        assert recovered["content_excerpt_start"] == message["content_excerpt_start"]
+    finally:
+        reopened.runtime.close()

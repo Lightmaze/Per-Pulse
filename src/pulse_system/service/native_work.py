@@ -93,6 +93,36 @@ def validate(arguments: Mapping[str, Any]) -> dict[str, Any]:
     return values
 
 
+_HISTORY_TEXT_LIMIT = 2000
+
+
+def _history_message_excerpt(message: Mapping[str, Any], query: str | None) -> dict[str, Any]:
+    """Return the exact source span that explains a bounded history match."""
+    original = str(message.get('content', ''))
+    start = 0
+    if query is not None and len(original) > _HISTORY_TEXT_LIMIT:
+        match = original.casefold().find(query.casefold())
+        if match >= 0:
+            # Unicode casefold may expand one original character (e.g. İ).
+            # Map the folded match back to a source offset, not a folded offset.
+            folded_offset = 0
+            for index, char in enumerate(original):
+                next_offset = folded_offset + len(char.casefold())
+                if next_offset > match:
+                    if index + len(query) > _HISTORY_TEXT_LIMIT:
+                        start = max(0, index - 320)
+                    break
+                folded_offset = next_offset
+    excerpt = original[start:start + _HISTORY_TEXT_LIMIT]
+    return {
+        **message, 'content': excerpt,
+        'content_original_chars': len(original),
+        'content_excerpt_start': start,
+        'content_excerpt_end': start + len(excerpt),
+        'content_truncated': len(excerpt) < len(original),
+    }
+
+
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
                                     ensure_ascii=False, allow_nan=False).encode()).hexdigest()
@@ -249,9 +279,9 @@ class NativeWork:
                 )
                 more = len(rows) > 12
                 selected = rows[-12:]
-                # Bound text without changing original event IDs or provenance.
-                messages = [{**m, 'content': str(m.get('content', ''))[:2000]}
-                            for m in selected]
+                # Return the matched part of a long old decision, not an
+                # unrelated first 2,000 characters that hide the match.
+                messages = [_history_message_excerpt(m, query) for m in selected]
                 output = {'work': r._task_front_view(front), 'recent_messages': messages,
                     'recent_only': query is None and 'before_seq' not in a,
                     'text_limit_per_message': 2000,
