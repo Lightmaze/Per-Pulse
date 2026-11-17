@@ -414,3 +414,67 @@ def test_home_search_finds_older_owned_works_without_crawling(local):
             work["id"] for work in first["works"]}
     finally:
         reopened.runtime.close()
+
+
+def test_home_can_recover_exact_older_work_history_after_restart(local):
+    """An ordinary Home tool can recover old source text without a second index."""
+    pages, fixture = local
+    runtime = pages.runtime
+    created = pages.create_page("Long-lived investigation", "Start the investigation.")
+    work_id = created["page"]["id"]
+    run_event(runtime, runtime.causal_ledger.get_event(created["initialMessageId"]))
+    for index in range(14):
+        content = f"Historical decision {index:02}: " + (
+            "Use TRACE_PROVENANCE_07 for the later comparison." if index == 7
+            else f"Keep source observation {index:02} in this Work.")
+        sent = pages.send(work_id, content)
+        run_event(runtime, runtime.causal_ledger.get_event(sent["messageId"]))
+
+    home(pages, fixture, [("work", {"op": "inspect", "work_id": work_id})])
+    first = fixture.outcomes[0]["output"]
+    assert first["message_scope"] == "owned_native_work_history"
+    assert first["more_messages"] is True
+    assert len(first["recent_messages"]) == 12
+    assert first["next_before_seq"] == first["recent_messages"][0]["seq"]
+    assert all(message["event_id"] for message in first["recent_messages"])
+
+    home(pages, fixture, [("work", {"op": "inspect", "work_id": work_id,
+                                 "before_seq": first["next_before_seq"]})])
+    older = fixture.outcomes[0]["output"]
+    assert older["recent_only"] is False
+    assert older["recent_messages"][-1]["seq"] < first["recent_messages"][0]["seq"]
+    assert {m["event_id"] for m in older["recent_messages"]}.isdisjoint(
+        {m["event_id"] for m in first["recent_messages"]})
+
+    home(pages, fixture, [("work", {"op": "inspect", "work_id": work_id,
+                                 "query": "trace_provenance_07"})])
+    found = fixture.outcomes[0]["output"]
+    assert found["searched_field"] == "message_content"
+    assert found["search_complete"] is True
+    assert len(found["recent_messages"]) == 1
+    assert "TRACE_PROVENANCE_07" in found["recent_messages"][0]["content"]
+    assert found["recent_messages"][0]["center_id"] == runtime.world.get_task_front(work_id).center_id
+
+    other = runtime.engrams.create(auto_name=False).id
+    foreign = runtime.world.create_task_bundle_for_existing_engram("Foreign Work", other).front
+    home(pages, fixture, [("work", {"op": "inspect", "work_id": foreign.id,
+                                 "query": "TRACE_PROVENANCE_07"})])
+    assert fixture.outcomes[0]["status"] == "failed"
+
+    from pulse_system.service.native_work import validate
+    for bad in (0, -1, "12", True):
+        with pytest.raises(ValueError):
+            validate({"op": "inspect", "work_id": work_id, "before_seq": bad})
+
+    pages.runtime.close()
+    reopened = PageService(pages.data_dir, model_factory=fixture.factory,
+                           posture=False, allow_workspace_actions=False,
+                           pulse=PulseSettings(enabled=False))
+    try:
+        home(reopened, fixture, [("work", {"op": "inspect", "work_id": work_id,
+                                       "query": "TRACE_PROVENANCE_07"})])
+        assert fixture.outcomes[0]["status"] == "succeeded"
+        assert [m["event_id"] for m in fixture.outcomes[0]["output"]["recent_messages"]] == [
+            found["recent_messages"][0]["event_id"]]
+    finally:
+        reopened.runtime.close()
