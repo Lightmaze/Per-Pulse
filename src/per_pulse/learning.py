@@ -116,7 +116,7 @@ class PageLearning:
                     and source.get("capture_kind") != "operator_selected_web_example")):
             raise PageError("web_experience_unavailable",
                             "Choose an active, shared, saved experience from its source Work.", 422)
-        selected = {**{key: record[key] for key in ("id", "title", "excerpt", "note")},
+        selected = {**{key: record[key] for key in ("id", "revision", "title", "excerpt", "note")},
                     "source_kind": kind}
         if fixture_selector:
             selected["record_type"] = "constructed_fixture"
