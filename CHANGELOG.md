@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a26
+
+- Start a new Work from an explicitly selected, saved correction in its original Work, carrying its verified revision, applicability and source attribution into the next task while leaving the private source conversation in place (#298).
+- Recognize in the new Work when that selected experience has since been revised, paused, kept local or made unavailable. Link back to the original Work for the current source instead of treating an old snapshot as fresh guidance (#299).
+- Recheck the selected experience against the same World and Posture journal at each later Kernel model decision, including after approval. Supply revised shared content or withdrawn-source status without silently rewriting old messages, files, or effect permissions (#300).
+
 ## 0.1.0a25
 
 - Preserve plain text dropped together with supported image material in the same Home or Work draft, including Work/Home return and refresh; send both only on explicit Send (#294).
