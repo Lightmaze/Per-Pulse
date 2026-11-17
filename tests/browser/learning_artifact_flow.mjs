@@ -25,8 +25,13 @@ const checks = [];
 const errors = [];
 let serverLog = '';
 let browser;
+// In distribution acceptance, isolate Python imports from the checkout: the
+// native service and Kernel must come from the installed wheel, while this
+// script supplies only the explicitly synthetic HTTP provider fixture.
+const installedPython = process.env.PER_PULSE_INSTALLED_PYTHON;
 const startServer = () => {
-  const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
+  const child = spawn(installedPython || process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
+    ...(installedPython ? ['-I'] : []),
     join(root, 'tests/browser/learning_artifact_server.py'),
     '--data-dir', directory, '--port', String(port),
   ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
