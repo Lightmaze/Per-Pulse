@@ -6,7 +6,7 @@ Node.js and Git are needed only when developing from source.
 ## Download and install
 
 Download `per_pulse-0.1.0a27-py3-none-any.whl` from the
-[v0.1.0a26 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a27).
+[v0.1.0a27 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a27).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
