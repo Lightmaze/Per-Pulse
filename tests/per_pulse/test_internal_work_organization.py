@@ -604,6 +604,21 @@ def test_home_hands_a_verified_older_decision_to_work_b_and_returns_after_restar
         run_event(runtime, report_event)
         assert len(runtime.storage.list_engrams()) == 1
         assert runtime.world.get_task_front(source_work_id).id == source_work_id
+
+        # The same original source is available on a later ordinary Home
+        # follow-up to this Work; it is not consumed by first delivery.
+        home(reopened, fixture, [("work", {
+            "op": "send", "work_id": front.id,
+            "instruction": "Recheck the evidence in the existing Work.",
+            **source_args,
+        })])
+        assert fixture.outcomes[0]["status"] == "succeeded"
+        followup = delivered(runtime, fixture.outcomes[0]["output"])
+        assert followup.center_id == front.center_id
+        assert json.loads(followup.content.split(label, 1)[1]) == reference
+        assert runtime.causal_ledger.get_event(original_event.id).content == original_text
+        fixture.plan = []
+        run_event(runtime, followup)
     finally:
         reopened.runtime.close()
 
