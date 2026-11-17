@@ -249,6 +249,9 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         assert "encounter" not in payload and "feedback" not in payload
         assert CORRECTION not in initial and source_result["content"] not in initial
         assert selected.json()["view"]["page"]["sourcePageId"] == source_page
+        assert selected.json()["view"]["sourceExperience"] == {
+            "id": record["id"], "revision": 2, "currentRevision": 2, "status": "current",
+        }
 
         selected_pending = await_view(client, f"/api/pages/{selected_work}/execution",
                                       lambda x: any(a["canResolve"] for a in x["pendingActions"]),
@@ -289,4 +292,30 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         assert any(m["id"] == result_message["id"] for m in original.json()["messages"])
         assert client.get(f"/api/pages/{work}/posture").json()["experiences"][0]["id"] == record["id"]
         assert PageArtifacts(client.app.state.pages.runtime).read(work, action["actionId"])["content"] == EXPERIENCE
+        # The source is revised after the receiving Work has finished. Its
+        # original user task stays historical, but current native source state
+        # must be visible before the person relies on that old version again.
+        updated = client.patch(f"/api/pages/{source_page}/posture/experiences/{record['id']}", json={
+            "expectedRevision": 2, "changes": {"lesson": LESSON + " Check the first interaction."},
+        })
+        assert updated.status_code == 200, updated.text
+        changed = client.get(f"/api/pages/{selected_work}").json()
+        assert changed["sourceExperience"] == {
+            "id": record["id"], "revision": 2, "currentRevision": 3, "status": "revised",
+        }
+        assert "LESSON_EXPERIENCE_JSON" in changed["messages"][0]["content"]
+        assert LESSON in changed["messages"][0]["content"]
+        assert PageArtifacts(client.app.state.pages.runtime).read(
+            selected_work, selected_action["actionId"])["content"] == EXPERIENCE
+
+        paused = client.patch(f"/api/pages/{source_page}/posture/experiences/{record['id']}", json={
+            "expectedRevision": 3, "changes": {"active": False},
+        })
+        assert paused.status_code == 200, paused.text
+        unavailable = client.get(f"/api/pages/{selected_work}").json()
+        assert unavailable["sourceExperience"] == {
+            "id": record["id"], "revision": 2, "currentRevision": 4, "status": "withdrawn",
+        }
+        assert PageArtifacts(client.app.state.pages.runtime).read(
+            selected_work, selected_action["actionId"])["content"] == EXPERIENCE
         assert not (tmp_path / "workspace" / "intake.txt").exists()
