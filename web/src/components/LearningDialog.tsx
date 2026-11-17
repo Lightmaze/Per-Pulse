@@ -178,7 +178,8 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     </div> : experience.sourcePageId && !experience.sourceAnchor ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin)}>{t('learning.editSource')}</button> : null}
     {experience.active && experience.scope === 'subject' && experience.canEdit
       && experience.sourcePageId === pageId
-      && ((lesson && experience.source?.capture_kind === 'operator_selected_correction')
+      && ((lesson && (experience.source?.capture_kind === 'operator_selected_correction'
+          || experience.source?.interpretation === 'model_proposed_lesson_from_user_followup'))
         || (example && (experience.record_type === 'observed_episode'
           || (experience.record_type === 'constructed_fixture'
               && (experience.sourceKind === 'reading' || experience.sourceKind === 'command')
