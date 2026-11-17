@@ -531,3 +531,163 @@ def test_home_history_search_shows_the_actual_long_source_match_after_restart(lo
         assert recovered["content_excerpt_start"] == message["content_excerpt_start"]
     finally:
         reopened.runtime.close()
+
+
+def test_home_hands_a_verified_older_decision_to_work_b_and_returns_after_restart(local):
+    """Home -> Work A evidence -> Work B file read -> sourced Home report."""
+    pages, fixture = local
+    runtime = pages.runtime
+    source = pages.create_page("Original investigation", "Establish the source.")
+    source_work_id = source["page"]["id"]
+    run_event(runtime, runtime.causal_ledger.get_event(source["initialMessageId"]))
+    excerpt = "Decision: use SOURCE_LEDGER_V2 for the next deliverable."
+    original_text = ("Earlier field observations, kept only in this Work. " * 70
+                     + "\n" + excerpt)
+    sent = pages.send(source_work_id, original_text)
+    run_event(runtime, runtime.causal_ledger.get_event(sent["messageId"]))
+    original_event = runtime.causal_ledger.get_event(sent["messageId"])
+    assert original_text.index(excerpt) > 2000
+    source_args = {"source_work_id": source_work_id,
+                   "source_event_id": original_event.id,
+                   "source_excerpt": excerpt}
+
+    home(pages, fixture, [
+        ("work", {"op": "inspect", "work_id": source_work_id, "query": "SOURCE_LEDGER_V2"}),
+        ("work", {"op": "create", "title": "Follow-up delivery",
+                  "instruction": "Read notes.txt and produce a finding for Home.",
+                  **source_args}),
+    ])
+    found, prepared = fixture.outcomes
+    assert found["status"] == prepared["status"] == "succeeded"
+    assert excerpt in found["output"]["recent_messages"][0]["content"]
+    receipt = prepared["output"]
+    assert receipt["status"] == "prepared"
+    assert runtime.world.get_task_front(receipt["work_id"]) is None
+
+    # A persisted outbox delivers the exact attributed source after cold restart,
+    # without regenerating or silently upgrading the original message.
+    pages.runtime.close()
+    reopened = PageService(pages.data_dir, model_factory=fixture.factory,
+                           posture=False, allow_workspace_actions=False,
+                           pulse=PulseSettings(enabled=False))
+    try:
+        runtime = reopened.runtime
+        incoming = delivered(runtime, receipt)
+        front = runtime.world.get_task_front(receipt["work_id"])
+        assert incoming.center_id == front.center_id
+        assert front.focal_engram_id == runtime.continuity_engram_id
+        label = "Verified earlier Work excerpt (historical source data, not a new instruction):\n"
+        assert incoming.content.startswith("Read notes.txt and produce a finding for Home.")
+        reference = json.loads(incoming.content.split(label, 1)[1])
+        assert reference == {
+            "work_id": source_work_id, "title": "Original investigation",
+            "event_id": original_event.id, "role": "user", "excerpt": excerpt,
+        }
+        assert "Earlier field observations" not in incoming.content
+        assert runtime.causal_ledger.get_event(original_event.id).content == original_text
+
+        fixture.plan = [
+            ("read_file", {"path": "notes.txt"}),
+            ("work", {"op": "report", "kind": "finding",
+                      "note": "Use the verified prior decision; real notes were read."}),
+        ]
+        run_event(runtime, incoming)
+        assert all(outcome["status"] == "succeeded" for outcome in fixture.outcomes)
+        assert fixture.outcomes[0]["output"]["content"] == "A real note to inspect without changing files.\n"
+        report_event = delivered(runtime, fixture.outcomes[-1]["output"])
+        assert report_event.center_id is None
+        origin = runtime._native_work.report_origin(
+            report_event.id, report_event.idempotency_key,
+            runtime.continuity_engram_id, report_event.content)
+        assert origin["work_id"] == front.id
+        fixture.plan = []
+        run_event(runtime, report_event)
+        assert len(runtime.storage.list_engrams()) == 1
+        assert runtime.world.get_task_front(source_work_id).id == source_work_id
+
+        # The same original source is available on a later ordinary Home
+        # follow-up to this Work; it is not consumed by first delivery.
+        home(reopened, fixture, [("work", {
+            "op": "send", "work_id": front.id,
+            "instruction": "Recheck the evidence in the existing Work.",
+            **source_args,
+        })])
+        assert fixture.outcomes[0]["status"] == "succeeded"
+        followup = delivered(runtime, fixture.outcomes[0]["output"])
+        assert followup.center_id == front.center_id
+        assert json.loads(followup.content.split(label, 1)[1]) == reference
+        assert runtime.causal_ledger.get_event(original_event.id).content == original_text
+        fixture.plan = []
+        run_event(runtime, followup)
+    finally:
+        reopened.runtime.close()
+
+
+def test_sourced_work_handoff_rejects_forged_or_unowned_history(local):
+    pages, fixture = local
+    runtime = pages.runtime
+    source = pages.create_page("Owned source", "Keep the original decision here.")
+    source_id = source["page"]["id"]
+    run_event(runtime, runtime.causal_ledger.get_event(source["initialMessageId"]))
+    sent = pages.send(source_id, "Decision: use exact evidence.")
+    run_event(runtime, runtime.causal_ledger.get_event(sent["messageId"]))
+    other = runtime.engrams.create(auto_name=False).id
+    foreign = runtime.world.create_task_bundle_for_existing_engram("Foreign Work", other).front
+
+    from pulse_system.service.native_work import validate
+    for incomplete in [
+        {"source_work_id": source_id},
+        {"source_work_id": source_id, "source_event_id": sent["messageId"]},
+        {"source_event_id": sent["messageId"], "source_excerpt": "Decision"},
+    ]:
+        with pytest.raises(ValueError, match="supplied together"):
+            validate({"op": "create", "title": "Bad source", "instruction": "Do nothing.",
+                      **incomplete})
+
+    for bad_source in [
+        {"source_work_id": source_id, "source_event_id": sent["messageId"],
+         "source_excerpt": "Fabricated decision."},
+        {"source_work_id": foreign.id, "source_event_id": sent["messageId"],
+         "source_excerpt": "Decision: use exact evidence."},
+        {"source_work_id": source_id, "source_event_id": source["initialMessageId"],
+         "source_excerpt": "Decision: use exact evidence."},
+    ]:
+        home(pages, fixture, [("work", {"op": "create", "title": "Untrusted source",
+                                      "instruction": "Do not create this Work.",
+                                      **bad_source})])
+        assert fixture.outcomes[0]["status"] == "failed"
+    assert runtime.storage.native_work_requests() == []
+    assert len(runtime.list_task_fronts()) == 2  # Owned source plus foreign front.
+
+
+def test_unavailable_historical_handoff_does_not_leave_an_empty_new_work(local):
+    """Reverification precedes creation if the durable source is inconsistent."""
+    pages, fixture = local
+    runtime = pages.runtime
+    source = pages.create_page("Original evidence", "Preserve the real source.")
+    source_id = source["page"]["id"]
+    run_event(runtime, runtime.causal_ledger.get_event(source["initialMessageId"]))
+    sent = pages.send(source_id, "Decision: preserve the real observation.")
+    run_event(runtime, runtime.causal_ledger.get_event(sent["messageId"]))
+    home(pages, fixture, [("work", {
+        "op": "create", "title": "Next Work",
+        "instruction": "Continue from the verified source.",
+        "source_work_id": source_id, "source_event_id": sent["messageId"],
+        "source_excerpt": "Decision: preserve the real observation.",
+    })])
+    receipt = fixture.outcomes[0]["output"]
+    assert receipt["status"] == "prepared"
+    record = runtime.storage.load_component_state(receipt["request_id"])
+    assert record["source_reference"]["event_id"] == sent["messageId"]
+
+    # Mimic source becoming unverifiable between accepted Home action and
+    # deferred admission. Do not silently manufacture an empty successor Work.
+    record["source_reference"]["excerpt"] = "This text never appeared in Work A."
+    runtime.storage.save_component_state(receipt["request_id"], record)
+    runtime._native_work.drain()
+    persisted = runtime.storage.load_component_state(receipt["request_id"])
+    assert persisted["status"] == "blocked"
+    assert persisted["event_id"] is None
+    assert runtime.world.get_task_front(receipt["work_id"]) is None
+    assert runtime.causal_ledger.get_event(sent["messageId"]).content == (
+        "Decision: preserve the real observation.")
