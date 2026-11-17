@@ -27,7 +27,7 @@ Kernel implementation.
   JSON or code, up to 1 MiB), PDFs
   (up to 32 MiB, read as their text), or PNG/JPEG images (up to 32 MiB and
   50 megapixels). Preview them in Materials and send an exact source version.
-  Pasting text and a supported image together keeps both in the same draft, including after refresh.
+  Pasting or dragging text and a supported image together keeps both in the same draft, including after refresh.
   Reading an image sends it to your configured model, which must support image
   input; a large image is sent as a copy scaled to fit 2048 px and 1 MiB. Replies can include headings, tables and code blocks.
 - Read public HTTPS pages, PDF selectable text with page markers, and research API responses (HTML, plain text, JSON, XML/Atom, CSV) with their source URL and reading time.
@@ -60,13 +60,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a24-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a24)
+[`per_pulse-0.1.0a25-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a25)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a24-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a25-py3-none-any.whl
 per-pulse --example
 ```
 
