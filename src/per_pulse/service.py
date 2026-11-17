@@ -988,6 +988,7 @@ class PageService:
                 "workspaceId": self.runtime.world_id,
                 "serviceInstanceId": self.service_instance_id,
                 "page": self._summary(page_id, summary_rows), "messages": messages,
+                "sourceExperience": self.learning.source_status(page_id),
                 "references": refs,
                 "backlinks": [dict(r) for r in self._state["references"] if r["targetPageId"] == page_id],
                 "breadcrumbs": list(reversed(crumbs)), "provider": self.provider,
@@ -1026,11 +1027,13 @@ class PageService:
             self._check_message(source_page_id, source_message_id)
             content = instruction
             source_role = None
+            saved_origin = None
             if source_experience_id is not None:
                 if source_message_id is not None or source_excerpt is not None:
                     raise PageError("page_source_conflict",
                                     "Choose either a source message or a saved experience.", 422)
                 saved = self.learning.selected_saved_observation(source_page_id, source_experience_id)
+                saved_origin = {"experienceId": saved["id"], "experienceRevision": saved["revision"]}
                 kind = saved.pop("source_kind")
                 # Retain the existing webpage envelope. Other native observations
                 # keep their own source type and are never re-read or re-executed.
@@ -1079,6 +1082,7 @@ class PageService:
             self._state["origins"][page_id] = {
                 "pageId": source_page_id, "messageId": source_message_id,
                 "description": instruction[:240],
+                **(saved_origin or {}),
             }
             ref = self._reference(source_page_id, page_id, source_message_id, title, "created")
             self._save()

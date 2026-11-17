@@ -262,6 +262,11 @@ def test_operator_keeps_exact_web_observation_for_later_work_without_model(tmp_p
         assert "https://research.example/operator-choice" not in first_input["content"]
         assert followup["page"]["sourcePageId"] == first
         assert followup["page"]["sourceMessageId"] is None
+        assert followup["view"]["sourceExperience"] == {
+            "id": source["id"], "revision": source["revision"],
+            "currentRevision": source["revision"], "status": "current",
+        }
+        assert '"revision": ' + str(source["revision"]) in first_input["content"]
         before = len(client.get("/api/bootstrap").json()["pages"])
         for invalid in (
             {"sourcePageId": foreign, "sourceExperienceId": source["id"]},
@@ -279,4 +284,8 @@ def test_operator_keeps_exact_web_observation_for_later_work_without_model(tmp_p
         restored = next(item for item in client.get(f"/api/pages/{foreign}/posture").json()["experiences"]
                         if item["id"] == source["id"])
         assert restored == shared
+        assert client.get(f"/api/pages/{followup['page']['id']}").json()["sourceExperience"] == {
+            "id": source["id"], "revision": source["revision"],
+            "currentRevision": source["revision"], "status": "current",
+        }
         assert len(observed) == 1

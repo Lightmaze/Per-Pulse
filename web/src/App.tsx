@@ -535,6 +535,11 @@ export default function App() {
 
   const pages = bootstrap?.pages ?? [];
   const sourcePage = view?.page.sourcePageId ? pages.find(page => page.id === view.page.sourcePageId) : undefined;
+  const sourceExperience = view?.sourceExperience;
+  const sourceStatusKey = sourceExperience?.status === 'revised' ? 'learning.sourceRevised'
+    : sourceExperience?.status === 'withdrawn' ? 'learning.sourceWithdrawn'
+    : sourceExperience?.status === 'unavailable' ? 'learning.sourceUnavailable'
+    : 'learning.sourceCurrent';
   const breadcrumbs = view?.breadcrumbs.length ? view.breadcrumbs : [{ id: 'home', title: 'Home' }];
   const activity = view ? getPageActivity(view.page.status, view.provider.configured, Boolean(syncError), view.execution?.failureCode, view.execution?.providerWaiting) : null;
   const failedMessage = view?.page.status === 'error'
@@ -586,6 +591,10 @@ export default function App() {
             {route.id === 'home' ? <><h1 tabIndex={-1}>{t('app.heading')}</h1><p className="page-subtitle">{t('app.subtitle')}</p></> : <>
               <h1 tabIndex={-1}><button className="editable-title" onClick={() => openModal({ kind: 'rename' })} title={t('app.rename')}>{view?.page.title ?? t('app.openingPage')}<Icon name="edit" size={21} /></button></h1>
               {sourcePage ? <p className="page-subtitle page-origin">{t('app.origin')} <SessionLink pageId={sourcePage.id} label={pageTitle(sourcePage)} navigate={navigate} targetMessageId={view?.page.sourceMessageId ?? undefined} /></p> : <p className="page-subtitle">{t('app.pageSubtitle')}</p>}
+              {sourceExperience ? <p className="page-subtitle source-experience-state" role={sourceExperience.status === 'current' ? undefined : 'status'}>
+                {t(sourceStatusKey, { revision: sourceExperience.revision, currentRevision: sourceExperience.currentRevision ?? sourceExperience.revision })}
+                {sourcePage ? <> <SessionLink pageId={sourcePage.id} label={t('learning.openSourceWork')} navigate={navigate} /></> : null}
+              </p> : null}
             </>}
             {bootstrap?.example ? <p className="mobile-workspace-status">{t('settings.exampleWorkspace')}</p> : null}
             {activity ? <div className="page-activity" role="status" aria-atomic="true"><span className={`activity-indicator tone-${activity.tone}`}><span className="activity-dot" aria-hidden="true" />{t(activity.labelKey)}</span>{['attention', 'error'].includes(activity.tone) ? <p className="page-activity-detail">{t(activity.detailKey, activity.detailParams)}</p> : null}{canSendAgain ? <button type="button" className="secondary-button send-again" onClick={() => void sendAgain()}>{t('status.sendAgain')}</button> : null}</div> : null}

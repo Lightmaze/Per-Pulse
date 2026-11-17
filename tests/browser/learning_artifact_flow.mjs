@@ -161,6 +161,14 @@ try {
   assert.deepEqual(selectedMaterial.shift, selectedCorrection.shift);
   assert.equal(selectedMaterial.record_type, selectedCorrection.record_type);
   assert.equal(selectedView.page.sourcePageId, originalId);
+  assert.deepEqual(selectedView.sourceExperience, {
+    id: selectedCorrection.id, revision: selectedCorrection.revision,
+    currentRevision: selectedCorrection.revision, status: 'current',
+  });
+  await page.locator('.source-experience-state').getByText(
+    'This Work began from saved experience v' + selectedCorrection.revision + '.', { exact: false },
+  ).waitFor();
+  assert.equal(await page.getByRole('link', { name: 'Review source Work', exact: true }).count(), 1);
   assert.ok(!selectedInput.includes('The intake form hides the product.'),
     'The user correction remains in its original Work.');
   assert.ok(!selectedInput.includes('The first screen is a twelve-field intake form.'),
@@ -312,6 +320,18 @@ try {
   await lesson.getByRole('button', { name: 'Pause lesson', exact: true }).click();
   await lesson.getByText('Paused · v4', { exact: true }).waitFor();
   await closeDialog();
+  await page.goto(base + '/page/' + selectedWorkId);
+  await page.getByRole('heading', { name: 'Correction-guided follow-up', exact: true }).waitFor();
+  await page.getByText(
+    'The selected experience (v3) was paused or kept local.', { exact: false },
+  ).waitFor();
+  const selectedAfterPause = await (await fetch(base + '/api/pages/' + selectedWorkId)).json();
+  assert.deepEqual(selectedAfterPause.sourceExperience, {
+    id: selectedCorrection.id, revision: 3, currentRevision: 4, status: 'withdrawn',
+  });
+  await page.getByRole('link', { name: 'Review source Work', exact: true }).click();
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  checks.push('withdrawn source is flagged in its already-created Work and links back to its owner');
   const withdrawnId = await create('After withdrawal', 'BUILD_PRACTICE_ARTIFACT');
   await page.getByText('Your approval is needed', { exact: true }).waitFor();
   assert.match(await page.locator('body').innerText(), /intake[.]txt/);
@@ -332,6 +352,11 @@ try {
   await wait(async () => (await fetch(base + '/api/health')).ok, 'withdrawn lesson restart');
   const sourceAfterRestart = await (await fetch(base + '/api/pages/' + originalId + '/posture')).json();
   assert.equal(sourceAfterRestart.experiences[0].active, false);
+  const selectedAfterRestart = await (await fetch(base + '/api/pages/' + selectedWorkId)).json();
+  assert.equal(selectedAfterRestart.sourceExperience.status, 'withdrawn');
+  assert.equal(selectedAfterRestart.sourceExperience.currentRevision, 4);
+  await page.goto(base + '/page/' + selectedWorkId);
+  await page.getByText('The selected experience (v3) was paused or kept local.', { exact: false }).waitFor();
   const targetAfterRestart = await (await fetch(base + '/api/pages/' + withdrawnId + '/posture')).json();
   assert.equal(targetAfterRestart.experiences.length, 0);
   checks.push('source-owned inactive audit, no revoked recipient visibility, and privacy survive SQLite restart');

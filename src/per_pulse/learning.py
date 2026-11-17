@@ -47,6 +47,36 @@ class PageLearning:
             raise PageError("experience_not_found", "Edit this experience from its source page.", 404)
         return memory, record
 
+    def source_status(self, page_id):
+        """Read the current source revision for a Work created from an experience.
+
+        Its first task is immutable history. The current source may have been
+        revised, paused, or kept local since then; report that difference
+        without silently rewriting the Work or admitting a new model turn.
+        """
+        origin = self.pages._state["origins"].get(page_id, {})
+        experience_id = origin.get("experienceId")
+        revision = origin.get("experienceRevision")
+        if not isinstance(experience_id, str) or type(revision) is not int:
+            return None
+        result = {"id": experience_id, "revision": revision,
+                  "status": "unavailable", "currentRevision": None}
+        source_page = origin.get("pageId")
+        if not isinstance(source_page, str):
+            return result
+        try:
+            _, record = self._owned(source_page, experience_id)
+        except PageError:
+            return result
+        result["currentRevision"] = record["revision"]
+        if not record["active"] or record["scope"] != "subject":
+            result["status"] = "withdrawn"
+        elif record["revision"] != revision:
+            result["status"] = "revised"
+        else:
+            result["status"] = "current"
+        return result
+
     def selected_saved_observation(self, page_id, experience_id):
         """Resolve an explicitly selected experience from its source Work.
 
@@ -86,7 +116,7 @@ class PageLearning:
                     and source.get("capture_kind") != "operator_selected_web_example")):
             raise PageError("web_experience_unavailable",
                             "Choose an active, shared, saved experience from its source Work.", 422)
-        selected = {**{key: record[key] for key in ("id", "title", "excerpt", "note")},
+        selected = {**{key: record[key] for key in ("id", "revision", "title", "excerpt", "note")},
                     "source_kind": kind}
         if fixture_selector:
             selected["record_type"] = "constructed_fixture"
