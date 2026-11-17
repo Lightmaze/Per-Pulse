@@ -165,6 +165,12 @@ jobs:
           node "$RUNNER_TEMP/browser-tools/node_modules/playwright/cli.js" install chromium
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" node tests/browser/installed_first_run.mjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" node tests/browser/image_materials_flow.mjs
+          # Run the full sourced-correction -> next Work -> approved file ->
+          # Home return -> restart path against the isolated wheel, not the
+          # editable checkout. Only the HTTP model response is a fixture.
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" \
+            PER_PULSE_INSTALLED_PYTHON="$PER_PULSE_INSTALLED_PYTHON" \
+            node tests/browser/learning_artifact_flow.mjs
           "$PER_PULSE_INSTALLED_PYTHON" -m pip install 'pytest>=8,<10'
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" node tests/browser/web_read_flow.mjs
 
