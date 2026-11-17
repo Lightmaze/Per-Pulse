@@ -47,6 +47,31 @@ def fixture_factory(monkeypatch, requests):
             else:
                 response = "PASS"
             delta, finish = {"content": response}, "stop"
+        elif "CONTINUE_SOURCE_STATUS_WITHDRAWN" in task and not any(m["role"] == "tool" for m in current):
+            fresh = "SELECTED_SOURCE_STATUS_JSON" in model_view and "withdrawn" in model_view
+            delta = {"tool_calls": [{"index": 0, "id": "fixture-withdrawn-decision",
+                                    "type": "function", "function": {
+                                        "name": "mutate_file",
+                                        "arguments": json.dumps({
+                                            "path": "after-withdrawn.txt" if fresh else "stale-selection.txt",
+                                            "expected_digest": None,
+                                            "content": "Historical source withheld.\\n" if fresh else INTAKE,
+                                        }),
+                                    }}]}
+            finish = "tool_calls"
+        elif "CONTINUE_SOURCE_STATUS_REVISED" in task and not any(m["role"] == "tool" for m in current):
+            fresh = ("SELECTED_SOURCE_STATUS_JSON" in model_view
+                     and "A guided registration preview is the current lesson." in model_view)
+            delta = {"tool_calls": [{"index": 0, "id": "fixture-revised-decision",
+                                    "type": "function", "function": {
+                                        "name": "mutate_file",
+                                        "arguments": json.dumps({
+                                            "path": "after-revision.txt" if fresh else "stale-selection.txt",
+                                            "expected_digest": None,
+                                            "content": "Updated shared guidance applied.\\n" if fresh else INTAKE,
+                                        }),
+                                    }}]}
+            finish = "tool_calls"
         elif "BUILD_SAVED_LESSON_ARTIFACT" in task and not any(m["role"] == "tool" for m in current):
             learned = LESSON in model_view
             arguments = {"path": "selected-practice.txt" if learned else "selected-intake.txt",
@@ -319,3 +344,69 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         assert PageArtifacts(client.app.state.pages.runtime).read(
             selected_work, selected_action["actionId"])["content"] == EXPERIENCE
         assert not (tmp_path / "workspace" / "intake.txt").exists()
+
+    # Reopen the same World with its real Kernel/provider interface. Work B's
+    # next ordinary turn sees CURRENT source state; its historical first user
+    # message and earlier approved artifact are not rewritten.
+    with TestClient(create_app(tmp_path, posture=True, allow_workspace_actions=True,
+                               model_factory=provider), base_url="http://localhost") as client:
+        assert client.get(f"/api/pages/{selected_work}").json()["sourceExperience"]["status"] == "withdrawn"
+        submitted = client.post(f"/api/pages/{selected_work}/messages",
+                                json={"content": "CONTINUE_SOURCE_STATUS_WITHDRAWN"})
+        assert submitted.status_code == 202, submitted.text
+        pending = await_view(client, f"/api/pages/{selected_work}/execution",
+                             lambda v: any(a["canResolve"] for a in v["pendingActions"]),
+                             "withdrawn-source next decision")
+        action = next(a for a in pending["pendingActions"] if a["canResolve"])
+        assert action["arguments"]["path"] == "after-withdrawn.txt"
+        assert not (tmp_path / "workspace" / "after-withdrawn.txt").exists()
+        withdrawn_requests = [x for x in requests if
+                              "CONTINUE_SOURCE_STATUS_WITHDRAWN" in json.dumps(x["messages"])
+                              and "SELECTED_SOURCE_STATUS_JSON" in json.dumps(x["messages"])]
+        assert withdrawn_requests
+        withdrawn_input = json.dumps(withdrawn_requests[0]["messages"], ensure_ascii=False)
+        assert "withdrawn" in withdrawn_input
+        assert "currentSelection" not in withdrawn_input
+        assert client.post(
+            f"/api/pages/{selected_work}/execution/actions/{action['actionId']}",
+            json={"decision": "allow_once"}).status_code == 200
+        await_view(client, f"/api/pages/{selected_work}/execution",
+                   lambda v: v["status"] == "idle", "withdrawn continuation settled")
+        assert (tmp_path / "workspace" / "after-withdrawn.txt").read_text() == "Historical source withheld.\\n"
+
+        resumed = client.patch(f"/api/pages/{source_page}/posture/experiences/{record['id']}",
+                               json={"expectedRevision": 4, "changes": {
+                                   "active": True,
+                                   "lesson": "A guided registration preview is the current lesson.",
+                               }})
+        assert resumed.status_code == 200, resumed.text
+        assert resumed.json()["experience"]["revision"] == 5
+        assert client.get(f"/api/pages/{selected_work}").json()["sourceExperience"]["status"] == "revised"
+        sent = client.post(f"/api/pages/{selected_work}/messages",
+                           json={"content": "CONTINUE_SOURCE_STATUS_REVISED"})
+        assert sent.status_code == 202, sent.text
+        next_pending = await_view(client, f"/api/pages/{selected_work}/execution",
+                                  lambda v: any(a["canResolve"] for a in v["pendingActions"]),
+                                  "revised-source next decision")
+        later = next(a for a in next_pending["pendingActions"] if a["canResolve"])
+        assert later["arguments"]["path"] == "after-revision.txt"
+        assert not (tmp_path / "workspace" / "after-revision.txt").exists()
+        revised_requests = [x for x in requests if
+                            "CONTINUE_SOURCE_STATUS_REVISED" in json.dumps(x["messages"])
+                            and "SELECTED_SOURCE_STATUS_JSON" in json.dumps(x["messages"])]
+        assert revised_requests
+        revised_input = json.dumps(revised_requests[0]["messages"], ensure_ascii=False)
+        assert "A guided registration preview is the current lesson." in revised_input
+        assert "currentRevision" in revised_input and "revised" in revised_input
+        assert CORRECTION not in revised_input
+        assert source_result["content"] not in revised_input
+        assert client.post(
+            f"/api/pages/{selected_work}/execution/actions/{later['actionId']}",
+            json={"decision": "allow_once"}).status_code == 200
+        await_view(client, f"/api/pages/{selected_work}/execution",
+                   lambda v: v["status"] == "idle", "revised continuation settled")
+        assert (tmp_path / "workspace" / "after-revision.txt").read_text() == "Updated shared guidance applied.\\n"
+        restored = client.get(f"/api/pages/{selected_work}").json()
+        assert "LESSON_EXPERIENCE_JSON" in restored["messages"][0]["content"]
+        assert "A guided registration preview is the current lesson." not in restored["messages"][0]["content"]
+        assert (tmp_path / "workspace" / "selected-practice.txt").read_text() == EXPERIENCE

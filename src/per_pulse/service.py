@@ -36,6 +36,7 @@ from .replay import PageReplay, RETURN_PREFIX
 from .page_source import source_content, source_presentation
 from .materials import PageMaterials, material_footer
 from .language import RESPONSE_LANGUAGES, ResponseLanguage, install_language_advisor
+from .selected_source_advice import install_selected_source_advisor
 
 MAX_MESSAGES = 500
 HISTORY_MESSAGES = 100
@@ -216,6 +217,7 @@ class PageService:
         # Reuse the native TurnAdvisor seam, never a second model loop.
         # Bind before running a session so each new turn snapshots its language.
         install_language_advisor(self.runtime.kernel_service, self._response_language)
+        install_selected_source_advisor(self.runtime.kernel_service, self.learning.decision_source)
         if example and not self._state.get("exampleSeeded"):
             self._seed_example()
 
