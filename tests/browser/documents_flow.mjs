@@ -144,7 +144,7 @@ try {
   const continuedDownload = await readContinued();
   assert.equal(continuedDownload.status, 200);
   const continuedBytes = Buffer.from(await continuedDownload.arrayBuffer());
-  assert.match(continuedBytes.toString('utf8'), /This \\*\\*confirmed file\\*\\*/);
+  assert.ok(continuedBytes.toString('utf8').includes('This **confirmed file**'));
   assert.equal(createHash('sha256').update(continuedBytes).digest('hex'), continuedArtifact.sha256);
   // Reopen the same persistent World and verify both the initial native
   // attachment and the second artifact without replaying either file effect.
