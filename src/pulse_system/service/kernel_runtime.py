@@ -924,16 +924,20 @@ class KernelHarnessRuntime:
             raise ScopeConflict("cognition control does not match the native action")
 
     def authorize_work(self, scope, action_request_id, call):
-        if call.arguments.get("op") == "report":
+        op = call.arguments.get("op")
+        # A Work may consult the same subject's earlier Works without
+        # delegating a new task. Creation and follow-ups remain Home-only.
+        if op == "report" or (
+                op in {"list", "search", "inspect"} and scope.context_id.startswith("work:")):
             self._check()
             if (not scope.context_id.startswith("work:")
                     or scope.session_scope() != self.scope_for(scope.engram_id, scope.context_id)):
-                raise ScopeConflict("report is bound to the current owned Work, never Home")
+                raise ScopeConflict("Work operation requires its original owned Work")
             if self.kernel.store.get_session(scope.session_scope()).status not in {
                     SessionStatus.CREATED, SessionStatus.ACTIVE}:
-                raise LeaseFenced("report Work is not active")
+                raise LeaseFenced("Work context is no longer active")
         else:
-            self._cognition_scope_check(scope)  # All other operations remain Home-only.
+            self._cognition_scope_check(scope)  # Home-only creation and follow-ups.
         with self._lock:
             if self._active.get((scope.engram_id, scope.context_id)) != scope or not action_request_id:
                 raise ScopeConflict("Work control requires the exact active context turn")

@@ -691,3 +691,100 @@ def test_unavailable_historical_handoff_does_not_leave_an_empty_new_work(local):
     assert runtime.world.get_task_front(receipt["work_id"]) is None
     assert runtime.causal_ledger.get_event(sent["messageId"]).content == (
         "Decision: preserve the real observation.")
+
+
+def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restart(local):
+    """Work B can find Work A on its own read-only tool path after a cold restart.
+
+    The tool choices are synthetic; the history, file bytes, Work scopes,
+    native Kernel actions, Home report and SQLite persistence are real.
+    """
+    pages, fixture = local
+    runtime = pages.runtime
+    original = pages.create_page("Prior source investigation", "Keep source evidence in this Work.")
+    work_a = original["page"]["id"]
+    run_event(runtime, runtime.causal_ledger.get_event(original["initialMessageId"]))
+    source_text = (
+        "Prior decision VERIFY_PRIOR_WORK_2026: read notes.txt before "
+        "completing the next artifact; keep this decision attributed to Work A."
+    )
+    recorded = pages.send(work_a, source_text)
+    run_event(runtime, runtime.causal_ledger.get_event(recorded["messageId"]))
+    source_event_id = recorded["messageId"]
+
+    later = pages.create_page(
+        "Follow-on artifact",
+        "Consult earlier Work evidence before choosing a file to read and report the result."
+    )
+    work_b = later["page"]["id"]
+    work_b_event = later["initialMessageId"]
+    pages.runtime.close()
+    reopened = PageService(
+        pages.data_dir, model_factory=fixture.factory, posture=False,
+        allow_workspace_actions=False, pulse=PulseSettings(enabled=False),
+    )
+    try:
+        runtime = reopened.runtime
+        other_subject = runtime.engrams.create(auto_name=False).id
+        foreign = runtime.world.create_task_bundle_for_existing_engram(
+            "Unrelated private investigation", other_subject).front
+
+        fixture.plan = [
+            ("work", {"op": "create", "title": "Not permitted from Work",
+                      "instruction": "This must remain a Home-only operation."}),
+            ("work", {"op": "send", "work_id": work_a,
+                      "instruction": "A Work cannot enqueue another Work."}),
+            ("work", {"op": "inspect", "work_id": foreign.id,
+                      "query": "Unrelated"}),
+            ("work", {"op": "list"}),
+            ("work", {"op": "search", "query": "Prior source investigation"}),
+            ("work", {"op": "inspect", "work_id": work_a,
+                      "query": "VERIFY_PRIOR_WORK_2026"}),
+            ("read_file", {"path": "notes.txt"}),
+            ("work", {"op": "report", "kind": "finding",
+                      "note": "Work B consulted Work A and read the existing notes.txt file."}),
+        ]
+        run_event(runtime, runtime.causal_ledger.get_event(work_b_event))
+        results = fixture.outcomes
+        assert len(results) == len(fixture.plan)
+        assert [r["status"] for r in results] == [
+            "failed", "failed", "failed", "succeeded", "succeeded",
+            "succeeded", "succeeded", "succeeded",
+        ]
+        found = results[3]["output"]["works"]
+        assert work_a in {work["id"] for work in found}
+        assert work_b in {work["id"] for work in found}
+        assert foreign.id not in {work["id"] for work in found}
+        matched = results[4]["output"]
+        assert [work["id"] for work in matched["works"]] == [work_a]
+        assert matched["searched_field"] == "title"
+        inspected = results[5]["output"]
+        assert inspected["searched_field"] == "message_content"
+        assert inspected["search_complete"] is True
+        assert any(
+            message["event_id"] == source_event_id
+            and source_text in message["content"]
+            for message in inspected["recent_messages"]
+        )
+        assert results[6]["output"]["content"] == (
+            "A real note to inspect without changing files.\n"
+        )
+        assert runtime.causal_ledger.get_event(source_event_id).content == source_text
+        assert runtime.world.get_task_front(work_b).focal_engram_id == runtime.continuity_engram_id
+        assert not any(
+            front["title"] == "Not permitted from Work" for front in runtime.list_task_fronts()
+        )
+
+        report = delivered(runtime, results[-1]["output"])
+        assert report.center_id is None
+        origin = runtime._native_work.report_origin(
+            report.id, report.idempotency_key,
+            runtime.continuity_engram_id, report.content,
+        )
+        assert origin["work_id"] == work_b
+        assert "existing notes.txt file" in report.content
+        fixture.plan = []
+        run_event(runtime, report)
+        assert runtime.causal_ledger.get_event(source_event_id).content == source_text
+    finally:
+        reopened.runtime.close()
