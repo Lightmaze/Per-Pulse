@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.0a29
+
+- Move a successfully Home-created file into an existing Work's unsent draft with its producing Kernel action, source link and exact file digest verified; continue the file under ordinary actions, return the result to Home and recover its source after SQLite restart (#311).
+
 ## 0.1.0a28
 
 - Let a later Work read-only inspect and search its subject's earlier Works directly, retaining the native Work/Kernel ownership and file-action boundaries (#307).
