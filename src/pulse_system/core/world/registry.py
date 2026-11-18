@@ -86,6 +86,16 @@ class WorldRegistry:
             front_id=front_id,
         )
 
+    def discard_unstarted_task_bundle(
+        self, front_id: str, center_id: str, focal_engram_id: str, *,
+        world_id: str, created_engram: bool = False,
+    ) -> None:
+        """Discard a failed, unobserved Work through the native World store."""
+        self._storage.discard_unstarted_task_bundle(
+            front_id, center_id, focal_engram_id,
+            world_id=world_id, created_engram=created_engram,
+        )
+
     def create_non_task_center_bundle(
         self,
         kind: ActivityKind | str,

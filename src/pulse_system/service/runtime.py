@@ -10019,12 +10019,24 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         # the Front exists, but before its first stimulus enters the ledger.
         # No model or Pulse step can observe a partially prepared first task.
         if prepare_content is not None:
-            content = prepare_content(bundle.front.id, content)
-            if not isinstance(content, str) or not content.strip():
-                raise ServiceError(
-                    "empty_content", "A prepared task needs an initial message.",
-                    "provide a non-empty initial task", status=400,
+            try:
+                content = prepare_content(bundle.front.id, content)
+                if not isinstance(content, str) or not content.strip():
+                    raise ServiceError(
+                        "empty_content", "A prepared task needs an initial message.",
+                        "provide a non-empty initial task", status=400,
+                    )
+            except BaseException:
+                # The bundle was persisted before a native material could be
+                # scoped to its Front. If preparation fails, remove both in
+                # the same World before an initial stimulus can be queued.
+                # Never delete a Front once inject() has begun: it may already
+                # have durable causal history.
+                self._world.discard_unstarted_task_bundle(
+                    bundle.front.id, bundle.center.id, bundle.focal_engram.id,
+                    world_id=self._world_id, created_engram=subject_id is None,
                 )
+                raise
         event_id = self.inject(
             bundle.focal_engram.id,
             content,

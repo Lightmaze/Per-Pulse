@@ -4906,6 +4906,52 @@ class Storage:
         return TaskFrontBundle(front, center, membership, focal_engram)
 
     @_locked
+    def discard_unstarted_task_bundle(
+        self, front_id: str, center_id: str, focal_engram_id: str, *,
+        world_id: str, created_engram: bool = False,
+    ) -> None:
+        """Roll back a newly prepared Work only before it has causal history.
+
+        This is intentionally not a general delete API. Once a stimulus has
+        been recorded, its Work and source receipts are historical evidence.
+        """
+        self._assert_runtime_publication()
+        with self._immediate_transaction() as conn:
+            row = conn.execute(
+                "SELECT center_id, focal_engram_id FROM task_fronts WHERE id = ?",
+                (front_id,),
+            ).fetchone()
+            if row is None or tuple(row) != (center_id, focal_engram_id):
+                raise ValueError("unstarted task bundle identity changed")
+            if conn.execute(
+                "SELECT 1 FROM causal_events WHERE center_id = ? LIMIT 1",
+                (center_id,),
+            ).fetchone() is not None:
+                raise ValueError("cannot discard a Work with causal history")
+            if created_engram and (
+                conn.execute(
+                    "SELECT 1 FROM causal_events WHERE engram_id = ? LIMIT 1",
+                    (focal_engram_id,),
+                ).fetchone() is not None
+                or conn.execute(
+                    "SELECT 1 FROM messages WHERE engram_id = ? LIMIT 1",
+                    (focal_engram_id,),
+                ).fetchone() is not None
+            ):
+                raise ValueError("cannot discard an Engram with history")
+            # The source bytes and producing action belong to the original Work.
+            # Only the new Work's uncommitted receipt and empty bundle are removed.
+            conn.execute(
+                "DELETE FROM per_pulse_materials WHERE world_id = ? AND page_id = ?",
+                (world_id, front_id),
+            )
+            conn.execute("DELETE FROM task_fronts WHERE id = ?", (front_id,))
+            conn.execute("DELETE FROM center_memberships WHERE center_id = ?", (center_id,))
+            conn.execute("DELETE FROM activity_centers WHERE id = ?", (center_id,))
+            if created_engram:
+                conn.execute("DELETE FROM engrams WHERE id = ?", (focal_engram_id,))
+
+    @_locked
     def create_non_task_center_bundle(
         self,
         kind: ActivityKind | str,
