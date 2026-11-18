@@ -1012,3 +1012,79 @@ def test_new_work_starts_with_verified_file_before_first_model_stimulus(tmp_path
         assert saved["materials"][0]["originArtifactId"] == item["id"]
         assert saved["materials"][0]["sha256"] == item["sha256"]
         assert service.materials.read(target, receipt["id"])["content"] == source_text
+
+
+def test_failed_file_sourced_work_creation_leaves_no_empty_front_or_receipt(tmp_path, monkeypatch):
+    """An oversized initial message must not strand a new Work in SQLite."""
+    source_text = "A verified original document.\n"
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "source.txt", "expected_digest": None, "content": source_text},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        source_id = _page(client)
+        _approve(service.execution, source_id)
+        original, = service.artifacts.snapshot(source_id)["artifacts"]
+        selected = {"id": original["id"], "pageId": source_id,
+                    "path": original["path"], "sha256": original["sha256"]}
+        before = {row["id"] for row in service.runtime.list_task_fronts()}
+        response = client.post("/api/pages", json={
+            "title": "Continue this source", "instruction": "x" * 31_900,
+            "sourcePageId": source_id, "sourceArtifact": selected,
+        })
+        assert response.status_code == 422, response.text
+        assert response.json()["error"]["code"] == "page_source_too_large"
+        assert {row["id"] for row in service.runtime.list_task_fronts()} == before
+        assert service.runtime.storage.find_page_material_versions(
+            service.runtime.world_id, "source.txt", original["sha256"],
+            len(source_text.encode("utf-8")),
+        ) == []
+        assert service.artifacts.snapshot(source_id)["artifacts"][0]["id"] == original["id"]
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        assert {row["id"] for row in service.runtime.list_task_fronts()} == before
+        assert service.runtime.storage.find_page_material_versions(
+            service.runtime.world_id, "source.txt", original["sha256"],
+            len(source_text.encode("utf-8")),
+        ) == []
+        assert service.artifacts.snapshot(source_id)["artifacts"][0]["id"] == original["id"]
+
+
+def test_file_changed_during_new_work_preparation_does_not_leave_empty_front(tmp_path, monkeypatch):
+    """A source mutation after the first check must not create a ghost Work."""
+    source_text = "Original sourced result.\n"
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "source.txt", "expected_digest": None, "content": source_text},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        source_id = _page(client)
+        _approve(service.execution, source_id)
+        original, = service.artifacts.snapshot(source_id)["artifacts"]
+        selected = {"id": original["id"], "pageId": source_id,
+                    "path": original["path"], "sha256": original["sha256"]}
+        before = {row["id"] for row in service.runtime.list_task_fronts()}
+        reference_existing = service.materials.reference_existing
+
+        def change_after_preflight(*args, **kwargs):
+            (tmp_path / "workspace" / "source.txt").write_text(
+                "File changed after preflight.\n", encoding="utf-8",
+            )
+            return reference_existing(*args, **kwargs)
+
+        monkeypatch.setattr(service.materials, "reference_existing", change_after_preflight)
+        response = client.post("/api/pages", json={
+            "title": "Continue original", "instruction": "Read the selected file.",
+            "sourcePageId": source_id, "sourceArtifact": selected,
+        })
+        assert response.status_code == 409, response.text
+        assert {row["id"] for row in service.runtime.list_task_fronts()} == before
+        assert service.runtime.storage.find_page_material_versions(
+            service.runtime.world_id, "source.txt", original["sha256"],
+            len(source_text.encode("utf-8")),
+        ) == []
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        assert {row["id"] for row in client.app.state.pages.runtime.list_task_fronts()} == before
