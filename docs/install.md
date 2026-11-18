@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a29-py3-none-any.whl` from the
-[v0.1.0a29 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a29).
+Download `per_pulse-0.1.0a30-py3-none-any.whl` from the
+[v0.1.0a30 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a30).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a29-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a30-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a29-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a30-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -83,10 +83,18 @@ file. Work may read its original bytes and create a revised file under the
 normal file-action approval or Undo controls. Bring that result back Home with
 its source and revisit it after restarting the service.
 
-The source file must still match the original producing action; if it changed,
-reopen the Home result to choose the current version. This handoff does not
-create a new Work automatically. Use the normal **Create page** action first
-if you need a new destination.
+To start an entirely new Work from the result instead, open the confirmed
+file in Home or another Work and choose **Start a new Work with this file**.
+Give the Work a name and your task instructions. The same Kernel verifies the
+original producing action and file digest, prepares a source-linked material
+receipt in the new Work, then queues its first message. The first model turn
+can inspect the original file immediately; it does not run before that receipt
+is attached. Later file changes still require the ordinary approval or Undo
+boundary. Reopen the Work after restarting to inspect its source and resulting
+artifact.
+
+For either route, the source file must still match its producing action; if
+it changed, reopen the original file result to choose the current version.
 
 ## Continue from a saved correction
 
@@ -163,7 +171,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a29-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a30-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
