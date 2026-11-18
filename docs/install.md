@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a28-py3-none-any.whl` from the
-[v0.1.0a28 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a28).
+Download `per_pulse-0.1.0a29-py3-none-any.whl` from the
+[v0.1.0a29 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a29).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a28-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a29-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a28-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a29-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -71,6 +71,22 @@ pages can continue in the background, up to 12 turns per hour by default.
 Use `--pulse-budget N` to change this or `--no-pulse` to switch it off. Model
 file changes apply by default and offer Undo; `--ask-before-edits` asks first.
 See [workspace actions](workspace-actions.md) for what Undo can restore.
+
+## Continue a Home file in another Work
+
+After a file-producing action in Home has completed, open its file result and
+choose **Add the full file to another page's draft**. Select an existing Work.
+The original Home file and producing action are checked in the same World;
+the receiving Work gets a source-linked, version-checked material in its
+**unsent** draft. Add instructions and press **Send** to begin work on the
+file. Work may read its original bytes and create a revised file under the
+normal file-action approval or Undo controls. Bring that result back Home with
+its source and revisit it after restarting the service.
+
+The source file must still match the original producing action; if it changed,
+reopen the Home result to choose the current version. This handoff does not
+create a new Work automatically. Use the normal **Create page** action first
+if you need a new destination.
 
 ## Continue from a saved correction
 
@@ -147,7 +163,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a28-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a29-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
