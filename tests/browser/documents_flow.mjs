@@ -134,10 +134,18 @@ try {
   assert.equal(firstMessage.materials?.[0]?.sha256, fixture.sha256);
   await page.getByRole('button', { name: 'Allow once', exact: true }).click();
   await page.locator('.artifact-open').filter({ hasText: 'continued-field-note.md' }).waitFor();
-  assert.equal((await fetch(base + '/__fixture/status').then(r => r.json())).files.includes('continued-field-note.md'), true);
   const continuedArtifact = (await fetch(base + '/api/pages/' + continuationId).then(r => r.json())).artifacts
     .find(item => item.path === 'continued-field-note.md');
   assert.ok(continuedArtifact?.id);
+  // Read the actual versioned Kernel artifact instead of the fixture's .txt-only
+  // inventory, which intentionally omits Markdown files.
+  const readContinued = () => fetch(base + '/api/pages/' + continuationId + '/artifacts/'
+    + encodeURIComponent(continuedArtifact.id) + '/download');
+  const continuedDownload = await readContinued();
+  assert.equal(continuedDownload.status, 200);
+  const continuedBytes = Buffer.from(await continuedDownload.arrayBuffer());
+  assert.match(continuedBytes.toString('utf8'), /This \\*\\*confirmed file\\*\\*/);
+  assert.equal(createHash('sha256').update(continuedBytes).digest('hex'), continuedArtifact.sha256);
   // Reopen the same persistent World and verify both the initial native
   // attachment and the second artifact without replaying either file effect.
   await stop(server); server = start(); await ready();
@@ -145,6 +153,10 @@ try {
   const resumed = await fetch(base + '/api/pages/' + continuationId).then(r => r.json());
   assert.ok(resumed.artifacts.some(item => item.id === continuedArtifact.id));
   assert.equal(resumed.messages.find(message => message.role === 'user')?.materials?.[0]?.originArtifactId, artifactId);
+  const restoredDownload = await readContinued();
+  assert.equal(restoredDownload.status, 200);
+  assert.deepEqual(Buffer.from(await restoredDownload.arrayBuffer()), continuedBytes,
+    'Restart must preserve the exact resulting file bytes');
   checks.push('A verified file starts a new Work with source attached before its first model decision, produces a second native artifact and survives restart');
   await page.goto(base + '/page/' + firstId);
   await page.locator('.artifact-open').filter({ hasText: fixture.path }).click();
