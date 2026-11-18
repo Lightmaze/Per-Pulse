@@ -782,6 +782,10 @@ def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restar
                       "query": "VERIFY_PRIOR_WORK_2026"}),
             ("read_file", {"path": "notes.txt"}),
             ("work", {"op": "report", "kind": "finding",
+                      "note": "Cannot cite a foreign Work as the source.",
+                      "source_work_id": foreign.id, "source_event_id": source_event_id,
+                      "source_excerpt": source_text}),
+            ("work", {"op": "report", "kind": "finding",
                       "note": "Work B consulted Work A and read the existing notes.txt file.",
                       "source_work_id": work_a, "source_event_id": source_event_id,
                       "source_excerpt": source_text}),
@@ -791,7 +795,7 @@ def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restar
         assert len(results) == len(fixture.plan)
         assert [r["status"] for r in results] == [
             "failed", "failed", "failed", "succeeded", "succeeded",
-            "succeeded", "succeeded", "succeeded", "succeeded",
+            "succeeded", "succeeded", "succeeded", "failed", "succeeded",
         ]
         found = results[3]["output"]["works"]
         assert work_a in {work["id"] for work in found}
