@@ -55,7 +55,7 @@ Kernel implementation.
   Later Works can discover and search past regions without knowing their names;
   version-checked writes avoid overwriting newer changes. Habitat writes still
   require Allow once and currently do not offer Undo.
-- From a configured Home model, find an earlier Work decision in original history, inspect the matching text and event ID, then carry a verified source quote into a new or continuing Work without copying the old conversation.
+- From a configured Home or Work model, find a decision in another owned Work by its original message text, inspect the event and carry a verified source quote into the next Work. A later Work can return the source with its result to Home without copying the earlier conversation.
 - Browse and search the whole history, continue through large workspace
   directories, and reopen older file results from a long-running Work with
   their original source and version. Move a stopped workspace to another directory.
@@ -66,13 +66,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a27-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a27)
+[`per_pulse-0.1.0a28-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a28)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a27-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a28-py3-none-any.whl
 per-pulse --example
 ```
 
