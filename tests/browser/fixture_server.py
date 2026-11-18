@@ -85,7 +85,32 @@ def handler(request):
     if 'SLOW_AFTER_APPROVAL' in text and has_tool:
         entered.set()
         release.wait(30)
-    if not has_tool and 'WRITE_' in text:
+    if 'FROM_CONFIRMED_DOCUMENT' in text:
+        current = messages[max(i for i, m in enumerate(messages) if m['role'] == 'user'):]
+        tools = [m for m in current if m['role'] == 'tool']
+        assert 'per-pulse.material-references.v1' in json.dumps(current), 'first model decision must receive the attached original'
+        if not tools:
+            delta = {'tool_calls': [{'index': 0, 'id': 'new-work-read', 'type': 'function', 'function': {
+                'name': 'reading', 'arguments': json.dumps({
+                    'op': 'open', 'path': document_name, 'max_chars': 4096,
+                }),
+            }}]}
+            finish = 'tool_calls'
+        elif len(tools) == 1:
+            read = json.loads(tools[0]['content'])
+            assert read['status'] == 'succeeded', read
+            assert 'This **confirmed file**' in read['output']['content']
+            delta = {'tool_calls': [{'index': 0, 'id': 'new-work-result', 'type': 'function', 'function': {
+                'name': 'mutate_file', 'arguments': json.dumps({
+                    'path': 'continued-field-note.md', 'expected_digest': None,
+                    'content': '# Continued source\\n\\n' + read['output']['content'],
+                }),
+            }}]}
+            finish = 'tool_calls'
+        else:
+            delta = {'content': 'Synthetic fixture: continued the verified source into a new file.'}
+            finish = 'stop'
+    elif not has_tool and 'WRITE_' in text:
         name = 'slow.txt' if 'SLOW_AFTER_APPROVAL' in text else 'declined.txt' if 'WRITE_DECLINE' in text else 'approved.txt'
         arguments = {'path': name, 'expected_digest': None, 'content': 'A real file from a synthetic model fixture.\n'}
         if 'WRITE_LITERAL_MARKER' in text:

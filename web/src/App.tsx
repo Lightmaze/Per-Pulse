@@ -321,9 +321,14 @@ export default function App() {
     const message = modal?.kind === 'create' ? modal.message : undefined;
     setBusy(true); setModalError('');
     try {
+      const artifact = modal?.kind === 'create' ? modal.artifact : undefined;
+      if (artifact && (!bootstrap || artifact.pageId !== sourceId)) {
+        throw new Error(t('library.referenceUnconfirmed'));
+      }
       const response = await api.createPage({ title, instruction, sourcePageId: sourceId,
         sourceMessageId: message?.id, sourceExcerpt,
-        sourceExperienceId: modal?.kind === 'create' ? modal.fromExperience?.id : undefined });
+        sourceExperienceId: modal?.kind === 'create' ? modal.fromExperience?.id : undefined,
+        sourceArtifact: artifact ? { id: artifact.id, pageId: artifact.pageId, path: artifact.path, sha256: artifact.sha256 } : undefined });
       applyView(response.view);
       refreshPage(sourceId).catch(() => {});
       navigate(response.page.id, { pageId: sourceId, messageId: message?.id, referenceId: response.reference.id });
@@ -610,7 +615,7 @@ export default function App() {
           {view ? <WebSources key={`web-${workspaceId}/${route.id}`} view={view} navigate={navigate}
             onReviewExperience={() => openModal({ kind: 'learning' })}
             onContinueWork={experience => openModal({ kind: 'create', fromExperience: experience })} /> : null}
-          {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} onUseInHome={view.page.kind === 'work' ? prepareArtifactHome : undefined} onUseInWork={pages.some(page => page.kind === 'work' && page.id !== view.page.id) ? artifact => openModal({ kind: 'picker', mode: 'artifact', artifact }) : undefined} onChanged={() => refreshPage(view.page.id)} /> : null}
+          {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} onUseInHome={view.page.kind === 'work' ? prepareArtifactHome : undefined} onUseInWork={pages.some(page => page.kind === 'work' && page.id !== view.page.id) ? artifact => openModal({ kind: 'picker', mode: 'artifact', artifact }) : undefined} onCreateWork={artifact => openModal({ kind: 'create', artifact })} onChanged={() => refreshPage(view.page.id)} /> : null}
           {view?.page.kind === 'work' ? <CollaboratorChoices key={`${workspaceId}/${route.id}`} pageId={route.id} pages={pages} navigate={navigate} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection, needsExactExcerpt) => openModal({ kind: 'return', message, content: selection, needsExactExcerpt })} onTransfer={(message, excerpt) => openModal({ kind: 'transfer', message, excerpt })} onSaveExample={bootstrap?.postureEnabled ? (message, content, needsExactExcerpt) => openModal({ kind: 'save-example', message, content, needsExactExcerpt }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
           {view?.tick?.status === 'running' && view.provider.configured ? <div className="tick-status" role="status">
@@ -630,7 +635,7 @@ export default function App() {
       navigate={navigate} onChanged={() => { void refreshWorkspace().catch(() => {}); }}
       onClose={() => setPulseOpen(false)} /> : null}
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
-    {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} fromExperience={modal.fromExperience} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
+    {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} fromExperience={modal.fromExperience} artifact={modal.artifact} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : modal.mode === 'artifact' ? pages.filter(page => page.kind === 'work' && page.id !== modal.artifact.pageId) : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.mode === 'artifact' ? undefined : modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} sourceText={messageBody(modal.message)} needsExactExcerpt={modal.needsExactExcerpt} materials={modal.message.materials} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'transfer' ? <TransferWorkDialog key={`${route.id}/${modal.message.id}`} excerpt={modal.excerpt}

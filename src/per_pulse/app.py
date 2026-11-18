@@ -47,7 +47,15 @@ class ReferenceInput(Input):
     label: Title | None = None
 
 
+class SourceArtifact(Input):
+    id: Identifier
+    pageId: Identifier
+    path: Annotated[str, StringConstraints(min_length=1, max_length=1024)]
+    sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+
+
 class NewPage(Input):
+    sourceArtifact: SourceArtifact | None = None
     sourceExcerpt: Annotated[str, StringConstraints(min_length=1, max_length=32_000)] | None = None
     title: Title
     instruction: Content
@@ -519,6 +527,7 @@ def create_app(
         return pages(request).create_page(
             body.title, body.instruction, body.sourcePageId, body.sourceMessageId,
             source_excerpt=body.sourceExcerpt, source_experience_id=body.sourceExperienceId,
+            source_artifact=body.sourceArtifact.model_dump() if body.sourceArtifact is not None else None,
         )
 
     @app.post("/api/pages/{page_id}/messages", status_code=202)

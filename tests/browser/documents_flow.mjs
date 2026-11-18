@@ -119,6 +119,31 @@ try {
   await page.locator('.artifact-open').filter({ hasText: fixture.path }).click();
   await page.locator('.markdown-document').getByRole('heading', { name: 'A field note', exact: true }).waitFor();
   await save(page, fixture);
+  // Create a Work directly from the confirmed artifact, with the native
+  // receipt in its first message before the fixture can choose any tool.
+  await page.getByRole('button', { name: 'Start a new Work with this file', exact: true }).click();
+  await page.getByLabel('Page name', { exact: true }).fill('Continue field note');
+  await page.getByLabel('Where should we begin?', { exact: true }).fill('FROM_CONFIRMED_DOCUMENT');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Continue field note', exact: true }).waitFor();
+  const continuationId = new URL(page.url()).pathname.split('/').pop();
+  const continuation = await fetch(base + '/api/pages/' + continuationId).then(r => r.json());
+  const firstMessage = continuation.messages.find(message => message.role === 'user');
+  assert.equal(firstMessage.materials?.[0]?.originArtifactPageId, firstId);
+  assert.equal(firstMessage.materials?.[0]?.originArtifactId, artifactId);
+  assert.equal(firstMessage.materials?.[0]?.sha256, fixture.sha256);
+  await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+  await page.locator('.artifact-open').filter({ hasText: 'continued-field-note.md' }).waitFor();
+  assert.equal((await fetch(base + '/__fixture/status').then(r => r.json())).files.includes('continued-field-note.md'), true);
+  const continuedArtifact = (await fetch(base + '/api/pages/' + continuationId).then(r => r.json())).artifacts
+    .find(item => item.path === 'continued-field-note.md');
+  assert.ok(continuedArtifact?.id);
+  await page.reload();
+  assert.ok((await fetch(base + '/api/pages/' + continuationId).then(r => r.json())).artifacts.some(item => item.id === continuedArtifact.id));
+  checks.push('A verified file starts a new Work with source attached before its first model decision, produces a second native artifact and survives restart');
+  await page.goto(base + '/page/' + firstId);
+  await page.locator('.artifact-open').filter({ hasText: fixture.path }).click();
+  await save(page, fixture);
   const reopened = await fetch(base + '/api/pages/' + firstId + '/artifacts').then(r => r.json());
   assert.equal(reopened.artifacts[0].id, artifactId);
   assert.equal((await fetch(base + '/__fixture/status').then(r => r.json())).requests, 0, 'Reading and saving do not replay a native effect');
