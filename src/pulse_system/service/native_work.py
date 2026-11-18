@@ -24,7 +24,7 @@ from .report_contributions import CITATION_SCHEMA, validate_citations
 NAME = 'work'
 PREFIX = 'native-work-v1:'
 SCHEMA = {'type': 'object', 'properties': {
-    'op': {'type': 'string', 'enum': ['list', 'search', 'inspect', 'create', 'send', 'report']},
+    'op': {'type': 'string', 'enum': ['list', 'search', 'find', 'inspect', 'create', 'send', 'report']},
     'work_id': {'type': 'string', 'maxLength': 160},
     'after_work_id': {'type': 'string', 'maxLength': 160},
     'source_work_id': {'type': 'string', 'maxLength': 160},
@@ -38,12 +38,12 @@ SCHEMA = {'type': 'object', 'properties': {
     'kind': {'type': 'string', 'enum': ['result', 'question', 'finding']},
     'contributions': CITATION_SCHEMA,
 }, 'required': ['op'], 'additionalProperties': False}
-_FIELDS = {'list': set(), 'search': {'query'}, 'inspect': {'work_id'},
+_FIELDS = {'list': set(), 'search': {'query'}, 'find': {'query'}, 'inspect': {'work_id'},
            'create': {'title', 'instruction'},
            'send': {'work_id', 'instruction'}, 'report': {'kind', 'note'}}
 _HISTORY_SOURCE_FIELDS = frozenset({'source_work_id', 'source_event_id', 'source_excerpt'})
 _OPTIONAL_FIELDS = {'list': {'after_work_id'}, 'search': {'after_work_id'},
-                    'inspect': {'before_seq', 'query'}, 'report': {'contributions'},
+                    'inspect': {'before_seq', 'query'}, 'find': {'before_seq'}, 'report': {'contributions'},
                     'create': _HISTORY_SOURCE_FIELDS, 'send': _HISTORY_SOURCE_FIELDS}
 
 
@@ -53,6 +53,9 @@ def descriptor() -> ToolDescriptor:
         'Home/Work: list(after_work_id?) pages owned Works, 32 at a time; '
         'next_after_work_id continues. search(query, after_work_id?) finds '
         'titles (not messages), 32 per page. '
+        'Home/Work: find(query, before_seq?) searches the original text '
+        'across owned Works, 12 source-addressed matches per page. '
+        'Continue using next_before_seq; inspect the source for more context. '
         'inspect(work_id, query?, before_seq?) reads 12 messages per page; '
         'query matches earlier text literally; next_before_seq continues. '
         'In Work, inspect earlier decisions when relevant to the next action. '
@@ -105,11 +108,12 @@ def validate(arguments: Mapping[str, Any]) -> dict[str, Any]:
 _HISTORY_TEXT_LIMIT = 2000
 
 
-def _history_message_excerpt(message: Mapping[str, Any], query: str | None) -> dict[str, Any]:
+def _history_message_excerpt(message: Mapping[str, Any], query: str | None,
+                             *, max_chars: int = _HISTORY_TEXT_LIMIT) -> dict[str, Any]:
     """Return the exact source span that explains a bounded history match."""
     original = str(message.get('content', ''))
     start = 0
-    if query is not None and len(original) > _HISTORY_TEXT_LIMIT:
+    if query is not None and len(original) > max_chars:
         match = original.casefold().find(query.casefold())
         if match >= 0:
             # Unicode casefold may expand one original character (e.g. İ).
@@ -118,11 +122,11 @@ def _history_message_excerpt(message: Mapping[str, Any], query: str | None) -> d
             for index, char in enumerate(original):
                 next_offset = folded_offset + len(char.casefold())
                 if next_offset > match:
-                    if index + len(query) > _HISTORY_TEXT_LIMIT:
+                    if index + len(query) > max_chars:
                         start = max(0, index - 320)
                     break
                 folded_offset = next_offset
-    excerpt = original[start:start + _HISTORY_TEXT_LIMIT]
+    excerpt = original[start:start + max_chars]
     return {
         **message, 'content': excerpt,
         'content_original_chars': len(original),
@@ -291,6 +295,37 @@ class NativeWork:
                                   complete_history=False)
                 else:
                     output.update(searched_field='title', search_complete=not has_more)
+            elif a['op'] == 'find':
+                # Discover an earlier decision by its content, even when the
+                # model cannot remember its Work title or ID. One indexed
+                # causal-ledger query, scoped in SQL to the subject's Works.
+                query = a['query'].strip()
+                rows = r._causal_message_projection(
+                    engram_id=subject, owned_work_messages=True,
+                    session_admitted=True, content_query=query,
+                    before_seq=a.get('before_seq'), limit=13,
+                )
+                more = len(rows) > 12
+                selected = rows[-12:]
+                owned = {front.center_id: front for front in
+                         r.world.list_task_fronts(focal_engram_id=subject)}
+                matches = []
+                for message in selected:
+                    front = owned.get(message['center_id'])
+                    if front is None:
+                        raise ScopeConflict('found historical Work no longer belongs to this subject')
+                    excerpt = _history_message_excerpt(message, query, max_chars=1024)
+                    matches.append({
+                        'work_id': front.id, 'work_title': front.title,
+                        'source_event_id': message['event_id'],
+                        'source_excerpt': excerpt['content'],
+                        'message': excerpt,
+                    })
+                output = {'matches': matches, 'searched_field': 'message_content',
+                    'scope': 'current_subject_only', 'more_matches': more,
+                    'next_before_seq': selected[0]['seq'] if more else None,
+                    'search_complete': not more,
+                    'text_limit_per_match': 1024}
             elif a['op'] == 'inspect':
                 front = self._owned(subject, a['work_id'])
                 # Use the already persistent, admission-aware World ledger, not
