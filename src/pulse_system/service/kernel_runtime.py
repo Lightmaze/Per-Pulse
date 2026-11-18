@@ -928,7 +928,7 @@ class KernelHarnessRuntime:
         # A Work may consult the same subject's earlier Works without
         # delegating a new task. Creation and follow-ups remain Home-only.
         if op == "report" or (
-                op in {"list", "search", "inspect"} and scope.context_id.startswith("work:")):
+                op in {"list", "search", "find", "inspect"} and scope.context_id.startswith("work:")):
             self._check()
             if (not scope.context_id.startswith("work:")
                     or scope.session_scope() != self.scope_for(scope.engram_id, scope.context_id)):

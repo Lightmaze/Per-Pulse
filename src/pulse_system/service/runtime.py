@@ -9447,6 +9447,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         event_id: str | None = None,
         before_seq: int | None = None,
         content_query: str | None = None,
+        owned_work_messages: bool = False,
     ) -> list[dict[str, Any]]:
         clauses = [
             "world_id = ?",
@@ -9474,6 +9475,17 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 "ON generation.successor_id = current.id "
                 "WHERE generation.state = 'committed'"
                 ") SELECT id FROM lineage_engram)"
+            )
+            params.append(engram_id)
+        if owned_work_messages:
+            if engram_id is None:
+                raise ValueError('owned Work message search requires a subject')
+            # Query the original causal ledger, restricted at the SQL boundary
+            # to Works owned by this subject. Do not build a second text index.
+            clauses.append(
+                'EXISTS (SELECT 1 FROM task_fronts owned_front '
+                'WHERE owned_front.center_id = causal_events.center_id '
+                'AND owned_front.focal_engram_id = ?)'
             )
             params.append(engram_id)
         if session_admitted:
