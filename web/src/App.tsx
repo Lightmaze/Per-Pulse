@@ -340,7 +340,7 @@ export default function App() {
       const sourceId = route.id;
       const sourceSerial = route.serial;
       const sourceModal = modal;
-      if (!bootstrap || !workspaceId || !view || sourceId === 'home'
+      if (!bootstrap || !workspaceId || !view
           || artifact.pageId !== sourceId || page.kind !== 'work' || page.id === sourceId) {
         setModalError(t('library.referenceUnconfirmed'));
         return;
@@ -610,7 +610,7 @@ export default function App() {
           {view ? <WebSources key={`web-${workspaceId}/${route.id}`} view={view} navigate={navigate}
             onReviewExperience={() => openModal({ kind: 'learning' })}
             onContinueWork={experience => openModal({ kind: 'create', fromExperience: experience })} /> : null}
-          {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} onUseInHome={view.page.kind === 'work' ? prepareArtifactHome : undefined} onUseInWork={view.page.kind === 'work' && pages.some(page => page.kind === 'work' && page.id !== view.page.id) ? artifact => openModal({ kind: 'picker', mode: 'artifact', artifact }) : undefined} onChanged={() => refreshPage(view.page.id)} /> : null}
+          {view ? <PageArtifacts key={`artifacts-${workspaceId}/${route.id}`} view={view} onUseInHome={view.page.kind === 'work' ? prepareArtifactHome : undefined} onUseInWork={pages.some(page => page.kind === 'work' && page.id !== view.page.id) ? artifact => openModal({ kind: 'picker', mode: 'artifact', artifact }) : undefined} onChanged={() => refreshPage(view.page.id)} /> : null}
           {view?.page.kind === 'work' ? <CollaboratorChoices key={`${workspaceId}/${route.id}`} pageId={route.id} pages={pages} navigate={navigate} /> : null}
           {view ? <Conversation view={view} pages={pages} navigate={navigate} stale={Boolean(syncError)} onCreate={(message?: Message) => openModal({ kind: 'create', message })} onReference={message => openModal({ kind: 'picker', mode: 'reference', message })} onReturn={(message, selection, needsExactExcerpt) => openModal({ kind: 'return', message, content: selection, needsExactExcerpt })} onTransfer={(message, excerpt) => openModal({ kind: 'transfer', message, excerpt })} onSaveExample={bootstrap?.postureEnabled ? (message, content, needsExactExcerpt) => openModal({ kind: 'save-example', message, content, needsExactExcerpt }) : undefined} onHistory={beforeMessageId => openModal({ kind: 'history', beforeMessageId })} onFind={() => openModal({ kind: 'message-search' })} onMaterial={(materialId, pageId) => openModal({ kind: 'materials', materialId, pageId })} /> : loading ? <div className="loading-state" role="status"><span className="loading-dot" />{t('app.openingConversation')}</div> : null}
           {view?.tick?.status === 'running' && view.provider.configured ? <div className="tick-status" role="status">

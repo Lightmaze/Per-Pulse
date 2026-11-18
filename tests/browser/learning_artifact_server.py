@@ -48,6 +48,36 @@ def handler(request):
     material = json.dumps(messages, ensure_ascii=False)
     requests.append({"material": material, "tools": [t.get("function", {}).get("name")
                        for t in body.get("tools", [])]})
+    # Explicit synthetic tool choices: prove the shipped Home-created file can
+    # travel to a later Work and be used to produce a second real file.
+    if "BUILD_HOME_FILE_FOR_WORK" in material or "USE_HOME_FILE_IN_WORK" in material:
+        current_index = max(i for i, msg in enumerate(messages) if msg["role"] == "user")
+        current = messages[current_index:]
+        task = json.dumps(current, ensure_ascii=False)
+        tool_results = [m for m in current if m["role"] == "tool"]
+        if "BUILD_HOME_FILE_FOR_WORK" in task:
+            if not tool_results:
+                return streamed(tool="mutate_file", arguments={
+                    "path": "home-reference.txt", "expected_digest": None,
+                    "content": "Home reference: check the original file before drafting.\n",
+                })
+            return streamed(text="The Home source file is complete. [Synthetic browser fixture]")
+        if "USE_HOME_FILE_IN_WORK" in task:
+            if not tool_results:
+                return streamed(tool="reading", arguments={
+                    "op": "open", "path": "home-reference.txt", "max_chars": 4096,
+                })
+            if len(tool_results) == 1:
+                read = json.loads(tool_results[0]["content"])
+                assert read["status"] == "succeeded", read
+                observed = read["output"]["content"]
+                assert "Home reference: check the original file before drafting." in observed
+                return streamed(tool="mutate_file", arguments={
+                    "path": "reviewed-home-reference.txt", "expected_digest": None,
+                    "content": "Work used the verified Home source:\n" + observed,
+                })
+            return streamed(text="The sourced Work deliverable is complete. [Synthetic browser fixture]")
+
     if "WORK_MATERIAL_JSON" in material:
         # An explicitly requested form is the practice-first counterexample.
         # Its shared lesson reaches the fork, which should decline the change.

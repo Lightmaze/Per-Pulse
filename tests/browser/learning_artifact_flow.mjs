@@ -540,6 +540,70 @@ try {
   assert.ok(sourceResults.some(m => m.sourcePageId === originalId && m.sourceMessageId),
     'The native receiving message preserves the original Work result source');
   checks.push('explicit settled Work excerpt changes another Work with exact source and both drafts intact');
+  // A Home-created file used to be stranded: the file-result action for
+  // another Work was hidden in Home, despite the native reference API accepting
+  // a verified Home producer. Exercise the complete ordinary route.
+  await page.goto(base + '/');
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).fill('BUILD_HOME_FILE_FOR_WORK');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await page.getByText('Your approval is needed', { exact: true }).waitFor();
+  assert.equal((await status()).files.includes('home-reference.txt'), false);
+  await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+  const homeFileButton = page.locator('.page-artifacts .artifact-open').filter({ hasText: 'home-reference.txt' });
+  await homeFileButton.waitFor();
+  const homeFile = (await (await fetch(base + '/api/pages/home')).json())
+    .artifacts.find(item => item.path === 'home-reference.txt');
+  assert.ok(homeFile?.id, 'the source must be a successful Home Kernel file action');
+  await homeFileButton.click();
+  await page.getByText('Home reference: check the original file before drafting.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Add the full file to another page’s draft', exact: true }).click();
+  const homeFilePicker = page.getByRole('dialog', { name: 'Add the full file to another page’s draft', exact: true });
+  await homeFilePicker.getByRole('option', { name: /Uninformed delivery/ }).click();
+  await page.getByRole('heading', { name: 'Uninformed delivery', exact: true }).waitFor();
+  const receivingDraft = await page.locator('.composer textarea').inputValue();
+  assert.match(receivingDraft, /Receiver draft stays here/);
+  assert.match(receivingDraft, /home-reference[.]txt/);
+  const receivedMaterials = (await (await fetch(base + '/api/pages/' + beforeId + '/materials')).json()).materials;
+  const homeSourceReceipt = receivedMaterials.find(item => item.originArtifactId === homeFile.id);
+  assert.equal(homeSourceReceipt?.originArtifactPageId, 'home');
+  assert.equal(homeSourceReceipt?.sha256, homeFile.sha256);
+  await page.getByRole('button', { name: 'Inspect home-reference.txt before sending', exact: true }).click();
+  const homeSourcePreview = page.getByRole('dialog', { name: 'Source files', exact: true });
+  await homeSourcePreview.getByText('Home reference: check the original file before drafting.', { exact: true }).waitFor();
+  await homeSourcePreview.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  assert.equal(await page.locator('.composer textarea').inputValue(), receivingDraft);
+  checks.push('the Home Kernel file is version-verified in a second Work draft, with its original action identity');
+
+  // Sending is still the person's choice; the fixture chooses an actual
+  // native reading followed by a real approved change using observed bytes.
+  await page.locator('.composer textarea').fill(receivingDraft + '\n\nUSE_HOME_FILE_IN_WORK');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await page.getByText('Your approval is needed', { exact: true }).waitFor();
+  assert.equal((await status()).files.includes('reviewed-home-reference.txt'), false);
+  await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+  const reviewedFileButton = page.locator('.page-artifacts .artifact-open').filter({ hasText: 'reviewed-home-reference.txt' });
+  await reviewedFileButton.waitFor();
+  await reviewedFileButton.click();
+  await page.getByText('Work used the verified Home source:', { exact: false }).waitFor();
+  assert.equal((await status()).files.includes('reviewed-home-reference.txt'), true);
+  await page.getByRole('button', { name: 'Add full file to Home draft', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  assert.match(await page.locator('.composer textarea').inputValue(), /reviewed-home-reference[.]txt/);
+  const reviewedFile = (await (await fetch(base + '/api/pages/' + beforeId)).json()).artifacts
+    .find(item => item.path === 'reviewed-home-reference.txt');
+  const homeAfterReturn = (await (await fetch(base + '/api/pages/home/materials')).json()).materials;
+  assert.ok(homeAfterReturn.some(item => item.originArtifactId === reviewedFile?.id
+    && item.originArtifactPageId === beforeId), 'the completed file retains its producing Work action');
+  await stopServer(server);
+  server = startServer();
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'Home to Work artifact after restart');
+  await page.reload();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  assert.match(await page.locator('.composer textarea').inputValue(), /reviewed-home-reference[.]txt/);
+  assert.equal((await (await fetch(base + '/api/pages/' + beforeId)).json())
+    .artifacts.some(item => item.id === reviewedFile?.id), true);
+  checks.push('explicit Home-to-Work source reading, approved new file, return to Home and restart all survive');
+
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({
     passed: checks.length, checks, sourceWork: originalId, comparisonWork: beforeId,
