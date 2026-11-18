@@ -297,7 +297,7 @@ class NativeWork:
                     output.update(searched_field='title', search_complete=not has_more)
             elif a['op'] == 'find':
                 # Discover an earlier decision by its content, even when the
-                # model cannot remember its Work title or ID. One indexed
+                # model cannot remember its Work title or ID. One bounded
                 # causal-ledger query, scoped in SQL to the subject's Works.
                 query = a['query'].strip()
                 rows = r._causal_message_projection(
@@ -315,11 +315,18 @@ class NativeWork:
                     if front is None:
                         raise ScopeConflict('found historical Work no longer belongs to this subject')
                     excerpt = _history_message_excerpt(message, query, max_chars=1024)
+                    # Give the model a directly reusable source tuple instead
+                    # of two copies of the excerpt and unrelated metadata.
                     matches.append({
                         'work_id': front.id, 'work_title': front.title,
+                        'source_work_id': front.id,
                         'source_event_id': message['event_id'],
                         'source_excerpt': excerpt['content'],
-                        'message': excerpt,
+                        'role': excerpt['role'], 'seq': excerpt['seq'],
+                        'content_original_chars': excerpt['content_original_chars'],
+                        'content_excerpt_start': excerpt['content_excerpt_start'],
+                        'content_excerpt_end': excerpt['content_excerpt_end'],
+                        'content_truncated': excerpt['content_truncated'],
                     })
                 output = {'matches': matches, 'searched_field': 'message_content',
                     'scope': 'current_subject_only', 'more_matches': more,

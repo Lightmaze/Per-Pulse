@@ -464,9 +464,10 @@ def test_home_can_recover_exact_older_work_history_after_restart(local):
     assert len(first_matches["matches"]) == 12
     assert first_matches["more_matches"] is True
     assert first_matches["search_complete"] is False
-    assert first_matches["next_before_seq"] == first_matches["matches"][0]["message"]["seq"]
-    assert all(hit["work_id"] == work_id and hit["source_event_id"]
-               and hit["source_excerpt"] in hit["message"]["content"]
+    assert first_matches["next_before_seq"] == first_matches["matches"][0]["seq"]
+    assert all(hit["work_id"] == work_id and hit["source_work_id"] == work_id
+               and hit["source_event_id"] and "Historical decision" in hit["source_excerpt"]
+               and len(hit["source_excerpt"]) <= 1024
                for hit in first_matches["matches"])
     home(pages, fixture, [("work", {"op": "find", "query": "Historical decision",
                                  "before_seq": first_matches["next_before_seq"]})])
@@ -539,6 +540,16 @@ def test_home_history_search_shows_the_actual_long_source_match_after_restart(lo
     assert message["content_original_chars"] == len(content)
     assert message["content_truncated"] is True
     assert output["search_complete"] is True
+
+    # Long-lived content remains copyable with exact source offsets.
+    home(pages, fixture, [("work", {"op": "find", "query": "i\u0307stanbul_scope"})])
+    discovered, = fixture.outcomes[0]["output"]["matches"]
+    assert discovered["source_work_id"] == work_id
+    assert discovered["source_event_id"] == original.id
+    assert "İSTANBUL_SCOPE" in discovered["source_excerpt"]
+    assert discovered["content_excerpt_start"] > 0
+    assert content[discovered["content_excerpt_start"]:discovered["content_excerpt_end"]] == discovered["source_excerpt"]
+    assert len(discovered["source_excerpt"]) <= 1024
 
     pages.runtime.close()
     reopened = PageService(pages.data_dir, model_factory=fixture.factory,
@@ -781,9 +792,9 @@ def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restar
         assert discovered["search_complete"] is True
         assert len(discovered["matches"]) == 1
         hit = discovered["matches"][0]
-        assert hit["work_id"] == work_a and hit["source_event_id"] == source_event_id
+        assert (hit["work_id"] == work_a and hit["source_work_id"] == work_a
+                and hit["source_event_id"] == source_event_id)
         assert source_text in hit["source_excerpt"]
-        assert hit["source_excerpt"] == hit["message"]["content"]
         assert foreign.id not in {item["work_id"] for item in discovered["matches"]}
         matched = results[5]["output"]
         assert [work["id"] for work in matched["works"]] == [work_a]
