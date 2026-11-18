@@ -171,6 +171,11 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" \
             PER_PULSE_INSTALLED_PYTHON="$PER_PULSE_INSTALLED_PYTHON" \
             node tests/browser/learning_artifact_flow.mjs
+          # The newest file-to-new-Work path must also work from the
+          # isolated release wheel, not the source checkout.
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" \
+            PER_PULSE_PYTHON="$PER_PULSE_INSTALLED_PYTHON" \
+            node tests/browser/documents_flow.mjs
           "$PER_PULSE_INSTALLED_PYTHON" -m pip install 'pytest>=8,<10'
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" node tests/browser/web_read_flow.mjs
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.0a30
+
+- Start a new Work directly from a verified Home or Work file result. Prepare the original Kernel file receipt and exact source material before the new Work's first model stimulus; then read that file, produce a new artifact under ordinary approval, and retain both through SQLite restart (#313).
+
 ## 0.1.0a29
 
 - Move a successfully Home-created file into an existing Work's unsent draft with its producing Kernel action, source link and exact file digest verified; continue the file under ordinary actions, return the result to Home and recover its source after SQLite restart (#311).
