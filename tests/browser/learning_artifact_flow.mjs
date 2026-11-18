@@ -556,8 +556,8 @@ try {
   assert.ok(homeFile?.id, 'the source must be a successful Home Kernel file action');
   await homeFileButton.click();
   await page.getByText('Home reference: check the original file before drafting.', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Add full file to another Work draft', exact: true }).click();
-  const homeFilePicker = page.getByRole('dialog', { name: 'Add full file to another Work draft', exact: true });
+  await page.getByRole('button', { name: 'Add the full file to another page’s draft', exact: true }).click();
+  const homeFilePicker = page.getByRole('dialog', { name: 'Add the full file to another page’s draft', exact: true });
   await homeFilePicker.getByRole('option', { name: /Uninformed delivery/ }).click();
   await page.getByRole('heading', { name: 'Uninformed delivery', exact: true }).waitFor();
   const receivingDraft = await page.locator('.composer textarea').inputValue();
@@ -576,7 +576,7 @@ try {
 
   // Sending is still the person's choice; the fixture chooses an actual
   // native reading followed by a real approved change using observed bytes.
-  await page.locator('.composer textarea').fill(receivingDraft + '\\n\\nUSE_HOME_FILE_IN_WORK');
+  await page.locator('.composer textarea').fill(receivingDraft + '\n\nUSE_HOME_FILE_IN_WORK');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('Your approval is needed', { exact: true }).waitFor();
   assert.equal((await status()).files.includes('reviewed-home-reference.txt'), false);

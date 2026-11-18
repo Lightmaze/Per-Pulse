@@ -59,7 +59,7 @@ def handler(request):
             if not tool_results:
                 return streamed(tool="mutate_file", arguments={
                     "path": "home-reference.txt", "expected_digest": None,
-                    "content": "Home reference: check the original file before drafting.\\n",
+                    "content": "Home reference: check the original file before drafting.\n",
                 })
             return streamed(text="The Home source file is complete. [Synthetic browser fixture]")
         if "USE_HOME_FILE_IN_WORK" in task:
@@ -74,7 +74,7 @@ def handler(request):
                 assert "Home reference: check the original file before drafting." in observed
                 return streamed(tool="mutate_file", arguments={
                     "path": "reviewed-home-reference.txt", "expected_digest": None,
-                    "content": "Work used the verified Home source:\\n" + observed,
+                    "content": "Work used the verified Home source:\n" + observed,
                 })
             return streamed(text="The sourced Work deliverable is complete. [Synthetic browser fixture]")
 
