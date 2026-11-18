@@ -964,3 +964,51 @@ def test_generated_file_handoff_retains_exact_native_action_source_across_works_
         assert record == received
         assert client.get(f"/api/pages/{producer}/artifacts/{action_id}").json()["state"] == "current"
         assert client.app.state.pages.runtime.kernel_service._runtimes == {}
+
+
+def test_new_work_starts_with_verified_file_before_first_model_stimulus(tmp_path, monkeypatch):
+    """The original Kernel file receipt is durable before the first Work message."""
+    requests = []
+    source_text = "Evidence from the first Work.\\n"
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "handoff.txt", "expected_digest": None, "content": source_text},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        source_id = _page(client)
+        _approve(service.execution, source_id)
+        item, = service.artifacts.snapshot(source_id)["artifacts"]
+        selected = {"id": item["id"], "pageId": source_id,
+                    "path": item["path"], "sha256": item["sha256"]}
+        creation = client.post("/api/pages", json={
+            "title": "Continue the confirmed result", "instruction": "Inspect the original source.",
+            "sourcePageId": source_id, "sourceArtifact": selected,
+        })
+        assert creation.status_code == 201, creation.text
+        body = creation.json()
+        target = body["page"]["id"]
+        initial = next(row for row in body["view"]["messages"]
+                       if row["id"] == body["initialMessageId"])
+        assert len(initial["materials"]) == 1
+        receipt = initial["materials"][0]
+        assert receipt["originArtifactPageId"] == source_id
+        assert receipt["originArtifactId"] == item["id"]
+        assert receipt["pageId"] == target
+        assert receipt["sha256"] == item["sha256"]
+        assert "per-pulse.material-references.v1" in initial["content"]
+        assert service.runtime.storage.get_page_material(service.runtime.world_id, receipt["id"])
+        before_count = len(service.runtime.list_task_fronts())
+        invalid = client.post("/api/pages", json={
+            "title": "Wrong original", "instruction": "Inspect.",
+            "sourcePageId": source_id,
+            "sourceArtifact": {**selected, "sha256": "0" * 64},
+        })
+        assert invalid.status_code == 409
+        assert len(service.runtime.list_task_fronts()) == before_count
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        persisted = client.get(f"/api/pages/{target}").json()
+        saved = next(row for row in persisted["messages"] if row["id"] == body["initialMessageId"])
+        assert saved["materials"][0]["originArtifactId"] == item["id"]
+        assert saved["materials"][0]["sha256"] == item["sha256"]
+        assert service.materials.read(target, receipt["id"])["content"] == source_text

@@ -9931,6 +9931,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         title: str | None = None,
         project_id: str | None = None,
         subject_engram_id: str | None = None,
+        prepare_content: Callable[[str, str], str] | None = None,
     ) -> dict[str, Any]:
         """Create one task view inside this world, then queue its first text.
 
@@ -10014,6 +10015,16 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                     ) from exc
             raise self._world_input_error(exc, "task_front") from exc
 
+        # A native caller can durably prepare scoped source materials after
+        # the Front exists, but before its first stimulus enters the ledger.
+        # No model or Pulse step can observe a partially prepared first task.
+        if prepare_content is not None:
+            content = prepare_content(bundle.front.id, content)
+            if not isinstance(content, str) or not content.strip():
+                raise ServiceError(
+                    "empty_content", "A prepared task needs an initial message.",
+                    "provide a non-empty initial task", status=400,
+                )
         event_id = self.inject(
             bundle.focal_engram.id,
             content,

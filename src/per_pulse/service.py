@@ -1024,9 +1024,41 @@ class PageService:
 
     def create_page(self, title: str, instruction: str, source_page_id: str = "home",
                     source_message_id: str | None = None, *, source_excerpt: str | None = None,
-                    source_experience_id: str | None = None) -> dict:
+                    source_experience_id: str | None = None,
+                    source_artifact: dict | None = None) -> dict:
         with self._lock:
             self._check_message(source_page_id, source_message_id)
+            prepare_content = None
+            first_material = None
+            if source_artifact is not None:
+                if source_message_id is not None or source_excerpt is not None or source_experience_id is not None:
+                    raise PageError("page_source_conflict",
+                                    "Start from either a selected file or another source.", 422)
+                if source_artifact["pageId"] != source_page_id:
+                    raise PageError("page_source_invalid", "The selected file must belong to its source page.", 422)
+                original, _ = self.artifacts._resolve_action(source_page_id, source_artifact["id"])
+                if (original["path"] != source_artifact["path"]
+                        or original["sha256"] != source_artifact["sha256"] or original["undone"]):
+                    raise PageError("page_source_invalid", "The original file result no longer matches.", 409)
+                current_file = self.files.read(source_artifact["path"])
+                if current_file["sha256"] != source_artifact["sha256"]:
+                    raise PageError("page_source_changed", "This file changed. Reopen the original result.", 409)
+
+                def prepare_content(new_page_id: str, initial_content: str) -> str:
+                    nonlocal first_material
+                    # Existing World/Kernel receipt verifies the original action,
+                    # scope, file bytes and hash before the first model stimulus.
+                    result = self.materials.reference_existing(
+                        new_page_id, source_artifact["path"], source_artifact["sha256"],
+                        world_id=self.runtime.world_id, service_instance_id=self.service_instance_id,
+                        source_page_id=source_page_id, source_artifact_id=source_artifact["id"],
+                    )
+                    first_material = result["material"]
+                    prepared = initial_content + material_footer([first_material])
+                    if len(prepared) > 32_000:
+                        raise PageError("page_source_too_large", "Choose a shorter request.", 422)
+                    return prepared
+
             content = instruction
             source_role = None
             saved_origin = None
@@ -1075,8 +1107,11 @@ class PageService:
                     raise PageError("page_source_too_large", "Choose a shorter excerpt or request.", 422)
             created = self.runtime.create_task_front(
                 content, title=title, subject_engram_id=self.runtime.continuity_engram_id,
+                prepare_content=prepare_content,
             )
             page_id = created["task_front"]["id"]
+            if first_material is not None:
+                self._state.setdefault("messageMaterials", {})[created["event_id"]] = [first_material["id"]]
             if source_role is not None:
                 self._state["messageOrigins"][created["event_id"]] = {
                     "pageId": source_page_id, "messageId": source_message_id, "pageSourceRole": source_role,

@@ -12,7 +12,7 @@ function unavailableReason(reason: string | null, t: Translate): string {
   return t('artifacts.missing');
 }
 
-export function PageArtifacts({ view, onUseInHome, onUseInWork, onChanged }: { view: PageView & { artifactsNextCursor?: string | null }; onUseInHome?: (artifact: Artifact) => Promise<void>; onUseInWork?: (artifact: Artifact) => void; onChanged?: () => Promise<unknown> }) {
+export function PageArtifacts({ view, onUseInHome, onUseInWork, onCreateWork, onChanged }: { view: PageView & { artifactsNextCursor?: string | null }; onUseInHome?: (artifact: Artifact) => Promise<void>; onUseInWork?: (artifact: Artifact) => void; onCreateWork?: (artifact: Artifact) => void; onChanged?: () => Promise<unknown> }) {
   const { t, errorText } = useLanguage();
   const [opened, setOpened] = useState<string | null>(null);
   const [result, setResult] = useState<ArtifactRead | null>(null);
@@ -169,6 +169,7 @@ export function PageArtifacts({ view, onUseInHome, onUseInWork, onChanged }: { v
             <button type="button" className="secondary-button" disabled={downloadState === 'loading' || carrying} onClick={() => void download(artifact)}>{t(downloadState === 'loading' ? 'artifacts.downloading' : 'artifacts.download')}</button>
             {onUseInHome && view.page.kind === 'work' ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => void useInHome(artifact)}>{t(carrying ? 'library.artifactToHomeBusy' : 'library.artifactToHome')}</button> : null}
             {onUseInWork ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => onUseInWork(artifact)}>{t('library.artifactToWork')}</button> : null}
+            {onCreateWork ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => onCreateWork(artifact)}>{t('library.artifactToNewWork')}</button> : null}
             {downloadState === 'started' ? <span role="status">{t('artifacts.downloadStarted')}</span> : null}
           </div> : null}
           {!result.downloadable && !result.redacted ? <p className="artifact-intro">{t('artifacts.originalUnavailable')}</p> : null}
