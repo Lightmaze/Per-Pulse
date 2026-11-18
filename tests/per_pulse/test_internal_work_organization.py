@@ -772,7 +772,7 @@ def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restar
         assert runtime.causal_ledger.get_event(source_event_id).content == source_text
         assert runtime.world.get_task_front(work_b).focal_engram_id == runtime.continuity_engram_id
         assert not any(
-            front.title == "Not permitted from Work" for front in runtime.list_task_fronts()
+            front["title"] == "Not permitted from Work" for front in runtime.list_task_fronts()
         )
 
         report = delivered(runtime, results[-1]["output"])
