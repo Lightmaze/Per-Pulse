@@ -455,6 +455,27 @@ def test_home_can_recover_exact_older_work_history_after_restart(local):
     assert "TRACE_PROVENANCE_07" in found["recent_messages"][0]["content"]
     assert found["recent_messages"][0]["center_id"] == runtime.world.get_task_front(work_id).center_id
 
+    # Find previous decisions by content, even when the Work title is unknown.
+    # Cursors are stable ledger sequence numbers rather than in-memory offsets.
+    home(pages, fixture, [("work", {"op": "find", "query": "Historical decision"})])
+    first_matches = fixture.outcomes[0]["output"]
+    assert first_matches["searched_field"] == "message_content"
+    assert first_matches["scope"] == "current_subject_only"
+    assert len(first_matches["matches"]) == 12
+    assert first_matches["more_matches"] is True
+    assert first_matches["search_complete"] is False
+    assert first_matches["next_before_seq"] == first_matches["matches"][0]["message"]["seq"]
+    assert all(hit["work_id"] == work_id and hit["source_event_id"]
+               and hit["source_excerpt"] in hit["message"]["content"]
+               for hit in first_matches["matches"])
+    home(pages, fixture, [("work", {"op": "find", "query": "Historical decision",
+                                 "before_seq": first_matches["next_before_seq"]})])
+    older_matches = fixture.outcomes[0]["output"]
+    assert len(older_matches["matches"]) == 2
+    assert older_matches["search_complete"] is True
+    assert {hit["source_event_id"] for hit in older_matches["matches"]}.isdisjoint(
+        {hit["source_event_id"] for hit in first_matches["matches"]})
+
     other = runtime.engrams.create(auto_name=False).id
     foreign = runtime.world.create_task_bundle_for_existing_engram("Foreign Work", other).front
     home(pages, fixture, [("work", {"op": "inspect", "work_id": foreign.id,
@@ -737,6 +758,7 @@ def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restar
             ("work", {"op": "inspect", "work_id": foreign.id,
                       "query": "Unrelated"}),
             ("work", {"op": "list"}),
+            ("work", {"op": "find", "query": "VERIFY_PRIOR_WORK_2026"}),
             ("work", {"op": "search", "query": "Prior source investigation"}),
             ("work", {"op": "inspect", "work_id": work_a,
                       "query": "VERIFY_PRIOR_WORK_2026"}),
@@ -749,16 +771,24 @@ def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restar
         assert len(results) == len(fixture.plan)
         assert [r["status"] for r in results] == [
             "failed", "failed", "failed", "succeeded", "succeeded",
-            "succeeded", "succeeded", "succeeded",
+            "succeeded", "succeeded", "succeeded", "succeeded",
         ]
         found = results[3]["output"]["works"]
         assert work_a in {work["id"] for work in found}
         assert work_b in {work["id"] for work in found}
         assert foreign.id not in {work["id"] for work in found}
-        matched = results[4]["output"]
+        discovered = results[4]["output"]
+        assert discovered["search_complete"] is True
+        assert len(discovered["matches"]) == 1
+        hit = discovered["matches"][0]
+        assert hit["work_id"] == work_a and hit["source_event_id"] == source_event_id
+        assert source_text in hit["source_excerpt"]
+        assert hit["source_excerpt"] == hit["message"]["content"]
+        assert foreign.id not in {item["work_id"] for item in discovered["matches"]}
+        matched = results[5]["output"]
         assert [work["id"] for work in matched["works"]] == [work_a]
         assert matched["searched_field"] == "title"
-        inspected = results[5]["output"]
+        inspected = results[6]["output"]
         assert inspected["searched_field"] == "message_content"
         assert inspected["search_complete"] is True
         assert any(
@@ -766,7 +796,7 @@ def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restar
             and source_text in message["content"]
             for message in inspected["recent_messages"]
         )
-        assert results[6]["output"]["content"] == (
+        assert results[7]["output"]["content"] == (
             "A real note to inspect without changing files.\n"
         )
         assert runtime.causal_ledger.get_event(source_event_id).content == source_text
