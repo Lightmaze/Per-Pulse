@@ -138,8 +138,13 @@ try {
   const continuedArtifact = (await fetch(base + '/api/pages/' + continuationId).then(r => r.json())).artifacts
     .find(item => item.path === 'continued-field-note.md');
   assert.ok(continuedArtifact?.id);
+  // Reopen the same persistent World and verify both the initial native
+  // attachment and the second artifact without replaying either file effect.
+  await stop(server); server = start(); await ready();
   await page.reload();
-  assert.ok((await fetch(base + '/api/pages/' + continuationId).then(r => r.json())).artifacts.some(item => item.id === continuedArtifact.id));
+  const resumed = await fetch(base + '/api/pages/' + continuationId).then(r => r.json());
+  assert.ok(resumed.artifacts.some(item => item.id === continuedArtifact.id));
+  assert.equal(resumed.messages.find(message => message.role === 'user')?.materials?.[0]?.originArtifactId, artifactId);
   checks.push('A verified file starts a new Work with source attached before its first model decision, produces a second native artifact and survives restart');
   await page.goto(base + '/page/' + firstId);
   await page.locator('.artifact-open').filter({ hasText: fixture.path }).click();
