@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a28
+
+- Let a later Work read-only inspect and search its subject's earlier Works directly, retaining the native Work/Kernel ownership and file-action boundaries (#307).
+- Find an original decision by content across owned Works even when its Work title is unknown, returning a compact, source-addressed quote and history page cursor from the same World/SQLite (#308).
+- Return a later Work's selected result to Home with verified original evidence from another Work, checking the original event and verbatim excerpt at request preparation and delivery (#309).
+
 ## 0.1.0a27
 
 - Run the complete saved-correction → next Work → approved file → sourced Home return → restart journey against an isolated cold-installed wheel, not the source checkout (#302).

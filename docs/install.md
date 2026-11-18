@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a27-py3-none-any.whl` from the
-[v0.1.0a27 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a27).
+Download `per_pulse-0.1.0a28-py3-none-any.whl` from the
+[v0.1.0a28 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a28).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a27-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a28-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a27-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a28-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -91,11 +91,12 @@ still inspect the saved source, but no new AI action runs.
 
 ## Continue from an earlier Work decision
 
-With a configured model, ask Home to revisit an earlier Work's decisions before starting a related task. Native `work.list` and `work.search` locate your Works; `work.inspect` reads their original admitted messages. Use a phrase with `query` to find older messages, or `before_seq` to continue beyond the latest 12. Long matches return an exact continuous excerpt, original event ID and character offsets.
+With a configured model, ask Home or a focused Work to look up an earlier decision before doing a related task. The native `work.list` and `work.search` tools locate owned Works by title; `work.find(query)` searches original messages across owned Works even when the earlier Work title is unknown. Follow `next_before_seq` to inspect older matches. `work.inspect(work_id, query?, before_seq?)` reads the original Work history. Matches carry the original event ID, a continuous exact excerpt and source offsets.
 
-Ask Home to compare that decision with the current task and, where relevant, continue an existing Work or create another. Native `work.create` and `work.send` can include `source_work_id`, `source_event_id` and a verbatim `source_excerpt`. Per Pulse verifies all three against the owned source event again at delivery. The destination receives attributed historical evidence, not a new user instruction or file-action permission. You can reopen the original Work, review the later Work's actual files and return its selected result to Home.
+From Home, `work.create` and `work.send` can carry `source_work_id`, `source_event_id` and verbatim `source_excerpt` into a later Work. While working there, the model can independently call `work.find` or `work.inspect`, read its own files, and use `work.report(kind, note, source_work_id, source_event_id, source_excerpt)` to send a selected result and the earlier Work evidence back to Home. All three source fields are supplied together. The same World verifies source ownership and the exact original excerpt both when the request is prepared and when it is delivered after the source turn succeeds.
 
-This gives the model access to an earlier decision; it does not guarantee the model will look for it without a prompt or that a later artifact will be better.
+The later Work retains its own conversation and file action approval/Undo. Earlier messages are attributed historical data, not new user commands. The Home report can be revisited after restarting the service. A configured model has these tools available; the model's voluntary retrieval and its benefit to the final artifact depend on the actual model and task.
+
 
 ## Continue in a shared Habitat region
 
@@ -146,7 +147,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a27-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a28-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
