@@ -621,7 +621,8 @@ def test_home_hands_a_verified_older_decision_to_work_b_and_returns_after_restar
         fixture.plan = [
             ("read_file", {"path": "notes.txt"}),
             ("work", {"op": "report", "kind": "finding",
-                      "note": "Use the verified prior decision; real notes were read."}),
+                      "note": "Use the verified prior decision; real notes were read.",
+                      **source_args}),
         ]
         run_event(runtime, incoming)
         assert all(outcome["status"] == "succeeded" for outcome in fixture.outcomes)
@@ -632,6 +633,9 @@ def test_home_hands_a_verified_older_decision_to_work_b_and_returns_after_restar
             report_event.id, report_event.idempotency_key,
             runtime.continuity_engram_id, report_event.content)
         assert origin["work_id"] == front.id
+        assert origin["earlier_work_source"] == reference
+        assert label in report_event.content
+        assert json.loads(report_event.content.split(label, 1)[1]) == reference
         fixture.plan = []
         run_event(runtime, report_event)
         assert len(runtime.storage.list_engrams()) == 1
@@ -674,6 +678,9 @@ def test_sourced_work_handoff_rejects_forged_or_unowned_history(local):
     ]:
         with pytest.raises(ValueError, match="supplied together"):
             validate({"op": "create", "title": "Bad source", "instruction": "Do nothing.",
+                      **incomplete})
+        with pytest.raises(ValueError, match="supplied together"):
+            validate({"op": "report", "kind": "finding", "note": "No fabricated source.",
                       **incomplete})
 
     for bad_source in [
@@ -775,7 +782,9 @@ def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restar
                       "query": "VERIFY_PRIOR_WORK_2026"}),
             ("read_file", {"path": "notes.txt"}),
             ("work", {"op": "report", "kind": "finding",
-                      "note": "Work B consulted Work A and read the existing notes.txt file."}),
+                      "note": "Work B consulted Work A and read the existing notes.txt file.",
+                      "source_work_id": work_a, "source_event_id": source_event_id,
+                      "source_excerpt": source_text}),
         ]
         run_event(runtime, runtime.causal_ledger.get_event(work_b_event))
         results = fixture.outcomes
@@ -823,7 +832,13 @@ def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restar
             runtime.continuity_engram_id, report.content,
         )
         assert origin["work_id"] == work_b
+        assert origin["earlier_work_source"] == {
+            "work_id": work_a, "title": "Prior source investigation",
+            "event_id": source_event_id, "role": "user", "excerpt": source_text,
+        }
         assert "existing notes.txt file" in report.content
+        assert "Verified earlier Work excerpt" in report.content
+        assert source_text in report.content
         fixture.plan = []
         run_event(runtime, report)
         assert runtime.causal_ledger.get_event(source_event_id).content == source_text
