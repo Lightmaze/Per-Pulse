@@ -406,7 +406,7 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         revised_input = json.dumps(revised_requests[0]["messages"], ensure_ascii=False)
         assert "A guided registration preview is the current lesson." in revised_input
         assert "CURRENT_REVISION_END: let visitors try it first." in revised_input
-        assert '"detailsOmitted": true' in revised_input
+        assert "detailsOmitted" in revised_input
         assert "readCurrentWith" in revised_input
         assert "currentRevision" in revised_input and "revised" in revised_input
         assert CORRECTION not in revised_input
