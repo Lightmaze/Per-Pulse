@@ -58,7 +58,7 @@ def test_oversized_revised_lesson_remains_usable_before_the_next_work_decision()
     )
     value["selected"]["conditions"] = {"any": ["The visitor can try it", "Use a small demo"]}
     context = source_context(value)
-    current_json = context.split("SELECTED_SOURCE_STATUS_JSON\\n", 1)[1].split("\\n", 1)[0]
+    current_json = context.split("SELECTED_SOURCE_STATUS_JSON\n", 1)[1].split("\n", 1)[0]
     payload = json.loads(current_json)
     selected = payload["currentSelection"]
     assert len(json.dumps(selected, ensure_ascii=False)) <= MAX_SELECTED_JSON_CHARS
