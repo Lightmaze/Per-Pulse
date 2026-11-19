@@ -200,7 +200,10 @@ export default function App() {
   }, [view?.page.kind, view?.page.title]);
 
   useEffect(() => {
-    setModal(previous => previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' || previous?.kind === 'save-example' || previous?.kind === 'transfer' ? null : previous);
+    // Browser Back can leave a create request in flight. Dismiss only its
+    // dialog; the native Work creation and original source keep running.
+    if (currentModal.current?.kind === 'create') setBusy(false);
+    setModal(previous => previous?.kind === 'create' || previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' || previous?.kind === 'save-example' || previous?.kind === 'transfer' ? null : previous);
   }, [route.id, route.serial, workspaceId, bootstrap?.serviceInstanceId]);
 
   useEffect(() => () => window.clearTimeout(scrollTimer.current), [route.id]);
@@ -318,7 +321,15 @@ export default function App() {
 
   const createPage = async (title: string, instruction: string, sourceExcerpt?: string) => {
     const sourceId = route.id;
+    const sourceSerial = route.serial;
+    const sourceModal = modal;
+    const sourceWorkspace = bootstrap?.workspaceId;
+    const sourceService = bootstrap?.serviceInstanceId;
     const message = modal?.kind === 'create' ? modal.message : undefined;
+    const sameService = () => latestBootstrap.current?.workspaceId === sourceWorkspace
+      && latestBootstrap.current?.serviceInstanceId === sourceService;
+    const stillHere = () => sameService() && currentPage.current === sourceId
+      && currentRouteSerial.current === sourceSerial && currentModal.current === sourceModal;
     setBusy(true); setModalError('');
     try {
       const artifact = modal?.kind === 'create' ? modal.artifact : undefined;
@@ -329,12 +340,23 @@ export default function App() {
         sourceMessageId: message?.id, sourceExcerpt,
         sourceExperienceId: modal?.kind === 'create' ? modal.fromExperience?.id : undefined,
         sourceArtifact: artifact ? { id: artifact.id, pageId: artifact.pageId, path: artifact.path, sha256: artifact.sha256 } : undefined });
-      applyView(response.view);
-      refreshPage(sourceId).catch(() => {});
-      navigate(response.page.id, { pageId: sourceId, messageId: message?.id, referenceId: response.reference.id });
-      setToast(t('app.pageCreated'));
-    } catch (problem) { setModalError(errorText(problem)); }
-    finally { setBusy(false); }
+      // An admitted Work remains real even if the user navigated elsewhere
+      // while its receipt was in flight. Update the original World, but never
+      // replace a later route, dialog or workspace with an older response.
+      if (sameService()) {
+        applyView(response.view);
+        refreshPage(sourceId).catch(() => {});
+        if (stillHere()) navigate(response.page.id, { pageId: sourceId, messageId: message?.id, referenceId: response.reference.id });
+        setToast(t('app.pageCreated'));
+      }
+    } catch (problem) {
+      if (stillHere()) setModalError(errorText(problem));
+      else if (sameService()) setToast(errorText(problem));
+    } finally {
+      // Do not clear the busy state of a different dialog started since this
+      // request, even when the old response arrives last.
+      if (currentModal.current === sourceModal || currentModal.current === null) setBusy(false);
+    }
   };
 
   const selectPage = async (page: PageSummary) => {
