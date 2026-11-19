@@ -551,9 +551,9 @@ def test_stop_between_failed_connection_and_fallback_prevents_next_attempt(monke
 
 
 def test_later_connection_attempts_share_the_original_total_deadline(monkeypatch):
-    # A loaded CI runner can spend the 100 ms wall-clock budget before the
-    # second attempt starts. Advance only this adapter's clock at connection
-    # boundaries, so the test checks the shared deadline, not runner speed.
+    # The former 100 ms real sleep budget was consumed by CI runner load.
+    # Advance only this adapter's clock at connection boundaries and use a
+    # generous real asyncio timeout, so the test checks the shared deadline.
     class Clock:
         now = 1000.0
 
@@ -565,13 +565,13 @@ def test_later_connection_attempts_share_the_original_total_deadline(monkeypatch
 
     async def connecting(request):
         calls.append(request)
-        clock.now += .04 if len(calls) == 1 else .07
+        clock.now += 4 if len(calls) == 1 else 7
         raise httpx.ConnectTimeout("synthetic connection timeout")
 
     monkeypatch.setattr(web, "time", clock)
     monkeypatch.setattr(web, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(connecting), trust_env=False))
     monkeypatch.setattr(web, "_resolve", lambda *args: ("8.8.8.8", "1.1.1.1", "9.9.9.9"))
-    monkeypatch.setattr(web, "TOTAL_SECONDS", .1)
+    monkeypatch.setattr(web, "TOTAL_SECONDS", 10)
 
     with pytest.raises(web.WebReadError) as error:
         read()
