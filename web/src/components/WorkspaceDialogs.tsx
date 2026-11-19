@@ -14,7 +14,7 @@ export type Modal =
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'picker'; mode: 'artifact'; artifact: Artifact }
   | { kind: 'return'; message: Message; content: string; needsExactExcerpt?: boolean }
-  | { kind: 'transfer'; message: Message; excerpt: string }
+  | { kind: 'transfer'; message: Message; excerpt: string; requestId: string }
   | { kind: 'settings' }
   | { kind: 'learning' }
   | { kind: 'save-example'; message: Message; content: string; needsExactExcerpt?: boolean }
