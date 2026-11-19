@@ -47,13 +47,36 @@ def test_native_source_state_is_attributed_and_revisable_without_copying_private
         assert "Use a real preview" not in context
 
 
-def test_oversized_lesson_is_not_fragmented_into_unparseable_or_authoritative_json():
+def test_oversized_revised_lesson_remains_usable_before_the_next_work_decision():
+    import json
+
     value = status()
-    value["selected"]["lesson"] = "Very long private source. " * MAX_SELECTED_JSON_CHARS
+    value["selected"]["lesson"] = (
+        "NEW_REVISION_START: use the playable preview. "
+        + "Background from this source. " * MAX_SELECTED_JSON_CHARS
+        + "NEW_REVISION_END: never require intake first."
+    )
+    value["selected"]["conditions"] = {"any": ["The visitor can try it", "Use a small demo"]}
     context = source_context(value)
-    assert '"detailsOmitted": true' in context
-    assert "Very long private source." not in context
-    assert '"id": "experience-1"' in context
+    current_json = context.split("SELECTED_SOURCE_STATUS_JSON\n", 1)[1].split("\n", 1)[0]
+    payload = json.loads(current_json)
+    selected = payload["currentSelection"]
+    assert len(json.dumps(selected, ensure_ascii=False)) <= MAX_SELECTED_JSON_CHARS
+    assert selected["detailsOmitted"] is True
+    assert selected["readCurrentWith"] == {
+        "tool": "posture", "op": "get", "experience_id": "experience-1",
+    }
+    assert selected["lessonPreview"]["first"].startswith("NEW_REVISION_START")
+    assert selected["lessonPreview"]["last"].endswith("NEW_REVISION_END: never require intake first.")
+    assert selected["lessonPreview"]["truncated"] is True
+    assert "Background from this source. " * MAX_SELECTED_JSON_CHARS not in context
+    assert "before relying on omitted details" in context
+    assert selected["conditions"] == value["selected"]["conditions"]
+    assert value["selected"]["lesson"] == (
+        "NEW_REVISION_START: use the playable preview. "
+        + "Background from this source. " * MAX_SELECTED_JSON_CHARS
+        + "NEW_REVISION_END: never require intake first."
+    )
 
 
 @pytest.mark.parametrize("invalid", [
