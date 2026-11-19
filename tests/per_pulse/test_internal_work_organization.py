@@ -18,7 +18,7 @@ from pulse_harness.core.errors import ScopeConflict
 from pulse_harness.core.provider import CancellationToken
 from pulse_system.agent.harness.base import HarnessError
 from pulse_system.service.kernel_runtime import KernelHarnessFactory, KernelHarnessRuntime
-from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig
+from pulse_system.service.runtime import RuntimeService, RuntimeServiceConfig, ServiceError
 from pulse_system.core.pulse.engine import PulseEvent
 from pulse_system.core.types import ActivityOrigin
 
@@ -730,6 +730,95 @@ def test_unavailable_historical_handoff_does_not_leave_an_empty_new_work(local):
     assert runtime.world.get_task_front(receipt["work_id"]) is None
     assert runtime.causal_ledger.get_event(sent["messageId"]).content == (
         "Decision: preserve the real observation.")
+
+
+def test_failed_native_create_discards_its_empty_work_and_allows_later_work(local, monkeypatch):
+    """A rejected initial admission must leave no ghost Work across SQLite restart."""
+    pages, fixture = local
+    runtime = pages.runtime
+    home(pages, fixture, create_plan())
+    receipt = fixture.outcomes[-1]["output"]
+    assert receipt["status"] == "prepared"
+    original_inject = runtime.inject
+
+    def fail_initial_admission(*args, **kwargs):
+        if kwargs.get("idempotency_key") == receipt["request_id"]:
+            # A native admission failure after the persisted TaskFront exists.
+            assert runtime.world.get_task_front(receipt["work_id"]) is not None
+            raise ServiceError("initial_work_unavailable", "The initial task cannot enter",
+                               "Try a new Work request", status=409)
+        return original_inject(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "inject", fail_initial_admission)
+    runtime._native_work.drain()
+    failed = runtime.storage.load_component_state(receipt["request_id"])
+    assert failed["status"] == "blocked"
+    assert failed["error_code"] == "initial_work_unavailable"
+    assert failed["event_id"] is None
+    assert runtime.world.get_task_front(receipt["work_id"]) is None
+    assert runtime.causal_ledger.find_causal_event_by_idempotency(
+        runtime.world_id, receipt["request_id"]) is None
+    assert runtime.list_task_fronts() == []
+    assert len(runtime.storage.list_engrams()) == 1
+
+    pages.runtime.close()
+    reopened = PageService(pages.data_dir, model_factory=fixture.factory,
+                           posture=False, allow_workspace_actions=False,
+                           pulse=PulseSettings(enabled=False))
+    try:
+        runtime = reopened.runtime
+        assert runtime.world.get_task_front(receipt["work_id"]) is None
+        assert runtime.storage.load_component_state(receipt["request_id"])["status"] == "blocked"
+        home(reopened, fixture, create_plan())
+        next_receipt = fixture.outcomes[-1]["output"]
+        assert next_receipt["request_id"] != receipt["request_id"]
+        actual = delivered(runtime, next_receipt)
+        assert actual.center_id == runtime.world.get_task_front(next_receipt["work_id"]).center_id
+        assert len(runtime.list_task_fronts()) == 1
+        assert runtime.world.get_task_front(receipt["work_id"]) is None
+    finally:
+        reopened.runtime.close()
+
+
+def test_native_create_recovers_committed_first_event_without_replaying(local, monkeypatch):
+    """A missing inject acknowledgement does not lose or duplicate the first stimulus."""
+    pages, fixture = local
+    runtime = pages.runtime
+    home(pages, fixture, create_plan())
+    receipt = fixture.outcomes[-1]["output"]
+    original_inject = runtime.inject
+    admitted = []
+
+    def lose_acknowledgement(*args, **kwargs):
+        event_id = original_inject(*args, **kwargs)
+        if kwargs.get("idempotency_key") == receipt["request_id"]:
+            admitted.append(event_id)
+            raise ServiceError("admission_ack_lost", "Event committed but acknowledgement lost",
+                               "Inspect the existing event", status=503)
+        return event_id
+
+    monkeypatch.setattr(runtime, "inject", lose_acknowledgement)
+    runtime._native_work.drain()
+    assert len(admitted) == 1
+    saved = runtime.storage.load_component_state(receipt["request_id"])
+    assert saved["status"] == "delivered"
+    assert saved["event_id"] == admitted[0]
+    front = runtime.world.get_task_front(receipt["work_id"])
+    assert front.center_id == runtime.causal_ledger.get_event(admitted[0]).center_id
+    runtime._native_work.drain()
+    assert runtime.storage.load_component_state(receipt["request_id"]) == saved
+    assert len(runtime.list_task_fronts()) == 1
+
+    pages.runtime.close()
+    reopened = PageService(pages.data_dir, model_factory=None, posture=False,
+                           allow_workspace_actions=False, pulse=PulseSettings(enabled=False))
+    try:
+        actual = delivered(reopened.runtime, receipt)
+        assert actual.id == admitted[0]
+        assert len(reopened.runtime.list_task_fronts()) == 1
+        assert reopened.runtime.world.get_task_front(receipt["work_id"]).center_id == front.center_id
+    finally:
+        reopened.runtime.close()
 
 
 def test_later_work_reads_prior_owned_history_and_returns_real_file_after_restart(local):
