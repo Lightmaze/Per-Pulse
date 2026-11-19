@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a32
+
+- Keep all older Works reachable while new activity arrives between native `work.list` or title-search pages. Discovery now uses a stable creation-order cursor; the UI still shows recent activity (#320).
+- Preserve Home's current route, unsent draft and keyboard focus when the server has created another Work but its HTTP acknowledgement arrives after the person navigated back. The new Work remains saved and source-linked (#321).
+- Restore an explicitly selected, still-shared Work experience from the native Posture journal when the Kernel actually omits early history for a later model decision. Keep revised, withdrawn, and unavailable-source checks and the bounded full-revision reading path (#322).
+- Make Web multi-address timeout fallback regression deterministic on CI without changing production HTTP behavior (#319).
+
 ## 0.1.0a31
 
 - If creating a new Work from a verified file fails before its first task is admitted, remove the unstarted Work and its temporary material receipt transactionally. Keep the source file and producing action, including across SQLite restart (#315).
