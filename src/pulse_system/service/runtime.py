@@ -10144,7 +10144,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             ),
         }
 
-    def send_task_front_message(self, front_id: str, content: str) -> str:
+    def send_task_front_message(self, front_id: str, content: str, *,
+                                idempotency_key: str | None = None) -> str:
         self._require_runtime_owner()
         front = self._world.get_task_front(front_id)
         if front is None:
@@ -10197,6 +10198,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             content,
             source="user",
             center_id=center.id,
+            idempotency_key=idempotency_key,
             _admission_guard=self._task_message_admission_guard(
                 center_id=center.id,
                 engram_id=front.focal_engram_id,
