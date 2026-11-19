@@ -85,7 +85,7 @@ SCHEMA["properties"]["changes"] = {
 def descriptor() -> ToolDescriptor:
     return ToolDescriptor(
         NAME,
-        "Keep lessons and later feedback. list shows newest experiences and recent "
+        "Keep lessons and later feedback. list pages experiences by stable creation order and recent "
         "message IDs; when next_after_experience_id appears, page older ones with "
         "list(after_experience_id). find(query) searches titles, lessons, conditions, "
         "shifts and passages; page older matches with find(query, after_experience_id). "
@@ -709,15 +709,21 @@ class NativePosture:
                             "material_too_large": not bool(packed["episodes"]),
                             "scope": "current_context_and_explicit_subject_transfers",
                             "semantic_applicability": "not_yet_assessed"}
-                materials = memory.materials(subject_id=scope.engram_id, context_id=scope.context_id)
+                materials = memory.materials(
+                    subject_id=scope.engram_id, context_id=scope.context_id,
+                    stable_creation_order=True,
+                )
                 is_find = values["op"] == "find"
                 eligible = materials["episodes"]
                 if is_find:
                     needle = values["query"].casefold()
                     eligible = [item for item in eligible
                                 if needle in experience_search_text(item).casefold()]
-                # The host journal already filters inaccessible contexts and inactive
-                # experiences. A cursor must belong to exactly that visible sequence.
+                # Host journal eligibility is authoritative. Stable creation order
+                # keeps an older selected source reachable when another Work
+                # edits or rates it between discovery pages. The automatic
+                # model work packet keeps its separate content-priority policy.
+                # A cursor must belong to exactly this visible sequence.
                 start = 0
                 after = values.get("after_experience_id")
                 if after is not None:
