@@ -51,7 +51,7 @@ _OPTIONAL_FIELDS = {'list': {'after_work_id'}, 'search': {'after_work_id'},
 def descriptor() -> ToolDescriptor:
     return ToolDescriptor(NAME,
         'Home: create(title, instruction) starts a Work with required context. '
-        'Home/Work: list(after_work_id?) pages owned Works, 32 per page; '
+        'Home/Work: list(after_work_id?) pages owned Works by creation order, 32 per page; '
         'search(query, after_work_id?) finds titles, 32 each. '
         'Page both with next_after_work_id. '
         'find(query, before_seq?) searches owned Work messages, 12 per page; '
@@ -285,7 +285,11 @@ class NativeWork:
                     # transcripts into the Home model context to find a match.
                     needle = a['query'].strip().casefold()
                     fronts = [front for front in fronts if needle in front.title.casefold()]
-                fronts.sort(key=lambda x: (x.updated_at, x.id), reverse=True)
+                # A background Work may advance while Home pages older Works.
+                # Cursor traversal uses immutable creation order; refreshed
+                # activity stays visible in each Work without moving IDs
+                # across the model's existing after_work_id boundary.
+                fronts.sort(key=lambda x: (x.created_at, x.id), reverse=True)
                 start = 0
                 if 'after_work_id' in a:
                     # A foreign, missing, or nonmatching anchor must not reveal
