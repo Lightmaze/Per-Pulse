@@ -168,10 +168,9 @@ try {
   await wait(() => new URL(page.url()).pathname === '/', 'Home after browser Back');
   await page.locator('dialog').waitFor({ state: 'detached' });
   await composer.fill(homeDraft);
-  // A real return to the composer includes focus/pointer interaction, even
-  // when its saved draft already equals the text. A same-value scripted fill
-  // alone may not mark the new route as actively edited before restoration.
-  await composer.click();
+  // Returning to an unchanged Home draft through keyboard or assistive focus
+  // is still active interaction. Delayed route restoration must yield to it.
+  await composer.focus();
   assert.ok(await composer.evaluate(element => element === document.activeElement));
   releaseCreate();
   await lateResponse;
