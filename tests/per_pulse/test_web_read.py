@@ -551,20 +551,32 @@ def test_stop_between_failed_connection_and_fallback_prevents_next_attempt(monke
 
 
 def test_later_connection_attempts_share_the_original_total_deadline(monkeypatch):
+    # A loaded CI runner can spend the 100 ms wall-clock budget before the
+    # second attempt starts. Advance only this adapter's clock at connection
+    # boundaries, so the test checks the shared deadline, not runner speed.
+    class Clock:
+        now = 1000.0
+
+        def monotonic(self):
+            return self.now
+
+    clock = Clock()
     calls = []
+
     async def connecting(request):
         calls.append(request)
-        await asyncio.sleep(.04 if len(calls) == 1 else .3)
-        raise httpx.ConnectTimeout("synthetic first connection timeout")
+        clock.now += .04 if len(calls) == 1 else .07
+        raise httpx.ConnectTimeout("synthetic connection timeout")
+
+    monkeypatch.setattr(web, "time", clock)
     monkeypatch.setattr(web, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(connecting), trust_env=False))
     monkeypatch.setattr(web, "_resolve", lambda *args: ("8.8.8.8", "1.1.1.1", "9.9.9.9"))
     monkeypatch.setattr(web, "TOTAL_SECONDS", .1)
-    started = time.monotonic()
+
     with pytest.raises(web.WebReadError) as error:
         read()
     assert error.value.code == "web_read_timeout"
-    assert len(calls) == 2, "the next address must not receive a fresh total deadline"
-    assert time.monotonic() - started < .3
+    assert [request.url.host for request in calls] == ["8.8.8.8", "1.1.1.1"]
 
 
 @pytest.mark.parametrize("blocked", ["127.0.0.1", "::ffff:10.0.0.1"])
