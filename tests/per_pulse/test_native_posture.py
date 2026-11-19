@@ -496,6 +496,89 @@ def test_native_find_pages_all_old_matching_records_without_exposing_private_cur
     assert native.tool._requests() == []  # Pure reads do not stage learning.
 
 
+def test_old_shared_experience_survives_active_revision_during_native_discovery(native):
+    """Work B can finish paging Work A lessons after one older lesson is updated.
+
+    All reads use the original World/Posture journal and native tool. Only
+    the saved example input is authored; no model response is inferred.
+    """
+    def add(index, *, context="work:source-a", scope="subject"):
+        return native.memory.add_experience(
+            experience_id=f"trail-source-{index:02d}",
+            subject_id=native.scope.engram_id, context_id=context,
+            scope=scope, record_type="constructed_fixture",
+            title=f"Trail report decision {index:02d}",
+            lesson="Keep the source and the finished field report together.",
+            conditions={"all": ["A traced field report is requested"]},
+            counterexamples=["A blank register needs no source narrative."],
+            shift={"understanding": "Check the source before choosing an export.",
+                   "candidates": "Prefer a traceable artifact.",
+                   "delivery": "Compare the completed file with the source."},
+            encounter={"situation": "A source Work",
+                       "action": "A first report", "outcome": "Operator correction"},
+            source={"kind": "test_native_paging"},
+        )
+
+    saved = [add(index) for index in range(20)]
+    private = add(90, context="work:another-private", scope="context")
+    oldest = saved[0]
+
+    def read(arguments):
+        return native.tool.execute(
+            native.scope, ToolCall("posture-page", "posture", arguments),
+            CancellationToken(), action_request_id="posture-page-read",
+        )
+
+    first_list = read({"op": "list"})
+    first_find = read({"op": "find", "query": "Trail"})
+    assert len(first_list["experiences"]) == len(first_find["experiences"]) == 8
+    assert oldest["id"] not in {item["id"] for item in first_list["experiences"]}
+
+    # A later change to the oldest selected lesson would jump ahead of both
+    # cursor anchors if native discovery were ordered by mutable updated_at.
+    native.memory.revise_experience(
+        oldest["id"], expected_revision=1,
+        changes={"lesson": "Check original observation bytes before publishing the revised trail report."},
+    )
+    assert native.memory.materials(
+        subject_id=native.scope.engram_id, context_id=native.scope.context_id,
+    )["episodes"][0]["id"] == oldest["id"]  # Model material priority is unchanged.
+
+    def finish_pages(op, first):
+        pages = [first]
+        while pages[-1]["more_experiences"]:
+            anchor = pages[-1]["next_after_experience_id"]
+            assert anchor is not None
+            arguments = {"op": op, "after_experience_id": anchor}
+            if op == "find":
+                arguments["query"] = "Trail"
+            pages.append(read(arguments))
+            assert len(pages) <= 4
+        assert pages[-1]["next_after_experience_id"] is None
+        return [item for page in pages for item in page["experiences"]]
+
+    expected = {item["id"] for item in saved}
+    for op, initial in (("list", first_list), ("find", first_find)):
+        result = finish_pages(op, initial)
+        ids = [item["id"] for item in result]
+        assert len(ids) == len(set(ids)) == 20
+        assert set(ids) == expected
+        current = next(item for item in result if item["id"] == oldest["id"])
+        assert current["revision"] == 2
+        assert "original observation bytes" in current["lesson"]
+        # An explicitly shared Work carries its abstraction, not raw private
+        # feedback, encounter or unrelated Work content.
+        assert "encounter" not in current
+        assert private["id"] not in ids
+
+    current = read({"op": "get", "experience_id": oldest["id"]})
+    assert current["experience"]["revision"] == 2
+    with pytest.raises(ScopeConflict, match="not active or accessible"):
+        read({"op": "find", "query": "Trail",
+              "after_experience_id": private["id"]})
+    assert native.tool._requests() == []  # Browsing did not stage a learning write.
+
+
 def test_model_cannot_supply_a_scope_or_fabricated_encounter(native):
     for extra in ({"scope": "subject"}, {"encounter": {"action": "Invented success"}},
                   {"source": {"kind": "verified"}}):
