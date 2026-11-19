@@ -23,7 +23,7 @@ await new Promise(done => socket.close(done));
 const base = `http://127.0.0.1:${port}`;
 const title = 'A discovered source check';
 const checks = [], errors = [];
-let server, serverLog = '', browser, page, releaseRead = () => {}, releaseReconnect = () => {};
+let server, serverLog = '', browser, page, releaseRead = () => {}, releaseReconnect = () => {}, releaseCreate = () => {};
 const start = (offline = false) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/work_discovery_server.py'), '--data-dir', directory,
@@ -141,10 +141,54 @@ try {
   checks.push('A failed workspace read preserves known pages and drafts; the next existing Home observation remains usable.');
 
   await navigate(title);
+  // Withhold the HTTP response only AFTER the real native World has created
+  // the new Work. Browser Back must not let that late receipt steal Home focus.
+  let createdOnServer;
+  const persistedCreate = new Promise(done => { createdOnServer = done; });
+  const heldCreate = new Promise(done => { releaseCreate = done; });
+  await page.route('**/api/pages', async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 201);
+    const result = await response.json();
+    createdOnServer(result.page.id);
+    await heldCreate;
+    await route.fulfill({ response }).catch(() => {});
+  }, { times: 1 });
+  await page.getByRole('button', { name: 'Create a page', exact: true }).click();
+  await page.locator('#new-page-title').fill('New Work after a delayed receipt');
+  await page.locator('#new-page-focus').fill('Preserve the source Work and its original browsing position.');
+  const lateResponse = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/pages' && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  const lateCreatedId = await persistedCreate;
+  const persisted = await get('/api/pages/' + lateCreatedId);
+  assert.equal(persisted.page.title, 'New Work after a delayed receipt');
+  assert.equal(persisted.page.sourcePageId, workId);
+  await page.goBack();
+  await wait(() => new URL(page.url()).pathname === '/', 'Home after browser Back');
+  await page.locator('dialog').waitFor({ state: 'detached' });
+  await composer.fill(homeDraft);
+  // Returning to an unchanged Home draft through keyboard or assistive focus
+  // is still active interaction. Delayed route restoration must yield to it.
+  await composer.focus();
+  assert.ok(await composer.evaluate(element => element === document.activeElement));
+  releaseCreate();
+  await lateResponse;
+  assert.equal(new URL(page.url()).pathname, '/', 'late native creation cannot open a Work over Home');
+  assert.equal(await composer.inputValue(), homeDraft, 'late receipt preserves the new Home draft');
+  assert.ok(await composer.evaluate(element => element === document.activeElement));
+  assert.equal(await page.locator('dialog').count(), 0);
+  await navigate(title);
+  assert.equal(await composer.inputValue(), workDraft, 'the original Work draft was not replaced');
+  checks.push('Creating a real source-linked Work survives a late HTTP receipt after browser Back without moving Home, closing another dialog or losing either draft.');
+
   await stop(server); server = start(true);
   await wait(async () => (await fetch(base + '/api/health')).ok, 'real same-World restart');
   const restarted = await get('/api/bootstrap');
   assert.equal(restarted.workspaceId, identity.workspaceId);
+  const recoveredWork = await get('/api/pages/' + lateCreatedId);
+  assert.equal(recoveredWork.page.title, 'New Work after a delayed receipt');
+  assert.equal(recoveredWork.page.sourcePageId, workId);
   assert.notEqual(restarted.serviceInstanceId, identity.serviceInstanceId);
   const restartRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/bootstrap');
   await navigate('Home');
@@ -223,7 +267,7 @@ try {
   await navigation.getByRole('button', { name: 'Show more Works' }).click();
   assert.equal(await sidebarWorks.count(), 97, 'progressively reveal instead of mounting all Works');
   await navigation.getByRole('button', { name: 'Show more Works' }).click();
-  assert.equal(await sidebarWorks.count(), 131, 'all summaries eventually remain reachable');
+  assert.equal(await sidebarWorks.count(), 132, 'all display summaries and both real Works remain reachable');
   const pageFilter = navigation.getByRole('searchbox', { name: 'Find a Work' });
   await pageFilter.fill('archive work 130');
   assert.equal(await sidebarWorks.count(), 1, 'search reaches the oldest matching summary');
@@ -238,7 +282,7 @@ try {
   if (screenshots && page) await page.screenshot({ path: join(screenshots, 'work-discovery-failure.png') }).catch(() => {});
   throw error;
 } finally {
-  releaseRead(); releaseReconnect();
+  releaseRead(); releaseReconnect(); releaseCreate();
   await browser?.close(); await stop(server);
   await rm(directory, { recursive: true, force: true });
 }
