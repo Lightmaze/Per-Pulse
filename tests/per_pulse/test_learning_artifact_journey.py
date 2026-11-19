@@ -61,7 +61,8 @@ def fixture_factory(monkeypatch, requests):
             finish = "tool_calls"
         elif "CONTINUE_SOURCE_STATUS_REVISED" in task and not any(m["role"] == "tool" for m in current):
             fresh = ("SELECTED_SOURCE_STATUS_JSON" in model_view
-                     and "A guided registration preview is the current lesson." in model_view)
+                     and "A guided registration preview is the current lesson." in model_view
+                     and "CURRENT_REVISION_END: let visitors try it first." in model_view)
             delta = {"tool_calls": [{"index": 0, "id": "fixture-revised-decision",
                                     "type": "function", "function": {
                                         "name": "mutate_file",
@@ -374,10 +375,17 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
                    lambda v: v["status"] == "idle", "withdrawn continuation settled")
         assert (tmp_path / "workspace" / "after-withdrawn.txt").read_text() == "Historical source withheld.\\n"
 
+        # A later correction can be long enough to overflow advisory JSON.
+        # The receiving Work still needs the actionable beginning and end of
+        # the new revision before deciding which file to create.
+        long_current_lesson = (
+            "A guided registration preview is the current lesson. "
+            + "Current source details for the real visitor. " * 86
+            + "CURRENT_REVISION_END: let visitors try it first."
+        )
         resumed = client.patch(f"/api/pages/{source_page}/posture/experiences/{record['id']}",
                                json={"expectedRevision": 4, "changes": {
-                                   "active": True,
-                                   "lesson": "A guided registration preview is the current lesson.",
+                                   "active": True, "lesson": long_current_lesson,
                                }})
         assert resumed.status_code == 200, resumed.text
         assert resumed.json()["experience"]["revision"] == 5
@@ -397,6 +405,9 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         assert revised_requests
         revised_input = json.dumps(revised_requests[0]["messages"], ensure_ascii=False)
         assert "A guided registration preview is the current lesson." in revised_input
+        assert "CURRENT_REVISION_END: let visitors try it first." in revised_input
+        assert '"detailsOmitted": true' in revised_input
+        assert "readCurrentWith" in revised_input
         assert "currentRevision" in revised_input and "revised" in revised_input
         assert CORRECTION not in revised_input
         assert source_result["content"] not in revised_input
