@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from per_pulse.service import _selected_result_transfer_content
 from test_pages import client_for, http_factory, new_page, wait_for
 
@@ -151,3 +153,86 @@ def test_an_edited_excerpt_is_sent_with_its_source_and_marked_edited(tmp_path, m
         }).json()
         verbatim = next(m for m in exact["view"]["messages"] if m["id"] == exact["messageId"])
         assert '"edited"' not in verbatim["content"]
+
+
+def test_retried_work_handoff_keeps_one_native_input_and_source_after_restart(tmp_path, monkeypatch):
+    """A lost HTTP response or interrupted metadata save cannot duplicate real Work."""
+    observed = []
+    with client_for(tmp_path, model_factory=http_factory(monkeypatch, observed)) as client:
+        source_id = new_page(client, title="Research source", instruction="source input")["page"]["id"]
+        target_id = new_page(client, title="Follow-up draft", instruction="receiving input")["page"]["id"]
+        reply = _settled_reply(client, source_id)
+        _settled_reply(client, target_id)
+
+    transfer_id = "transfer-retry-20261119-a"
+    content = {
+        "targetPageId": target_id, "messageId": reply["id"],
+        "excerpt": reply["content"],
+        "instruction": "Use the first Work's completed finding in the second Work.",
+        "requestId": transfer_id,
+    }
+    # No model is configured in the new process: only the durable native
+    # Work stimulus is admitted, never a scripted continuation.
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        persisted_save = pages._save
+
+        def interrupted_save():
+            raise OSError("Simulated lost response after native transfer admission")
+
+        monkeypatch.setattr(pages, "_save", interrupted_save)
+        with pytest.raises(OSError, match="Simulated lost response"):
+            pages.transfer_work(
+                source_id, target_id, reply["id"], content["excerpt"],
+                content["instruction"], transfer_id,
+            )
+        monkeypatch.setattr(pages, "_save", persisted_save)
+        original = pages.runtime.causal_ledger.find_causal_event_by_idempotency(
+            pages.runtime.world_id,
+            f"per-pulse-work-transfer:{pages.runtime.world_id}:{transfer_id}",
+        )
+        assert original is not None and original.center_id == pages._front(target_id).center_id
+
+    # Reopen the same World. The original user stimulus survives even if its
+    # page presentation/reference write was interrupted. A retry repairs that
+    # presentation rather than scheduling another model turn.
+    with client_for(tmp_path, model_factory=None) as client:
+        replay = client.post(f"/api/pages/{source_id}/transfer", json=content)
+        assert replay.status_code == 201, replay.text
+        first = replay.json()
+        assert first["messageId"] == original.id
+        exact = next(m for m in first["view"]["messages"] if m["id"] == original.id)
+        assert exact["sourcePageId"] == source_id
+        assert exact["sourceMessageId"] == reply["id"]
+
+        # The owner may rename the source while this browser still awaits its
+        # response. A second identical request still has exactly one link.
+        changed = client.patch(f"/api/pages/{source_id}", json={"title": "Revised research source"})
+        assert changed.status_code == 200, changed.text
+        repeated = client.post(f"/api/pages/{source_id}/transfer", json=content)
+        assert repeated.status_code == 201, repeated.text
+        again = repeated.json()
+        assert again["messageId"] == first["messageId"]
+        assert again["reference"]["id"] == first["reference"]["id"]
+        current = client.get(f"/api/pages/{target_id}").json()
+        assert sum(m["id"] == first["messageId"] for m in current["messages"]) == 1
+        assert sum(r["kind"] == "transfer" and r["sourceMessageId"] == first["messageId"]
+                   for r in current["references"]) == 1
+
+        # A fresh instruction is a new user action, not an invisible rewrite of
+        # the already-accepted request identity.
+        conflict = client.post(f"/api/pages/{source_id}/transfer", json={
+            **content, "instruction": "Replace the previous request with a different task.",
+        })
+        assert conflict.status_code == 409, conflict.text
+        assert conflict.json()["error"]["code"] == "transfer_request_conflict"
+        assert [m["id"] for m in client.get(f"/api/pages/{target_id}").json()["messages"]] == [
+            m["id"] for m in current["messages"]
+        ]
+
+    with client_for(tmp_path, model_factory=None) as client:
+        stored = client.get(f"/api/pages/{target_id}").json()
+        assert sum(m["id"] == original.id for m in stored["messages"]) == 1
+        assert next(m for m in stored["messages"] if m["id"] == original.id)["sourceMessageId"] == reply["id"]
+        assert len([r for r in stored["references"] if r["sourceMessageId"] == original.id
+                    and r["kind"] == "transfer"]) == 1
