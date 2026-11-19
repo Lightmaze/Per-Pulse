@@ -146,9 +146,9 @@ export const api = {
     request<{ reference: PageReference; view: PageView }>(`${pagePath(id)}/references`, { method: 'POST', body: JSON.stringify(data) }),
   bringHome: (id: string, content: string, messageId?: string, includeMaterials = false) =>
     request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/return`, { method: 'POST', body: JSON.stringify({ content, messageId, includeMaterials }) }),
-  transferWork: (id: string, targetPageId: string, messageId: string, excerpt: string, instruction: string) =>
+  transferWork: (id: string, targetPageId: string, messageId: string, excerpt: string, instruction: string, requestId: string) =>
     request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/transfer`, {
-      method: 'POST', body: JSON.stringify({ targetPageId, messageId, excerpt, instruction }),
+      method: 'POST', body: JSON.stringify({ targetPageId, messageId, excerpt, instruction, requestId }),
     }),
   pulse: (signal?: AbortSignal) => request<PulseState>('/pulse', { signal }),
   pulseObservation: (signal?: AbortSignal) => request<PulseObservation>('/pulse/observation', { signal }),
