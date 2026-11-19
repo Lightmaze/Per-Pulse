@@ -506,8 +506,28 @@ try {
   await transferDialog.locator('#transfer-work-target').selectOption(beforeId);
   assert.match(await transferDialog.locator('#transfer-work-excerpt').inputValue(), /twelve-field intake form/);
   await transferDialog.locator('#transfer-work-instruction').fill('Use this precise finding to improve the next draft.');
+  // The first request reaches the native World, but its HTTP response is
+  // deliberately lost. Repeating Send in the same dialog must reuse the
+  // original request identity, not schedule a second Work input.
+  const retryTransferUrl = `**/api/pages/${originalId}/transfer`;
+  const transferAttempts = [];
+  await page.route(retryTransferUrl, async route => {
+    transferAttempts.push(route.request().postDataJSON());
+    if (transferAttempts.length === 1) {
+      const committed = await route.fetch();
+      assert.equal(committed.status(), 201);
+      await route.fulfill({ status: 503, contentType: 'application/json',
+        body: '{"error":{"code":"network_error","message":"The transfer response was lost. Try again."}}' });
+    } else await route.continue();
+  });
+  await transferDialog.getByRole('button', { name: 'Send to page', exact: true }).click();
+  await transferDialog.locator('.form-error').waitFor();
   await transferDialog.getByRole('button', { name: 'Send to page', exact: true }).click();
   await page.getByRole('heading', { name: 'Uninformed delivery', exact: true }).waitFor();
+  await page.unroute(retryTransferUrl);
+  assert.equal(transferAttempts.length, 2);
+  assert.ok(transferAttempts[0].requestId && transferAttempts[0].requestId === transferAttempts[1].requestId,
+    'A retry keeps one native transfer identity');
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Receiver draft stays here.');
   const imported = page.locator('.message-user').filter({
     has: page.locator('.transfer-presentation'),
@@ -537,9 +557,12 @@ try {
   await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
   const sourceResults = (await (await fetch(base + '/api/pages/' + beforeId)).json()).messages;
+  assert.equal(sourceResults.filter(m => m.sourcePageId === originalId
+    && m.sourceMessageId === transferAttempts[0].messageId).length, 1,
+    'A lost HTTP response and retry must not enqueue the selected Work result twice');
   assert.ok(sourceResults.some(m => m.sourcePageId === originalId && m.sourceMessageId),
     'The native receiving message preserves the original Work result source');
-  checks.push('explicit settled Work excerpt changes another Work with exact source and both drafts intact');
+  checks.push('retrying a lost transfer response keeps one sourced Work input and both drafts intact');
   // A Home-created file used to be stranded: the file-result action for
   // another Work was hidden in Home, despite the native reference API accepting
   // a verified Home producer. Exercise the complete ordinary route.
