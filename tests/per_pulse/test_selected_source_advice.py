@@ -88,12 +88,17 @@ def test_oversized_revised_lesson_remains_usable_before_the_next_work_decision()
     {**status(), "selected": {"id": "different", "revision": 3}},
     {**status(), "selected": {"id": "experience-1", "revision": 4}},
     {**status(), "status": "withdrawn"},
-    {**status("current"), "selected": {**status("current")["selected"], "revision": 8}},
 ])
 def test_invalid_current_source_cannot_enter_model_advice(invalid):
     with pytest.raises(ValueError):
         source_context(invalid)
 
+
+def test_current_source_revision_mismatch_cannot_be_restored_after_compaction():
+    invalid = status("current")
+    invalid["selected"]["revision"] = 8
+    with pytest.raises(ValueError, match="current source revision mismatch"):
+        source_context(invalid, include_current=True)
 
 
 def test_native_context_window_restores_selected_current_source_without_a_new_prompt():
