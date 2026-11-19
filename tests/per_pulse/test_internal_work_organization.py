@@ -416,6 +416,87 @@ def test_home_search_finds_older_owned_works_without_crawling(local):
         reopened.runtime.close()
 
 
+def test_work_discovery_does_not_lose_an_active_older_work_across_pages_and_restart(local):
+    """Work A stays findable after it advances while Home is paging other Works.
+
+    Model tool calls are fixture-selected; the source message, Work activity,
+    pagination, Kernel admission and reopened SQLite World are native.
+    """
+    pages, fixture = local
+    runtime = pages.runtime
+    subject = runtime.continuity_engram_id
+    source = pages.create_page(
+        "Searchable Work A", "Record the original finding in this Work."
+    )
+    source_id = source["page"]["id"]
+    run_event(runtime, runtime.causal_ledger.get_event(source["initialMessageId"]))
+    for index in range(39):
+        runtime.world.create_task_bundle_for_existing_engram(
+            f"Searchable Work {index + 1:02}", subject,
+            origin=ActivityOrigin.SELF,
+            front_id=f"stable_work_{index:03}",
+            center_id=f"stable_center_{index:03}",
+        )
+
+    home(pages, fixture, [("work", {"op": "list"})])
+    listed = fixture.outcomes[0]["output"]
+    home(pages, fixture, [("work", {"op": "search", "query": "Searchable Work"})])
+    searched = fixture.outcomes[0]["output"]
+    assert listed["more_works"] and searched["more_works"]
+    assert len(listed["works"]) == len(searched["works"]) == 32
+    assert source_id not in {item["id"] for item in listed["works"]}
+    assert source_id not in {item["id"] for item in searched["works"]}
+
+    # A real later message makes the oldest Work newly active. Recency sorting
+    # would move it ahead of both old cursors, silently omitting it forever.
+    before = runtime.world.get_task_front(source_id).updated_at
+    fixture.plan = []
+    evidence = pages.send(source_id, "OLDER_WORK_DECISION_2026: read the verified file.")
+    run_event(runtime, runtime.causal_ledger.get_event(evidence["messageId"]))
+    assert runtime.world.get_task_front(source_id).updated_at > before
+
+    pages.runtime.close()
+    reopened = PageService(
+        pages.data_dir, model_factory=fixture.factory, posture=False,
+        allow_workspace_actions=False, pulse=PulseSettings(enabled=False),
+    )
+    try:
+        home(reopened, fixture, [("work", {
+            "op": "list", "after_work_id": listed["next_after_work_id"]
+        })])
+        remaining = fixture.outcomes[0]["output"]
+        all_ids = [item["id"] for item in listed["works"] + remaining["works"]]
+        assert len(remaining["works"]) == 8
+        assert len(all_ids) == len(set(all_ids)) == 40
+        assert source_id in {item["id"] for item in remaining["works"]}
+
+        home(reopened, fixture, [("work", {
+            "op": "search", "query": "Searchable Work",
+            "after_work_id": searched["next_after_work_id"],
+        })])
+        matching = fixture.outcomes[0]["output"]
+        all_matches = [item["id"] for item in searched["works"] + matching["works"]]
+        assert len(matching["works"]) == 8
+        assert len(all_matches) == len(set(all_matches)) == 40
+        assert source_id in {item["id"] for item in matching["works"]}
+        assert matching["search_complete"] is True
+
+        # The discovered source is actionable, not merely a stable list ID.
+        home(reopened, fixture, [("work", {
+            "op": "inspect", "work_id": source_id,
+            "query": "OLDER_WORK_DECISION_2026",
+        })])
+        inspection = fixture.outcomes[0]["output"]
+        assert inspection["work"]["id"] == source_id
+        assert any(
+            message["event_id"] == evidence["messageId"]
+            and "OLDER_WORK_DECISION_2026" in message["content"]
+            for message in inspection["recent_messages"]
+        )
+    finally:
+        reopened.runtime.close()
+
+
 def test_home_can_recover_exact_older_work_history_after_restart(local):
     """An ordinary Home tool can recover old source text without a second index."""
     pages, fixture = local
