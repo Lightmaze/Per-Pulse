@@ -135,7 +135,7 @@ def test_native_context_window_restores_selected_current_source_without_a_new_pr
     assert projected[0]["role"] == "system"
     assert projected[0]["item_id"] == "context-window:omitted"
     assert projected[0]["content"].startswith(OMITTED_NOTE)
-    assert "Original selected experience." not in str(projected)
+    assert "history " * 50 not in str(projected)
     shortened = ModelRequest(scope, projected, (), 0)
     recovered = advisor.advise(shortened, cancel_event=Event())
     assert '"status": "current"' in recovered.context
