@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a31
+
+- If creating a new Work from a verified file fails before its first task is admitted, remove the unstarted Work and its temporary material receipt transactionally. Keep the source file and producing action, including across SQLite restart (#315).
+- Recover a Home-created Work after an uncertain first event admission: distinguish a refused task from a committed task whose acknowledgement was lost, avoiding both orphaned Works and duplicate execution (#316).
+- Keep bounded first and last portions of a later, long revision of a selected Work experience visible before the receiving Work's next model decision. Mark the preview incomplete and retain native full-revision retrieval (#317).
+
 ## 0.1.0a30
 
 - Start a new Work directly from a verified Home or Work file result. Prepare the original Kernel file receipt and exact source material before the new Work's first model stimulus; then read that file, produce a new artifact under ordinary approval, and retain both through SQLite restart (#313).
