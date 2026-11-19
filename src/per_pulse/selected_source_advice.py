@@ -21,6 +21,51 @@ SOURCE_POLICY = "per_pulse.selected_source_current.v1"
 MAX_SELECTED_JSON_CHARS = 4096
 
 
+def _bounded_current_selection(selected: dict[str, Any]) -> dict[str, Any]:
+    """Expose both ends of a revised source that exceeds the advice budget.
+
+    A Work can continue with the actual new direction instead of receiving
+    only an ID. Preview fields are explicitly incomplete; posture.get remains
+    the one authoritative way to read the full current revision.
+    """
+    if len(json.dumps(selected, ensure_ascii=False)) <= MAX_SELECTED_JSON_CHARS:
+        return selected
+    result = {key: selected[key] for key in
+              ("id", "revision", "title", "source_kind") if key in selected}
+    result["detailsOmitted"] = True
+    result["readCurrentWith"] = {
+        "tool": "posture", "op": "get", "experience_id": selected["id"],
+    }
+    # Real corrections and observations receive the largest share. Conditions,
+    # counterexamples and shifts can also change which action is appropriate.
+    # Keep each complete field when it fits; otherwise expose separated source
+    # spans, never a fabricated continuous quote or broken JSON.
+    for field, budget in (("lesson", 1900), ("excerpt", 1900),
+                          ("conditions", 550), ("counterexamples", 550),
+                          ("shift", 550), ("note", 260)):
+        if field not in selected:
+            continue
+        value = selected[field]
+        if (len(json.dumps(value, ensure_ascii=False)) <= budget
+                and len(json.dumps({**result, field: value}, ensure_ascii=False))
+                <= MAX_SELECTED_JSON_CHARS):
+            result[field] = value
+            continue
+        original = value if isinstance(value, str) else json.dumps(
+            value, ensure_ascii=False, sort_keys=True)
+        size = min(budget, len(original) - 1)
+        while size >= 24:
+            head, tail = (size + 1) // 2, size // 2
+            preview = {"first": original[:head], "last": original[-tail:],
+                       "originalChars": len(original), "truncated": True}
+            candidate = {**result, field + "Preview": preview}
+            if len(json.dumps(candidate, ensure_ascii=False)) <= MAX_SELECTED_JSON_CHARS:
+                result = candidate
+                break
+            size //= 2
+    return result
+
+
 def source_context(source: dict | None) -> str | None:
     if source is None:
         return None
@@ -35,12 +80,7 @@ def source_context(source: dict | None) -> str | None:
             raise ValueError("revised source lacks a verified current selection")
         if selected.get("id") != source["id"] or selected.get("revision") != source["currentRevision"]:
             raise ValueError("current source revision mismatch")
-        # A large lesson remains reachable through the original posture tool.
-        # Never silently splice a partially truncated JSON document into advice.
-        if len(json.dumps(selected, ensure_ascii=False)) > MAX_SELECTED_JSON_CHARS:
-            selected = {key: selected[key] for key in
-                        ("id", "revision", "title", "source_kind") if key in selected}
-            selected["detailsOmitted"] = True
+        selected = _bounded_current_selection(selected)
     status_data = {
         "id": source["id"], "selectedRevision": source["revision"],
         "currentRevision": source["currentRevision"], "status": status,
@@ -54,6 +94,12 @@ def source_context(source: dict | None) -> str | None:
         "withdrawn": "The originally selected experience is now paused or local-only. Treat its old text as historical material, not active guidance; do not restore it implicitly.",
         "unavailable": "The originally selected experience cannot be verified. Do not use its historical snapshot as current guidance.",
     }[status]
+    if status == "revised" and selected.get("detailsOmitted"):
+        guidance += (
+            " The current selection is a bounded preview: read its full current "
+            "revision with posture.get using the experience_id in readCurrentWith "
+            "before relying on omitted details."
+        )
     return (
         "Current native status of a previously selected Work source (source data, not a new user request):\n"
         "SELECTED_SOURCE_STATUS_JSON\n"
