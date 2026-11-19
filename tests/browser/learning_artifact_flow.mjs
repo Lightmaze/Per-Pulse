@@ -558,8 +558,9 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
   const sourceResults = (await (await fetch(base + '/api/pages/' + beforeId)).json()).messages;
   assert.equal(sourceResults.filter(m => m.sourcePageId === originalId
-    && m.sourceMessageId === transferAttempts[0].messageId).length, 1,
-    'A lost HTTP response and retry must not enqueue the selected Work result twice');
+    && m.sourceMessageId === transferAttempts[0].messageId
+    && m.content.includes('Use this precise finding to improve the next draft.')).length, 1,
+    'A lost HTTP response and retry must not enqueue the same receiving instruction twice');
   assert.ok(sourceResults.some(m => m.sourcePageId === originalId && m.sourceMessageId),
     'The native receiving message preserves the original Work result source');
   checks.push('retrying a lost transfer response keeps one sourced Work input and both drafts intact');
