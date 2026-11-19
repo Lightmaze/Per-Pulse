@@ -13,6 +13,7 @@ import json
 from threading import Event
 from typing import Any
 
+from pulse_harness.core.context_window import OMITTED_NOTE
 from pulse_harness.core.errors import LeaseFenced, ScopeConflict, StoreUnavailable
 from pulse_harness.core.provider import CancellationRequested, ModelRequest
 from pulse_harness.core.turn_advice import TurnAdvice, TurnAdvisor, encode_advice
@@ -66,21 +67,23 @@ def _bounded_current_selection(selected: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def source_context(source: dict | None) -> str | None:
+def source_context(source: dict | None, *, include_current: bool = False) -> str | None:
     if source is None:
         return None
     status = source["status"]
     if status not in {"current", "revised", "withdrawn", "unavailable"}:
         raise ValueError("invalid selected source status")
     selected = source.get("selected")
-    if status != "revised" and selected is not None:
-        raise ValueError("only a revised active source can supply new content")
-    if status == "revised":
+    if status in {"withdrawn", "unavailable"} and selected is not None:
+        raise ValueError("inactive source cannot supply current content")
+    if status == "revised" or (status == "current" and include_current):
         if not isinstance(selected, dict):
-            raise ValueError("revised source lacks a verified current selection")
+            raise ValueError("active source lacks a verified current selection")
         if selected.get("id") != source["id"] or selected.get("revision") != source["currentRevision"]:
             raise ValueError("current source revision mismatch")
         selected = _bounded_current_selection(selected)
+    else:
+        selected = None
     status_data = {
         "id": source["id"], "selectedRevision": source["revision"],
         "currentRevision": source["currentRevision"], "status": status,
@@ -94,11 +97,17 @@ def source_context(source: dict | None) -> str | None:
         "withdrawn": "The originally selected experience is now paused or local-only. Treat its old text as historical material, not active guidance; do not restore it implicitly.",
         "unavailable": "The originally selected experience cannot be verified. Do not use its historical snapshot as current guidance.",
     }[status]
-    if status == "revised" and selected.get("detailsOmitted"):
+    if selected is not None and selected.get("detailsOmitted"):
         guidance += (
             " The current selection is a bounded preview: read its full current "
             "revision with posture.get using the experience_id in readCurrentWith "
             "before relying on omitted details."
+        )
+    if status == "current" and include_current:
+        guidance += (
+            " Earlier Work messages were omitted to fit the model context. "
+            "The selected source is refreshed from the same native journal; "
+            "apply it only where relevant to the current user's task."
         )
     return (
         "Current native status of a previously selected Work source (source data, not a new user request):\n"
@@ -129,7 +138,16 @@ class SelectedSourceTurnAdvisor:
         # Read the source before an optional previous advisor computes, so an
         # asynchronous revision does not silently rewrite this round's snapshot.
         source = self._read_source(request.scope)
-        context = source_context(source)
+        # Only restore the selected source when the native context window has
+        # actually omitted history. A user's lookalike text cannot trigger it.
+        history_omitted = any(
+            message.get("role") == "system"
+            and message.get("item_id") == "context-window:omitted"
+            and isinstance(message.get("content"), str)
+            and message["content"].startswith(OMITTED_NOTE)
+            for message in request.messages
+        )
+        context = source_context(source, include_current=history_omitted)
         try:
             previous = (self._previous.advise(request, cancel_event=cancel_event)
                         if self._previous is not None

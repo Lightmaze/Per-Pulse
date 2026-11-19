@@ -7,6 +7,7 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 import json
 import time
 
@@ -15,6 +16,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from per_pulse.app import create_app
+from per_pulse.selected_source_advice import source_context
 from per_pulse.artifacts import PageArtifacts
 from per_pulse.execution import PageExecution
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
@@ -318,6 +320,20 @@ def test_original_correction_changes_later_fixture_action_and_returns_sourced_re
         assert any(m["id"] == result_message["id"] for m in original.json()["messages"])
         assert client.get(f"/api/pages/{work}/posture").json()["experiences"][0]["id"] == record["id"]
         assert PageArtifacts(client.app.state.pages.runtime).read(work, action["actionId"])["content"] == EXPERIENCE
+        # The original selection can be refreshed from the same persisted
+        # journal after a long Work loses old model-request messages.
+        pages = client.app.state.pages
+        source = pages.learning.decision_source(SimpleNamespace(
+            world_id=pages.runtime.world_id,
+            context_id=pages.learning._context(selected_work),
+        ))
+        assert source["status"] == "current"
+        assert source["selected"]["lesson"] == LESSON
+        restored_advice = source_context(source, include_current=True)
+        assert LESSON in restored_advice
+        assert CORRECTION not in restored_advice
+        assert source_result["content"] not in restored_advice
+
         # The source is revised after the receiving Work has finished. Its
         # original user task stays historical, but current native source state
         # must be visible before the person relies on that old version again.

@@ -100,13 +100,13 @@ class PageLearning:
         status = self.source_status(front.id, origin=origin)
         if status is None:
             return None
-        if status["status"] == "revised":
+        if status["status"] in {"current", "revised"}:
             try:
                 current = self.selected_saved_observation(
                     origin["pageId"], status["id"])
             except (KeyError, PageError):
                 # Source permissions may have changed between the two reads.
-                # Never ship the old selected lesson as a current revision.
+                # Never reconstruct a current lesson from old Work history.
                 status["status"] = "unavailable"
             else:
                 if current["revision"] == status["currentRevision"]:
