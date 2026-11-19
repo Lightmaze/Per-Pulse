@@ -606,7 +606,7 @@ export default function App() {
         {(route.id !== 'home' || Boolean(route.origin) || Boolean(route.samePageReturn)) ? <button className="text-button return-to-thread" onClick={goBack} aria-label={t('app.back')}><Icon name="back" size={16} /><span className="return-label-long">{t('app.back')}</span><span className="return-label-short">{t('app.backShort')}</span></button> : null}
       </header>
       <main className="workspace-main" ref={main} onPointerDownCapture={recordInteraction}
-        onKeyDownCapture={recordInteraction} onWheelCapture={recordInteraction} onScroll={() => {
+        onFocusCapture={recordInteraction} onKeyDownCapture={recordInteraction} onWheelCapture={recordInteraction} onScroll={() => {
         if (!workspaceId) return;
         window.clearTimeout(scrollTimer.current);
         const id = route.id;
