@@ -1155,7 +1155,7 @@ class PageService:
             return {"reference": ref, "view": self.view(page_id, source_message_id=source_message_id)}
 
     def transfer_work(self, source_page_id: str, target_page_id: str, message_id: str,
-                      excerpt: str, instruction: str) -> dict:
+                      excerpt: str, instruction: str, request_id: str | None = None) -> dict:
         """Deliver a selected (optionally edited) Work result to a different Work.
 
         Only the selected text and the user's new instruction enter the
@@ -1186,13 +1186,37 @@ class PageService:
             )
             if len(content) > 32_000:
                 raise PageError("transfer_too_large", "Choose a shorter excerpt or instruction.", 422)
-            event_id = self.runtime.send_task_front_message(target_page_id, content)
+            # A retry after a lost HTTP response must not queue the same Work
+            # input, its model computation and its later file actions twice.
+            # The existing World CausalLedger is the only idempotency authority.
+            key = (f"per-pulse-work-transfer:{self.runtime.world_id}:{request_id}"
+                   if request_id is not None else None)
+            if key is not None:
+                previous = self.runtime.causal_ledger.find_causal_event_by_idempotency(
+                    self.runtime.world_id, key)
+                if previous is not None:
+                    front = self.runtime.world.get_task_front(target_page_id)
+                    if (front is None or previous.center_id != front.center_id
+                            or previous.engram_id != front.focal_engram_id
+                            or previous.content != content
+                            or previous.source.value != "user"):
+                        raise PageError("transfer_request_conflict",
+                                        "This transfer was already sent with different details. Open a new transfer to send another version.",
+                                        409)
+            event_id = self.runtime.send_task_front_message(
+                target_page_id, content, idempotency_key=key)
             origin = {"pageId": source_page_id, "messageId": message_id}
             if edited:
                 origin["edited"] = True
             self._state["messageOrigins"][event_id] = origin
-            reference = self._reference(target_page_id, source_page_id, event_id,
-                                        None, "transfer")
+            reference = next((dict(ref) for ref in self._state["references"]
+                              if ref["kind"] == "transfer"
+                              and ref["sourcePageId"] == target_page_id
+                              and ref["sourceMessageId"] == event_id
+                              and ref["targetPageId"] == source_page_id), None)
+            if reference is None:
+                reference = self._reference(target_page_id, source_page_id, event_id,
+                                            None, "transfer")
             self._save()
             return {"messageId": event_id, "reference": reference, "view": self.view(target_page_id)}
 
