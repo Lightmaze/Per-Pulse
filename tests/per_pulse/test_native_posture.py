@@ -275,6 +275,112 @@ def test_native_lookup_finds_older_lesson_without_cross_context_or_raw_transfer(
 
 
 
+def test_work_b_can_read_full_shared_correction_even_when_discovery_clips_it(native):
+    """The next Work can act on a long correction, not its clipped first half.
+
+    The saved Work A source and Work B's tool reads use the existing World
+    journal. This is a constructed source, not a real-provider result.
+    """
+    import hashlib
+    import json
+
+    lesson = (
+        "Compare the original source with the claimed outcome before choosing a file operation. " * 36
+        + "Choose read_file before write_file, and deliver a source-linked field report."
+    )
+    candidates = (
+        "Inspect the original artifact, check cited rows, then choose the export. " * 23
+    )
+    saved = native.memory.add_experience(
+        experience_id="long-work-a-correction",
+        subject_id=native.scope.engram_id,
+        context_id="work:source-a",
+        scope="subject",
+        record_type="constructed_fixture",
+        title="Complete source comparison before the next artifact",
+        lesson=lesson,
+        conditions={"all": [
+            "The requested work needs source-backed file output",
+            {"not": "The user only requested a blank template"},
+        ]},
+        counterexamples=["A blank sign-in sheet needs no imported field report."],
+        shift={
+            "understanding": "Check observed input before the original proposed solution.",
+            "candidates": candidates,
+            "delivery": "Inspect the final file against the cited original rows.",
+        },
+        encounter={
+            "situation": "PRIVATE_SOURCE_WORK_DETAILS",
+            "action": "PRIVATE_ORIGINAL_ACTION",
+            "outcome": "PRIVATE_OPERATOR_FEEDBACK",
+        },
+        source={"kind": "constructed_work_a_correction", "private_note": "PRIVATE_SOURCE_NOTE"},
+    )
+
+    def read(arguments):
+        return native.tool.execute(
+            native.scope, ToolCall("work-b-read", "posture", arguments),
+            CancellationToken(), action_request_id="work-b-read-only",
+        )
+
+    discovered = read({"op": "find", "query": "Complete source comparison"})
+    assert len(discovered["experiences"]) == 1
+    preview = discovered["experiences"][0]
+    assert preview["id"] == saved["id"]
+    assert "lesson" in preview["clipped_fields"]
+    assert "shift.candidates" in preview["clipped_fields"]
+    assert len(preview["lesson"]) < len(lesson)
+    assert "PRIVATE_" not in json.dumps(preview)
+
+    def read_complete():
+        arguments = {"op": "get", "experience_id": saved["id"]}
+        fragments = []
+        digest = None
+        while arguments is not None:
+            response = read(arguments)
+            assert response["experience"] is None
+            # This record fits the overall limit. It was incomplete because
+            # individual fields were clipped for automatic context packing.
+            assert response["material_too_large"] is False
+            detail = response["detail"]
+            assert detail["digest"] == (digest or detail["digest"])
+            digest = detail["digest"]
+            assert detail["offset"] == sum(len(part) for part in fragments)
+            fragments.append(detail["content"])
+            arguments = detail["next"]
+        original = "".join(fragments)
+        assert hashlib.sha256(original.encode()).hexdigest() == digest
+        assert len(fragments) > 1
+        record = json.loads(original)
+        assert "PRIVATE_" not in original
+        assert "encounter" not in record
+        return record, digest
+
+    complete, old_digest = read_complete()
+    assert complete["lesson"] == lesson
+    assert complete["shift"]["candidates"] == candidates
+    assert complete["revision"] == 1
+
+    revised_lesson = lesson.replace("read_file before write_file", "read_web before write_file")
+    native.memory.revise_experience(
+        saved["id"], expected_revision=1, changes={"lesson": revised_lesson},
+    )
+    with pytest.raises(ScopeConflict, match="experience changed"):
+        read({"op": "get", "experience_id": saved["id"],
+              "offset": 100, "expected_digest": old_digest})
+    revised, new_digest = read_complete()
+    assert revised["revision"] == 2
+    assert revised["lesson"] == revised_lesson
+    assert new_digest != old_digest
+    assert native.tool._requests() == []  # No extra learning or update is staged.
+
+    native.memory.revise_experience(
+        saved["id"], expected_revision=2, changes={"active": False},
+    )
+    with pytest.raises(ScopeConflict, match="not active or accessible"):
+        read({"op": "get", "experience_id": saved["id"]})
+
+
 def test_large_experience_details_can_be_read_completely_with_stable_identity(native):
     import hashlib
     import json
