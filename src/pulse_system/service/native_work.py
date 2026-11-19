@@ -499,4 +499,34 @@ class NativeWork:
                             engram_id=rec['subject'], front_id=front.id))
                     self._finish(rec, 'delivered', event_id=event_id)
                 except (ScopeConflict, ValueError, ServiceError) as exc:
-                    self._finish(rec, 'blocked', getattr(exc, 'code', type(exc).__name__))
+                    # The causal event may have committed before inject raised
+                    # (for example, if publication lost its acknowledgement).
+                    # Reconcile the original idempotency key first: replaying
+                    # an uncertain effect or deleting its Work would be wrong.
+                    existing = r.causal_ledger.find_causal_event_by_idempotency(
+                        r.world_id, rec['request_id'])
+                    if existing is not None:
+                        self._finish(rec, 'delivered', event_id=existing.id)
+                        continue
+                    if a['op'] == 'create':
+                        # A settled Home turn may have created the target Front
+                        # before a later admission check refused its first task.
+                        # The deterministic identity ties this empty bundle to
+                        # this exact outbox request, including after a restart.
+                        front = r.world.get_task_front(rec['work_id'])
+                        expected_center = 'center_' + rec['request_id'].split(':')[-1][:32]
+                        if (front is not None and front.center_id == expected_center
+                                and front.focal_engram_id == rec['subject']):
+                            try:
+                                r.world.discard_unstarted_task_bundle(
+                                    front.id, front.center_id, front.focal_engram_id,
+                                    world_id=r.world_id)
+                            except ValueError:
+                                # Other causal history or a changed identity
+                                # means the Work can no longer be discarded.
+                                # Keep it for inspection, never silently replay.
+                                self._finish(rec, 'blocked', 'work_creation_requires_review')
+                                continue
+                    self._finish(rec, 'blocked',
+                                 getattr(exc, 'code', getattr(exc, 'error',
+                                                             type(exc).__name__)))
