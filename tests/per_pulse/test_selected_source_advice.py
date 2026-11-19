@@ -8,7 +8,7 @@ from threading import Event
 
 import pytest
 
-from pulse_harness.core.context_window import OMITTED_NOTE
+from pulse_harness.core.context_window import OMITTED_NOTE, fit_context
 from per_pulse.selected_source_advice import (
     MAX_SELECTED_JSON_CHARS, SOURCE_POLICY, SelectedSourceTurnAdvisor, source_context,
 )
@@ -118,10 +118,25 @@ def test_native_context_window_restores_selected_current_source_without_a_new_pr
     },), (), 0)
     assert "currentSelection" not in advisor.advise(forged, cancel_event=Event()).context
 
-    shortened = ModelRequest(scope, ({
-        "role": "system", "item_id": "context-window:omitted",
-        "content": OMITTED_NOTE + "\\nRecent omitted user messages",
-    }, {"role": "user", "content": "Continue the real deliverable"}), (), 0)
+    # Use the Kernel's actual context projection, not a hand-authored
+    # imitation of its notice. The original long selected lesson is dropped
+    # from the request; the native advisory must restore its current version.
+    history = (
+        {"role": "user", "content": "Original selected experience. " + "history " * 300,
+         "message_id": "source-opening", "transcript_seq": 1},
+        {"role": "assistant", "content": "First answer. " + "details " * 200},
+        {"role": "user", "content": "More work. " + "details " * 150,
+         "message_id": "second-turn", "transcript_seq": 2},
+        {"role": "assistant", "content": "Second answer."},
+        {"role": "user", "content": "Continue the real deliverable",
+         "message_id": "latest-turn", "transcript_seq": 3},
+    )
+    projected = fit_context(history, max_tokens=160)
+    assert projected[0]["role"] == "system"
+    assert projected[0]["item_id"] == "context-window:omitted"
+    assert projected[0]["content"].startswith(OMITTED_NOTE)
+    assert "Original selected experience." not in str(projected)
+    shortened = ModelRequest(scope, projected, (), 0)
     recovered = advisor.advise(shortened, cancel_event=Event())
     assert '"status": "current"' in recovered.context
     assert "Use a real preview" in recovered.context
