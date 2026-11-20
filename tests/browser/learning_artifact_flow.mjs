@@ -608,8 +608,10 @@ try {
   assert.ok(ordinaryHomeAttempts[0].requestId
     && ordinaryHomeAttempts[0].requestId === ordinaryHomeAttempts[1].requestId);
   const ordinaryHomeMessages = (await (await fetch(base + '/api/pages/home')).json()).messages;
+  // Home may carry verified draft attachments; native material footers extend
+  // the visible instruction without changing the one accepted user event.
   assert.equal(ordinaryHomeMessages.filter(message => message.role === 'user'
-    && message.content === ordinaryHomeText).length, 1);
+    && message.content.startsWith(ordinaryHomeText)).length, 1);
   await page.goto(base + '/page/' + originalId);
   await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
