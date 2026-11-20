@@ -13,7 +13,7 @@ export type Modal =
   | { kind: 'create'; message?: Message; sourceExcerpt?: string; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'picker'; mode: 'artifact'; artifact: Artifact }
-  | { kind: 'return'; message: Message; content: string; needsExactExcerpt?: boolean }
+  | { kind: 'return'; message: Message; content: string; needsExactExcerpt?: boolean; requestId: string }
   | { kind: 'transfer'; message: Message; excerpt: string; requestId: string }
   | { kind: 'settings' }
   | { kind: 'learning' }
