@@ -1119,6 +1119,7 @@ class PageService:
             self._state["origins"][page_id] = {
                 "pageId": source_page_id, "messageId": source_message_id,
                 "description": instruction[:240],
+                **({"initialMessageId": created["event_id"]} if source_role is not None else {}),
                 **(saved_origin or {}),
             }
             ref = self._reference(source_page_id, page_id, source_message_id, title, "created")
