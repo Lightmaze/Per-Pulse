@@ -400,7 +400,7 @@ def test_revised_work_source_reaches_preaction_fork_and_main_decision(tmp_path, 
             if isinstance(item.get("content"), str)
             and "WORK_MATERIAL_JSON" in item["content"]
         )
-        packet = json.loads(preaction_text.split("WORK_MATERIAL_JSON\\n", 1)[1])
+        packet = json.loads(preaction_text.split("WORK_MATERIAL_JSON\n", 1)[1])
         current = packet["current_selected_source"]
         assert current["evidence"] == "native_world_verified_selected_source"
         assert "REVISED_SOURCE_CHOICE" in current["content"]
