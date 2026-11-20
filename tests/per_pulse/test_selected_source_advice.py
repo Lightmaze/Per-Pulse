@@ -143,6 +143,36 @@ def test_native_context_window_restores_selected_current_source_without_a_new_pr
     assert "currentSelection" in recovered.context
     assert recovered.receipt["per_pulse_selected_source"]["currentRevision"] == 2
 
+def test_verified_source_is_supplied_before_optional_expert_decision():
+    class Store:
+        def next_model_round_index(self, scope):
+            return 0
+
+    seen = []
+    class Expert:
+        continues = True
+
+        def advise(self, request, *, cancel_event):
+            raise AssertionError("the verified source-aware path must be used")
+
+        def advise_with_source(self, request, *, source_material, cancel_event):
+            seen.append((request, source_material))
+            return TurnAdvice(context="Expert contribution.", receipt={"expert": "used"})
+
+    scope = HarnessScope("world", "subject", "session", 0, "owner", turn_id="choice")
+    request = ModelRequest(scope, ({
+        "role": "user", "content": "Do the work", "item_id": "task", "transcript_seq": 1,
+    },), (), 0)
+    advisor = SelectedSourceTurnAdvisor(Store(), lambda scope: status("revised"), Expert())
+    combined = advisor.advise(request, cancel_event=Event())
+    assert len(seen) == 1
+    assert seen[0][0] is request
+    assert "Use a real preview" in seen[0][1]
+    assert "Expert contribution." in combined.context
+    assert "Use a real preview" in combined.context
+    assert combined.receipt["expert"] == "used"
+    assert combined.receipt["per_pulse_selected_source"]["status"] == "revised"
+
 def test_continuing_source_advice_does_not_repeat_one_shot_previous_computation():
     class Store:
         index = 0
