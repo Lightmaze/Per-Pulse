@@ -10,7 +10,7 @@ import { providerSetupCommand, type ProviderMode, type ProviderShell } from '../
 import { CopyButton } from './CopyButton';
 
 export type Modal =
-  | { kind: 'create'; message?: Message; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact }
+  | { kind: 'create'; message?: Message; sourceExcerpt?: string; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'picker'; mode: 'artifact'; artifact: Artifact }
   | { kind: 'return'; message: Message; content: string; needsExactExcerpt?: boolean }
@@ -23,12 +23,12 @@ export type Modal =
   | { kind: 'materials'; materialId?: string; pageId?: string }
   | { kind: 'rename' };
 
-export function CreatePageDialog({ initial, fromExperience, artifact, busy, error, close, create }: { initial?: Message; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
+export function CreatePageDialog({ initial, sourceExcerpt, initialInstruction, fromExperience, artifact, busy, error, close, create }: { initial?: Message; sourceExcerpt?: string; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
   const { t } = useLanguage();
   const [title, setTitle] = useState('');
   const source = initialPageSource(initial, t('source.defaultRequest'));
-  const [excerpt, setExcerpt] = useState(source.excerpt);
-  const [instruction, setInstruction] = useState(source.instruction);
+  const [excerpt, setExcerpt] = useState(sourceExcerpt ?? source.excerpt);
+  const [instruction, setInstruction] = useState(initialInstruction ?? source.instruction);
   return <Dialog title={t("dialogs.createTitle")} onClose={close}>
     <p className="dialog-description">{t('dialogs.createDescription')}</p>
     {fromExperience ? <>
@@ -86,10 +86,11 @@ export function PagePickerDialog({ pages, mode, busy, error, close, select, crea
   </Dialog>;
 }
 
-export function TransferWorkDialog({ excerpt, sourceText, destinations, busy, error, close, send, sourceTitle }: {
+export function TransferWorkDialog({ excerpt, sourceText, destinations, busy, error, close, send, createNew, sourceTitle }: {
   excerpt: string; sourceText: string;
   destinations: PageSummary[]; busy: boolean; error: string; close: () => void;
-  send: (targetId: string, excerpt: string, instruction: string) => void; sourceTitle?: string;
+  send: (targetId: string, excerpt: string, instruction: string) => void;
+  createNew: (excerpt: string, instruction: string) => void; sourceTitle?: string;
 }) {
   const { t } = useLanguage();
   const [targetId, setTargetId] = useState(destinations[0]?.id ?? '');
@@ -97,7 +98,8 @@ export function TransferWorkDialog({ excerpt, sourceText, destinations, busy, er
   const [instruction, setInstruction] = useState('');
   const isExact = isExactWorkHandoffExcerpt(sourceText, chosenExcerpt);
   const tooLong = chosenExcerpt.length + instruction.length + 100 > 32_000;
-  const canSend = !!targetId && !!chosenExcerpt.trim() && !!instruction.trim() && !tooLong;
+  const canCreate = !!chosenExcerpt.trim() && !!instruction.trim() && !tooLong;
+  const canSend = !!targetId && canCreate;
   return <Dialog title={t('dialogs.transferTitle')} onClose={close}>
     <p className="dialog-description">{t('dialogs.transferDescription')}</p>
     <p className="lesson-note">{t('dialogs.from')} <strong>{sourceTitle || t('dialogs.thisPage')}</strong></p>
@@ -122,6 +124,8 @@ export function TransferWorkDialog({ excerpt, sourceText, destinations, busy, er
         placeholder={t('dialogs.transferPlaceholder')} rows={3} maxLength={2000} required autoFocus disabled={busy} />
       {tooLong ? <p role="alert" className="form-error">{t('dialogs.transferTooLong')}</p> : null}
       {error ? <p role="alert" className="form-error">{error}</p> : null}
+      <button type="button" className="text-button" disabled={busy || !canCreate}
+        onClick={() => createNew(chosenExcerpt, instruction.trim())}>{t('dialogs.transferCreateNew')}</button>
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button>
         <button type="submit" className="primary-button" disabled={busy || !canSend}>{busy ? t('dialogs.saving') : t('dialogs.transferAction')}</button></div>
     </form>

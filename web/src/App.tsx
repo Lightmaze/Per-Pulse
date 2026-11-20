@@ -657,13 +657,14 @@ export default function App() {
       navigate={navigate} onChanged={() => { void refreshWorkspace().catch(() => {}); }}
       onClose={() => setPulseOpen(false)} /> : null}
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
-    {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} fromExperience={modal.fromExperience} artifact={modal.artifact} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
+    {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} sourceExcerpt={modal.sourceExcerpt} initialInstruction={modal.initialInstruction} fromExperience={modal.fromExperience} artifact={modal.artifact} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : modal.mode === 'artifact' ? pages.filter(page => page.kind === 'work' && page.id !== modal.artifact.pageId) : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.mode === 'artifact' ? undefined : modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} sourceText={messageBody(modal.message)} needsExactExcerpt={modal.needsExactExcerpt} materials={modal.message.materials} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'transfer' ? <TransferWorkDialog key={`${route.id}/${modal.message.id}`} excerpt={modal.excerpt}
       sourceTitle={view?.page.title} sourceText={messageBody(modal.message)}
       destinations={pages.filter(page => page.kind === 'work' && page.id !== route.id)}
-      busy={busy} error={modalError} close={closeModal} send={transferWork} /> : null}
+      busy={busy} error={modalError} close={closeModal} send={transferWork}
+       createNew={(sourceExcerpt, initialInstruction) => openModal({ kind: 'create', message: modal.message, sourceExcerpt, initialInstruction })} /> : null}
     {modal?.kind === 'rename' ? <RenameDialog initial={view?.page.title ?? ''} busy={busy} error={modalError} close={closeModal} rename={renamePage} /> : null}
     {modal?.kind === 'settings' ? <SettingsDialog bootstrap={bootstrap} close={closeModal} learning={() => openModal({ kind: 'learning' })} refresh={() => refreshWorkspace().then(() => setToast(t('app.connectionChecked'))).catch(problem => setToast(errorText(problem)))} /> : null}
     {modal?.kind === 'learning' ? <LearningDialog key={`${workspaceId}/${route.id}`} pageId={route.id} pageTitle={view?.page.title ?? t('dialogs.thisPage')} messages={view?.messages ?? []} close={closeModal} navigate={navigate} continueWebWork={experience => openModal({ kind: 'create', fromExperience: experience })} /> : null}
