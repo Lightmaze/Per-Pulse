@@ -76,7 +76,21 @@ def _project_saved_user_input(message: Mapping[str, Any], max_tokens: int) -> Ma
         "message, not a new instruction.]"
     )
     for preview_chars in (512, 256, 64, 0):
-        preview = content[:preview_chars] + ("…" if preview_chars and len(content) > preview_chars else "")
+        # A Work can carry a long attributed result followed by the
+        # actual request. A prefix-only preview hides that request from the
+        # first model decision, even though the full input is saved.
+        head_chars = preview_chars // 3
+        tail_chars = preview_chars - head_chars
+        if tail_chars and len(content) > preview_chars:
+            preview = (
+                content[:head_chars]
+                + f"\n[USER_MESSAGE_MIDDLE_OMITTED original_chars={len(content)}]\n"
+                + content[-tail_chars:]
+            )
+        else:
+            preview = content[:preview_chars]
+            if preview_chars and len(content) > preview_chars:
+                preview += "…"
         projected = {**message, "content": preview + instruction}
         if (estimate_tokens(projected) <= max_tokens // 2
                 and estimate_tokens(projected) < estimate_tokens(message)):

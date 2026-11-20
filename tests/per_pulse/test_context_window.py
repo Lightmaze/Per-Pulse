@@ -123,6 +123,50 @@ def test_a_current_exchange_stays_whole_after_an_oversized_opening_is_omitted():
 
 
 
+
+def test_long_sourced_work_opening_keeps_the_current_task_in_the_model_preview():
+    """A huge selected result cannot hide the task appended to Work B's opening."""
+    from per_pulse.page_source import source_content
+
+    task = "Create the complete comparison.csv file using the corrected figures."
+    full_text = source_content(
+        "work-a", "result-a", "assistant",
+        "SOURCE_BEGIN " + "background record " * 2500 + " SOURCE_END",
+        task, edited=True,
+    )
+    original = {"role": "user", "message_id": "persisted-work-b-opening",
+                "transcript_seq": 1, "content": full_text}
+    fitted = fit_context((original,), 1000)
+    assert len(fitted) == 1
+    projection = fitted[0]
+    assert sum(map(estimate_tokens, fitted)) <= 1000
+    assert projection["message_id"] == original["message_id"]
+    assert projection["role"] == "user"
+    assert projection["content"].startswith("Selected source for this page")
+    assert "USER_MESSAGE_MIDDLE_OMITTED" in projection["content"]
+    assert task in projection["content"]
+    assert "background record " * 150 not in projection["content"]
+    assert "read_history" in projection["content"]
+    assert "message_id=" in projection["content"]
+    assert "persisted-work-b-opening" in projection["content"]
+    assert original["content"] == full_text
+
+
+def test_long_sourced_work_preview_preserves_multibyte_task_end_without_splicing():
+    """The model receives complete CJK task text, not an invented continuous quote."""
+    full_text = "源材料：" + "实验记录与背景。" * 4000 + "最终要求：生成真实结果文件。"
+    original = {"role": "user", "message_id": "cjk-work-b-opening",
+                "transcript_seq": 1, "content": full_text}
+    fitted = fit_context((original,), 900)
+    assert sum(map(estimate_tokens, fitted)) <= 900
+    preview = fitted[0]["content"]
+    assert "源材料：" in preview
+    assert "最终要求：生成真实结果文件。" in preview
+    assert "USER_MESSAGE_MIDDLE_OMITTED" in preview
+    assert "read_history" in preview
+    assert full_text not in preview
+
+
 def test_large_current_tool_result_is_addressable_without_replaying_the_action():
     result = {**_result("current", 18_000), "message_id": "saved-tool-message-7",
               "item_id": "tool-result:current", "transcript_seq": 7}
