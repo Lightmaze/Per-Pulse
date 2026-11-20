@@ -8,6 +8,7 @@ Runtime may be blocked inside a Harness turn.
 from __future__ import annotations
 
 import math
+import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass
@@ -24,6 +25,19 @@ from pulse_system.core.types import (
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _retryable_sqlite_lock(exc: sqlite3.OperationalError) -> bool:
+    """Only SQLITE_BUSY/LOCKED permits a retry under the original expiry."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    if type(code) is int:
+        return (code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    # Some transport/test wrappers do not expose SQLite's numeric result.
+    return str(exc).strip().lower() in {
+        "database is locked",
+        "database is busy",
+        "database table is locked",
+    }
 
 
 class LeaseStorage(Protocol):
@@ -220,30 +234,50 @@ class RuntimeLeaseKeeper:
 
     def _run(self) -> None:
         while not self._stop.wait(self._renew_interval_sec):
-            with self._lock:
-                if self._closed or self._lost_error is not None:
+            # A temporary SQLite writer lock is not loss of this lease. Keep
+            # trying only while the last durable expiry remains in the future;
+            # every foreground mutation still checks the database owner.
+            while True:
+                with self._lock:
+                    if self._closed or self._lost_error is not None:
+                        return
+                    lease = self._lease
+                epoch = lease.epoch
+                try:
+                    renewed = self._storage.renew_runtime_lease(
+                        self._owner_id,
+                        epoch,
+                        now=self._clock(),
+                        ttl_sec=self._ttl_sec,
+                    )
+                except RuntimeLeaseError as exc:
+                    self._mark_lost(exc)
                     return
-                epoch = self._lease.epoch
-            try:
-                renewed = self._storage.renew_runtime_lease(
-                    self._owner_id,
-                    epoch,
-                    now=self._clock(),
-                    ttl_sec=self._ttl_sec,
-                )
-            except RuntimeLeaseError as exc:
-                self._mark_lost(exc)
-                return
-            except Exception as exc:  # fail closed on an unreadable local DB
-                self._mark_lost(RuntimeLeaseLostError(
-                    owner_id=self._owner_id,
-                    epoch=epoch,
-                    reason=f"renew_failed:{type(exc).__name__}",
-                    lease=self.health().lease,
-                ))
-                return
-            with self._lock:
-                self._lease = renewed
+                except sqlite3.OperationalError as exc:
+                    if _retryable_sqlite_lock(exc):
+                        remaining = (lease.expires_at - self._clock()).total_seconds()
+                        if remaining > 0:
+                            if self._stop.wait(min(0.25, remaining)):
+                                return
+                            continue
+                    self._mark_lost(RuntimeLeaseLostError(
+                        owner_id=self._owner_id,
+                        epoch=epoch,
+                        reason=f"renew_failed:{type(exc).__name__}",
+                        lease=lease,
+                    ))
+                    return
+                except Exception as exc:  # fail closed on an unreadable local DB
+                    self._mark_lost(RuntimeLeaseLostError(
+                        owner_id=self._owner_id,
+                        epoch=epoch,
+                        reason=f"renew_failed:{type(exc).__name__}",
+                        lease=lease,
+                    ))
+                    return
+                with self._lock:
+                    self._lease = renewed
+                break
 
     def _mark_lost(self, error: RuntimeLeaseError) -> None:
         callback: Callable[[RuntimeLeaseError], None] | None = None

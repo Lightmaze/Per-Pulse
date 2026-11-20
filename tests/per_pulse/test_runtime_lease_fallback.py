@@ -9,6 +9,8 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import sqlite3
+import threading
 
 import pytest
 
@@ -16,6 +18,7 @@ from pulse_system.core.runtime.lease import RuntimeLeaseKeeper
 from pulse_system.core.types import (
     RuntimeLeaseConflictError,
     RuntimeLeaseError,
+    RuntimeLeaseLostError,
     RuntimeLeaseState,
 )
 from pulse_system.substrate.storage import Storage
@@ -108,3 +111,70 @@ def test_unreleased_owner_requires_expiry_before_successor_can_open(tmp_path):
         if prior_storage is not None:
             prior_storage.close()
         successor_storage.close()
+
+
+class _OneRenewalFailure:
+    """Inject the Windows failure shape around actual durable SQLite renewal."""
+
+    def __init__(self, backing: Storage, error: sqlite3.OperationalError):
+        self.backing = backing
+        self.error = error
+        self.failed = threading.Event()
+        self.recovered = threading.Event()
+        self.calls = 0
+
+    def __getattr__(self, name):
+        return getattr(self.backing, name)
+
+    def renew_runtime_lease(self, *args, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            self.failed.set()
+            raise self.error
+        renewed = self.backing.renew_runtime_lease(*args, **kwargs)
+        self.recovered.set()
+        return renewed
+
+
+def test_transient_sqlite_busy_during_heartbeat_keeps_same_durable_owner(tmp_path):
+    """One busy renewal must recover before TTL, without replacing the epoch."""
+    storage = Storage(tmp_path / "world.db")
+    shim = _OneRenewalFailure(storage, sqlite3.OperationalError("database is locked"))
+    keeper = RuntimeLeaseKeeper(
+        shim, ttl_sec=10, renew_interval_sec=1, owner_id="owner",
+    )
+    try:
+        epoch = keeper.epoch
+        assert shim.failed.wait(3), "heartbeat did not attempt renewal"
+        assert shim.recovered.wait(3), "heartbeat did not retry a busy database"
+        assert keeper.health().healthy
+        assert keeper.assert_owned().epoch == epoch
+        durable = storage.get_runtime_lease()
+        assert durable is not None and durable.owner_id == "owner"
+        assert durable.epoch == epoch
+    finally:
+        keeper.close()
+        storage.close()
+
+
+def test_non_busy_sqlite_renewal_failure_still_fences_runtime(tmp_path):
+    """An unreadable database must not be treated as transient contention."""
+    storage = Storage(tmp_path / "world.db")
+    shim = _OneRenewalFailure(storage, sqlite3.OperationalError("disk I/O error"))
+    lost = threading.Event()
+    keeper = RuntimeLeaseKeeper(
+        shim, ttl_sec=10, renew_interval_sec=1, owner_id="owner",
+        on_lost=lambda _error: lost.set(),
+    )
+    try:
+        assert shim.failed.wait(3)
+        assert lost.wait(3)
+        assert not keeper.health().healthy
+        assert not shim.recovered.is_set()
+        with pytest.raises(RuntimeLeaseLostError):
+            keeper.assert_owned()
+        durable = storage.get_runtime_lease()
+        assert durable is not None and durable.state is RuntimeLeaseState.ACTIVE
+    finally:
+        keeper.close(release=False)
+        storage.close()
