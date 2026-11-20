@@ -1221,7 +1221,7 @@ class PageService:
             return {"messageId": event_id, "reference": reference, "view": self.view(target_page_id)}
 
     def return_home(self, page_id: str, content: str, message_id: str | None = None,
-                    *, include_materials: bool = False) -> dict:
+                    *, include_materials: bool = False, request_id: str | None = None) -> dict:
         with self._lock:
             if page_id == "home":
                 raise PageError("already_home", "Choose a session page to bring a result home.")
@@ -1247,11 +1247,40 @@ class PageService:
             # A causal parent inherits its center in the native ledger, so a
             # cross-page reference belongs in the World link metadata instead.
             # Keeping this a fresh Home input preserves its actual Home lane.
+            # A Home return is a real user stimulus. If its HTTP receipt is
+            # lost, a retry must reuse the original native event rather than
+            # trigger another Home turn and its possible file effects.
+            key = (f"per-pulse-home-return:{self.runtime.world_id}:{request_id}"
+                   if request_id is not None else None)
+            previous = (self.runtime.causal_ledger.find_causal_event_by_idempotency(
+                self.runtime.world_id, key) if key is not None else None)
+            if previous is not None:
+                saved_origin = self._state["messageOrigins"].get(previous.id)
+                if (previous.center_id is not None
+                        or previous.engram_id != self.runtime.continuity_engram_id
+                        or previous.source.value != "user" or previous.content != content
+                        or (saved_origin is not None and saved_origin != {
+                            "pageId": page_id, "messageId": message_id,
+                        })):
+                    raise PageError(
+                        "return_request_conflict",
+                        "This result was already brought Home with different details. Open a new return to send another version.",
+                        409,
+                    )
             event_id = self.runtime.inject(
                 self.runtime.continuity_engram_id, content, source="user",
+                idempotency_key=key,
             )
+            # The native input survives even if writing its page presentation
+            # fails. An identical retry repairs the source link after restart.
             self._state["messageOrigins"][event_id] = {"pageId": page_id, "messageId": message_id}
-            ref = self._reference("home", page_id, event_id, None, "return")
+            ref = next((dict(record) for record in self._state["references"]
+                        if record["kind"] == "return"
+                        and record["sourcePageId"] == "home"
+                        and record["sourceMessageId"] == event_id
+                        and record["targetPageId"] == page_id), None)
+            if ref is None:
+                ref = self._reference("home", page_id, event_id, None, "return")
             self._save()
             return {"messageId": event_id, "reference": ref, "view": self.view("home")}
 

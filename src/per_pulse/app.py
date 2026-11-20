@@ -105,6 +105,7 @@ class ReturnHome(Input):
     content: Annotated[str, StringConstraints(strip_whitespace=True, max_length=32_000)]
     messageId: Identifier | None = None
     includeMaterials: bool = False
+    requestId: Annotated[str, StringConstraints(pattern=r"^[a-zA-Z0-9_-]{16,64}$")] | None = None
 
     @model_validator(mode="after")
     def has_content(self):
@@ -601,7 +602,10 @@ def create_app(
 
     @app.post("/api/pages/{page_id}/return", status_code=201)
     def return_home(page_id: str, body: ReturnHome, request: Request):
-        return pages(request).return_home(page_id, body.content, body.messageId, include_materials=body.includeMaterials)
+        return pages(request).return_home(
+            page_id, body.content, body.messageId,
+            include_materials=body.includeMaterials, request_id=body.requestId,
+        )
 
     @app.post("/api/pages/{page_id}/tick", status_code=201)
     def tick(page_id: str, body: TickRequest, request: Request):

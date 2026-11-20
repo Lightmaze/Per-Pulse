@@ -144,8 +144,8 @@ export const api = {
     }),
   reference: (id: string, data: { targetPageId: string; label: string; sourceMessageId?: string | null }) =>
     request<{ reference: PageReference; view: PageView }>(`${pagePath(id)}/references`, { method: 'POST', body: JSON.stringify(data) }),
-  bringHome: (id: string, content: string, messageId?: string, includeMaterials = false) =>
-    request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/return`, { method: 'POST', body: JSON.stringify({ content, messageId, includeMaterials }) }),
+  bringHome: (id: string, content: string, messageId?: string, includeMaterials = false, requestId?: string) =>
+    request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/return`, { method: 'POST', body: JSON.stringify({ content, messageId, includeMaterials, requestId }) }),
   transferWork: (id: string, targetPageId: string, messageId: string, excerpt: string, instruction: string, requestId: string) =>
     request<{ messageId: string; reference: PageReference; view: PageView }>(`${pagePath(id)}/transfer`, {
       method: 'POST', body: JSON.stringify({ targetPageId, messageId, excerpt, instruction, requestId }),

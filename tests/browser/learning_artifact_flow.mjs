@@ -500,6 +500,44 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
   checks.push('late native Home return keeps its source without stealing the active route or drafts');
 
+  // A committed Home input with a lost HTTP receipt must not produce a second
+  // native stimulus when the same return dialog retries. The original source
+  // link, Home draft and Work A draft remain usable.
+  await selectedSource.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  const retryReturnDialog = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
+  const retryReturnText = 'Home return retry must keep a single sourced input. [Synthetic browser fixture]';
+  await retryReturnDialog.locator('#return-content').fill(retryReturnText);
+  const retryReturnUrl = `**/api/pages/${originalId}/return`;
+  const returnAttempts = [];
+  await page.route(retryReturnUrl, async route => {
+    returnAttempts.push(route.request().postDataJSON());
+    if (returnAttempts.length === 1) {
+      const committed = await route.fetch();
+      assert.equal(committed.status(), 201);
+      await route.fulfill({ status: 503, contentType: 'application/json',
+        body: '{"error":{"code":"network_error","message":"The Home receipt was lost. Try again."}}' });
+    } else await route.continue();
+  });
+  await retryReturnDialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  await retryReturnDialog.locator('.form-error').waitFor();
+  await retryReturnDialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
+  await page.unroute(retryReturnUrl);
+  assert.equal(returnAttempts.length, 2);
+  assert.ok(returnAttempts[0].requestId
+    && returnAttempts[0].requestId === returnAttempts[1].requestId,
+  'A retry keeps the same native Home return identity');
+  const retriedHome = (await (await fetch(base + '/api/pages/home')).json()).messages
+    .filter(message => message.content.includes(retryReturnText) && message.sourcePageId === originalId);
+  assert.equal(retriedHome.length, 1, 'One native Home input survives the lost receipt and retry');
+  assert.equal(retriedHome[0].sourceMessageId, returnAttempts[0].messageId);
+  assert.equal(retriedHome[0].references.filter(ref => ref.kind === 'return').length, 1);
+  assert.equal(await page.locator('.composer textarea').inputValue(), pendingHomeDraft);
+  await page.goto(base + '/page/' + originalId);
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
+  checks.push('lost Home return HTTP receipt retries one native input and retains source and both drafts');
+
   await selectedSource.getByRole('button', { name: 'Use in another page', exact: true }).click();
   const transferDialog = page.getByRole('dialog', { name: 'Carry this result into another page', exact: true });
   await transferDialog.waitFor();
