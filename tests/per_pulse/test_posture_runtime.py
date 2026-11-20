@@ -20,6 +20,7 @@ from pulse_harness.core.response_review import CombinedResponseReviewer, RESPONS
 from pulse_harness.core.turn_advice import TURN_ADVICE_PREFIX, decode_advice
 from pulse_harness.plugins.posture import pack_posture_materials
 from pulse_harness.plugins.expert_work import make_work_prompt, WorkMaterialBudgetExceeded
+from per_pulse.selected_source_advice import SelectedSourceTurnAdvisor
 from pulse_system.service.expert_computation import ExpertRuntime, recorded_expert_usage
 from pulse_system.service.posture import PostureMemory, posture_enabled
 from pulse_system.substrate.storage import Storage
@@ -362,6 +363,97 @@ def test_long_work_b_action_reaches_native_preaction_fork_and_main_model(tmp_pat
     assert any(source == message.content for message in transcript if message.role == "user")
     assert len(decisions) == 2
 
+
+def test_revised_work_source_reaches_preaction_fork_and_main_decision(tmp_path, monkeypatch):
+    """One native turn carries the same verified revision to both decisions."""
+    requests = []
+    storage = Storage(tmp_path / "world.db")
+    memory = PostureMemory(storage, "world")
+    memory.add_experience(**episode(scope="subject"))
+    expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None,
+                           posture_memory=memory, expert_active=False)
+    store = HarnessStore(tmp_path / "kernel.db")
+    scope = HarnessScope("world", "subject", "session", 0, "owner",
+                         context_id="work:work-b", turn_id="decision")
+    model = model_fixture(monkeypatch, requests)
+    source = {
+        "id": "origin-experience", "revision": 1, "currentRevision": 2,
+        "status": "revised", "selected": {
+            "id": "origin-experience", "revision": 2, "title": "Revised tool choice",
+            "lesson": "REVISED_SOURCE_CHOICE: read the original artifact before editing.",
+            "source_kind": "native_correction_lesson",
+            "conditions": {"all": ["The original artifact exists"]},
+            "counterexamples": ["A new artifact with no predecessor."],
+        },
+    }
+    advisor = SelectedSourceTurnAdvisor(
+        store, lambda request_scope: source, expert.advisor(store, model, scope))
+    runner = TurnRunner(store, model_adapter=model, tool_provider=NoTools(),
+                        turn_advisor=advisor)
+    try:
+        outcome = runner.run(scope, prompt="Make the actual Work B file deliverable.")
+        assert outcome.status is TurnStatus.SUCCEEDED
+        preaction = next(r for r in requests if
+                         "WORK_MATERIAL_JSON" in json.dumps(r["messages"]))
+        preaction_text = next(
+            item["content"] for item in preaction["messages"]
+            if isinstance(item.get("content"), str)
+            and "WORK_MATERIAL_JSON" in item["content"]
+        )
+        packet = json.loads(preaction_text.split("WORK_MATERIAL_JSON\n", 1)[1])
+        current = packet["current_selected_source"]
+        assert current["evidence"] == "native_world_verified_selected_source"
+        assert "REVISED_SOURCE_CHOICE" in current["content"]
+        assert '"currentRevision": 2' in current["content"]
+        assert all("REVISED_SOURCE_CHOICE" not in row["content"]
+                   for row in packet["current_work"]["messages"])
+        main = next(r for r in requests if
+                    "WORK_MATERIAL_JSON" not in json.dumps(r["messages"]))
+        assert "REVISED_SOURCE_CHOICE" in json.dumps(main["messages"])
+        assert len([r for r in requests if
+                    "WORK_MATERIAL_JSON" in json.dumps(r["messages"])]) == 1
+        transcript = list(TranscriptStore(store).messages(scope))
+        assert not any("REVISED_SOURCE_CHOICE" in m.content and m.role == "user"
+                       for m in transcript)
+    finally:
+        runner.close()
+        expert.close()
+        store.close()
+        storage.close()
+
+
+def test_cached_preaction_cannot_reuse_old_selected_source_revision(tmp_path, monkeypatch):
+    requests = []
+    storage = Storage(tmp_path / "world.db")
+    memory = PostureMemory(storage, "world")
+    memory.add_experience(**episode(scope="subject"))
+    expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None,
+                           posture_memory=memory, expert_active=False)
+    store = HarnessStore(tmp_path / "kernel.db")
+    scope = HarnessScope("world", "subject", "session", 0, "owner",
+                         context_id="work:work-b", turn_id="pending")
+    model = model_fixture(monkeypatch, requests)
+    store.create_session(scope.session_scope())
+    store.create_turn(scope, "Continue Work B")
+    request = ModelRequest(scope, ({
+        "role": "user", "content": "Continue Work B",
+        "item_id": "opening", "transcript_seq": 1,
+    },), (), 0)
+    advisor = expert.advisor(store, model, scope)
+    try:
+        old = advisor.advise_with_source(
+            request, source_material="Verified source revision 1", cancel_event=Event())
+        assert old is not None
+        assert len(requests) == 1
+        new = advisor.advise_with_source(
+            request, source_material="Verified source revision 2", cancel_event=Event())
+        assert new.receipt["status"] == "source_changed_before_admission"
+        assert new.context is None
+        assert len(requests) == 1
+    finally:
+        expert.close()
+        store.close()
+        storage.close()
 
 def test_semantic_pass_preserves_main_request_and_records_real_fork_cost(tmp_path, monkeypatch):
     requests, outcome, transcript, (usage, accounted), decisions = run_with_posture(tmp_path, monkeypatch, learned=True)

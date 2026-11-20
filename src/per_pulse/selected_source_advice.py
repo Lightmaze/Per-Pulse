@@ -204,10 +204,19 @@ class SelectedSourceTurnAdvisor:
         )
         context = source_context(source, include_current=history_omitted)
         try:
-            previous = (self._previous.advise(request, cancel_event=cancel_event)
-                        if self._previous is not None
-                        and (index == 0 or getattr(self._previous, "continues", False))
-                        else None)
+            previous = None
+            if (self._previous is not None
+                    and (index == 0 or getattr(self._previous, "continues", False))):
+                # The expert's first action is a decision too. Give its existing
+                # optional computation the same host-verified source snapshot
+                # that the main model receives after history omission/revision.
+                # Never add fabricated events to the native transcript.
+                aware = getattr(self._previous, "advise_with_source", None)
+                if context is not None and callable(aware):
+                    previous = aware(
+                        request, source_material=context, cancel_event=cancel_event)
+                else:
+                    previous = self._previous.advise(request, cancel_event=cancel_event)
             if previous is not None and not isinstance(previous, TurnAdvice):
                 raise ValueError("invalid previous turn advice")
             if previous is not None:

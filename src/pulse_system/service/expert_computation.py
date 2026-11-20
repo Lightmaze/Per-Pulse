@@ -175,6 +175,15 @@ class _Advisor:
         self.continues = runtime.mode == "semantic"
 
     def advise(self, request, *, cancel_event):
+        return self.advise_with_source(
+            request, source_material=None, cancel_event=cancel_event)
+
+    def advise_with_source(self, request, *, source_material, cancel_event):
+        """Use the current native source status before constructing this decision.
+
+        The wrapper supplies one verified snapshot directly to this optional
+        computation; the original request and saved Kernel events are untouched.
+        """
         self.runtime.guard()
         if cancel_event.is_set():
             raise CancellationRequested("expert computation cancelled")
@@ -183,6 +192,9 @@ class _Advisor:
             return None
         index = self.main_store.next_model_round_index(scope)
         identity = scope.digest + (f":round:{index}" if index else "")
+        selected_source_digest = (
+            fingerprint(source_material) if source_material is not None else None
+        )
         # Reuse the paid calculation after restart, but main admission remains
         # a separate boundary and must respect current posture revisions.
         try:
@@ -190,6 +202,16 @@ class _Advisor:
         except ValueError:
             saved = None
         if saved is not None:
+            # A cached expert contribution from before a source revision must
+            # not guide the next action. Do not spend again under the same
+            # decision identity, or rewrite historical provider cost.
+            if (saved.get("kind") == "semantic_computation"
+                    and (saved.get("computation") or {}).get("selected_source_digest")
+                    != selected_source_digest):
+                return TurnAdvice(receipt={
+                    "plugin": "expert_computation", "mode": "semantic",
+                    "decision_id": identity, "status": "source_changed_before_admission",
+                })
             return self.runtime.current_advice(scope, self._advice(saved))
         if self.continues:
             if index and not request.tool_results:
@@ -222,6 +244,7 @@ class _Advisor:
         try:
             prompt = make_work_prompt(view, materials, model_round=index,
                                       posture_packet=posture_packet if has_posture else None,
+                                      selected_source_material=source_material,
                                       byte_budget=self.runtime.trace.max_payload_bytes if has_posture else None)
         except WorkMaterialBudgetExceeded:
             return TurnAdvice(receipt=self.runtime.material_budget_receipt(posture_packet, checkpoint="before_action"))
@@ -238,7 +261,8 @@ class _Advisor:
         else:
             receipt["contribution_status"] = "fork_failed"
         computation = {"prompt_digest": fingerprint(prompt), "fork": receipt,
-                       "method": "constructive_work.v1"}
+                       "method": "constructive_work.v1",
+                       "selected_source_digest": selected_source_digest}
         if has_posture:
             computation.update(checkpoint="before_action",
                                offered_posture_revisions=posture_packet["offered_posture_revisions"],
