@@ -203,7 +203,7 @@ def test_selected_message_restores_the_exact_user_selection_only_after_native_om
     projected = fit_context(history, max_tokens=100)
     assert projected[0]["item_id"] == "context-window:omitted"
     restored = advisor.advise(ModelRequest(scope, projected, (), 0), cancel_event=Event())
-    payload = json.loads(restored.context.split("SELECTED_MESSAGE_SOURCE_JSON\\n", 1)[1].split("\\n", 1)[0])
+    payload = json.loads(restored.context.split("SELECTED_MESSAGE_SOURCE_JSON\n", 1)[1].split("\n", 1)[0])
     assert payload["excerpt"] == source["excerpt"]
     assert payload["instruction"] == source["instruction"]
     assert payload["edited"] is True
@@ -226,11 +226,11 @@ def test_large_selected_message_is_attributed_bounded_and_never_fabricates_middl
         "kind": "selected_message", "id": "opening", "workId": "work-b",
         "sourcePageId": "home", "sourceMessageId": "earlier",
         "role": "user", "edited": False,
-        "excerpt": "START " + 'quoted "body"\\n' * 1600 + " END",
+        "excerpt": "START " + 'quoted "body"\n' * 1600 + " END",
         "instruction": "Make this work. " + "specific details " * 400,
     }
     context = source_context(source, include_current=True)
-    payload = json.loads(context.split("SELECTED_MESSAGE_SOURCE_JSON\\n", 1)[1].split("\\n", 1)[0])
+    payload = json.loads(context.split("SELECTED_MESSAGE_SOURCE_JSON\n", 1)[1].split("\n", 1)[0])
     assert len(json.dumps(payload, ensure_ascii=False)) <= MAX_SELECTED_JSON_CHARS
     for name in ("excerpt", "instruction"):
         preview = payload[name + "Preview"]
