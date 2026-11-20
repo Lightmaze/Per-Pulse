@@ -78,6 +78,43 @@ class PageLearning:
             result["status"] = "current"
         return result
 
+    def _selected_message_source(self, work_id, origin, state):
+        """Recover the user's exact selected opening source from native history.
+
+        The source pointer and origin binding are persisted in the existing
+        World page state; the selected text remains solely in the original
+        admitted Work input. No independent memory copy is created.
+        """
+        from .page_source import source_presentation
+
+        initial_id = origin.get("initialMessageId")
+        source_page = origin.get("pageId")
+        source_id = origin.get("messageId")
+        if not all(isinstance(v, str) and v for v in
+                   (initial_id, source_page, source_id)):
+            return None
+        binding = state.get("messageOrigins", {}).get(initial_id)
+        if (not isinstance(binding, dict)
+                or binding.get("pageId") != source_page
+                or binding.get("messageId") != source_id):
+            return None
+        try:
+            self.pages._check_message(source_page, source_id)
+            rows = self.pages._rows(work_id, limit=1, event_id=initial_id)
+        except PageError:
+            return None
+        if len(rows) != 1 or rows[0].get("role") != "user":
+            return None
+        selected = source_presentation(rows[0]["content"], binding)
+        if selected is None:
+            return None
+        return {
+            "kind": "selected_message", "id": initial_id, "workId": work_id,
+            "sourcePageId": source_page, "sourceMessageId": source_id,
+            "role": selected["role"], "edited": selected["edited"],
+            "excerpt": selected["excerpt"], "instruction": selected["instruction"],
+        }
+
     def decision_source(self, scope):
         """Get host-verified source status for the next native Work decision.
 
@@ -99,7 +136,7 @@ class PageLearning:
         origin = state.get("origins", {}).get(front.id, {})
         status = self.source_status(front.id, origin=origin)
         if status is None:
-            return None
+            return self._selected_message_source(front.id, origin, state)
         if status["status"] in {"current", "revised"}:
             try:
                 current = self.selected_saved_observation(

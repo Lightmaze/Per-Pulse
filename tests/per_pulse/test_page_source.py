@@ -83,3 +83,46 @@ def test_envelope_cannot_spoof_request_or_create_attribution():
     for invalid in ({}, {**origin, "messageId": "other"}, {**origin, "pageSourceRole": "user"}):
         assert source_presentation(content, invalid) is None
     assert source_presentation(PREFIX + "{bad" + DIVIDER + "Request", origin) is None
+
+
+def test_selected_result_source_survives_compaction_and_world_restart(tmp_path):
+    """An existing Work retains its selected, edited source after old turns drop."""
+    from types import SimpleNamespace
+    from per_pulse.selected_source_advice import source_context
+
+    with client_for(tmp_path, model_factory=None) as client:
+        original = send(client, "home", "PRIVATE_ORIGINAL_NOT_SELECTED")
+        created = new_page(
+            client, sourceMessageId=original["messageId"],
+            sourceExcerpt="Selected editable summary for the second Work.",
+            instruction="Create a real comparison and write its finished result.",
+        )
+        pages = client.app.state.pages
+        work_id = created["page"]["id"]
+        front = pages._front(work_id)
+        scope = SimpleNamespace(world_id=pages.runtime.world_id,
+                                context_id="work:" + front.center_id)
+        native = pages.learning.decision_source(scope)
+        assert native["kind"] == "selected_message"
+        assert native["id"] == created["initialMessageId"]
+        assert native["edited"] is True
+        assert native["sourceMessageId"] == original["messageId"]
+        assert source_context(native) is None
+        restored = source_context(native, include_current=True)
+        assert "Selected editable summary" in restored
+        assert "Create a real comparison" in restored
+        assert "PRIVATE_ORIGINAL_NOT_SELECTED" not in restored
+
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        front = pages._front(work_id)
+        scope = SimpleNamespace(world_id=pages.runtime.world_id,
+                                context_id="work:" + front.center_id)
+        recovered = pages.learning.decision_source(scope)
+        assert recovered == native
+        assert "Selected editable summary" in source_context(recovered, include_current=True)
+        # A missing native origin binding cannot be replaced by a lookalike
+        # envelope in ordinary user text.
+        pages._state["messageOrigins"].pop(created["initialMessageId"])
+        pages._save()
+        assert pages.learning.decision_source(scope) is None
