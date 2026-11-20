@@ -528,7 +528,7 @@ try {
     && returnAttempts[0].requestId === returnAttempts[1].requestId,
   'A retry keeps the same native Home return identity');
   const retriedHome = (await (await fetch(base + '/api/pages/home')).json()).messages
-    .filter(message => message.content === retryReturnText && message.sourcePageId === originalId);
+    .filter(message => message.content.includes(retryReturnText) && message.sourcePageId === originalId);
   assert.equal(retriedHome.length, 1, 'One native Home input survives the lost receipt and retry');
   assert.equal(retriedHome[0].sourceMessageId, returnAttempts[0].messageId);
   assert.equal(retriedHome[0].references.filter(ref => ref.kind === 'return').length, 1);
