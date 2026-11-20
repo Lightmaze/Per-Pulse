@@ -1128,17 +1128,43 @@ class PageService:
             return {"page": view["page"], "reference": ref, "initialMessageId": created["event_id"], "view": view}
 
     def send(self, page_id: str, content: str, references: list[dict] | None = None,
-             materials: list[str] | None = None) -> dict:
+             materials: list[str] | None = None, request_id: str | None = None) -> dict:
+        """Admit one ordinary user turn, including when its HTTP receipt is lost.
+
+        The existing World CausalLedger owns the request identity. A repeat
+        projects the original message and its links instead of starting another
+        model round or replaying any eventual file effects.
+        """
         with self._lock:
-            self._front(page_id)
+            front = self._front(page_id)
             for ref in references or []:
                 self._front(ref["targetPageId"])
             selected = self.materials.selected(page_id, materials or [])
             content += material_footer(selected)
+            key = (f"per-pulse-user-message:{self.runtime.world_id}:{request_id}"
+                   if request_id is not None else None)
+            if key is not None:
+                previous = self.runtime.causal_ledger.find_causal_event_by_idempotency(
+                    self.runtime.world_id, key)
+                if previous is not None:
+                    if (previous.center_id != (front.center_id if front else None)
+                            or previous.engram_id != self.runtime.continuity_engram_id
+                            or previous.source.value != "user"
+                            or previous.kind.value != "stimulus"
+                            or previous.content != content):
+                        raise PageError(
+                            "message_request_conflict",
+                            "This message was already sent with different details. Edit it to send a new message.",
+                            409,
+                        )
             message_id = (
-                self.runtime.inject(self.runtime.continuity_engram_id, content, source="user")
-                if page_id == "home" else self.runtime.send_task_front_message(page_id, content)
+                self.runtime.inject(self.runtime.continuity_engram_id, content,
+                                    source="user", idempotency_key=key)
+                if page_id == "home" else self.runtime.send_task_front_message(
+                    page_id, content, idempotency_key=key)
             )
+            # If the original HTTP request stopped after World admission, these
+            # page projections are recoverable from the original input on retry.
             for ref in references or []:
                 self._reference(page_id, ref["targetPageId"], message_id, ref.get("label"))
             if selected:
