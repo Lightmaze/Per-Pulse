@@ -12,7 +12,9 @@ export function readDraft(workspaceId: string, pageId: string): Draft {
     const saved = JSON.parse(localStorage.getItem(storageKey(workspaceId, 'draft', pageId)) ?? 'null');
     if (saved && typeof saved.text === 'string' && Array.isArray(saved.references)) {
       const materials = Array.isArray(saved.materials) ? saved.materials.filter((item: unknown) => typeof item === 'object' && item !== null && 'id' in item && typeof item.id === 'string' && /^[a-f0-9]{32}$/.test(item.id) && 'name' in item && typeof item.name === 'string').slice(0, 5) : [];
-      return { text: saved.text, references: saved.references.filter((r: unknown) => typeof r === 'object' && r !== null && 'targetPageId' in r && typeof r.targetPageId === 'string' && 'label' in r && typeof r.label === 'string'), ...(materials.length ? { materials } : {}) };
+      const pendingSend = typeof saved.pendingSend === 'string' && /^[0-9a-f-]{36}$/.test(saved.pendingSend)
+        ? saved.pendingSend : undefined;
+      return { text: saved.text, references: saved.references.filter((r: unknown) => typeof r === 'object' && r !== null && 'targetPageId' in r && typeof r.targetPageId === 'string' && 'label' in r && typeof r.label === 'string'), ...(materials.length ? { materials } : {}), ...(pendingSend ? { pendingSend } : {}) };
     }
   } catch { /* A restricted or full browser storage must not break the workspace. */ }
   return { ...EMPTY_DRAFT, references: [] };
