@@ -31,7 +31,9 @@ def test_saved_large_current_user_message_is_addressable_without_mutating_histor
     assert sum(estimate_tokens(item) for item in fitted) <= 1024
     assert len(fitted) == 1 and fitted[0]["role"] == "user"
     assert "OPENING GOAL" in fitted[0]["content"]
-    assert "FINAL REQUIREMENT" not in fitted[0]["content"]
+    assert "FINAL REQUIREMENT" in fitted[0]["content"]
+    assert "[USER_MESSAGE_MIDDLE_OMITTED " in fitted[0]["content"]
+    assert "café 🌍 details\n" * 100 not in fitted[0]["content"]
     assert "read_history" in fitted[0]["content"]
     assert "current-user-message-1" in fitted[0]["content"]
     assert original["content"].endswith("FINAL REQUIREMENT")
@@ -99,7 +101,9 @@ def test_real_world_can_page_the_current_input_and_keeps_other_work_private(tmp_
         sent = requests[-1][1]["messages"]
         shown = next(row for row in sent if row["role"] == "user")
         assert "CURRENT_LONG_INPUT_START" in shown["content"]
-        assert "CURRENT_LONG_INPUT_END" not in shown["content"]
+        assert "CURRENT_LONG_INPUT_END" in shown["content"]
+        assert "[USER_MESSAGE_MIDDLE_OMITTED " in shown["content"]
+        assert "各段内容 café 🌍\n" * 100 not in shown["content"]
         assert user["message_id"] in shown["content"]
         assert "read_history" in shown["content"]
         assert sum(estimate_tokens(row) for row in sent) <= 2048
