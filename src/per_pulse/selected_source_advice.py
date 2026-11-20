@@ -111,8 +111,8 @@ def source_context(source: dict | None, *, include_current: bool = False) -> str
         if not include_current:
             return None
         selected = _bounded_selected_message(source)
-        note = ("The source was edited by the user when starting this Work; "
-                "do not present the excerpt as a verbatim quote. "
+        note = ("This excerpt was edited by the user when creating this Work; "
+                "it is not a verbatim quote. "
                 if selected["edited"] else "")
         return (
             "Previously selected source and original request for this Work "
