@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.0a33
+
+- Keep revised Work experiences reachable through native `posture.list/find` cursor pages even when earlier records change; continue to fetch their latest revision (#324).
+- Let a later Work read an entire saved correction using native `posture.get` and existing versioned `detail.next` fragments, including long lessons and decision shifts (#325).
+- Keep one Work-to-Work result transfer when the receiving World accepted the message but the browser lost its response. A retry keeps the original source and does not start duplicate model work (#326).
+- Create a new sourced Work directly from a selected, editable completed result in another Work, retaining the original result anchor, the new instruction, drafts and Back navigation (#327).
+- Keep one sourced Work-to-Home result return after the same lost-response condition, without a second native user stimulus or repeated downstream effects (#328).
+
 ## 0.1.0a32
 
 - Keep all older Works reachable while new activity arrives between native `work.list` or title-search pages. Discovery now uses a stable creation-order cursor; the UI still shows recent activity (#320).

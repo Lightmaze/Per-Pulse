@@ -20,7 +20,10 @@ Kernel implementation.
 - Create a page from Home or another page, link pages inline, and return to
   where you were with your unsent draft and reading position intact.
 - Bring selected text Home with a link to its source message, or pass a
-  selected result from one Work to another.
+  selected result from one Work to another. From a completed Work result,
+  edit the selected passage and task to create a new sourced Work directly.
+  If a Work transfer or Home return succeeds on the server but its receipt is
+  lost, retrying the same dialog keeps one delivered message and source.
 - Drop or paste up to five mixed PNG/JPEG, text or PDF files into a Home or
   Work draft; the saved attachments survive refresh and go to the model only
   when you press Send. The Materials file picker can attach several files in one selection and show how many are confirmed as they arrive. You can also attach text materials (Markdown, CSV,
@@ -69,13 +72,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a32-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a32)
+[`per_pulse-0.1.0a33-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a33)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a32-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a33-py3-none-any.whl
 per-pulse --example
 ```
 
