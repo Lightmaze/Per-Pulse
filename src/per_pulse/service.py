@@ -1281,14 +1281,20 @@ class PageService:
                    if request_id is not None else None)
             previous = (self.runtime.causal_ledger.find_causal_event_by_idempotency(
                 self.runtime.world_id, key) if key is not None else None)
+            origin = {"pageId": page_id, "messageId": message_id}
             if previous is not None:
                 saved_origin = self._state["messageOrigins"].get(previous.id)
+                durable_origin = previous.metadata.get("host_source_origin")
                 if (previous.center_id is not None
                         or previous.engram_id != self.runtime.continuity_engram_id
                         or previous.source.value != "user" or previous.content != content
-                        or (saved_origin is not None and saved_origin != {
-                            "pageId": page_id, "messageId": message_id,
-                        })):
+                        or (durable_origin is not None and durable_origin != origin)
+                        or (saved_origin is not None and saved_origin != origin)
+                        # Before this binding existed, a fully saved return is
+                        # recoverable through its page projection. An older
+                        # interrupted return with neither binding is ambiguous;
+                        # never let a later request fabricate its source.
+                        or (durable_origin is None and saved_origin is None)):
                     raise PageError(
                         "return_request_conflict",
                         "This result was already brought Home with different details. Open a new return to send another version.",
@@ -1296,7 +1302,7 @@ class PageService:
                     )
             event_id = self.runtime.inject(
                 self.runtime.continuity_engram_id, content, source="user",
-                idempotency_key=key,
+                idempotency_key=key, _host_source_origin=origin,
             )
             # The native input survives even if writing its page presentation
             # fails. An identical retry repairs the source link after restart.
