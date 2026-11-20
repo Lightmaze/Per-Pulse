@@ -544,6 +544,8 @@ try {
   const ordinaryWorkId = await create('Ordinary send continuation', 'Prepare an ordinary Work task.');
   const ordinaryWorkText = 'Keep the corrected source and finish one ordinary Work decision.';
   const ordinaryWorkAttempts = [];
+  let notifyOrdinaryWorkLost;
+  const ordinaryWorkLost = new Promise(resolve => { notifyOrdinaryWorkLost = resolve; });
   const ordinaryWorkUrl = `**/api/pages/${ordinaryWorkId}/messages`;
   await page.route(ordinaryWorkUrl, async route => {
     ordinaryWorkAttempts.push(route.request().postDataJSON());
@@ -552,11 +554,12 @@ try {
       assert.equal(committed.status(), 202);
       await route.fulfill({ status: 503, contentType: 'application/json',
         body: '{"error":{"code":"network_error","message":"Ordinary Work receipt lost. Try again."}}' });
+      notifyOrdinaryWorkLost();
     } else await route.continue();
   });
   await page.locator('.composer textarea').fill(ordinaryWorkText);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await page.getByText('Ordinary Work receipt lost. Try again.', { exact: true }).waitFor();
+  await ordinaryWorkLost;
   assert.equal(await page.locator('.composer textarea').inputValue(), ordinaryWorkText);
   await page.reload();
   await page.getByRole('heading', { name: 'Ordinary send continuation', exact: true }).waitFor();
@@ -578,6 +581,8 @@ try {
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
   const ordinaryHomeText = 'Continue in Home once after a network receipt disappears.';
   const ordinaryHomeAttempts = [];
+  let notifyOrdinaryHomeLost;
+  const ordinaryHomeLost = new Promise(resolve => { notifyOrdinaryHomeLost = resolve; });
   const ordinaryHomeUrl = '**/api/pages/home/messages';
   await page.route(ordinaryHomeUrl, async route => {
     ordinaryHomeAttempts.push(route.request().postDataJSON());
@@ -586,11 +591,12 @@ try {
       assert.equal(committed.status(), 202);
       await route.fulfill({ status: 503, contentType: 'application/json',
         body: '{"error":{"code":"network_error","message":"Ordinary Home receipt lost. Try again."}}' });
+      notifyOrdinaryHomeLost();
     } else await route.continue();
   });
   await page.locator('.composer textarea').fill(ordinaryHomeText);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await page.getByText('Ordinary Home receipt lost. Try again.', { exact: true }).waitFor();
+  await ordinaryHomeLost;
   await page.reload();
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), ordinaryHomeText);
