@@ -5,6 +5,8 @@ actual task material, not a score, mandatory review form or hidden chain of thou
 """
 from __future__ import annotations
 
+import hashlib
+
 from pulse_harness.core.replay import bound_text, digest_json
 from pulse_harness.core.response_review import RESPONSE_REVIEW_PREFIX
 from pulse_harness.core.turn_advice import TURN_ADVICE_PREFIX
@@ -54,6 +56,32 @@ def clip(text: str, limit: int) -> str:
     return bound_text(text, limit)[0]
 
 
+def preview_work_message(text: str, max_bytes: int = 5000) -> str:
+    """Preserve the source opening and final task in a bounded expert view.
+
+    Only the optional advisory view is shortened: the original native
+    transcript remains authoritative and addressable. A visible gap keeps
+    the two retained passages from looking like continuous source text.
+    """
+    original = text.encode("utf-8")
+    if len(original) <= max_bytes:
+        return text
+    marker = (
+        f"\n[WORK_MESSAGE_MIDDLE_OMITTED original_bytes={len(original)} "
+        f"sha256={hashlib.sha256(original).hexdigest()}]\n"
+    )
+    available = max_bytes - len(marker.encode("utf-8"))
+    if available < 8:
+        raise ValueError("work message preview requires room for both ends")
+    head_bytes = available * 3 // 5
+    tail_bytes = available - head_bytes
+    # Dropping an incomplete boundary code point keeps both excerpts exactly
+    # as they appeared; no replacement characters are invented as evidence.
+    head = original[:head_bytes].decode("utf-8", errors="ignore")
+    tail = original[-tail_bytes:].decode("utf-8", errors="ignore")
+    return head + marker + tail
+
+
 def working_view(request, *, byte_budget: int = 24000) -> tuple[dict, dict]:
     messages = [m for m in request.messages
                 if not m["item_id"].startswith((TURN_ADVICE_PREFIX, RESPONSE_REVIEW_PREFIX))]
@@ -62,7 +90,7 @@ def working_view(request, *, byte_budget: int = 24000) -> tuple[dict, dict]:
     order = ([messages[0]] if messages else []) + list(reversed(messages[1:]))
     for message in order:
         record = {"item_id": message["item_id"], "role": message["role"],
-                  "content": clip(message["content"], 5000)}
+                  "content": preview_work_message(message["content"], 5000)}
         size = len(canonical(record).encode())
         if used + size > byte_budget:
             continue

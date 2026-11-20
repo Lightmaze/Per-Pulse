@@ -294,7 +294,7 @@ def model_fixture(monkeypatch, requests, *, correction=False, all_contributions=
         transport=httpx.MockTransport(handler))
 
 
-def run_with_posture(tmp_path, monkeypatch, *, learned=False, correction=False):
+def run_with_posture(tmp_path, monkeypatch, *, learned=False, correction=False, prompt=None):
     requests = []
     storage = Storage(tmp_path / "world.db")
     memory = PostureMemory(storage, "world")
@@ -309,7 +309,7 @@ def run_with_posture(tmp_path, monkeypatch, *, learned=False, correction=False):
                         turn_advisor=expert.advisor(store, model, scope),
                         response_reviewer=expert.posture_reviewer(store, model, scope))
     try:
-        outcome = runner.run(scope, prompt="Build a useful first experience for a language practice page.")
+        outcome = runner.run(scope, prompt=prompt or "Build a useful first experience for a language practice page.")
         expert.record_outcome(store, scope, outcome)
         transcript = list(TranscriptStore(store).messages(scope))
         usage = recorded_expert_usage(store, scope, trace=expert.trace)
@@ -330,6 +330,37 @@ def test_posture_only_without_eligible_experience_makes_no_extra_request(tmp_pat
     assert usage["provider_requests"] == 0 and accounted
     assert decisions == []
     assert "POSTURE" not in json.dumps(requests[0]["messages"])
+
+
+def test_long_work_b_action_reaches_native_preaction_fork_and_main_model(tmp_path, monkeypatch):
+    """The actual TurnRunner exposes the next task, not just a clipped source lead."""
+    source = (
+        "SELECTED_WORK_A_RESULT: the prior page found the original artifact.\\n"
+        + ("SOURCE_MIDDLE_REQUIRES_SEPARATE_READING. " * 500)
+        + "\\nWORK_B_ACTUAL_NEXT_ACTION: read the saved file before revising the deliverable."
+    )
+    requests, outcome, transcript, usage, decisions = run_with_posture(
+        tmp_path, monkeypatch, learned=True, prompt=source,
+    )
+    assert outcome.status is TurnStatus.SUCCEEDED
+    assert len(requests) == 3
+    advisory = next(
+        json.dumps(request["messages"], ensure_ascii=False)
+        for request in requests
+        if "WORK_MATERIAL_JSON" in json.dumps(request["messages"])
+        and "candidate_response" not in json.dumps(request["messages"])
+    )
+    assert "SELECTED_WORK_A_RESULT" in advisory
+    assert "WORK_B_ACTUAL_NEXT_ACTION: read the saved file" in advisory
+    assert "WORK_MESSAGE_MIDDLE_OMITTED" in advisory
+    assert "SOURCE_MIDDLE_REQUIRES_SEPARATE_READING. " * 500 not in advisory
+    main = next(request for request in requests if "WORK_MATERIAL_JSON"
+                not in json.dumps(request["messages"]))
+    assert "WORK_B_ACTUAL_NEXT_ACTION: read the saved file" in json.dumps(
+        main["messages"], ensure_ascii=False,
+    )
+    assert any(source == message.content for message in transcript if message.role == "user")
+    assert len(decisions) == 2
 
 
 def test_semantic_pass_preserves_main_request_and_records_real_fork_cost(tmp_path, monkeypatch):
