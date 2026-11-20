@@ -598,7 +598,7 @@ try {
   'Private correction text stays in the originating Work');
   await page.reload();
   await page.getByRole('heading', { name: 'Follow-up from selected result', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
   checks.push('Result → new Work: edited source and instruction persist through native first turn, reload and source return');
