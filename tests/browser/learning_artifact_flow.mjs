@@ -564,6 +564,44 @@ try {
   assert.ok(sourceResults.some(m => m.sourcePageId === originalId && m.sourceMessageId),
     'The native receiving message preserves the original Work result source');
   checks.push('retrying a lost transfer response keeps one sourced Work input and both drafts intact');
+  // A later Work can be created directly from an edited result without first
+  // building an empty destination, with one original native source and turn.
+  await selectedSource.getByRole('button', { name: 'Use in another page', exact: true }).click();
+  const newWorkHandoff = page.getByRole('dialog', { name: 'Carry this result into another page', exact: true });
+  const handoffExcerpt = (await newWorkHandoff.locator('#transfer-work-excerpt').inputValue())
+    + '\n\nReviewer note: show the central interaction first.';
+  const handoffInstruction = 'Produce the next usable onboarding draft from this edited result.';
+  await newWorkHandoff.locator('#transfer-work-excerpt').fill(handoffExcerpt);
+  await newWorkHandoff.locator('#transfer-work-instruction').fill(handoffInstruction);
+  await newWorkHandoff.getByRole('button', { name: 'Create a new page from this result', exact: true }).click();
+  const fromResultCreate = page.getByRole('dialog', { name: 'Give this a little room.', exact: true });
+  await fromResultCreate.waitFor();
+  assert.equal(await fromResultCreate.locator('#new-page-source').inputValue(), handoffExcerpt);
+  assert.equal(await fromResultCreate.locator('#new-page-focus').inputValue(), handoffInstruction);
+  await fromResultCreate.locator('#new-page-title').fill('Follow-up from selected result');
+  await fromResultCreate.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Follow-up from selected result', exact: true }).waitFor();
+  const newWorkId = new URL(page.url()).pathname.split('/').pop();
+  await wait(async () => {
+    const response = await fetch(base + '/api/pages/' + newWorkId);
+    return response.ok && (await response.json()).messages.some(message => message.role === 'assistant');
+  }, 'new Work receives a normal native model turn from its selected result');
+  const createdWorkView = await (await fetch(base + '/api/pages/' + newWorkId)).json();
+  assert.equal(createdWorkView.page.sourcePageId, originalId);
+  assert.ok(createdWorkView.messages.some(message => message.role === 'user'
+    && message.content.includes(handoffInstruction)
+    && message.content.includes('Reviewer note: show the central interaction first.')
+    && message.content.includes('"edited": true')),
+  'The first native user message includes the edited result with its original source');
+  assert.ok(!createdWorkView.messages.some(message => message.role === 'user'
+    && message.content.includes('The intake form hides the product')),
+  'Private correction text stays in the originating Work');
+  await page.reload();
+  await page.getByRole('heading', { name: 'Follow-up from selected result', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
+  checks.push('Result → new Work: edited source and instruction persist through native first turn, reload and source return');
   // A Home-created file used to be stranded: the file-result action for
   // another Work was hidden in Home, despite the native reference API accepting
   // a verified Home producer. Exercise the complete ordinary route.
