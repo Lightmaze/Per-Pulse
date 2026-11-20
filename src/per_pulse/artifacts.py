@@ -23,7 +23,6 @@ import base64
 import binascii
 import hashlib
 import json
-from pathlib import Path
 import re
 from typing import Any
 
@@ -142,18 +141,20 @@ class PageArtifacts:
             self._undone_record.mark_undone(action.action_request_id)
 
     def _has_before_image(self, item: dict) -> bool:
-        """Whether the file already has the content it had before this change."""
-        path = Path(self.execution._kernel.workspace_root) / item["path"]
+        """Recognize a previously restored version without following external paths.
+
+        Only the same anchored workspace file reader used for artifact previews
+        may establish the prior bytes. A missing file counts as a restored
+        create-only action only when its parent is still a trusted directory.
+        """
+        files = WorkspaceFiles(self.execution._kernel.workspace_root)
         try:
-            regular = path.is_file() and not path.is_symlink()
-            if regular and path.stat().st_size > MAX_FILE_BYTES:
-                return False
-            data = path.read_bytes() if regular else None
-        except OSError:
+            if item["beforeSha256"] is None:
+                return files.is_absent(item["path"])
+            data = files.read_bytes(item["path"])
+        except FileAccessError:
             return False
-        if item["beforeSha256"] is None:
-            return data is None and not path.exists() and not path.is_symlink()
-        return data is not None and hashlib.sha256(data).hexdigest() == item["beforeSha256"]
+        return hashlib.sha256(data).hexdigest() == item["beforeSha256"]
 
     @staticmethod
     def _limits() -> dict:
