@@ -99,10 +99,16 @@ export default function App() {
   const changeDraft = useCallback((next: Draft) => {
     if (!workspaceId) return;
     interacted.current = `${workspaceId}-${route.id}-${route.serial}`;
-    const updated = { ...draftsRef.current, [draftKey]: next };
+    const previous = draftsRef.current[draftKey] ?? readDraft(workspaceId, route.id);
+    // An edited message is a new user intent, not a retry of an uncertain send.
+    const samePayload = previous.text === next.text
+      && JSON.stringify(previous.references) === JSON.stringify(next.references)
+      && JSON.stringify(previous.materials ?? []) === JSON.stringify(next.materials ?? []);
+    const changed = samePayload ? next : { ...next, pendingSend: undefined };
+    const updated = { ...draftsRef.current, [draftKey]: changed };
     draftsRef.current = updated;
     setDrafts(updated);
-    persistDraft(route.id, next);
+    persistDraft(route.id, changed);
   }, [route.id, route.serial, workspaceId, draftKey, persistDraft]);
 
   const pasteFiles = async (selected: File[]) => {
@@ -161,7 +167,7 @@ export default function App() {
           stoppedReason = t('composer.pastedImageSaved');
           break;
         }
-        const next: Draft = { ...latest, materials: [
+        const next: Draft = { ...latest, pendingSend: undefined, materials: [
           ...(latest.materials ?? []), { id: response.material.id, name: response.material.name },
         ] };
         const updated = { ...draftsRef.current, [key]: next };
@@ -270,6 +276,16 @@ export default function App() {
     }
     // Only this local context is saving. Another Work remains usable while
     // this request is awaiting the native World/Kernel response.
+    const requestId = command ? undefined : outgoing.pendingSend ?? crypto.randomUUID();
+    if (requestId && !outgoing.pendingSend) {
+      // Persist the identity *before* sending. A browser reload after a lost
+      // receipt reuses the original native input, not another model turn.
+      const prepared: Draft = { ...outgoing, pendingSend: requestId };
+      const updated = { ...draftsRef.current, [key]: prepared };
+      draftsRef.current = updated;
+      setDrafts(updated);
+      persistDraft(id, prepared);
+    }
     pendingSends.current.add(key);
     setSendingPages(previous => ({ ...previous, [key]: true }));
     setSendErrors(previous => ({ ...previous, [key]: '' }));
@@ -277,7 +293,7 @@ export default function App() {
     try {
       const response = command?.kind === 'start' ? await api.tick(id, command.count)
         : command?.kind === 'stop' ? await api.stopTick(id)
-        : await api.send(id, outgoing.text.trim(), outgoing.references.filter(reference => outgoing.text.includes(reference.label)), outgoing.materials?.map(item => item.id));
+        : await api.send(id, outgoing.text.trim(), outgoing.references.filter(reference => outgoing.text.includes(reference.label)), outgoing.materials?.map(item => item.id), requestId);
       applyView(response.view);
       if (command) setToast(command.kind === 'stop' ? t('tick.stopped')
         : command.count === 1 ? t('tick.startedOne') : t('tick.started', { count: command.count }));
@@ -293,6 +309,7 @@ export default function App() {
       const sentMaterials = new Set((outgoing.materials ?? []).map(material => material.id));
       const nextDraft: Draft = unchanged ? empty : {
         ...currentDraft,
+        pendingSend: undefined,
         text: currentDraft.text === outgoing.text ? '' : currentDraft.text,
         materials: currentDraft.materials?.filter(material => !sentMaterials.has(material.id)),
       };
@@ -405,6 +422,7 @@ export default function App() {
           });
           const next: Draft = {
             ...current,
+            pendingSend: undefined,
             text: current.text ? `${current.text}\n\n${sourceLine}` : sourceLine,
             references: existingLink ? current.references
               : [...current.references, { targetPageId: sourceId, label: sourceTitle }],
@@ -501,6 +519,7 @@ export default function App() {
       });
       const next: Draft = {
         ...current,
+        pendingSend: undefined,
         text: current.text ? `${current.text}\n\n${sourceLine}` : sourceLine,
         references: existingLink ? current.references
           : [...current.references, { targetPageId: sourceId, label: sourceTitle }],
