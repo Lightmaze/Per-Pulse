@@ -270,7 +270,7 @@ export type PostureExperience = PostureLesson | PostureExample;
 export type PostureView = { enabled: boolean; experiences: PostureExperience[] };
 
 export type DraftReference = { targetPageId: string; label: string };
-export type Draft = { text: string; references: DraftReference[]; materials?: Pick<Material, 'id' | 'name'>[] };
+export type Draft = { text: string; references: DraftReference[]; materials?: Pick<Material, 'id' | 'name'>[]; pendingSend?: string };
 export type NavigationOrigin = { pageId: string; messageId?: string; referenceId?: string };
 
 export type PulseConnection = {

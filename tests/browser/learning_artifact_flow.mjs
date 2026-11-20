@@ -538,6 +538,85 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
   checks.push('lost Home return HTTP receipt retries one native input and retains source and both drafts');
 
+  // Ordinary composer Send (not a specialized return/transfer dialog) must
+  // survive native admission followed by a lost HTTP response and browser
+  // restart. The original Work and Home continue from one input each.
+  const ordinaryWorkId = await create('Ordinary send continuation', 'Prepare an ordinary Work task.');
+  const ordinaryWorkText = 'Keep the corrected source and finish one ordinary Work decision.';
+  const ordinaryWorkAttempts = [];
+  let notifyOrdinaryWorkLost;
+  const ordinaryWorkLost = new Promise(resolve => { notifyOrdinaryWorkLost = resolve; });
+  const ordinaryWorkUrl = `**/api/pages/${ordinaryWorkId}/messages`;
+  await page.route(ordinaryWorkUrl, async route => {
+    ordinaryWorkAttempts.push(route.request().postDataJSON());
+    if (ordinaryWorkAttempts.length === 1) {
+      const committed = await route.fetch();
+      assert.equal(committed.status(), 202);
+      await route.fulfill({ status: 503, contentType: 'application/json',
+        body: '{"error":{"code":"network_error","message":"Ordinary Work receipt lost. Try again."}}' });
+      notifyOrdinaryWorkLost();
+    } else await route.continue();
+  });
+  await page.locator('.composer textarea').fill(ordinaryWorkText);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await ordinaryWorkLost;
+  assert.equal(await page.locator('.composer textarea').inputValue(), ordinaryWorkText);
+  await page.reload();
+  await page.getByRole('heading', { name: 'Ordinary send continuation', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), ordinaryWorkText);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => (await page.locator('.composer textarea').inputValue()) === '',
+    'ordinary Work retry clears the confirmed draft');
+  await page.unroute(ordinaryWorkUrl);
+  assert.equal(ordinaryWorkAttempts.length, 2);
+  assert.ok(ordinaryWorkAttempts[0].requestId
+    && ordinaryWorkAttempts[0].requestId === ordinaryWorkAttempts[1].requestId,
+    'A reloaded Work draft retries the original native identity');
+  const ordinaryWorkMessages = (await (await fetch(base + '/api/pages/' + ordinaryWorkId)).json()).messages;
+  assert.equal(ordinaryWorkMessages.filter(message => message.role === 'user'
+    && message.content === ordinaryWorkText).length, 1);
+  checks.push('ordinary Work Send recovers its native input after 503 and browser restart, without duplicate work');
+
+  await page.goto(base + '/');
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  const ordinaryHomeText = 'Continue in Home once after a network receipt disappears.';
+  const ordinaryHomeAttempts = [];
+  let notifyOrdinaryHomeLost;
+  const ordinaryHomeLost = new Promise(resolve => { notifyOrdinaryHomeLost = resolve; });
+  const ordinaryHomeUrl = '**/api/pages/home/messages';
+  await page.route(ordinaryHomeUrl, async route => {
+    ordinaryHomeAttempts.push(route.request().postDataJSON());
+    if (ordinaryHomeAttempts.length === 1) {
+      const committed = await route.fetch();
+      assert.equal(committed.status(), 202);
+      await route.fulfill({ status: 503, contentType: 'application/json',
+        body: '{"error":{"code":"network_error","message":"Ordinary Home receipt lost. Try again."}}' });
+      notifyOrdinaryHomeLost();
+    } else await route.continue();
+  });
+  await page.locator('.composer textarea').fill(ordinaryHomeText);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await ordinaryHomeLost;
+  await page.reload();
+  await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), ordinaryHomeText);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => (await page.locator('.composer textarea').inputValue()) === '',
+    'ordinary Home retry clears the confirmed draft');
+  await page.unroute(ordinaryHomeUrl);
+  assert.equal(ordinaryHomeAttempts.length, 2);
+  assert.ok(ordinaryHomeAttempts[0].requestId
+    && ordinaryHomeAttempts[0].requestId === ordinaryHomeAttempts[1].requestId);
+  const ordinaryHomeMessages = (await (await fetch(base + '/api/pages/home')).json()).messages;
+  // Home may carry verified draft attachments; native material footers extend
+  // the visible instruction without changing the one accepted user event.
+  assert.equal(ordinaryHomeMessages.filter(message => message.role === 'user'
+    && message.content.startsWith(ordinaryHomeText)).length, 1);
+  await page.goto(base + '/page/' + originalId);
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
+  checks.push('ordinary Home Send retries once after 503/reload and preserves the unrelated source Work draft');
+
   await selectedSource.getByRole('button', { name: 'Use in another page', exact: true }).click();
   const transferDialog = page.getByRole('dialog', { name: 'Carry this result into another page', exact: true });
   await transferDialog.waitFor();

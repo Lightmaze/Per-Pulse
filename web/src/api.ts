@@ -103,8 +103,8 @@ export const api = {
     request<MessageHistory>(`${pagePath(id)}/messages/search?q=${encodeURIComponent(query)}${beforeMessageId ? `&beforeMessageId=${encodeURIComponent(beforeMessageId)}` : ''}`, { signal }),
   createPage: (data: { title: string; instruction: string; sourcePageId: string; sourceMessageId?: string | null; sourceExcerpt?: string; sourceExperienceId?: string; sourceArtifact?: Pick<Artifact, 'id' | 'pageId' | 'path' | 'sha256'> }) =>
     request<{ page: PageSummary; reference: PageReference; initialMessageId: string; view: PageView }>('/pages', { method: 'POST', body: JSON.stringify(data) }),
-  send: (id: string, content: string, references: DraftReference[], materials: string[] = []) =>
-    request<{ messageId: string; view: PageView }>(`${pagePath(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, references, materials }) }),
+  send: (id: string, content: string, references: DraftReference[], materials: string[] = [], requestId?: string) =>
+    request<{ messageId: string; view: PageView }>(`${pagePath(id)}/messages`, { method: 'POST', body: JSON.stringify({ content, references, materials, requestId }) }),
   tick: (id: string, count: number) =>
     request<{ tick: TickRun; view: PageView }>(`${pagePath(id)}/tick`, { method: 'POST', body: JSON.stringify({ count }) }),
   stopTick: (id: string) =>

@@ -68,6 +68,7 @@ class NewMessage(Input):
     content: Annotated[str, StringConstraints(strip_whitespace=True, max_length=32_000)]
     references: list[ReferenceInput] = Field(default_factory=list, max_length=20)
     materials: list[Identifier] = Field(default_factory=list, max_length=5)
+    requestId: Identifier | None = None
 
     @model_validator(mode="after")
     def has_content(self):
@@ -534,7 +535,8 @@ def create_app(
 
     @app.post("/api/pages/{page_id}/messages", status_code=202)
     def message(page_id: str, body: NewMessage, request: Request):
-        return pages(request).send(page_id, body.content, [r.model_dump() for r in body.references], body.materials)
+        return pages(request).send(page_id, body.content, [r.model_dump() for r in body.references],
+                                   body.materials, request_id=body.requestId)
 
     @app.get("/api/pages/{page_id}/materials")
     def materials(page_id: str, request: Request):
