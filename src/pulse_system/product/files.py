@@ -293,6 +293,31 @@ class WorkspaceFiles:
                 "restartedDueToChange": changed and not continued,
                 "limit_bytes": MAX_FILE_BYTES, "scope": "shared_native_workspace"}
 
+    def is_absent(self, path: str) -> bool:
+        """Check that a file name is absent in a verified workspace directory.
+
+        Unlike Path.exists(), this never follows a replaced workspace root or
+        parent symlink. This supports recovery of a completed Undo whose receipt
+        was lost, without treating an inaccessible path as a deleted file.
+        """
+        parts = _parts(path)
+        with self.directory("/".join(parts[:-1])) as parent:
+            if _WINDOWS:
+                # Enumerate from the anchored native directory handle. Name
+                # comparison follows Windows' case-insensitive file lookup.
+                return not any(
+                    name.casefold() == parts[-1].casefold()
+                    for name, _directory, _size, _reparse
+                    in winfiles.list_directory(parent)
+                )
+            try:
+                os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                return True
+            except OSError:
+                raise FileAccessError("path_unavailable", 404) from None
+            return False
+
     def read_bytes(self, path: str) -> bytes:
         """The file's original bytes, bounded by ``upload_limit``."""
         parts = _parts(path)

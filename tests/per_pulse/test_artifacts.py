@@ -469,6 +469,85 @@ def test_preview_uses_existing_path_file_type_and_size_guards(tmp_path, monkeypa
             original_workspace.rename(workspace)
 
 
+@pytest.mark.parametrize("preexisting", [False, True], ids=["new-file", "rewrite"])
+def test_undo_receipt_recovery_keeps_native_workspace_boundary(tmp_path, monkeypatch, preexisting):
+    """A lost Undo receipt cannot be reconstructed through an external symlink.
+
+    The file effect, approval, original action receipt, and final Undo are
+    native. Only the injected digest disagreement is a test double.
+    """
+    from pulse_harness.adapters.workspace import WorkspaceDigestConflict
+
+    before = "Original user draft.\n"
+    after = "Finished Work artifact.\n"
+    plans = {"WRITE_REPORT": {
+        "path": "report.txt",
+        "expected_digest": _sha(before) if preexisting else None,
+        "content": after,
+    }}
+    requests = []
+    factory = _factory(monkeypatch, plans, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        workspace = tmp_path / "workspace"
+        target = workspace / "report.txt"
+        if preexisting:
+            target.write_text(before, encoding="utf-8", newline="")
+        pages = client.app.state.pages
+        work = _page(client, "WRITE_REPORT")
+        action_id = _approve(pages.execution, work)
+        item, = pages.artifacts.snapshot(work)["artifacts"]
+        assert item["actionId"] == action_id
+        assert target.read_text(encoding="utf-8") == after
+
+        # The already-restored version is recognized on a genuine workspace
+        # path, including the absence of an originally new file.
+        if preexisting:
+            target.write_text(before, encoding="utf-8", newline="")
+        else:
+            target.unlink()
+        assert pages.artifacts._has_before_image(item)
+        target.write_text(after, encoding="utf-8", newline="")
+
+        external = tmp_path / "outside-workspace"
+        external.mkdir()
+        if preexisting:
+            (external / "report.txt").write_text(before, encoding="utf-8", newline="")
+        displaced = tmp_path / "original-workspace"
+        workspace.rename(displaced)
+        try:
+            workspace.symlink_to(external, target_is_directory=True)
+            assert not pages.artifacts._has_before_image(item)
+            with monkeypatch.context() as injected:
+                def digest_conflict(*_args, **_kwargs):
+                    raise WorkspaceDigestConflict("Simulated lost Undo receipt")
+                injected.setattr(pages.execution._kernel, "restore_checkpoint", digest_conflict)
+                blocked = client.post(f"/api/pages/{work}/artifacts/{action_id}/undo", json={})
+            assert blocked.status_code == 409, blocked.text
+            assert blocked.json()["error"]["code"] == "artifact_version_changed"
+            assert not pages.artifacts.snapshot(work)["artifacts"][0]["undone"]
+            # Recovery did not remove, edit or consume any outside source.
+            if preexisting:
+                assert (external / "report.txt").read_text(encoding="utf-8") == before
+            else:
+                assert list(external.iterdir()) == []
+        finally:
+            if workspace.is_symlink():
+                workspace.unlink()
+            displaced.rename(workspace)
+
+        # The original confirmed Work change is still undoable exactly once.
+        assert target.read_text(encoding="utf-8") == after
+        restored = client.post(f"/api/pages/{work}/artifacts/{action_id}/undo", json={})
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["artifact"]["undone"]
+        if preexisting:
+            assert target.read_text(encoding="utf-8") == before
+        else:
+            assert not target.exists()
+        assert pages.artifacts.snapshot(work)["artifacts"][0]["undone"]
+        assert len(requests) >= 1
+
+
 def test_preview_shows_the_users_own_text_bounded_after_verifying_original_bytes(tmp_path, monkeypatch):
     import per_pulse.artifacts as module
 
