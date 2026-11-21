@@ -150,11 +150,23 @@ try {
   await page.goto(base);
   assert.equal(await page.evaluate(() => Object.keys(sessionStorage).filter(k =>
     k.startsWith('per-pulse-create-pending:')).length), 0, 'new tab has no pending sessionStorage');
+  // The user can complete a different Work before retrying the lost first
+  // receipt. Its confirmed identity must not overwrite the first pending one.
+  await openNewWork();
+  await page.locator('#new-page-title').fill('Separate Work while offline');
+  await page.locator('#new-page-focus').fill('Complete a different legitimate task.');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Separate Work while offline', exact: true }).waitFor();
+  assert.equal(await workCount(), priorCount + 2);
+  await page.goto(base);
+  assert.equal(await page.evaluate(() => Object.keys(localStorage).filter(k =>
+    k.startsWith('per-pulse-create-pending:')).length), 1,
+    'another confirmed Work must preserve the first uncertain request');
   await openNewWork();
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
   await page.getByRole('heading', { name: 'Lost create receipt', exact: true }).waitFor();
   assert.equal(dropped, 1, 'only the first native HTTP response was lost');
-  assert.equal(await workCount(), priorCount + 1, 'retry must not create a second Work');
+  assert.equal(await workCount(), priorCount + 2, 'retry must not create a third Work');
   assert.equal(page.url().split('/').pop(), admitted.page.id);
   const actualWork = await data('/api/pages/' + admitted.page.id);
   assert.equal(actualWork.messages[0].id, admitted.initialMessageId);
@@ -166,14 +178,15 @@ try {
   await openNewWork();
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
   await page.getByRole('heading', { name: 'Lost create receipt', exact: true }).waitFor();
-  assert.equal(await workCount(), priorCount + 2, 'intentional new Create gets a separate native Work');
+  assert.equal(await workCount(), priorCount + 3, 'intentional new Create gets a separate native Work');
   assert.notEqual(page.url().split('/').pop(), admitted.page.id);
 
   assert.deepEqual(errors.filter(error => !/net::ERR_FAILED|Failed to fetch/.test(error)), []);
   console.log(JSON.stringify({ passed: true, checks: ['Home source author', 'separate request editor',
     'native user identity', 'rendered author', 'source anchor', 'reload', 'search attribution',
     'mobile overflow', 'lost HTTP create receipt after native admission',
-    'closed tab and browser-context restart', 'original Work recovery without a second Work',
+    'closed tab and browser-context restart', 'interleaved second Work preserves original pending identity',
+    'original Work recovery without a duplicate',
     'no private content in pending storage', 'pending identity cleared',
     'confirmed Create allows intentional new Work', 'no unexpected page errors'], base, directory }));
 } finally {
