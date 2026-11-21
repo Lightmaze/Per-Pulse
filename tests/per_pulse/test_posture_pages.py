@@ -612,7 +612,8 @@ def test_selected_work_correction_withdrawn_during_advice_stays_withdrawn_after_
         front = pages._front(target)
         scope = HarnessScope(
             pages.runtime.world_id, pages.runtime.continuity_engram_id,
-            "work:" + front.center_id, 0, "owner", turn_id="later-decision",
+            "selected-source-recheck", 0, "owner",
+            context_id="work:" + front.center_id, turn_id="later-decision",
         )
         before = pages.learning.decision_source(scope)
         assert before["status"] == "current" and before["revision"] == 2
@@ -659,7 +660,8 @@ def test_selected_work_correction_withdrawn_during_advice_stays_withdrawn_after_
         front = pages._front(target)
         recovered = pages.learning.decision_source(HarnessScope(
             pages.runtime.world_id, pages.runtime.continuity_engram_id,
-            "work:" + front.center_id, 0, "owner", turn_id="after-restart",
+            "selected-source-recheck", 0, "owner",
+            context_id="work:" + front.center_id, turn_id="after-restart",
         ))
         assert recovered["status"] == "withdrawn"
         assert "selected" not in recovered
