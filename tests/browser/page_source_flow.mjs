@@ -102,8 +102,50 @@ try {
   await page.locator(`[data-message-id="${chineseFirst.id}"]`).locator('.message-label').getByText('来源与请求').waitFor();
   await page.reload();
   await page.locator(`[data-message-id="${chineseFirst.id}"]`).locator('.message-label').getByText('来源与请求').waitFor();
-  assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, checks: ['Home source author', 'separate request editor', 'native user identity', 'rendered author', 'source anchor', 'reload', 'search attribution', 'mobile overflow', 'no page errors'], base, directory }));
+  // A real native Work may be admitted while the browser loses the response.
+  // Reload discards the dialog but preserves only its tab-local request ID
+  // and payload digest, so submitting the same task recovers that Work.
+  await page.evaluate(() => localStorage.setItem('per-pulse.ui.language.v1', 'en-US'));
+  await page.goto(base);
+  const workCount = async () => (await data('/api/bootstrap')).pages.filter(p => p.kind === 'work').length;
+  const priorCount = await workCount();
+  let admitted = null, dropped = 0;
+  await page.route('**/api/pages', async route => {
+    if (route.request().method() !== 'POST' || dropped) return route.continue();
+    const response = await route.fetch();
+    assert.equal(response.status(), 201, await response.text());
+    admitted = await response.json();
+    dropped++;
+    await route.abort('failed');
+  });
+  const openNewWork = async () => {
+    await page.locator('.pages-label .icon-button').click();
+    await page.locator('#new-page-title').fill('Lost create receipt');
+    await page.locator('#new-page-focus').fill('Prepare one practical source-aware deliverable.');
+  };
+  await openNewWork();
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await wait(async () => !!admitted && await workCount() === priorCount + 1, 'first native Work admitted');
+  await page.getByRole('dialog').getByRole('alert').waitFor();
+  await page.reload();
+  await openNewWork();
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Lost create receipt', exact: true }).waitFor();
+  assert.equal(dropped, 1, 'only the first native HTTP response was lost');
+  assert.equal(await workCount(), priorCount + 1, 'retry must not create a second Work');
+  assert.equal(page.url().split('/').pop(), admitted.page.id);
+  const actualWork = await data('/api/pages/' + admitted.page.id);
+  assert.equal(actualWork.messages[0].id, admitted.initialMessageId);
+  assert.equal(await page.evaluate(() => Object.keys(sessionStorage).filter(k =>
+    k.startsWith('per-pulse-create-pending:')).length), 0, 'confirmed create clears pending browser identity');
+  await page.unroute('**/api/pages');
+
+  assert.deepEqual(errors.filter(error => !/net::ERR_FAILED|Failed to fetch/.test(error)), []);
+  console.log(JSON.stringify({ passed: true, checks: ['Home source author', 'separate request editor',
+    'native user identity', 'rendered author', 'source anchor', 'reload', 'search attribution',
+    'mobile overflow', 'lost HTTP create receipt after native admission',
+    'tab reload and original Work recovery', 'no duplicate native Work', 'pending identity cleared',
+    'no unexpected page errors'], base, directory }));
 } finally {
   await browser?.close();
   if (server.exitCode === null) { const stopped = new Promise(r => server.once('exit', r)); server.kill(); await stopped; }
