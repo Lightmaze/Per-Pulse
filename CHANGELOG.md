@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.1.0a34
+
+- Restore the verified selected message and its actual Work task when earlier native context has been omitted, without copying the source Work's private history (#330).
+- Recover an ordinary Home or Work Send after a lost HTTP response or restart without re-admitting the same native user event or issuing duplicate downstream work (#331).
+- Keep the last instruction of a long, source-heavy Work visible to the pre-action expert under its existing bounded work-material budget (#332).
+- Give the native pre-action expert the current verified Work source and replace stale source advice when the owner revises the lesson (#333).
+- Recover a temporarily SQLite-contended native runtime lease renewal without treating that transient lock as permanent shutdown (#334).
+- Keep a long user's final Work requirement visible in bounded main-model history while retaining the complete original message behind `read_history` (#335).
+- Verify restored file contents or absence through workspace-anchored paths when an Undo receipt was lost; a replaced symlink cannot make an outside path look restored (#336).
+- Bind Work-to-Home source identity to the originally admitted native CausalLedger message, so a different Work cannot claim a lost-response retry after restart (#337).
+- Keep an undone file-producing action withdrawn as a cross-Work source even if identical bytes reappear at the same path; allow explicit selection of the new current file instead (#338).
+
 ## 0.1.0a33
 
 - Keep revised Work experiences reachable through native `posture.list/find` cursor pages even when earlier records change; continue to fetch their latest revision (#324).
