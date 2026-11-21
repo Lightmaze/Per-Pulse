@@ -203,10 +203,12 @@ class SelectedSourceTurnAdvisor:
             for message in request.messages
         )
         context = source_context(source, include_current=history_omitted)
+        previous_invoked = False
         try:
             previous = None
             if (self._previous is not None
                     and (index == 0 or getattr(self._previous, "continues", False))):
+                previous_invoked = True
                 # The expert's first action is a decision too. Give its existing
                 # optional computation the same host-verified source snapshot
                 # that the main model receives after history omission/revision.
@@ -225,6 +227,21 @@ class SelectedSourceTurnAdvisor:
             raise
         except Exception:
             previous = TurnAdvice(receipt={"status": "skipped", "reason": "advisor_failed_or_invalid"})
+        if previous_invoked:
+            # A source Work may revise or withdraw its shared lesson while an
+            # optional expert computes. Recheck the authoritative World before
+            # giving either contribution to the main model. The prior fork's
+            # cost receipt survives, but its stale advice cannot be admitted.
+            latest = self._read_source(request.scope)
+            if latest != source:
+                source = latest
+                context = source_context(source, include_current=history_omitted)
+                if previous is not None:
+                    previous = TurnAdvice(receipt={
+                        **previous.receipt,
+                        "status": "suppressed_before_admission",
+                        "reason": "selected_source_changed_during_advice",
+                    })
         if context is None:
             return previous
         receipt = dict(previous.receipt) if previous is not None else {}
