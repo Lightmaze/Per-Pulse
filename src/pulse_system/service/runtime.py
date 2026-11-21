@@ -9924,6 +9924,64 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         )
         return self._task_offer_operation_view(operation)
 
+    def _new_work_identity(self, idempotency_key: str, request_fingerprint: str) -> tuple[str, str, str]:
+        """Bind one browser creation attempt to native World identities, not an HTTP cache."""
+        if (not isinstance(idempotency_key, str) or not idempotency_key
+                or not isinstance(request_fingerprint, str)
+                or len(request_fingerprint) != 64
+                or any(char not in "0123456789abcdef" for char in request_fingerprint)):
+            raise ServiceError(
+                "invalid_work_creation_identity", "Invalid Work creation identity.",
+                "Start a fresh Work creation.", status=422,
+            )
+        root = f"{self._world_id}:{idempotency_key}"
+        front_id = str(uuid.uuid5(uuid.NAMESPACE_URL, root + ":front"))
+        center_id = str(uuid.uuid5(uuid.NAMESPACE_URL, root + ":center"))
+        return front_id, center_id, "per-pulse-create:" + request_fingerprint
+
+    def find_created_task_front(
+        self, *, idempotency_key: str, request_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        """Recover a Work whose first native user event already survived a lost reply."""
+        self._require_runtime_owner()
+        front_id, center_id, description = self._new_work_identity(
+            idempotency_key, request_fingerprint,
+        )
+        front = self._world.get_task_front(front_id)
+        prior = self.causal_ledger.find_causal_event_by_idempotency(
+            self._world_id, idempotency_key,
+        )
+        if front is None:
+            if prior is not None:
+                raise ServiceError(
+                    "work_creation_conflict", "A Work creation lost its native identity.",
+                    "Inspect the existing World before retrying.", status=409,
+                )
+            return None
+        center = self._world.get_activity_center(front.center_id)
+        if (center is None or front.center_id != center_id
+                or center.description != description or center.title != front.title
+                or center.focal_engram_id != front.focal_engram_id):
+            raise ServiceError(
+                "work_creation_conflict", "This request already belongs to another Work.",
+                "Start a new Work request for changed details.", status=409,
+            )
+        if prior is None:
+            return None
+        if (prior.center_id != center_id
+                or prior.engram_id != front.focal_engram_id
+                or prior.source is not CausalEventSource.USER
+                or prior.kind is not CausalEventKind.STIMULUS):
+            raise ServiceError(
+                "work_creation_conflict", "The existing Work has a different first input.",
+                "Inspect the original Work before retrying.", status=409,
+            )
+        return {
+            "task_front": self._task_front_view(front),
+            "activity_center": self._activity_center_view(center),
+            "event_id": prior.id,
+        }
+
     def create_task_front(
         self,
         content: str,
@@ -9932,6 +9990,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         project_id: str | None = None,
         subject_engram_id: str | None = None,
         prepare_content: Callable[[str, str], str] | None = None,
+        idempotency_key: str | None = None,
+        request_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         """Create one task view inside this world, then queue its first text.
 
@@ -9948,6 +10008,25 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 'send {"content": "<text>"}',
                 status=400,
             )
+        if idempotency_key is not None:
+            recovered = self.find_created_task_front(
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+            )
+            if recovered is not None:
+                return recovered
+            front_id, center_id, creation_description = self._new_work_identity(
+                idempotency_key, request_fingerprint,
+            )
+            existing_front = self._world.get_task_front(front_id)
+        else:
+            if request_fingerprint is not None:
+                raise ServiceError(
+                    "invalid_work_creation_identity", "A Work fingerprint requires its request identity.",
+                    "Start a fresh Work creation.", status=422,
+                )
+            front_id = center_id = creation_description = None
+            existing_front = None
         self._ensure_project(project_id)
         resolved_title = title if title is not None else session_name(content)
         if resolved_title is None:
@@ -9980,20 +10059,38 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                     "use the current active successor Engram id",
                     status=409,
                 )
+        bundle = None
         try:
-            if subject_id is None:
+            if existing_front is not None:
+                front = existing_front
+                center = self._world.get_activity_center(front.center_id)
+                if (center is None or front.title != resolved_title
+                        or (subject_id is not None and front.focal_engram_id != subject_id)):
+                    raise ServiceError(
+                        "work_creation_conflict", "This request already belongs to another Work.",
+                        "Start a new Work request for changed details.", status=409,
+                    )
+            elif subject_id is None:
                 bundle = self._world.create_task_front(
                     resolved_title,
                     project_id=project_id,
                     origin=ActivityOrigin.USER,
+                    description=creation_description or "",
+                    front_id=front_id,
+                    center_id=center_id,
                 )
+                front, center = bundle.front, bundle.center
             else:
                 bundle = self._world.create_task_bundle_for_existing_engram(
                     resolved_title,
                     subject_id,
                     project_id=project_id,
                     origin=ActivityOrigin.USER,
+                    description=creation_description or "",
+                    front_id=front_id,
+                    center_id=center_id,
                 )
+                front, center = bundle.front, bundle.center
         except ValueError as exc:
             if subject_id is not None:
                 # The storage operation revalidates inside its transaction.  Map a
@@ -10020,7 +10117,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         # No model or Pulse step can observe a partially prepared first task.
         if prepare_content is not None:
             try:
-                content = prepare_content(bundle.front.id, content)
+                content = prepare_content(front.id, content)
                 if not isinstance(content, str) or not content.strip():
                     raise ServiceError(
                         "empty_content", "A prepared task needs an initial message.",
@@ -10032,19 +10129,21 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 # the same World before an initial stimulus can be queued.
                 # Never delete a Front once inject() has begun: it may already
                 # have durable causal history.
-                self._world.discard_unstarted_task_bundle(
-                    bundle.front.id, bundle.center.id, bundle.focal_engram.id,
-                    world_id=self._world_id, created_engram=subject_id is None,
-                )
+                if bundle is not None:
+                    self._world.discard_unstarted_task_bundle(
+                        front.id, center.id, front.focal_engram_id,
+                        world_id=self._world_id, created_engram=subject_id is None,
+                    )
                 raise
         event_id = self.inject(
-            bundle.focal_engram.id,
+            front.focal_engram_id,
             content,
             source="user",
-            center_id=bundle.center.id,
+            center_id=center.id,
+            idempotency_key=idempotency_key,
         )
-        center = self._world.touch_activity_center(bundle.center.id) or bundle.center
-        front = self._world.touch_task_front(bundle.front.id) or bundle.front
+        center = self._world.touch_activity_center(center.id) or center
+        front = self._world.touch_task_front(front.id) or front
         self._metrics.record(
             "task_front_created",
             world=self._world_id,

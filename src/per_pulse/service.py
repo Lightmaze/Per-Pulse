@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import asdict
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1022,11 +1023,113 @@ class PageService:
         self._state["references"].append(ref)
         return dict(ref)
 
+    def _created_page_result(
+        self, created: dict, *, title: str, instruction: str,
+        source_page_id: str, source_message_id: str | None,
+        source_excerpt: str | None, source_experience_id: str | None,
+        source_artifact: dict | None, first_material: dict | None = None,
+        saved_origin: dict | None = None,
+    ) -> dict:
+        """Rebuild page navigation from the original admitted native event.
+
+        This also runs after a lost HTTP response and restart. It must never
+        create a second Work or reinterpret a newer source revision as the
+        original selected experience.
+        """
+        event_id = created["event_id"]
+        page_id = created["task_front"]["id"]
+        event = self.runtime.causal_ledger.get_event(event_id)
+        if event is None:
+            raise PageError("work_creation_unconfirmed", "The new Work input is not available.", 503)
+        source_role = None
+        if source_excerpt is not None:
+            from .page_source import DIVIDER, PREFIX
+
+            packet, separator, _ = event.content[len(PREFIX):].partition(DIVIDER) if event.content.startswith(PREFIX) else ("", "", "")
+            try:
+                source_data = json.loads(packet)
+            except (TypeError, ValueError):
+                source_data = {}
+            if (not separator or not isinstance(source_data, dict)
+                    or source_data.get("sourcePageId") != source_page_id
+                    or source_data.get("sourceMessageId") != source_message_id
+                    or source_data.get("excerpt") != source_excerpt
+                    or source_data.get("role") not in {"user", "assistant", "system"}):
+                raise PageError("work_creation_unconfirmed", "The original selected source could not be recovered.", 503)
+            source_role = source_data["role"]
+        if source_experience_id is not None and saved_origin is None:
+            # Recover the selected revision from the immutable first input;
+            # the author may have revised or withdrawn the lesson meanwhile.
+            packet = None
+            for marker in ("WEB_EXPERIENCE_JSON\n", "READING_EXPERIENCE_JSON\n",
+                           "COMMAND_EXPERIENCE_JSON\n", "LESSON_EXPERIENCE_JSON\n"):
+                if marker in event.content:
+                    try:
+                        packet, _ = json.JSONDecoder().raw_decode(event.content.split(marker, 1)[1])
+                    except (TypeError, ValueError):
+                        packet = None
+                    break
+            if (not isinstance(packet, dict) or packet.get("id") != source_experience_id
+                    or type(packet.get("revision")) is not int):
+                raise PageError("work_creation_unconfirmed", "The original saved experience could not be recovered.", 503)
+            saved_origin = {"experienceId": packet["id"], "experienceRevision": packet["revision"]}
+        if source_artifact is not None and first_material is None:
+            records = self.runtime.storage.list_page_materials(
+                self.runtime.world_id, page_id, MAX_MESSAGES,
+            )
+            first_material = next((record for record in records
+                if record.get("originArtifactPageId") == source_page_id
+                and record.get("originArtifactId") == source_artifact["id"]
+                and record["path"] == source_artifact["path"]
+                and record["sha256"] == source_artifact["sha256"]
+                and event.content.endswith(material_footer([record]))), None)
+            if first_material is None:
+                raise PageError("work_creation_unconfirmed", "The original file source could not be recovered.", 503)
+        if first_material is not None:
+            self._state.setdefault("messageMaterials", {})[event_id] = [first_material["id"]]
+        if source_role is not None:
+            self._state["messageOrigins"][event_id] = {
+                "pageId": source_page_id, "messageId": source_message_id, "pageSourceRole": source_role,
+            }
+        self._state["origins"][page_id] = {
+            "pageId": source_page_id, "messageId": source_message_id,
+            "description": instruction[:240],
+            **({"initialMessageId": event_id} if source_role is not None else {}),
+            **(saved_origin or {}),
+        }
+        ref = self._reference(source_page_id, page_id, source_message_id, title, "created")
+        self._save()
+        view = self.view(page_id)
+        return {"page": view["page"], "reference": ref, "initialMessageId": event_id, "view": view}
+
     def create_page(self, title: str, instruction: str, source_page_id: str = "home",
                     source_message_id: str | None = None, *, source_excerpt: str | None = None,
                     source_experience_id: str | None = None,
-                    source_artifact: dict | None = None) -> dict:
+                    source_artifact: dict | None = None, request_id: str | None = None) -> dict:
         with self._lock:
+            creation_key = None
+            fingerprint = None
+            if request_id is not None:
+                creation_key = f"per-pulse-new-work:{self.runtime.world_id}:{request_id}"
+                fields = {
+                    "title": title, "instruction": instruction,
+                    "sourcePageId": source_page_id, "sourceMessageId": source_message_id,
+                    "sourceExcerpt": source_excerpt, "sourceExperienceId": source_experience_id,
+                    "sourceArtifact": source_artifact,
+                }
+                fingerprint = hashlib.sha256(json.dumps(
+                    fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                ).encode("utf-8")).hexdigest()
+                original = self.runtime.find_created_task_front(
+                    idempotency_key=creation_key, request_fingerprint=fingerprint,
+                )
+                if original is not None:
+                    return self._created_page_result(
+                        original, title=title, instruction=instruction,
+                        source_page_id=source_page_id, source_message_id=source_message_id,
+                        source_excerpt=source_excerpt, source_experience_id=source_experience_id,
+                        source_artifact=source_artifact,
+                    )
             self._check_message(source_page_id, source_message_id)
             prepare_content = None
             first_material = None
@@ -1107,25 +1210,16 @@ class PageService:
                     raise PageError("page_source_too_large", "Choose a shorter excerpt or request.", 422)
             created = self.runtime.create_task_front(
                 content, title=title, subject_engram_id=self.runtime.continuity_engram_id,
-                prepare_content=prepare_content,
+                prepare_content=prepare_content, idempotency_key=creation_key,
+                request_fingerprint=fingerprint,
             )
-            page_id = created["task_front"]["id"]
-            if first_material is not None:
-                self._state.setdefault("messageMaterials", {})[created["event_id"]] = [first_material["id"]]
-            if source_role is not None:
-                self._state["messageOrigins"][created["event_id"]] = {
-                    "pageId": source_page_id, "messageId": source_message_id, "pageSourceRole": source_role,
-                }
-            self._state["origins"][page_id] = {
-                "pageId": source_page_id, "messageId": source_message_id,
-                "description": instruction[:240],
-                **({"initialMessageId": created["event_id"]} if source_role is not None else {}),
-                **(saved_origin or {}),
-            }
-            ref = self._reference(source_page_id, page_id, source_message_id, title, "created")
-            self._save()
-            view = self.view(page_id)
-            return {"page": view["page"], "reference": ref, "initialMessageId": created["event_id"], "view": view}
+            return self._created_page_result(
+                created, title=title, instruction=instruction,
+                source_page_id=source_page_id, source_message_id=source_message_id,
+                source_excerpt=source_excerpt, source_experience_id=source_experience_id,
+                source_artifact=source_artifact, first_material=first_material,
+                saved_origin=saved_origin,
+            )
 
     def send(self, page_id: str, content: str, references: list[dict] | None = None,
              materials: list[str] | None = None, request_id: str | None = None) -> dict:

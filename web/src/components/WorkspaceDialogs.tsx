@@ -10,7 +10,7 @@ import { providerSetupCommand, type ProviderMode, type ProviderShell } from '../
 import { CopyButton } from './CopyButton';
 
 export type Modal =
-  | { kind: 'create'; message?: Message; sourceExcerpt?: string; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact }
+  | { kind: 'create'; message?: Message; sourceExcerpt?: string; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact; requestId?: string }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'picker'; mode: 'artifact'; artifact: Artifact }
   | { kind: 'return'; message: Message; content: string; needsExactExcerpt?: boolean; requestId: string }

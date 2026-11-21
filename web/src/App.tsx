@@ -82,7 +82,7 @@ export default function App() {
     workspace.navigate(id, origin, targetMessageId);
   }, [workspace.navigate, route.id, workspaceId]);
 
-  const openModal = (next: Modal) => { setModalError(''); setModal(next); setPulseOpen(false); setSidebarOpen(false); };
+  const openModal = (next: Modal) => { setModalError(''); setModal(next.kind === 'create' ? { ...next, requestId: crypto.randomUUID() } : next); setPulseOpen(false); setSidebarOpen(false); };
   const closeModal = () => { if (!busy) { setModal(null); setModalError(''); } };
   const persistDraft = useCallback((pageId: string, next: Draft) => {
     if (!workspaceId) return;
@@ -353,10 +353,33 @@ export default function App() {
       if (artifact && (!bootstrap || artifact.pageId !== sourceId)) {
         throw new Error(t('library.referenceUnconfirmed'));
       }
-      const response = await api.createPage({ title, instruction, sourcePageId: sourceId,
+      const payload = { title, instruction, sourcePageId: sourceId,
         sourceMessageId: message?.id, sourceExcerpt,
         sourceExperienceId: modal?.kind === 'create' ? modal.fromExperience?.id : undefined,
-        sourceArtifact: artifact ? { id: artifact.id, pageId: artifact.pageId, path: artifact.path, sha256: artifact.sha256 } : undefined });
+        sourceArtifact: artifact ? { id: artifact.id, pageId: artifact.pageId, path: artifact.path, sha256: artifact.sha256 } : undefined };
+      // A crashed tab may have lost its dialog after the native Work already
+      // started. Keep only an intent digest and request ID in this tab, never
+      // source text, file bytes, or a competing page/World record.
+      const pendingKey = `per-pulse-create-pending:${sourceWorkspace}:${sourceId}`;
+      const digestBytes = await crypto.subtle.digest('SHA-256',
+        new TextEncoder().encode(JSON.stringify(payload)));
+      const fingerprint = Array.from(new Uint8Array(digestBytes),
+        byte => byte.toString(16).padStart(2, '0')).join('');
+      let requestId = sourceModal?.kind === 'create' ? sourceModal.requestId ?? crypto.randomUUID() : crypto.randomUUID();
+      try {
+        const stored = JSON.parse(sessionStorage.getItem(pendingKey) ?? 'null');
+        if (stored?.fingerprint === fingerprint && typeof stored.requestId === 'string') requestId = stored.requestId;
+        sessionStorage.setItem(pendingKey, JSON.stringify({ fingerprint, requestId }));
+      } catch {
+        // Storage-disabled browsers can still retry this dialog with its ID.
+      }
+      const response = await api.createPage({ ...payload, requestId });
+      try {
+        const stored = JSON.parse(sessionStorage.getItem(pendingKey) ?? 'null');
+        if (stored?.fingerprint === fingerprint && stored.requestId === requestId) sessionStorage.removeItem(pendingKey);
+      } catch {
+        // A confirmed native response is authoritative, not tab storage.
+      }
       // An admitted Work remains real even if the user navigated elsewhere
       // while its receipt was in flight. Update the original World, but never
       // replace a later route, dialog or workspace with an older response.

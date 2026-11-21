@@ -62,6 +62,7 @@ class NewPage(Input):
     sourcePageId: Identifier = "home"
     sourceMessageId: Identifier | None = None
     sourceExperienceId: Identifier | None = None
+    requestId: Annotated[str, StringConstraints(pattern=r"^[a-zA-Z0-9_-]{16,64}$")] | None = None
 
 
 class NewMessage(Input):
@@ -531,6 +532,7 @@ def create_app(
             body.title, body.instruction, body.sourcePageId, body.sourceMessageId,
             source_excerpt=body.sourceExcerpt, source_experience_id=body.sourceExperienceId,
             source_artifact=body.sourceArtifact.model_dump() if body.sourceArtifact is not None else None,
+            request_id=body.requestId,
         )
 
     @app.post("/api/pages/{page_id}/messages", status_code=202)
