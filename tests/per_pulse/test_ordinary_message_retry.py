@@ -116,3 +116,99 @@ def test_legacy_send_without_request_identity_remains_compatible(tmp_path):
         second = client.post("/api/pages/home/messages", json={"content": "An intentional second send."})
         assert first.status_code == second.status_code == 202
         assert first.json()["messageId"] != second.json()["messageId"]
+
+
+def test_lost_composer_receipt_cannot_retarget_original_work_reference(tmp_path, monkeypatch):
+    """Real native admission, receipt failure, SQLite restart and HTTP recovery."""
+    with client_for(tmp_path, model_factory=None) as client:
+        original = new_page(client, title="Original Work", instruction="Keep original history.")
+        other = new_page(client, title="Other Work", instruction="Keep a separate history.")
+        original_id, other_id = original["page"]["id"], other["page"]["id"]
+
+    request_id = "message-original-link-20261121"
+    payload = {
+        "content": "Continue the evidence from Original Work.",
+        "references": [{"targetPageId": original_id}],
+        "requestId": request_id,
+    }
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        original_save = pages._save
+
+        def lose_receipt():
+            raise OSError("lost receipt after the native message was accepted")
+
+        monkeypatch.setattr(pages, "_save", lose_receipt)
+        with pytest.raises(OSError, match="lost receipt"):
+            pages.send("home", payload["content"], payload["references"],
+                       request_id=request_id)
+        monkeypatch.setattr(pages, "_save", original_save)
+        event = pages.runtime.causal_ledger.find_causal_event_by_idempotency(
+            pages.runtime.world_id,
+            f"per-pulse-user-message:{pages.runtime.world_id}:{request_id}",
+        )
+        assert event is not None
+        assert event.metadata["host_message_references"] == [{
+            "targetPageId": original_id,
+            "label": None,
+            "displayLabel": "Original Work",
+        }]
+
+    with client_for(tmp_path, model_factory=None) as client:
+        changed = client.post("/api/pages/home/messages", json={
+            **payload, "references": [{"targetPageId": other_id}],
+        })
+        assert changed.status_code == 409, changed.text
+        assert changed.json()["error"]["code"] == "message_request_conflict"
+
+        # A title change after the original admission cannot change its
+        # original reference label or source identity during replay.
+        client.app.state.pages.rename(original_id, "Renamed Work")
+        retry = client.post("/api/pages/home/messages", json=payload)
+        assert retry.status_code == 202, retry.text
+        assert retry.json()["messageId"] == event.id
+        refs = [ref for ref in retry.json()["view"]["references"]
+                if ref["sourceMessageId"] == event.id]
+        assert len(refs) == 1
+        assert refs[0]["targetPageId"] == original_id
+        assert refs[0]["label"] == "Original Work"
+
+        # A second retry is a projection of the first event, never a new
+        # input, reference or downstream tool/action opportunity.
+        again = client.post("/api/pages/home/messages", json=payload)
+        assert again.status_code == 202
+        assert again.json()["messageId"] == event.id
+        assert len([ref for ref in again.json()["view"]["references"]
+                    if ref["sourceMessageId"] == event.id]) == 1
+
+    with client_for(tmp_path, model_factory=None) as client:
+        home = client.get("/api/pages/home").json()
+        assert sum(msg["id"] == event.id for msg in home["messages"]) == 1
+        assert sum(ref["sourceMessageId"] == event.id
+                   for ref in home["references"]) == 1
+
+
+def test_legacy_interrupted_send_cannot_claim_new_reference(tmp_path):
+    """Old unbound causal messages cannot invent links during migration."""
+    with client_for(tmp_path, model_factory=None) as client:
+        work = new_page(client, title="Not the original source",
+                        instruction="Stay separate.")
+        pages = client.app.state.pages
+        request_id = "old-unbound-reference-20261121"
+        key = f"per-pulse-user-message:{pages.runtime.world_id}:{request_id}"
+        event_id = pages.runtime.inject(
+            pages.runtime.continuity_engram_id, "Legacy message.", source="user",
+            idempotency_key=key,
+        )
+        assert pages.runtime.causal_ledger.get_event(event_id).metadata.get(
+            "host_message_references") is None
+        conflict = client.post("/api/pages/home/messages", json={
+            "content": "Legacy message.",
+            "references": [{"targetPageId": work["page"]["id"]}],
+            "requestId": request_id,
+        })
+        assert conflict.status_code == 409
+        assert conflict.json()["error"]["code"] == "message_request_conflict"
+        home = client.get("/api/pages/home").json()
+        assert not any(ref["sourceMessageId"] == event_id
+                       for ref in home["references"])
