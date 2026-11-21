@@ -82,7 +82,7 @@ export default function App() {
     workspace.navigate(id, origin, targetMessageId);
   }, [workspace.navigate, route.id, workspaceId]);
 
-  const openModal = (next: Modal) => { setModalError(''); setModal(next); setPulseOpen(false); setSidebarOpen(false); };
+  const openModal = (next: Modal) => { setModalError(''); setModal(next.kind === 'create' ? { ...next, requestId: crypto.randomUUID() } : next); setPulseOpen(false); setSidebarOpen(false); };
   const closeModal = () => { if (!busy) { setModal(null); setModalError(''); } };
   const persistDraft = useCallback((pageId: string, next: Draft) => {
     if (!workspaceId) return;
@@ -356,7 +356,8 @@ export default function App() {
       const response = await api.createPage({ title, instruction, sourcePageId: sourceId,
         sourceMessageId: message?.id, sourceExcerpt,
         sourceExperienceId: modal?.kind === 'create' ? modal.fromExperience?.id : undefined,
-        sourceArtifact: artifact ? { id: artifact.id, pageId: artifact.pageId, path: artifact.path, sha256: artifact.sha256 } : undefined });
+        sourceArtifact: artifact ? { id: artifact.id, pageId: artifact.pageId, path: artifact.path, sha256: artifact.sha256 } : undefined,
+        requestId: sourceModal?.kind === 'create' ? sourceModal.requestId : undefined });
       // An admitted Work remains real even if the user navigated elsewhere
       // while its receipt was in flight. Update the original World, but never
       // replace a later route, dialog or workspace with an older response.
