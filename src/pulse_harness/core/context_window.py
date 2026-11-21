@@ -298,11 +298,18 @@ def fit_context(messages: Sequence[Mapping[str, Any]], max_tokens: int) -> tuple
     suffix = [0] * (len(messages) + 1)
     for index in range(len(messages) - 1, -1, -1):
         suffix[index] = suffix[index + 1] + estimate_tokens(messages[index])
-    # An old opening can exceed a newly selected model's window by itself.
-    # Prefer the current exchange; the original opening remains in history.
+    # A saved opening may be larger than the current model window. Keep an
+    # addressable, bounded preview of its actual beginning and final request
+    # beside the current exchange, rather than losing the page's original
+    # purpose merely because the full opening no longer fits. Never invent
+    # a history pointer for an opening without a durable message identity.
     if pinned and fixed + suffix[starts[-1]] > max_tokens:
-        pinned = ()
-        fixed = estimate_tokens(note)
+        opening_room = max_tokens - estimate_tokens(note) - suffix[starts[-1]]
+        preview = (_project_saved_user_input(pinned[0], opening_room)
+                   if opening_room > 0 else None)
+        pinned = ((preview,) if preview is not None
+                  and estimate_tokens(preview) <= opening_room else ())
+        fixed = sum(estimate_tokens(message) for message in pinned) + estimate_tokens(note)
     # Reserve a small space for original, addressable user corrections that
     # would otherwise vanish from this request. Limit both scans to the nearby
     # history; a page with thousands of turns still has bounded lookup cost.
