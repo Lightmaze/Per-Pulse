@@ -1238,12 +1238,27 @@ class PageService:
                     "targetPageId": ref["targetPageId"],
                     "label": ref.get("label") or None,
                 })
-            selected = self.materials.selected(page_id, materials or [])
-            content += material_footer(selected)
             key = (f"per-pulse-user-message:{self.runtime.world_id}:{request_id}"
                    if request_id is not None else None)
             previous = (self.runtime.causal_ledger.find_causal_event_by_idempotency(
                 self.runtime.world_id, key) if key is not None else None)
+            if previous is not None:
+                # A native Send may have committed before the HTTP receipt or
+                # messageMaterials projection was saved. Its original file IDs,
+                # digests and paths are already immutable in the causal input.
+                # Recover that historical input even if its file has since
+                # changed or its producing action was undone. This does not
+                # grant another read or let a new message use a stale file.
+                requested_materials = materials or []
+                if len(requested_materials) > 5 or len(set(requested_materials)) != len(requested_materials):
+                    from .materials import MaterialError
+                    raise MaterialError("material_selection_invalid",
+                                        "Select up to five distinct source files.", 422)
+                selected = [self.materials._record(page_id, identity)
+                            for identity in requested_materials]
+            else:
+                selected = self.materials.selected(page_id, materials or [])
+            content += material_footer(selected)
 
             def conflict() -> None:
                 raise PageError(
