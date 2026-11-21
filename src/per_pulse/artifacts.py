@@ -344,6 +344,10 @@ class PageArtifacts:
             "reason": None,
             **self._limits(),
         }
+        if item["undone"]:
+            # Matching bytes written again do not revive an undone action.
+            response["reason"] = "artifact_undone"
+            return response
         try:
             # Reuses the product's dirfd/no-follow path traversal, regular-file
             # check, hardlink rejection and bounded UTF-8 read.
@@ -380,6 +384,10 @@ class PageArtifacts:
         the filesystem path after this read. No pathname is reopened by HTTP.
         """
         item = self._resolve(page_id, artifact_id)
+        if item["undone"]:
+            raise ArtifactError(
+                "artifact_undone", "This file result was undone. Choose a current file result.", 409,
+            )
         try:
             current, data = WorkspaceFiles(self.execution._kernel.workspace_root).read_with_bytes(item["path"])
         except FileAccessError as error:
