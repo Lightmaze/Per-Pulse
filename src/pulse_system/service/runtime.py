@@ -10244,7 +10244,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         }
 
     def send_task_front_message(self, front_id: str, content: str, *,
-                                idempotency_key: str | None = None) -> str:
+                                idempotency_key: str | None = None,
+                                _host_message_references: list[dict[str, str | None]] | None = None) -> str:
         self._require_runtime_owner()
         front = self._world.get_task_front(front_id)
         if front is None:
@@ -10298,6 +10299,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             source="user",
             center_id=center.id,
             idempotency_key=idempotency_key,
+            _host_message_references=_host_message_references,
             _admission_guard=self._task_message_admission_guard(
                 center_id=center.id,
                 engram_id=front.focal_engram_id,
@@ -10914,6 +10916,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         idempotency_key: str | None = None,
         stimulus_envelope: StimulusEnvelope | None = None,
         _host_source_origin: dict[str, str | None] | None = None,
+        _host_message_references: list[dict[str, str | None]] | None = None,
         _admission_guard: Callable[[Any], None] | None = None,
     ) -> str:
         """Durably enqueue one piece of content and return its event id.
@@ -10962,6 +10965,25 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                     "invalid_source_origin",
                     "a Home source origin must identify one verified Work",
                     "use the original Work return request",
+                    status=422,
+                )
+        if _host_message_references is not None:
+            if (source_value is not CausalEventSource.USER
+                    or not isinstance(_host_message_references, list)
+                    or any(
+                        not isinstance(ref, dict)
+                        or set(ref) != {"targetPageId", "label", "displayLabel"}
+                        or not isinstance(ref["targetPageId"], str)
+                        or not ref["targetPageId"]
+                        or (ref["label"] is not None and not isinstance(ref["label"], str))
+                        or not isinstance(ref["displayLabel"], str)
+                        or not ref["displayLabel"]
+                        for ref in _host_message_references
+                    )):
+                raise ServiceError(
+                    "invalid_message_references",
+                    "a user message must carry verified navigation references",
+                    "use the original page message request",
                     status=422,
                 )
         try:
@@ -11183,6 +11205,9 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                             "stimulus_provenance_digest": envelope.provenance.digest,
                             **({"host_source_origin": dict(_host_source_origin)}
                                if _host_source_origin is not None else {}),
+                            **({"host_message_references": [
+                                dict(ref) for ref in _host_message_references
+                            ]} if _host_message_references is not None else {}),
                             **({"stimulus_source_turn_id": envelope.provenance.tip.source_turn_id}
                                if envelope.provenance.tip.source_turn_id is not None else {}),
                             **(

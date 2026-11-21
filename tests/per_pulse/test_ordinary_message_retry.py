@@ -116,3 +116,178 @@ def test_legacy_send_without_request_identity_remains_compatible(tmp_path):
         second = client.post("/api/pages/home/messages", json={"content": "An intentional second send."})
         assert first.status_code == second.status_code == 202
         assert first.json()["messageId"] != second.json()["messageId"]
+
+
+def test_lost_composer_receipt_cannot_retarget_original_work_reference(tmp_path, monkeypatch):
+    """Real native admission, receipt failure, SQLite restart and HTTP recovery."""
+    with client_for(tmp_path, model_factory=None) as client:
+        original = new_page(client, title="Original Work", instruction="Keep original history.")
+        other = new_page(client, title="Other Work", instruction="Keep a separate history.")
+        original_id, other_id = original["page"]["id"], other["page"]["id"]
+
+    request_id = "message-original-link-20261121"
+    payload = {
+        "content": "Continue the evidence from Original Work.",
+        "references": [{"targetPageId": original_id}],
+        "requestId": request_id,
+    }
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        original_save = pages._save
+
+        def lose_receipt():
+            raise OSError("lost receipt after the native message was accepted")
+
+        monkeypatch.setattr(pages, "_save", lose_receipt)
+        with pytest.raises(OSError, match="lost receipt"):
+            pages.send("home", payload["content"], payload["references"],
+                       request_id=request_id)
+        monkeypatch.setattr(pages, "_save", original_save)
+        event = pages.runtime.causal_ledger.find_causal_event_by_idempotency(
+            pages.runtime.world_id,
+            f"per-pulse-user-message:{pages.runtime.world_id}:{request_id}",
+        )
+        assert event is not None
+        assert event.metadata["host_message_references"] == [{
+            "targetPageId": original_id,
+            "label": None,
+            "displayLabel": "Original Work",
+        }]
+
+    with client_for(tmp_path, model_factory=None) as client:
+        changed = client.post("/api/pages/home/messages", json={
+            **payload, "references": [{"targetPageId": other_id}],
+        })
+        assert changed.status_code == 409, changed.text
+        assert changed.json()["error"]["code"] == "message_request_conflict"
+
+        # A title change after the original admission cannot change its
+        # original reference label or source identity during replay.
+        client.app.state.pages.rename(original_id, "Renamed Work")
+        retry = client.post("/api/pages/home/messages", json=payload)
+        assert retry.status_code == 202, retry.text
+        assert retry.json()["messageId"] == event.id
+        refs = [ref for ref in retry.json()["view"]["references"]
+                if ref["sourceMessageId"] == event.id]
+        assert len(refs) == 1
+        assert refs[0]["targetPageId"] == original_id
+        assert refs[0]["label"] == "Original Work"
+
+        # A second retry is a projection of the first event, never a new
+        # input, reference or downstream tool/action opportunity.
+        again = client.post("/api/pages/home/messages", json=payload)
+        assert again.status_code == 202
+        assert again.json()["messageId"] == event.id
+        assert len([ref for ref in again.json()["view"]["references"]
+                    if ref["sourceMessageId"] == event.id]) == 1
+
+    with client_for(tmp_path, model_factory=None) as client:
+        home = client.get("/api/pages/home").json()
+        assert sum(msg["id"] == event.id for msg in home["messages"]) == 1
+        assert sum(ref["sourceMessageId"] == event.id
+                   for ref in home["references"]) == 1
+
+
+def test_legacy_interrupted_send_cannot_claim_new_reference(tmp_path):
+    """Old unbound causal messages cannot invent links during migration."""
+    with client_for(tmp_path, model_factory=None) as client:
+        work = new_page(client, title="Not the original source",
+                        instruction="Stay separate.")
+        pages = client.app.state.pages
+        request_id = "old-unbound-reference-20261121"
+        key = f"per-pulse-user-message:{pages.runtime.world_id}:{request_id}"
+        event_id = pages.runtime.inject(
+            pages.runtime.continuity_engram_id, "Legacy message.", source="user",
+            idempotency_key=key,
+        )
+        assert pages.runtime.causal_ledger.get_event(event_id).metadata.get(
+            "host_message_references") is None
+        conflict = client.post("/api/pages/home/messages", json={
+            "content": "Legacy message.",
+            "references": [{"targetPageId": work["page"]["id"]}],
+            "requestId": request_id,
+        })
+        assert conflict.status_code == 409
+        assert conflict.json()["error"]["code"] == "message_request_conflict"
+        home = client.get("/api/pages/home").json()
+        assert not any(ref["sourceMessageId"] == event_id
+                       for ref in home["references"])
+
+
+def test_work_send_retries_preserve_original_cross_work_navigation(tmp_path, monkeypatch):
+    """Work B's accepted input cannot acquire Work C's link on HTTP retry."""
+    with client_for(tmp_path, model_factory=None) as client:
+        source = new_page(client, title="Work A source",
+                          instruction="Record a useful source.")
+        receiving = new_page(client, title="Work B receiver",
+                             instruction="Continue the original source.")
+        unrelated = new_page(client, title="Work C unrelated",
+                             instruction="Do unrelated work.")
+        source_id, receiver_id, other_id = (
+            source["page"]["id"], receiving["page"]["id"],
+            unrelated["page"]["id"],
+        )
+    request_id = "work-b-source-binding-20261121"
+    payload = {
+        "content": "Choose a tool for the next real document.",
+        "references": [{"targetPageId": source_id, "label": "Work A evidence"}],
+        "requestId": request_id,
+    }
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        original_save = pages._save
+
+        def lost_receipt():
+            raise OSError("Work B receipt lost after admission")
+
+        monkeypatch.setattr(pages, "_save", lost_receipt)
+        with pytest.raises(OSError, match="Work B receipt lost"):
+            pages.send(receiver_id, payload["content"], payload["references"],
+                       request_id=request_id)
+        monkeypatch.setattr(pages, "_save", original_save)
+        event = pages.runtime.causal_ledger.find_causal_event_by_idempotency(
+            pages.runtime.world_id,
+            f"per-pulse-user-message:{pages.runtime.world_id}:{request_id}",
+        )
+        assert event is not None
+        assert event.center_id == pages._front(receiver_id).center_id
+
+    with client_for(tmp_path, model_factory=None) as client:
+        changed = client.post(f"/api/pages/{receiver_id}/messages", json={
+            **payload,
+            "references": [{"targetPageId": other_id, "label": "Work A evidence"}],
+        })
+        assert changed.status_code == 409
+        assert changed.json()["error"]["code"] == "message_request_conflict"
+        recovered = client.post(f"/api/pages/{receiver_id}/messages", json=payload)
+        assert recovered.status_code == 202, recovered.text
+        assert recovered.json()["messageId"] == event.id
+        restored = [r for r in recovered.json()["view"]["references"]
+                    if r["sourceMessageId"] == event.id]
+        assert len(restored) == 1
+        assert restored[0]["targetPageId"] == source_id
+        assert restored[0]["label"] == "Work A evidence"
+        assert [m["id"] for m in recovered.json()["view"]["messages"]].count(event.id) == 1
+
+
+def test_legacy_plain_send_retry_keeps_later_manual_reference(tmp_path):
+    """A previously added link is not a new source claim by an empty retry."""
+    with client_for(tmp_path, model_factory=None) as client:
+        work = new_page(client, title="Later link", instruction="Keep existing Work.")
+        pages = client.app.state.pages
+        request_id = "old-send-with-later-manual-link-20261121"
+        event_id = pages.runtime.inject(
+            pages.runtime.continuity_engram_id, "An older message.",
+            source="user",
+            idempotency_key=f"per-pulse-user-message:{pages.runtime.world_id}:{request_id}",
+        )
+        pages.add_reference("home", work["page"]["id"], source_message_id=event_id)
+        retry = client.post("/api/pages/home/messages", json={
+            "content": "An older message.", "requestId": request_id,
+        })
+        assert retry.status_code == 202, retry.text
+        assert retry.json()["messageId"] == event_id
+        refs = [r for r in retry.json()["view"]["references"]
+                if r["sourceMessageId"] == event_id]
+        assert len(refs) == 1
+        assert refs[0]["targetPageId"] == work["page"]["id"]

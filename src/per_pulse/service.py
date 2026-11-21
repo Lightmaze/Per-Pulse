@@ -1223,46 +1223,102 @@ class PageService:
 
     def send(self, page_id: str, content: str, references: list[dict] | None = None,
              materials: list[str] | None = None, request_id: str | None = None) -> dict:
-        """Admit one ordinary user turn, including when its HTTP receipt is lost.
+        """Retry an ordinary user turn without changing its original Work links.
 
-        The existing World CausalLedger owns the request identity. A repeat
-        projects the original message and its links instead of starting another
-        model round or replaying any eventual file effects.
+        The accepted CausalLedger event binds both the message and the exact
+        navigation references before any fallible page-view projection. A
+        retry may repair that projection but cannot substitute another Work.
         """
         with self._lock:
             front = self._front(page_id)
+            requested_refs = []
             for ref in references or []:
                 self._front(ref["targetPageId"])
+                requested_refs.append({
+                    "targetPageId": ref["targetPageId"],
+                    "label": ref.get("label") or None,
+                })
             selected = self.materials.selected(page_id, materials or [])
             content += material_footer(selected)
             key = (f"per-pulse-user-message:{self.runtime.world_id}:{request_id}"
                    if request_id is not None else None)
-            if key is not None:
-                previous = self.runtime.causal_ledger.find_causal_event_by_idempotency(
-                    self.runtime.world_id, key)
-                if previous is not None:
-                    if (previous.center_id != (front.center_id if front else None)
-                            or previous.engram_id != self.runtime.continuity_engram_id
-                            or previous.source.value != "user"
-                            or previous.kind.value != "stimulus"
-                            or previous.content != content):
-                        raise PageError(
-                            "message_request_conflict",
-                            "This message was already sent with different details. Edit it to send a new message.",
-                            409,
+            previous = (self.runtime.causal_ledger.find_causal_event_by_idempotency(
+                self.runtime.world_id, key) if key is not None else None)
+
+            def conflict() -> None:
+                raise PageError(
+                    "message_request_conflict",
+                    "This message was already sent with different details. Edit it to send a new message.",
+                    409,
+                )
+
+            if previous is not None:
+                if (previous.center_id != (front.center_id if front else None)
+                        or previous.engram_id != self.runtime.continuity_engram_id
+                        or previous.source.value != "user"
+                        or previous.kind.value != "stimulus"
+                        or previous.content != content):
+                    conflict()
+                anchored_refs = previous.metadata.get("host_message_references")
+                if anchored_refs is None:
+                    # Prior releases did not bind navigation to the native
+                    # event. Accept only a completed matching projection;
+                    # an interrupted old event is ambiguous, not an invitation
+                    # to attach a newly chosen Work as its original source.
+                    old = [
+                        ref for ref in self._state["references"]
+                        if ref["sourcePageId"] == page_id
+                        and ref["sourceMessageId"] == previous.id
+                        and ref["kind"] == "reference"
+                    ]
+                    if requested_refs and (
+                        len(old) != len(requested_refs) or any(
+                            saved["targetPageId"] != wanted["targetPageId"]
+                            or (wanted["label"] is not None
+                                and saved["label"] != wanted["label"])
+                            for saved, wanted in zip(old, requested_refs)
                         )
+                    ):
+                        conflict()
+                    # An older message may have gained a separate, deliberate
+                    # Add Reference *after* its Send. An empty retry does not
+                    # remove or claim that independently created navigation.
+                    anchored_refs = [{
+                        "targetPageId": saved["targetPageId"],
+                        "label": wanted["label"],
+                        "displayLabel": saved["label"],
+                    } for saved, wanted in zip(old, requested_refs)]
+                if ([{"targetPageId": ref["targetPageId"], "label": ref["label"]}
+                     for ref in anchored_refs] != requested_refs):
+                    conflict()
+            else:
+                anchored_refs = [{
+                    **ref,
+                    "displayLabel": ref["label"] or self._summary(ref["targetPageId"])["title"],
+                } for ref in requested_refs]
+
             message_id = (
-                self.runtime.inject(self.runtime.continuity_engram_id, content,
-                                    source="user", idempotency_key=key)
+                self.runtime.inject(
+                    self.runtime.continuity_engram_id, content,
+                    source="user", idempotency_key=key,
+                    _host_message_references=anchored_refs,
+                )
                 if page_id == "home" else self.runtime.send_task_front_message(
-                    page_id, content, idempotency_key=key)
+                    page_id, content, idempotency_key=key,
+                    _host_message_references=anchored_refs,
+                )
             )
-            # If the original HTTP request stopped after World admission, these
-            # page projections are recoverable from the original input on retry.
-            for ref in references or []:
-                self._reference(page_id, ref["targetPageId"], message_id, ref.get("label"))
+            # A process can die after the native event was committed and
+            # before these navigational links were saved. Their immutable
+            # identities survive in that event; an identical retry restores
+            # the originally chosen targets and labels exactly once.
+            for ref in anchored_refs:
+                self._reference(page_id, ref["targetPageId"],
+                                message_id, ref["displayLabel"])
             if selected:
-                self._state.setdefault("messageMaterials", {})[message_id] = [record["id"] for record in selected]
+                self._state.setdefault("messageMaterials", {})[message_id] = [
+                    record["id"] for record in selected
+                ]
             self._save()
             return {"messageId": message_id, "view": self.view(page_id)}
 
