@@ -9,6 +9,7 @@ function unavailableReason(reason: string | null, t: Translate): string {
   if (reason === 'text_files_only') return t('artifacts.nonText');
   if (reason === 'credential_content_blocked') return t('artifacts.sensitive');
   if (reason === 'file_changed_retry') return t('artifacts.retry');
+  if (reason === 'artifact_undone') return t('artifacts.undone');
   return t('artifacts.missing');
 }
 
