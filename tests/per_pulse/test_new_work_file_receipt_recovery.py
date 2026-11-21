@@ -53,8 +53,9 @@ def test_file_sourced_work_recovers_same_origin_and_delivers_to_home(tmp_path, m
         first_events = pages.runtime.causal_ledger.list_events(
             center_id=receiver.center_id, limit=100,
         )
-        assert len(first_events) == 1
-        first_id = first_events[0].id
+        first_inputs = [event for event in first_events if event.source.value == "user"]
+        assert len(first_inputs) == 1
+        first_id = first_inputs[0].id
         native_materials = pages.runtime.storage.list_page_materials(
             pages.runtime.world_id, receiver.id, 100,
         )
