@@ -32,8 +32,8 @@ const data = async path => { const r = await fetch(base + path); assert.ok(r.ok)
 try {
   await wait(async () => (await fetch(base + '/api/health')).ok, 'server ready');
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US' });
-  const page = await context.newPage();
+  let context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US' });
+  let page = await context.newPage();
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(base);
@@ -103,8 +103,8 @@ try {
   await page.reload();
   await page.locator(`[data-message-id="${chineseFirst.id}"]`).locator('.message-label').getByText('来源与请求').waitFor();
   // A real native Work may be admitted while the browser loses the response.
-  // Reload discards the dialog but preserves only its tab-local request ID
-  // and payload digest, so submitting the same task recovers that Work.
+  // A full browser context restart discards the dialog and sessionStorage.
+  // The original request ID and digest must survive in origin-local storage.
   await page.evaluate(() => localStorage.setItem('per-pulse.ui.language.v1', 'en'));
   await page.goto(base);
   const workCount = async () => (await data('/api/bootstrap')).pages.filter(p => p.kind === 'work').length;
@@ -133,7 +133,23 @@ try {
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
   await wait(async () => !!admitted && await workCount() === priorCount + 1, 'first native Work admitted');
   await page.getByRole('dialog').getByRole('alert').waitFor();
-  await page.reload();
+  const pendingIntents = await page.evaluate(() => Object.entries(localStorage).filter(([key]) =>
+    key.startsWith('per-pulse-create-pending:')));
+  assert.equal(pendingIntents.length, 1, 'lost response retains exactly one pending Create identity');
+  assert.deepEqual(Object.keys(JSON.parse(pendingIntents[0][1])).sort(), ['fingerprint', 'requestId'],
+    'browser persists no source text or Work content');
+  // Restore only browser-persistent storage in a new context; sessionStorage,
+  // the original tab, its interceptors and all component state are destroyed.
+  const browserStorage = await context.storageState();
+  await context.close();
+  context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'en-US',
+    storageState: browserStorage });
+  page = await context.newPage();
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await page.goto(base);
+  assert.equal(await page.evaluate(() => Object.keys(sessionStorage).filter(k =>
+    k.startsWith('per-pulse-create-pending:')).length), 0, 'new tab has no pending sessionStorage');
   await openNewWork();
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
   await page.getByRole('heading', { name: 'Lost create receipt', exact: true }).waitFor();
@@ -142,16 +158,24 @@ try {
   assert.equal(page.url().split('/').pop(), admitted.page.id);
   const actualWork = await data('/api/pages/' + admitted.page.id);
   assert.equal(actualWork.messages[0].id, admitted.initialMessageId);
-  assert.equal(await page.evaluate(() => Object.keys(sessionStorage).filter(k =>
+  assert.equal(await page.evaluate(() => Object.keys(localStorage).filter(k =>
     k.startsWith('per-pulse-create-pending:')).length), 0, 'confirmed create clears pending browser identity');
-  await page.unroute('**/api/pages');
+  // A confirmed Work must not permanently collapse a later intentional Work
+  // with identical title and request into the recovered original.
+  await page.goto(base);
+  await openNewWork();
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Lost create receipt', exact: true }).waitFor();
+  assert.equal(await workCount(), priorCount + 2, 'intentional new Create gets a separate native Work');
+  assert.notEqual(page.url().split('/').pop(), admitted.page.id);
 
   assert.deepEqual(errors.filter(error => !/net::ERR_FAILED|Failed to fetch/.test(error)), []);
   console.log(JSON.stringify({ passed: true, checks: ['Home source author', 'separate request editor',
     'native user identity', 'rendered author', 'source anchor', 'reload', 'search attribution',
     'mobile overflow', 'lost HTTP create receipt after native admission',
-    'tab reload and original Work recovery', 'no duplicate native Work', 'pending identity cleared',
-    'no unexpected page errors'], base, directory }));
+    'closed tab and browser-context restart', 'original Work recovery without a second Work',
+    'no private content in pending storage', 'pending identity cleared',
+    'confirmed Create allows intentional new Work', 'no unexpected page errors'], base, directory }));
 } finally {
   await browser?.close();
   if (server.exitCode === null) { const stopped = new Promise(r => server.once('exit', r)); server.kill(); await stopped; }
