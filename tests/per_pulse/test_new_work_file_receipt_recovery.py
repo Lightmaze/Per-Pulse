@@ -66,6 +66,11 @@ def test_file_sourced_work_recovers_same_origin_and_delivers_to_home(tmp_path, m
     # The original producer and receiver are re-opened from the same SQLite.
     # The artifact is re-bound from its own native receipt, not a new file read.
     with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        identity = {
+            "X-Per-Pulse-World": pages.runtime.world_id,
+            "X-Per-Pulse-Service-Instance": pages.service_instance_id,
+        }
         recovered = client.post("/api/pages", json=request)
         assert recovered.status_code == 201, recovered.text
         result = recovered.json()
@@ -78,9 +83,12 @@ def test_file_sourced_work_recovers_same_origin_and_delivers_to_home(tmp_path, m
         assert len(initial["materials"]) == 1
         assert initial["materials"][0]["id"] == material_id
         assert initial["materials"][0]["originArtifactId"] == action_id
-        assert client.get(
-            f"/api/pages/{receiver.id}/materials/{material_id}/download"
-        ).content == source_text.encode("utf-8")
+        download = client.get(
+            f"/api/pages/{receiver.id}/materials/{material_id}/download",
+            headers=identity,
+        )
+        assert download.status_code == 200, download.text
+        assert download.content == source_text.encode("utf-8")
         repeated = client.post("/api/pages", json=request)
         assert repeated.status_code == 201, repeated.text
         assert repeated.json()["reference"]["id"] == result["reference"]["id"]
@@ -103,9 +111,16 @@ def test_file_sourced_work_recovers_same_origin_and_delivers_to_home(tmp_path, m
 
         undo = client.post(f"/api/pages/{producer}/artifacts/{action_id}/undo", json={})
         assert undo.status_code == 200, undo.text
-        assert client.get(f"/api/pages/{receiver.id}/materials/{material_id}").status_code == 409
+        material = client.get(f"/api/pages/{receiver.id}/materials/{material_id}", headers=identity)
+        assert material.status_code == 409, material.text
+        assert material.json()["error"]["code"] == "material_unavailable"
 
     with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        identity = {
+            "X-Per-Pulse-World": pages.runtime.world_id,
+            "X-Per-Pulse-Service-Instance": pages.service_instance_id,
+        }
         assert len([front for front in client.app.state.pages.runtime.world.list_task_fronts()
                     if front.id == receiver.id]) == 1
         home = client.get("/api/pages/home").json()
