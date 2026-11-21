@@ -173,6 +173,79 @@ def test_verified_source_is_supplied_before_optional_expert_decision():
     assert combined.receipt["expert"] == "used"
     assert combined.receipt["per_pulse_selected_source"]["status"] == "revised"
 
+@pytest.mark.parametrize("change", ["withdraw", "revise"])
+def test_source_work_change_during_expert_computation_replaces_stale_work_b_advice(change):
+    """A source Work's new decision outranks an in-flight expert contribution."""
+    current = {"source": status("revised")}
+    snapshots = []
+
+    def read_source(scope):
+        # Emulate a native World read; no stale reference can mutate in place.
+        value = current["source"]
+        snapshots.append((value["status"], value["currentRevision"]))
+        return dict(value, **({"selected": dict(value["selected"])}
+                              if "selected" in value else {}))
+
+    class Expert:
+        continues = True
+
+        def advise_with_source(self, request, *, source_material, cancel_event):
+            assert "Use a real preview" in source_material
+            assert "SELECTED_SOURCE_STATUS_JSON" in source_material
+            if change == "withdraw":
+                current["source"] = status("withdrawn")
+            else:
+                newer = status("revised")
+                newer["currentRevision"] = 4
+                newer["selected"]["revision"] = 4
+                newer["selected"]["lesson"] = "Produce a current playable walkthrough"
+                current["source"] = newer
+            return TurnAdvice(
+                context="STALE_EXPERT_CHOICE: use the old intake tool.",
+                receipt={"plugin": "expert_computation", "status": "contributed",
+                         "fork": {"provider_usage": {"total_tokens": 48}}},
+            )
+
+    store = type("Store", (), {"next_model_round_index": lambda self, scope: 0})()
+    scope = HarnessScope("world", "subject", "work:second", 0, "owner", turn_id="choice")
+    request = ModelRequest(scope, ({"role": "user", "content": "Make the actual file"},), (), 0)
+    decided = SelectedSourceTurnAdvisor(store, read_source, Expert()).advise(
+        request, cancel_event=Event())
+    assert len(snapshots) == 2 and snapshots[0] == ("revised", 3)
+    assert "STALE_EXPERT_CHOICE" not in decided.context
+    assert "Use a real preview" not in decided.context
+    assert decided.receipt["status"] == "suppressed_before_admission"
+    assert decided.receipt["reason"] == "selected_source_changed_during_advice"
+    assert decided.receipt["fork"]["provider_usage"]["total_tokens"] == 48
+    assert decided.receipt["per_pulse_selected_source"]["status"] == current["source"]["status"]
+    if change == "withdraw":
+        assert "withdrawn" in decided.context
+        assert "currentSelection" not in decided.context
+    else:
+        assert "Produce a current playable walkthrough" in decided.context
+        assert decided.receipt["per_pulse_selected_source"]["currentRevision"] == 4
+
+
+def test_source_rechecks_after_previous_returns_no_advice():
+    current = {"source": status("revised")}
+
+    class Expert:
+        continues = True
+
+        def advise_with_source(self, request, *, source_material, cancel_event):
+            current["source"] = status("withdrawn")
+            return None
+
+    store = type("Store", (), {"next_model_round_index": lambda self, scope: 0})()
+    scope = HarnessScope("world", "subject", "work:second", 0, "owner", turn_id="choice")
+    request = ModelRequest(scope, ({"role": "user", "content": "Make the file"},), (), 0)
+    decided = SelectedSourceTurnAdvisor(
+        store, lambda scope: current["source"], Expert()
+    ).advise(request, cancel_event=Event())
+    assert decided.receipt["per_pulse_selected_source"]["status"] == "withdrawn"
+    assert "Use a real preview" not in decided.context
+
+
 def test_continuing_source_advice_does_not_repeat_one_shot_previous_computation():
     class Store:
         index = 0
