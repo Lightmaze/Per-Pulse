@@ -268,3 +268,26 @@ def test_work_send_retries_preserve_original_cross_work_navigation(tmp_path, mon
         assert restored[0]["targetPageId"] == source_id
         assert restored[0]["label"] == "Work A evidence"
         assert [m["id"] for m in recovered.json()["view"]["messages"]].count(event.id) == 1
+
+
+def test_legacy_plain_send_retry_keeps_later_manual_reference(tmp_path):
+    """A previously added link is not a new source claim by an empty retry."""
+    with client_for(tmp_path, model_factory=None) as client:
+        work = new_page(client, title="Later link", instruction="Keep existing Work.")
+        pages = client.app.state.pages
+        request_id = "old-send-with-later-manual-link-20261121"
+        event_id = pages.runtime.inject(
+            pages.runtime.continuity_engram_id, "An older message.",
+            source="user",
+            idempotency_key=f"per-pulse-user-message:{pages.runtime.world_id}:{request_id}",
+        )
+        pages.add_reference("home", work["page"]["id"], source_message_id=event_id)
+        retry = client.post("/api/pages/home/messages", json={
+            "content": "An older message.", "requestId": request_id,
+        })
+        assert retry.status_code == 202, retry.text
+        assert retry.json()["messageId"] == event_id
+        refs = [r for r in retry.json()["view"]["references"]
+                if r["sourceMessageId"] == event_id]
+        assert len(refs) == 1
+        assert refs[0]["targetPageId"] == work["page"]["id"]
