@@ -574,3 +574,95 @@ def test_invalid_outcome_anchors_leave_the_lesson_unchanged(tmp_path, monkeypatc
             storage._conn.commit()
         current = client.get("/api/pages/home/posture").json()["experiences"][0]
         assert current == saved, "Rejected anchors must not pause or revise the lesson."
+
+
+def test_selected_work_correction_withdrawn_during_advice_stays_withdrawn_after_restart(tmp_path, monkeypatch):
+    """Use the actual World/Posture revision while a later Work is deciding."""
+    from threading import Event
+
+    from per_pulse.selected_source_advice import SelectedSourceTurnAdvisor
+    from pulse_harness.core import HarnessScope
+    from pulse_harness.core.context_window import OMITTED_NOTE, fit_context
+    from pulse_harness.core.provider import ModelRequest
+    from pulse_harness.core.turn_advice import TurnAdvice
+
+    with client_for(tmp_path, posture=True, model_factory=http_factory(monkeypatch, [])) as client:
+        source_work = new_page(client, title="Work A", instruction="Design the listening entry.")["page"]["id"]
+        wait_for(client, source_work, lambda v: any(m["role"] == "assistant" for m in v["messages"]))
+        _, result_message_id, feedback_message_id = observed_pair(client, source_work)
+        created = client.post(
+            f"/api/pages/{source_work}/posture/experiences",
+            json=lesson(result_message_id, feedback_message_id, scope="context"),
+        )
+        assert created.status_code == 201, created.text
+        record = created.json()["experience"]
+        source_endpoint = f"/api/pages/{source_work}/posture/experiences/{record['id']}"
+        shared = client.patch(source_endpoint, json={
+            "expectedRevision": 1, "changes": {"scope": "subject"},
+        })
+        assert shared.status_code == 200, shared.text
+        assert shared.json()["experience"]["revision"] == 2
+
+        target = new_page(
+            client, title="Work B", instruction="Make the final usable experience.",
+            sourcePageId=source_work, sourceExperienceId=record["id"],
+        )["page"]["id"]
+        wait_for(client, target, lambda v: any(m["role"] == "assistant" for m in v["messages"]))
+        pages = client.app.state.pages
+        front = pages._front(target)
+        scope = HarnessScope(
+            pages.runtime.world_id, pages.runtime.continuity_engram_id,
+            "selected-source-recheck", 0, "owner",
+            context_id="work:" + front.center_id, turn_id="later-decision",
+        )
+        before = pages.learning.decision_source(scope)
+        assert before["status"] == "current" and before["revision"] == 2
+        assert before["selected"]["lesson"].startswith("Let a new visitor")
+
+        history = (
+            {"role": "user", "content": "Original purpose. " + "context " * 500,
+             "message_id": "earlier", "transcript_seq": 1},
+            {"role": "assistant", "content": "Earlier answer."},
+            {"role": "user", "content": "Continue the final deliverable",
+             "message_id": "current", "transcript_seq": 2},
+        )
+        compacted = fit_context(history, max_tokens=160)
+        assert compacted[0]["content"].startswith(OMITTED_NOTE)
+        request = ModelRequest(scope, compacted, (), 0)
+
+        class Expert:
+            continues = True
+
+            def advise_with_source(self, request, *, source_material, cancel_event):
+                assert "Let a new visitor" in source_material
+                paused = client.patch(source_endpoint, json={
+                    "expectedRevision": 2, "changes": {"active": False},
+                })
+                assert paused.status_code == 200, paused.text
+                return TurnAdvice(
+                    context="STALE_EXPERT_CHOICE: use the withdrawn lesson to choose tools.",
+                    receipt={"plugin": "expert_computation", "status": "contributed",
+                             "fork": {"provider_usage": {"total_tokens": 30}}},
+                )
+
+        store = type("Store", (), {"next_model_round_index": lambda self, scope: 0})()
+        advisor = SelectedSourceTurnAdvisor(store, pages.learning.decision_source, Expert())
+        decided = advisor.advise(request, cancel_event=Event())
+        assert "STALE_EXPERT_CHOICE" not in decided.context
+        assert "Let a new visitor" not in decided.context
+        assert '"status": "withdrawn"' in decided.context
+        assert decided.receipt["reason"] == "selected_source_changed_during_advice"
+        assert decided.receipt["fork"]["provider_usage"]["total_tokens"] == 30
+        assert pages.learning.decision_source(scope)["status"] == "withdrawn"
+
+    with client_for(tmp_path, posture=True, model_factory=None) as client:
+        pages = client.app.state.pages
+        front = pages._front(target)
+        recovered = pages.learning.decision_source(HarnessScope(
+            pages.runtime.world_id, pages.runtime.continuity_engram_id,
+            "selected-source-recheck", 0, "owner",
+            context_id="work:" + front.center_id, turn_id="after-restart",
+        ))
+        assert recovered["status"] == "withdrawn"
+        assert "selected" not in recovered
+
