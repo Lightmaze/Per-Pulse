@@ -1418,6 +1418,14 @@ class PageService:
             if page_id == "home":
                 raise PageError("already_home", "Choose a session page to bring a result home.")
             self._check_message(page_id, message_id)
+            # Find an already-admitted native Home input before verifying the
+            # currently available file bytes. An interrupted HTTP response can
+            # be retried after the original file is changed, removed, or undone.
+            # The CausalLedger is the authority for whether this is a recovery.
+            key = (f"per-pulse-home-return:{self.runtime.world_id}:{request_id}"
+                   if request_id is not None else None)
+            previous = (self.runtime.causal_ledger.find_causal_event_by_idempotency(
+                self.runtime.world_id, key) if key is not None else None)
             if include_materials:
                 from .materials import MaterialError
 
@@ -1425,7 +1433,15 @@ class PageService:
                 attached = self.materials.message(page_id, source[0])["materials"] if source else []
                 if not attached:
                     raise MaterialError("material_selection_invalid", "The selected message has no attached source files.", 422)
-                records = self.materials.selected(page_id, [record["id"] for record in attached])
+                if previous is None:
+                    # A new Home return must still verify the current file and
+                    # its original effect before admitting a model stimulus.
+                    records = self.materials.selected(page_id, [record["id"] for record in attached])
+                else:
+                    # Restore only the original immutable material receipt, not
+                    # a new read of bytes that may have changed since admission.
+                    # The accepted text and source binding are checked below.
+                    records = [self.materials._record(page_id, record["id"]) for record in attached]
                 suffix = material_footer(records)
                 if not content.endswith(suffix):
                     content += suffix
@@ -1442,10 +1458,6 @@ class PageService:
             # A Home return is a real user stimulus. If its HTTP receipt is
             # lost, a retry must reuse the original native event rather than
             # trigger another Home turn and its possible file effects.
-            key = (f"per-pulse-home-return:{self.runtime.world_id}:{request_id}"
-                   if request_id is not None else None)
-            previous = (self.runtime.causal_ledger.find_causal_event_by_idempotency(
-                self.runtime.world_id, key) if key is not None else None)
             origin = {"pageId": page_id, "messageId": message_id}
             if previous is not None:
                 saved_origin = self._state["messageOrigins"].get(previous.id)
