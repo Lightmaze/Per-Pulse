@@ -119,6 +119,59 @@ def test_tick_gives_exactly_n_quiet_turns_from_the_page_history(tmp_path, monkey
         assert view(client, work)["tick"]["status"] == "complete"
 
 
+
+def test_tick_complete_cannot_outrun_the_last_visible_page_reply(tmp_path, monkeypatch):
+    """A page response must not combine old messages with newer tick progress."""
+    transport = Transport(monkeypatch)
+    with client_for(tmp_path, model_factory=transport.factory) as client:
+        work = new_work(client)
+        reply_started = threading.Event()
+        release_reply = threading.Event()
+
+        def hold_tick_reply():
+            reply_started.set()
+            assert release_reply.wait(10), "The test must release the model reply."
+
+        transport.before_reply = hold_tick_reply
+        assert client.post(f"/api/pages/{work}/tick", json={"count": 1}).status_code == 201
+        assert reply_started.wait(10), "The quiet continuation did not reach its provider."
+
+        pages = client.app.state.pages
+        center_id = pages._front(work).center_id
+        read_rows = pages._rows
+        crossed = threading.Event()
+
+        def finish_between_page_reads(page_id, **kwargs):
+            rows = read_rows(page_id, **kwargs)
+            if page_id == work and not crossed.is_set():
+                crossed.set()
+                # The HTTP view captured its message list before the provider
+                # settled; finish the very same native /tick before it can
+                # observe the run's final status.
+                release_reply.set()
+                eventually(
+                    lambda: pages.runtime.context_pulse.tick_run(center_id),
+                    lambda run: run is not None and run["status"] == "complete",
+                )
+            return rows
+
+        monkeypatch.setattr(pages, "_rows", finish_between_page_reads)
+        try:
+            snapshot = view(client, work)
+        finally:
+            release_reply.set()
+            monkeypatch.setattr(pages, "_rows", read_rows)
+
+        assert crossed.is_set()
+        assert replies(snapshot) == ["STEP_1"]
+        assert snapshot["tick"]["status"] == "running"
+        finished = eventually(
+            lambda: view(client, work), lambda result: result["tick"]["status"] == "complete"
+        )
+        assert finished["tick"]["completed"] == 1
+        assert replies(finished) == ["STEP_1", "STEP_2"]
+
+
 def test_tick_needs_a_finished_reply_a_model_and_a_valid_count(tmp_path, monkeypatch):
     transport = Transport(monkeypatch)
     with client_for(tmp_path / "connected", model_factory=transport.factory) as client:
