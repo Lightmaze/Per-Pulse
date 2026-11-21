@@ -119,7 +119,13 @@ try {
     await route.abort('failed');
   });
   const openNewWork = async () => {
-    await page.locator('.pages-label .icon-button').click();
+    // On a phone the Create action is inside the collapsed navigation.
+    // Use the actual mobile route instead of clicking a hidden sidebar button.
+    const createAction = page.locator('.pages-label .icon-button');
+    if (!await createAction.isVisible()) {
+      await page.locator('.topbar .nav-toggle').click();
+    }
+    await createAction.click();
     await page.locator('#new-page-title').fill('Lost create receipt');
     await page.locator('#new-page-focus').fill('Prepare one practical source-aware deliverable.');
   };
