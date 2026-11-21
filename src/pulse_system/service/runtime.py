@@ -10814,6 +10814,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         center_id: str | None = None,
         idempotency_key: str | None = None,
         stimulus_envelope: StimulusEnvelope | None = None,
+        _host_source_origin: dict[str, str | None] | None = None,
         _admission_guard: Callable[[Any], None] | None = None,
     ) -> str:
         """Durably enqueue one piece of content and return its event id.
@@ -10843,6 +10844,27 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 "use user, self, habitat, sensory, propagation, delegation, or system",
                 status=400,
             ) from exc
+        # The page service may bind a returned Work to the accepted Home
+        # stimulus itself. It has already checked the World source message;
+        # preserving the binding in the causal row makes a lost HTTP receipt
+        # recoverable without trusting a later, possibly changed UI selection.
+        if _host_source_origin is not None:
+            origin = _host_source_origin
+            if (source_value is not CausalEventSource.USER
+                    or center_id is not None
+                    or not isinstance(origin, dict)
+                    or set(origin) != {"pageId", "messageId"}
+                    or not isinstance(origin["pageId"], str)
+                    or not 1 <= len(origin["pageId"]) <= 128
+                    or (origin["messageId"] is not None and (
+                        not isinstance(origin["messageId"], str)
+                        or not 1 <= len(origin["messageId"]) <= 128))):
+                raise ServiceError(
+                    "invalid_source_origin",
+                    "a Home source origin must identify one verified Work",
+                    "use the original Work return request",
+                    status=422,
+                )
         try:
             priority_value = float(priority)
         except (TypeError, ValueError) as exc:
@@ -11060,6 +11082,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                             "stimulus_class": envelope.stimulus_class.value,
                             "stimulus_evidence_class": envelope.evidence_class.value,
                             "stimulus_provenance_digest": envelope.provenance.digest,
+                            **({"host_source_origin": dict(_host_source_origin)}
+                               if _host_source_origin is not None else {}),
                             **({"stimulus_source_turn_id": envelope.provenance.tip.source_turn_id}
                                if envelope.provenance.tip.source_turn_id is not None else {}),
                             **(
