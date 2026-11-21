@@ -97,6 +97,32 @@ def test_an_oversized_historical_opening_does_not_crowd_out_a_short_followup():
     assert tuple(messages) == original
 
 
+def test_durable_large_opening_keeps_its_actual_goal_after_many_turns():
+    opening_text = (
+        "ORIGINAL_WORK_PURPOSE: analyze the source material. "
+        + "long reference passage " * 1200
+        + " FINAL_DELIVERABLE: edit the existing report instead of making another."
+    )
+    opening = {**_user(opening_text), "message_id": "original-work-opening",
+               "transcript_seq": 1}
+    messages = [opening, _answer("Original result"), *_turns(12, size=180),
+                _user("Continue and deliver the corrected file.")]
+    fitted = fit_context(messages, 1000)
+    assert sum(estimate_tokens(message) for message in fitted) <= 1000
+    assert fitted[0]["content"].startswith(OMITTED_NOTE)
+    preview = next(message for message in fitted
+                   if message.get("message_id") == "original-work-opening")
+    assert preview["role"] == "user"
+    assert preview["content"].startswith("ORIGINAL_WORK_PURPOSE")
+    assert "FINAL_DELIVERABLE: edit the existing report" in preview["content"]
+    assert "USER_MESSAGE_MIDDLE_OMITTED" in preview["content"]
+    assert "read_history" in preview["content"]
+    assert "original-work-opening" in preview["content"]
+    assert opening_text not in [message["content"] for message in fitted]
+    assert fitted[-1] == messages[-1]
+    assert opening["content"] == opening_text
+
+
 def test_opening_is_optional_only_when_it_cannot_fit_beside_the_current_exchange():
     opening = _user("Original goal " + "x" * 1_800)
     current = [_user("Continue " + "y" * 1_800), _call("current"), _result("current")]
