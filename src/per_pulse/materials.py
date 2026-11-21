@@ -142,8 +142,36 @@ class PageMaterials:
                 raise pages.execution._translate(error) from error
             return {"material": dict(record), "repeated": False}
 
+    def _verify_generated_origin(self, record):
+        """An Undo remains authoritative even if identical bytes reappear.
+
+        The receiving page retains its historical file receipt. A later read
+        or Send may use it only while the producing native action is still
+        valid; a separate writer restoring identical bytes is not that action.
+        Plain workspace references have no producing-action claim.
+        """
+        source_page = record.get("originArtifactPageId")
+        source_action = record.get("originArtifactId")
+        if source_page is None and source_action is None:
+            return
+        invalid = MaterialError(
+            "material_unavailable",
+            "The original file result was undone or is no longer available. Choose a current source.",
+            409,
+        )
+        if not source_page or not source_action:
+            raise invalid
+        try:
+            source, _ = self.pages.artifacts._resolve_action(source_page, source_action)
+        except (ArtifactError, ExecutionError) as error:
+            raise invalid from error
+        if (source["undone"] or source["path"] != record["path"]
+                or source["sha256"] != record["sha256"]):
+            raise invalid
+
     def _verify(self, record):
-        """Check the file still has its recorded bytes, without reading it as text."""
+        """Check the native source and recorded bytes, without reading as text."""
+        self._verify_generated_origin(record)
         try:
             data = self.files.read_bytes(record["path"])
         except FileAccessError as error:
@@ -153,6 +181,7 @@ class PageMaterials:
         return data
 
     def _current(self, record):
+        self._verify_generated_origin(record)
         try:
             current = self.files.read(record["path"])
         except FileAccessError as error:
