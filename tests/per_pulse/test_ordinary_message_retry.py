@@ -291,3 +291,101 @@ def test_legacy_plain_send_retry_keeps_later_manual_reference(tmp_path):
                 if r["sourceMessageId"] == event_id]
         assert len(refs) == 1
         assert refs[0]["targetPageId"] == work["page"]["id"]
+
+
+@pytest.mark.parametrize("changed_source", [False, True])
+def test_file_bearing_work_send_recovers_after_lost_receipt_without_reusing_stale_file(
+        tmp_path, monkeypatch, changed_source):
+    """One admitted file-bearing Work input remains one input and one source after restart."""
+    from per_pulse.materials import material_footer
+    from test_materials import upload
+
+    request_id = "file-bearing-lost-send"
+    source_bytes = b"Final decision data: quantity=7\\n"
+    with client_for(tmp_path, model_factory=None) as client:
+        work = new_page(client, title="Work A source", instruction="Study the original data.")["page"]["id"]
+        uploaded = upload(client, work, "evidence.csv", source_bytes)
+        assert uploaded.status_code == 201
+        record = uploaded.json()["material"]
+        pages = client.app.state.pages
+        original_save = pages._save
+
+        def lose_receipt():
+            raise OSError("lost receipt after native file-bearing Send")
+
+        monkeypatch.setattr(pages, "_save", lose_receipt)
+        with pytest.raises(OSError, match="lost receipt"):
+            pages.send(work, "Read the attached evidence before deciding.",
+                       materials=[record["id"]], request_id=request_id)
+        monkeypatch.setattr(pages, "_save", original_save)
+        event = pages.runtime.causal_ledger.find_causal_event_by_idempotency(
+            pages.runtime.world_id, f"per-pulse-user-message:{pages.runtime.world_id}:{request_id}")
+        assert event is not None
+        assert event.content.endswith(material_footer([record]))
+        assert source_bytes.decode().strip() not in event.content
+
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        historical = next(m for m in client.get(f"/api/pages/{work}").json()["messages"]
+                          if m["id"] == event.id)
+        assert historical["materials"] == [], "The lost projection must really be absent."
+        if changed_source:
+            (tmp_path / "workspace" / record["path"]).write_bytes(b"REPLACED_NOT_ORIGINAL")
+        payload = {"content": "Read the attached evidence before deciding.",
+                   "materials": [record["id"]], "requestId": request_id}
+        recovered = client.post(f"/api/pages/{work}/messages", json=payload)
+        assert recovered.status_code == 202, recovered.text
+        assert recovered.json()["messageId"] == event.id
+        message = next(m for m in recovered.json()["view"]["messages"] if m["id"] == event.id)
+        assert message["materials"] == [record]
+        assert message["materialSuffixLength"] == len(material_footer([record]))
+        assert sum(m["id"] == event.id for m in recovered.json()["view"]["messages"]) == 1
+
+        other = upload(client, work, "different.csv", b"Different source.")
+        assert other.status_code == 201
+        retarget = client.post(f"/api/pages/{work}/messages", json={
+            **payload, "materials": [other.json()["material"]["id"]]})
+        assert retarget.status_code == 409
+        assert retarget.json()["error"]["code"] == "message_request_conflict"
+        if changed_source:
+            # Historical attribution survives, but this file cannot be read
+            # or attached to a new model turn after the bytes have changed.
+            preview = client.get(f"/api/pages/{work}/materials/{record['id']}")
+            assert preview.status_code == 409
+            fresh = client.post(f"/api/pages/{work}/messages", json={
+                **payload, "requestId": "fresh-file-send"})
+            assert fresh.status_code == 409
+            assert fresh.json()["error"]["code"] == "material_changed"
+        else:
+            preview = client.get(f"/api/pages/{work}/materials/{record['id']}")
+            assert preview.status_code == 200
+            assert preview.json()["content"].encode() == source_bytes
+
+        # Continue an ordinary sourced Work B and return its chosen result Home.
+        # B receives the selected historical text, never the changed file bytes.
+        receiving = new_page(
+            client, title="Work B final", instruction="Produce a final brief.",
+            sourcePageId=work, sourceMessageId=event.id,
+            sourceExcerpt="Read the attached evidence before deciding.",
+        )["page"]["id"]
+        result = client.post(f"/api/pages/{receiving}/messages", json={
+            "content": "Final brief: keep source attribution and disclose unread files."})
+        assert result.status_code == 202
+        brought = client.post(f"/api/pages/{receiving}/return", json={
+            "messageId": result.json()["messageId"],
+            "content": "Finished brief for Home with Work B source.",
+        })
+        assert brought.status_code == 201
+        home_id = brought.json()["messageId"]
+
+    with client_for(tmp_path, model_factory=None) as client:
+        restored = next(m for m in client.get(f"/api/pages/{work}").json()["messages"]
+                        if m["id"] == event.id)
+        assert restored["materials"] == [record]
+        assert sum(m["id"] == event.id
+                   for m in client.get(f"/api/pages/{work}").json()["messages"]) == 1
+        home = next(m for m in client.get("/api/pages/home").json()["messages"]
+                    if m["id"] == home_id)
+        assert home["sourcePageId"] == receiving
+        assert home["sourceMessageId"] == result.json()["messageId"]
+        assert home["references"][0]["targetPageId"] == receiving
