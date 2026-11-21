@@ -357,28 +357,31 @@ export default function App() {
         sourceMessageId: message?.id, sourceExcerpt,
         sourceExperienceId: modal?.kind === 'create' ? modal.fromExperience?.id : undefined,
         sourceArtifact: artifact ? { id: artifact.id, pageId: artifact.pageId, path: artifact.path, sha256: artifact.sha256 } : undefined };
-      // A crashed tab may have lost its dialog after the native Work already
-      // started. Keep only an intent digest and request ID in this tab, never
-      // source text, file bytes, or a competing page/World record.
-      const pendingKey = `per-pulse-create-pending:${sourceWorkspace}:${sourceId}`;
+      // A tab or browser can close after the native Work is admitted but before
+      // its receipt arrives. Keep only a request ID and content digest in
+      // origin-local storage, never the source text, bytes or a second World.
+      // The native World still owns the request and determines whether it ran.
       const digestBytes = await crypto.subtle.digest('SHA-256',
         new TextEncoder().encode(JSON.stringify(payload)));
       const fingerprint = Array.from(new Uint8Array(digestBytes),
         byte => byte.toString(16).padStart(2, '0')).join('');
+      // Different unconfirmed Works from the same Home/source must not evict
+      // each other's retry identity when their tabs complete out of order.
+      const pendingKey = `per-pulse-create-pending:${sourceWorkspace}:${sourceId}:${fingerprint}`;
       let requestId = sourceModal?.kind === 'create' ? sourceModal.requestId ?? crypto.randomUUID() : crypto.randomUUID();
       try {
-        const stored = JSON.parse(sessionStorage.getItem(pendingKey) ?? 'null');
+        const stored = JSON.parse(localStorage.getItem(pendingKey) ?? 'null');
         if (stored?.fingerprint === fingerprint && typeof stored.requestId === 'string') requestId = stored.requestId;
-        sessionStorage.setItem(pendingKey, JSON.stringify({ fingerprint, requestId }));
+        localStorage.setItem(pendingKey, JSON.stringify({ fingerprint, requestId }));
       } catch {
-        // Storage-disabled browsers can still retry this dialog with its ID.
+        // Storage-disabled browsers can still retry while this dialog remains open.
       }
       const response = await api.createPage({ ...payload, requestId });
       try {
-        const stored = JSON.parse(sessionStorage.getItem(pendingKey) ?? 'null');
-        if (stored?.fingerprint === fingerprint && stored.requestId === requestId) sessionStorage.removeItem(pendingKey);
+        const stored = JSON.parse(localStorage.getItem(pendingKey) ?? 'null');
+        if (stored?.fingerprint === fingerprint && stored.requestId === requestId) localStorage.removeItem(pendingKey);
       } catch {
-        // A confirmed native response is authoritative, not tab storage.
+        // A confirmed native response is authoritative, not browser storage.
       }
       // An admitted Work remains real even if the user navigated elsewhere
       // while its receipt was in flight. Update the original World, but never
