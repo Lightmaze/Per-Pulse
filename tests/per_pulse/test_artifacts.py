@@ -1045,6 +1045,84 @@ def test_generated_file_handoff_retains_exact_native_action_source_across_works_
         assert client.app.state.pages.runtime.kernel_service._runtimes == {}
 
 
+def test_undone_file_result_cannot_resurrect_sourced_work_from_identical_bytes(tmp_path, monkeypatch):
+    """A receiver can finish with a real file, but its old producer stays undone.
+
+    The provider chooses one file action synthetically; the approval, native
+    receipt, source transfer, Undo, file bytes and restart are real. A separate
+    writer later recreating exactly the same bytes cannot restore authorship.
+    """
+    content = "Deliverable with an attributed source.\n"
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "deliverable.md", "expected_digest": None, "content": content},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        producer = _page(client, "WRITE_REPORT")
+        action_id = _approve(pages.execution, producer)
+        producer_action, = pages.artifacts.snapshot(producer)["artifacts"]
+        receiver = _page(client, "Continue from the finished document.")
+        identity = {
+            "X-Per-Pulse-World": pages.runtime.world_id,
+            "X-Per-Pulse-Service-Instance": pages.service_instance_id,
+        }
+        payload = {
+            "path": producer_action["path"], "sha256": producer_action["sha256"],
+            "sourcePageId": producer, "sourceArtifactId": action_id,
+        }
+        linked = client.post(f"/api/pages/{receiver}/materials/reference",
+                             json=payload, headers=identity)
+        assert linked.status_code == 201, linked.text
+        linked_id = linked.json()["material"]["id"]
+        assert client.get(f"/api/pages/{receiver}/materials/{linked_id}").status_code == 200
+        assert pages.artifacts.read(producer, action_id)["state"] == "current"
+
+        target = tmp_path / "workspace" / "deliverable.md"
+        assert target.read_text(encoding="utf-8") == content
+        restored = client.post(f"/api/pages/{producer}/artifacts/{action_id}/undo", json={})
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["artifact"]["undone"] and not target.exists()
+
+        # This is a new unattributed filesystem write, not a replay of the
+        # producer's action. It intentionally has the exact old SHA-256.
+        target.write_text(content, encoding="utf-8", newline="")
+        assert _sha(target.read_text(encoding="utf-8")) == producer_action["sha256"]
+        preview = client.get(f"/api/pages/{producer}/artifacts/{action_id}")
+        assert preview.status_code == 200
+        assert preview.json()["state"] == "unavailable"
+        assert preview.json()["reason"] == "artifact_undone"
+        assert not preview.json()["downloadable"]
+        old_download = client.get(f"/api/pages/{producer}/artifacts/{action_id}/download")
+        assert old_download.status_code == 409
+        assert old_download.json()["error"]["code"] == "artifact_undone"
+        assert client.get(f"/api/pages/{receiver}/materials/{linked_id}").status_code == 409
+        assert client.get(f"/api/pages/{receiver}/materials/{linked_id}/download").status_code == 409
+        refused_send = client.post(f"/api/pages/{receiver}/messages",
+            json={"content": "Continue with the undone source.", "materials": [linked_id]})
+        assert refused_send.status_code == 409
+        assert refused_send.json()["error"]["code"] == "material_unavailable"
+
+        # Explicitly taking these present bytes as a plain workspace source
+        # remains possible, but never inherits the withdrawn action identity.
+        plain = client.post(f"/api/pages/{receiver}/materials/reference",
+            json={"path": producer_action["path"], "sha256": producer_action["sha256"]},
+            headers=identity)
+        assert plain.status_code == 201, plain.text
+        assert "originArtifactId" not in plain.json()["material"]
+        assert client.get(
+            f"/api/pages/{receiver}/materials/{plain.json()['material']['id']}"
+        ).status_code == 200
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        assert pages.artifacts.snapshot(producer)["artifacts"][0]["undone"]
+        assert pages.artifacts.read(producer, action_id)["reason"] == "artifact_undone"
+        assert client.get(f"/api/pages/{receiver}/materials/{linked_id}").status_code == 409
+        assert client.get(f"/api/pages/{producer}/artifacts/{action_id}/download").status_code == 409
+        assert pages.runtime.kernel_service._runtimes == {}
+
+
 def test_new_work_starts_with_verified_file_before_first_model_stimulus(tmp_path, monkeypatch):
     """The original Kernel file receipt is durable before the first Work message."""
     requests = []
