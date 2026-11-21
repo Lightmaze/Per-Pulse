@@ -105,7 +105,7 @@ try {
   // A real native Work may be admitted while the browser loses the response.
   // Reload discards the dialog but preserves only its tab-local request ID
   // and payload digest, so submitting the same task recovers that Work.
-  await page.evaluate(() => localStorage.setItem('per-pulse.ui.language.v1', 'en-US'));
+  await page.evaluate(() => localStorage.setItem('per-pulse.ui.language.v1', 'en'));
   await page.goto(base);
   const workCount = async () => (await data('/api/bootstrap')).pages.filter(p => p.kind === 'work').length;
   const priorCount = await workCount();
