@@ -108,6 +108,16 @@ def test_large_opening_can_be_recalled_after_a_smaller_window_and_restart(tmp_pa
                      or row.get("content") == OMITTED_NOTE
                      or "auxiliary assistant message marked pulse.local-notices.v1" in row.get("content", "")]
         assert sum(estimate_tokens(row) for row in projected) <= 2048
+        # The first decision after restart receives the old purpose as an
+        # attributed, paged preview. It need not guess that the opening exists.
+        previews = [row["content"] for row in first_request
+                    if row.get("role") == "user"
+                    and "ORIGINAL_LONG_OPENING:" in str(row.get("content", ""))]
+        assert len(previews) == 1
+        assert previews[0] != OPENING
+        assert "USER_MESSAGE_MIDDLE_OMITTED" in previews[0]
+        assert "read_history" in previews[0]
+        assert original["message_id"] in previews[0]
         assert any(row["content"] == OPENING for row in pages.runtime.kernel_service.store.transcript_rows(original_scope))
 
         history = ConversationHistoryTools(pages.runtime.kernel_service.store, pages.runtime.harness._history_scopes)
