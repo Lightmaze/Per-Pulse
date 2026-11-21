@@ -962,6 +962,11 @@ class PageService:
     def view(self, page_id: str, *, source_message_id: str | None = None) -> dict:
         with self._lock:
             self._check_message(page_id, source_message_id)
+            # Observe tick progress before its causal messages. A final reply
+            # can settle between separate reads; sampling progress last could
+            # say "complete" while the returned page still omits that reply.
+            tick_snapshot = self._tick_view(self.runtime.context_pulse.tick_run(
+                self._center(page_id)))
             artifacts = self.artifacts.snapshot(page_id)
             rows = self._rows(page_id)
             has_more = len(rows) > MAX_MESSAGES
@@ -1001,8 +1006,7 @@ class PageService:
                 "hasMore": has_more,
                 "historyBeforeMessageId": history_before,
                 "earlierSourceMessageId": earlier_source_id,
-                "tick": self._tick_view(self.runtime.context_pulse.tick_run(
-                    self._center(page_id))),
+                "tick": tick_snapshot,
             }
 
     def _reference(self, source: str, target: str, message_id: str | None,
