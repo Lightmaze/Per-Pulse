@@ -128,4 +128,6 @@ def test_file_sourced_work_recovers_same_origin_and_delivers_to_home(tmp_path, m
                              if message["id"] == home_id]
         assert returned_message["sourcePageId"] == receiver.id
         assert returned_message["sourceMessageId"] == delivered.json()["messageId"]
-        assert client.get(f"/api/pages/{receiver.id}/materials/{material_id}").status_code == 409
+        material = client.get(f"/api/pages/{receiver.id}/materials/{material_id}", headers=identity)
+        assert material.status_code == 409, material.text
+        assert material.json()["error"]["code"] == "material_unavailable"
