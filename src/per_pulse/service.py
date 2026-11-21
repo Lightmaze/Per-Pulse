@@ -1271,13 +1271,18 @@ class PageService:
                         and ref["sourceMessageId"] == previous.id
                         and ref["kind"] == "reference"
                     ]
-                    if len(old) != len(requested_refs) or any(
-                        saved["targetPageId"] != wanted["targetPageId"]
-                        or (wanted["label"] is not None
-                            and saved["label"] != wanted["label"])
-                        for saved, wanted in zip(old, requested_refs)
+                    if requested_refs and (
+                        len(old) != len(requested_refs) or any(
+                            saved["targetPageId"] != wanted["targetPageId"]
+                            or (wanted["label"] is not None
+                                and saved["label"] != wanted["label"])
+                            for saved, wanted in zip(old, requested_refs)
+                        )
                     ):
                         conflict()
+                    # An older message may have gained a separate, deliberate
+                    # Add Reference *after* its Send. An empty retry does not
+                    # remove or claim that independently created navigation.
                     anchored_refs = [{
                         "targetPageId": saved["targetPageId"],
                         "label": wanted["label"],
