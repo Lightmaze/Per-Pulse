@@ -212,3 +212,59 @@ def test_legacy_interrupted_send_cannot_claim_new_reference(tmp_path):
         home = client.get("/api/pages/home").json()
         assert not any(ref["sourceMessageId"] == event_id
                        for ref in home["references"])
+
+
+def test_work_send_retries_preserve_original_cross_work_navigation(tmp_path, monkeypatch):
+    """Work B's accepted input cannot acquire Work C's link on HTTP retry."""
+    with client_for(tmp_path, model_factory=None) as client:
+        source = new_page(client, title="Work A source",
+                          instruction="Record a useful source.")
+        receiving = new_page(client, title="Work B receiver",
+                             instruction="Continue the original source.")
+        unrelated = new_page(client, title="Work C unrelated",
+                             instruction="Do unrelated work.")
+        source_id, receiver_id, other_id = (
+            source["page"]["id"], receiving["page"]["id"],
+            unrelated["page"]["id"],
+        )
+    request_id = "work-b-source-binding-20261121"
+    payload = {
+        "content": "Choose a tool for the next real document.",
+        "references": [{"targetPageId": source_id, "label": "Work A evidence"}],
+        "requestId": request_id,
+    }
+    with client_for(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+        original_save = pages._save
+
+        def lost_receipt():
+            raise OSError("Work B receipt lost after admission")
+
+        monkeypatch.setattr(pages, "_save", lost_receipt)
+        with pytest.raises(OSError, match="Work B receipt lost"):
+            pages.send(receiver_id, payload["content"], payload["references"],
+                       request_id=request_id)
+        monkeypatch.setattr(pages, "_save", original_save)
+        event = pages.runtime.causal_ledger.find_causal_event_by_idempotency(
+            pages.runtime.world_id,
+            f"per-pulse-user-message:{pages.runtime.world_id}:{request_id}",
+        )
+        assert event is not None
+        assert event.center_id == pages._front(receiver_id).center_id
+
+    with client_for(tmp_path, model_factory=None) as client:
+        changed = client.post(f"/api/pages/{receiver_id}/messages", json={
+            **payload,
+            "references": [{"targetPageId": other_id, "label": "Work A evidence"}],
+        })
+        assert changed.status_code == 409
+        assert changed.json()["error"]["code"] == "message_request_conflict"
+        recovered = client.post(f"/api/pages/{receiver_id}/messages", json=payload)
+        assert recovered.status_code == 202, recovered.text
+        assert recovered.json()["messageId"] == event.id
+        restored = [r for r in recovered.json()["view"]["references"]
+                    if r["sourceMessageId"] == event.id]
+        assert len(restored) == 1
+        assert restored[0]["targetPageId"] == source_id
+        assert restored[0]["label"] == "Work A evidence"
+        assert [m["id"] for m in recovered.json()["view"]["messages"]].count(event.id) == 1
