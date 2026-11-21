@@ -361,11 +361,13 @@ export default function App() {
       // its receipt arrives. Keep only a request ID and content digest in
       // origin-local storage, never the source text, bytes or a second World.
       // The native World still owns the request and determines whether it ran.
-      const pendingKey = `per-pulse-create-pending:${sourceWorkspace}:${sourceId}`;
       const digestBytes = await crypto.subtle.digest('SHA-256',
         new TextEncoder().encode(JSON.stringify(payload)));
       const fingerprint = Array.from(new Uint8Array(digestBytes),
         byte => byte.toString(16).padStart(2, '0')).join('');
+      // Different unconfirmed Works from the same Home/source must not evict
+      // each other's retry identity when their tabs complete out of order.
+      const pendingKey = `per-pulse-create-pending:${sourceWorkspace}:${sourceId}:${fingerprint}`;
       let requestId = sourceModal?.kind === 'create' ? sourceModal.requestId ?? crypto.randomUUID() : crypto.randomUUID();
       try {
         const stored = JSON.parse(localStorage.getItem(pendingKey) ?? 'null');
