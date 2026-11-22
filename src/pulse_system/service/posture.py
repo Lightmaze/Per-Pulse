@@ -472,7 +472,7 @@ class PostureMemory:
             # pre-action expert; the model still checks conditions and exceptions.
             # Search only transferable fields, not encounter/feedback text.
             rows.sort(key=lambda pair: sum(
-                len(term) for term in task_terms
+                len(term.encode('utf-8')) for term in task_terms
                 if term in experience_search_text(pair[0]).casefold()
             ), reverse=True)
         episodes = [self._material_record(record, context_id) for record, _ in rows]
