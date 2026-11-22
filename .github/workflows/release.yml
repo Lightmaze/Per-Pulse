@@ -171,6 +171,13 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" \
             PER_PULSE_INSTALLED_PYTHON="$PER_PULSE_INSTALLED_PYTHON" \
             node tests/browser/learning_artifact_flow.mjs
+          # Verify the delivered wheel's real native file result can be
+          # returned to Home and downloaded byte-for-byte after restart;
+          # the model responses in this browser journey are synthetic HTTP.
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" \
+            PER_PULSE_PYTHON="$PER_PULSE_INSTALLED_PYTHON" \
+            PER_PULSE_INSTALLED_WHEEL=1 \
+            node tests/browser/report_source_flow.mjs
           # The newest file-to-new-Work path must also work from the
           # isolated release wheel, not the source checkout.
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" \

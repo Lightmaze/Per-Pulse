@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a36
+
+- Keep older, still-applicable Work experiences in the main model decision and later reuse after a long SQLite history; verify their exact revisions and withdrawal instead of rejecting them because they are absent from a recent candidate list (#352).
+- Bound the per-decision omission material for long-lived Worlds while retaining accurate omitted counts and explicit complete history queries (#353).
+- Return actual Work file results to Home with their native action source and version, including post-restart preview and Undo invalidation (#354).
+- Download the original verified Work file directly from Home, preserving bytes and source identity across restart and withdrawing the link after Undo (#355).
+
 ## 0.1.0a35
 
 - Recover native Work creation after lost HTTP receipts, including a browser-tab close, without re-admitting the original first task (#340, #341).
