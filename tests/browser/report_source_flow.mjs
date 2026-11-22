@@ -4,7 +4,8 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
@@ -134,8 +135,15 @@ try {
   assert.equal(projected.reportedArtifact.undone, false);
   await homeArticle.getByRole('button', { name: 'Open verified file' }).click();
   await homeArticle.getByText('This is the completed Work file.', { exact: true }).waitFor();
+  const firstDownloadEvent = page.waitForEvent('download');
+  await homeArticle.getByRole('button', { name: 'Download file', exact: true }).click();
+  const firstDownload = await firstDownloadEvent;
+  assert.equal(firstDownload.suggestedFilename(), 'report-delivery.md');
+  const originalBytes = await readFile(await firstDownload.path());
+  assert.equal(originalBytes.toString('utf8'), '# Report deliverable\n\nThis is the completed Work file.\n');
+  assert.equal(createHash('sha256').update(originalBytes).digest('hex'), projected.reportedArtifact.sha256);
   await homeArticle.getByRole('button', { name: 'Close file preview' }).click();
-  checks.push('completed native Work file is directly readable in its attributed Home report without new model calls');
+  checks.push('Home directly downloads exact original Work file bytes with native digest verification');
   assert.equal(projected.references.length, 0);
   const originalReportContent = projected.content;
   const homePosition = await page.locator('main').evaluate(node => node.scrollTop);
@@ -180,8 +188,12 @@ try {
     report.origin.artifact_source.artifact_id);
   await homeArticle.getByRole('button', { name: 'Open verified file' }).click();
   await homeArticle.getByText('This is the completed Work file.', { exact: true }).waitFor();
+  const restartedDownloadEvent = page.waitForEvent('download');
+  await homeArticle.getByRole('button', { name: 'Download file', exact: true }).click();
+  const restartedDownload = await restartedDownloadEvent;
+  assert.deepEqual(await readFile(await restartedDownload.path()), originalBytes);
   await homeArticle.getByRole('button', { name: 'Close file preview' }).click();
-  checks.push('offline restart retains the original file source and exact bytes without a provider');
+  checks.push('offline SQLite restart preserves direct Home download of the same original file');
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('offline process restart retains exact native provenance and source navigation on a phone viewport');
 
@@ -211,7 +223,8 @@ try {
   await homeComposer.waitFor();
   await homeArticle.getByRole('button', { name: 'Open verified file' }).click();
   await homeArticle.getByText('Undone', { exact: true }).waitFor();
-  checks.push('Undo after restart invalidates the delivered file preview without erasing report provenance');
+  assert.equal(await homeArticle.getByRole('button', { name: 'Download file', exact: true }).count(), 0);
+  checks.push('Undo after restart invalidates Home preview and download without erasing report provenance');
   assert.deepEqual(errors, []);
   assert.deepEqual(externalRequests, []);
   console.log(JSON.stringify({ checks, errors, externalRequests, restartNetworkErrors,

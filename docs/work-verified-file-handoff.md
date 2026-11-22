@@ -17,13 +17,16 @@ Work remain the source of truth.
    Home. Home receives a historical file-action receipt (path, digest and
    action ID) as attributed source data, not a new user command or permission.
 4. Home shows **File delivered from Work** with a direct **Open verified file**
-   reader and a link back to the producing Work. Opening the preview reads
-   through the existing page-scoped `/api/pages/{pageId}/artifacts/{artifactId}`
-   endpoint. The original Work still owns download and Undo.
+   reader, **Download file**, and a link back to the producing Work. The preview
+   uses the existing page-scoped `/api/pages/{pageId}/artifacts/{artifactId}`
+   endpoint; the download uses that exact Work's existing version-verified
+   `/download` endpoint and checks the original digest again. The original Work
+   still owns Undo.
 5. After restart, an old report links the same native action. If another
    writer changed the path, or Undo revoked the original change, Home refuses
    to display changed or unavailable bytes as the old result. The historical
-   report remains available for audit.
+   report remains available for audit. Closing the Home preview cancels an
+   in-flight download before it can start in the browser.
 
 The optional `artifact_id` must identify a **successful `mutate_file` action
 in the exact reporting Work turn**. A guessed, failed, read-only, earlier-turn,
@@ -42,7 +45,8 @@ remains governed by the Kernel and cannot become a completed file receipt.
 choices but real file bytes, World, Kernel actions, outbox, restart, provenance,
 forged-ID rejection and Undo. The installed-wheel Chromium
 `tests/browser/report_source_flow.mjs` exercises the rendered Home preview,
-source return, draft retention, offline restart, and invalidation after Undo
+verified original-byte download, source return, draft retention, direct download
+after offline restart, and invalidation of preview and download after Undo
 against the same native runtime.
 
 These checks establish a *usable delivered artifact and original action
