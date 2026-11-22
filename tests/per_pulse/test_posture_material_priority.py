@@ -161,3 +161,80 @@ def test_example_note_change_counts_but_outcome_report_does_not(tmp_path):
             memory.materials(subject_id=SUBJECT, context_id=TARGET, prioritize_content=True))
     finally:
         storage.close()
+
+
+def test_old_task_matched_experience_reaches_ordinary_preaction_work_after_restart(
+        tmp_path, monkeypatch):
+    """Old shared experience is actually offered before Work B's next decision.
+
+    The transport explicitly scripts PASS; this proves native retrieval and
+    model-request material, not a model's independent tool choice.
+    """
+    from pulse_harness.core import HarnessStore, TurnRunner, TurnStatus
+    from test_posture_runtime import NoTools, model_fixture
+
+    path = tmp_path / "world.db"
+    storage = Storage(path)
+    memory = PostureMemory(storage, "world")
+    old = _experience(memory, "provenance-manifest-original")
+    for index in range(180):
+        _experience(memory, f"routine-{index:03d}")
+    without_task = memory.materials(
+        subject_id=SUBJECT, context_id=TARGET, prioritize_content=True,
+        max_records=128, compact_backfill=16,
+    )
+    assert old["id"] not in _ids(without_task)
+    storage.close()
+
+    storage = Storage(path)
+    memory = PostureMemory(storage, "world")
+    expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None,
+                           posture_memory=memory, expert_active=False)
+    kernel = HarnessStore(tmp_path / "kernel.db")
+    scope = HarnessScope("world", SUBJECT, "session", 0, "owner",
+                         context_id=TARGET, turn_id="work-b")
+    requests = []
+    model = model_fixture(monkeypatch, requests)
+    runner = TurnRunner(kernel, model_adapter=model, tool_provider=NoTools(),
+                        turn_advisor=expert.advisor(kernel, model, scope))
+    try:
+        outcome = runner.run(
+            scope, prompt="Create a provenance manifest for the final dataset, "
+                          "with original source attribution in the artifact.",
+        )
+        assert outcome.status is TurnStatus.SUCCEEDED
+        preaction = next(json.dumps(item["messages"], ensure_ascii=False)
+                         for item in requests
+                         if "WORK_MATERIAL_JSON" in json.dumps(item["messages"]))
+        assert old["id"] in preaction
+        assert "PRIVATE_EPISODE" not in preaction
+        packet = expert.posture_materials(
+            scope, task_terms=("provenance", "manifest"))
+        assert packet["offered_posture_revisions"][0] == {
+            "id": old["id"], "revision": 1}
+        assert packet["semantic_applicability"] == "not_yet_assessed"
+        # A subject-local but unshared record is not a candidate in Work B.
+        assert memory.materials(
+            subject_id="other-subject", context_id=TARGET,
+            prioritize_content=True, max_records=128,
+            task_terms=("provenance", "manifest"))["episodes"] == []
+    finally:
+        runner.close()
+        kernel.close()
+        expert.close()
+        storage.close()
+
+    reopened = Storage(path)
+    try:
+        memory = PostureMemory(reopened, "world")
+        memory.record_feedback(
+            old["id"], expected_revision=1, verdict="withdrawn",
+            evidence="The original instruction no longer applies.")
+        packet = memory.materials(
+            subject_id=SUBJECT, context_id=TARGET, prioritize_content=True,
+            max_records=128, compact_backfill=16,
+            task_terms=("provenance", "manifest"))
+        assert old["id"] not in _ids(packet)
+        assert old["id"] not in {ref["id"] for ref in packet["omitted_refs"]}
+    finally:
+        reopened.close()
