@@ -103,10 +103,11 @@ class PostureJournal:
         if compact_backfill and (limit is None or not with_remaining):
             raise ValueError("compact backfill requires bounded material references")
         if (not isinstance(task_terms, tuple) or len(task_terms) > 6
-                or any(not isinstance(term, str) or not term.isascii()
-                       or not term.isalnum() or not 6 <= len(term) <= 32
+                or any(not isinstance(term, str) or not term.isalnum()
+                       or not (6 <= len(term) <= 32 if term.isascii()
+                               else 2 <= len(term) <= 32)
                        for term in task_terms)):
-            raise ValueError("task cues must be up to six ASCII words")
+            raise ValueError("task cues must be up to six bounded words or Han phrases")
         if task_terms and (limit is None or not with_remaining):
             raise ValueError("task cue rescue requires bounded material references")
         def read(conn):
@@ -131,7 +132,7 @@ class PostureJournal:
                             text = " ".join(str(record.get(field, "")) for field in
                                             ("title", "lesson", "excerpt", "note",
                                              "conditions", "shift")).casefold()
-                            score = sum(len(term) for term in task_terms if term in text)
+                            score = sum(len(term.encode('utf-8')) for term in task_terms if term in text)
                             if not score:
                                 continue
                             raw = {key: value for key, value in record.items()
@@ -199,7 +200,7 @@ class PostureJournal:
                         for field in fields) + ")"
                     matches = " OR ".join(f"instr({searchable}, ?) > 0" for _ in task_terms)
                     score = " + ".join(
-                        f"CASE WHEN instr({searchable}, ?) > 0 THEN {len(term)} ELSE 0 END"
+                        f"CASE WHEN instr({searchable}, ?) > 0 THEN {len(term.encode('utf-8'))} ELSE 0 END"
                         for term in task_terms)
                     excluded = ",".join("?" for _ in entries)
                     for identity, raw, content_time in conn.execute(
