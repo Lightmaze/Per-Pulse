@@ -17,6 +17,8 @@ from pulse_system.service.home_conversation import home_conversation
 from pulse_system.service.runtime import ServiceError
 
 NOTE = "The selected finding from this Work. [Explicit synthetic fixture]"
+FILE_TASK = "Write an attributed file and report its verified result to Home."
+FILE_TEXT = "# Delivery\n\nDerived from the earlier source Work.\n"
 RESULT = "The original detailed Work result. [Explicit synthetic fixture]"
 
 
@@ -34,7 +36,24 @@ class ReportFixture:
             task = messages[current]["content"]
             results = [json.loads(row["content"]) for row in messages[current + 1:]
                        if row["role"] == "tool"]
-            if scope.context_id.startswith("work:") and task == "Select a finding for Home." and not results:
+            if scope.context_id.startswith("work:") and task == FILE_TASK and len(results) < 3:
+                if not results:
+                    name = "mutate_file"
+                    arguments = {"path": "delivery.md", "expected_digest": None, "content": FILE_TEXT}
+                elif len(results) == 1:
+                    assert results[0]["status"] == "succeeded", results
+                    name = "work"
+                    arguments = {"op": "report", "kind": "result", "note": "A finished file was produced.",
+                                 "artifact_id": "forged-artifact-not-in-work"}
+                else:
+                    assert results[1]["status"] == "failed", results
+                    name = "work"
+                    arguments = {"op": "report", "kind": "result", "note": "A finished file was produced.",
+                                 "artifact_id": results[0]["output"]["action_request_id"]}
+                delta = {"tool_calls": [{"index": 0, "id": f"synthetic-{name}-{len(results)}",
+                    "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}]}
+                reason = "tool_calls"
+            elif scope.context_id.startswith("work:") and task == "Select a finding for Home." and not results:
                 delta = {"tool_calls": [{"index": 0, "id": "synthetic-report-call", "type": "function",
                     "function": {"name": "work", "arguments": json.dumps(
                         {"op": "report", "kind": "finding", "note": NOTE})}}]}
