@@ -478,7 +478,7 @@ def test_ordinary_work_bounds_omission_metadata_without_losing_old_source(tmp_pa
             prompt = make_work_prompt(
                 {}, {"episodes": [], "previous_computations": []}, model_round=0,
                 posture_packet=supplied, byte_budget=64 * 1024)
-            visible = json.loads(prompt.split("WORK_MATERIAL_JSON\\n", 1)[1])[
+            visible = json.loads(prompt.split("WORK_MATERIAL_JSON\n", 1)[1])[
                 "posture_experiences"]
             assert visible["omitted_posture_revision_count"] == supplied[
                 "omitted_posture_revision_count"]
