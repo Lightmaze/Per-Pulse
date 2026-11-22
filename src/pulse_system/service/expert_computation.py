@@ -6,6 +6,7 @@ The earlier signed-feature selector remains an explicitly selected baseline.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -27,6 +28,24 @@ def expert_enabled() -> bool:
     if value not in {"0", "1"}:
         raise ValueError("P_PULSE_EXPERT_COMPUTATION must be 0 or 1")
     return value == "1"
+
+
+_TASK_COMMON = frozenset({
+    "please", "create", "write", "produce", "generate", "prepare", "review",
+    "making", "using", "should", "would", "could", "before", "after",
+    "another", "current", "their", "there", "these", "those", "about",
+})
+
+
+def _task_terms(request) -> tuple[str, ...]:
+    """Literal recall cues from the latest user task, not from tool/file text."""
+    latest = next((row.get("content", "") for row in reversed(request.messages)
+                   if row.get("role") == "user"), "")
+    if not isinstance(latest, str):
+        return ()
+    words = re.findall(r"[A-Za-z][A-Za-z0-9]{5,31}", latest[:6000].casefold())
+    unique = {word for word in words if word not in _TASK_COMMON}
+    return tuple(sorted(unique, key=lambda word: (-len(word), word))[:6])
 
 
 def _fork_scope(source, identity):
@@ -71,12 +90,13 @@ class ExpertRuntime:
     def posture_reviewer(self, main_store, model, scope):
         return _PostureReviewer(self, main_store, model)
 
-    def posture_materials(self, scope):
+    def posture_materials(self, scope, *, task_terms=()):
         if self.posture_memory is None:
             return None
         materials = self.posture_memory.materials(
             subject_id=scope.engram_id, context_id=scope.context_id,
-            prioritize_content=True, max_records=128, compact_backfill=16)
+            prioritize_content=True, max_records=128, compact_backfill=16,
+            task_terms=task_terms)
         return pack_posture_materials(materials)
 
     def work_materials(self, scope, posture_packet):
@@ -222,7 +242,8 @@ class _Advisor:
                         and decode_advice(m.content)["receipt"].get("plugin") == "expert_computation"]
             if len(admitted) >= 2:
                 return None
-        posture_packet = self.runtime.posture_materials(scope)
+        posture_packet = self.runtime.posture_materials(
+            scope, task_terms=_task_terms(request))
         has_posture = bool(posture_packet and posture_packet["episodes"])
         if not self.runtime.expert_active and not has_posture:
             if posture_packet and posture_packet["eligible_count"]:

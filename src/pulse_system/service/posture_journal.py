@@ -88,7 +88,7 @@ class PostureJournal:
 
     def list(self, *, subjects, context_id, include_inactive, history=True,
              limit=None, prioritize_content=False, with_remaining=False,
-             compact_backfill=0):
+             compact_backfill=0, task_terms=()):
         """Read newest full records, optionally reserving older compact candidates.
 
         A raw-record byte size is a cheap *fit hint*, not a relevance or
@@ -102,6 +102,13 @@ class PostureJournal:
             raise ValueError("compact backfill must be 0..16")
         if compact_backfill and (limit is None or not with_remaining):
             raise ValueError("compact backfill requires bounded material references")
+        if (not isinstance(task_terms, tuple) or len(task_terms) > 6
+                or any(not isinstance(term, str) or not term.isascii()
+                       or not term.isalnum() or not 6 <= len(term) <= 32
+                       for term in task_terms)):
+            raise ValueError("task cues must be up to six ASCII words")
+        if task_terms and (limit is None or not with_remaining):
+            raise ValueError("task cue rescue requires bounded material references")
         def read(conn):
             if not self._ready(conn):
                 values = self.legacy()["experiences"].values()
@@ -114,17 +121,40 @@ class PostureJournal:
                         pair[1] if prioritize_content else pair[0]["updated_at"],
                         pair[0]["id"]), reverse=True)
                     older = pairs[limit:]
+                    # Legacy snapshots are read-only. Search transferable
+                    # content, not private episodes or feedback.
+                    rescued = []
+                    if task_terms:
+                        matches = []
+                        for pair in older:
+                            record = pair[0]
+                            text = " ".join(str(record.get(field, "")) for field in
+                                            ("title", "lesson", "excerpt", "note",
+                                             "conditions", "shift")).casefold()
+                            score = sum(len(term) for term in task_terms if term in text)
+                            if not score:
+                                continue
+                            raw = {key: value for key, value in record.items()
+                                   if key not in {"history", "feedback"}}
+                            if len(_json(raw).encode()) <= 8192:
+                                matches.append((score, pair))
+                        # Frequent words like "artifact" must not hide an
+                        # older source matching several distinct task cues.
+                        matches.sort(key=lambda item: item[0], reverse=True)
+                        rescued = [pair for _, pair in matches[:2]]
+                    rescued_ids = {row["id"] for row, _ in rescued}
                     reserved = []
                     if compact_backfill:
                         reserved = [
                             pair for pair in older
-                            if len(_json({key: value for key, value in pair[0].items()
+                            if pair[0]["id"] not in rescued_ids
+                            and len(_json({key: value for key, value in pair[0].items()
                                           if key not in {"history", "feedback"}}).encode("utf-8")) <= 4096
                         ][:compact_backfill]
-                    reserved_ids = {row["id"] for row, _ in reserved}
+                    reserved_ids = rescued_ids | {row["id"] for row, _ in reserved}
                     omitted = [{"id": row["id"], "revision": row["revision"]}
                                for row, _ in older if row["id"] not in reserved_ids] if with_remaining else []
-                    pairs = pairs[:limit] + reserved
+                    pairs = pairs[:limit] + rescued + reserved
                     return (pairs, omitted) if with_remaining else pairs
                 return pairs
 
@@ -159,6 +189,32 @@ class PostureJournal:
             # revision cannot splice two different journal versions together.
             omitted = []
             if with_remaining:
+                # Rescue at most two older candidates by literal operator-task
+                # cues; eligibility is SQL-scoped, applicability remains
+                # unassessed, and no other Work's private fields enter the query.
+                if task_terms:
+                    fields = ("title", "lesson", "excerpt", "note", "conditions", "shift")
+                    searchable = "lower(" + " || ' ' || ".join(
+                        f"coalesce(CAST(json_extract(e.record, '$.{field}') AS TEXT), '')"
+                        for field in fields) + ")"
+                    matches = " OR ".join(f"instr({searchable}, ?) > 0" for _ in task_terms)
+                    score = " + ".join(
+                        f"CASE WHEN instr({searchable}, ?) > 0 THEN {len(term)} ELSE 0 END"
+                        for term in task_terms)
+                    excluded = ",".join("?" for _ in entries)
+                    for identity, raw, content_time in conn.execute(
+                        "SELECT e.experience_id, e.record, e.content_updated_at "
+                        "FROM posture_experiences AS e" + where
+                        + f" AND e.experience_id NOT IN ({excluded})"
+                        + " AND length(CAST(e.record AS BLOB)) <= 8192"
+                        + f" AND ({matches})"
+                        # Favor multiple distinctive task words over a single
+                        # generic word in many newer experiences. Recency
+                        # breaks ties, while native visibility still gates rows.
+                        + f" ORDER BY ({score}) DESC, {order} DESC, e.experience_id DESC LIMIT 2",
+                        [*args, *entries, *task_terms, *task_terms],
+                    ):
+                        entries[identity] = [json.loads(raw), content_time]
                 # The previous ID/revision sweep already visits each older row.
                 # Check small raw sizes there without decoding full old bodies;
                 # keep at most 16 older candidates under the same SQLite
@@ -171,7 +227,7 @@ class PostureJournal:
                     [*args, limit]))
                 reserved_ids = [
                     identity for identity, revision, raw_bytes in remaining
-                    if raw_bytes <= 4096
+                    if raw_bytes <= 4096 and identity not in entries
                 ][:compact_backfill] if compact_backfill else []
                 if reserved_ids:
                     marks = ",".join("?" for _ in reserved_ids)
@@ -184,7 +240,7 @@ class PostureJournal:
                 reserved = set(reserved_ids)
                 omitted = [
                     {"id": row[0], "revision": row[1]}
-                    for row in remaining if row[0] not in reserved
+                    for row in remaining if row[0] not in reserved and row[0] not in entries
                 ]
             for record, _ in entries.values():
                 record["feedback"] = []

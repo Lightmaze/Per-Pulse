@@ -441,7 +441,8 @@ class PostureMemory:
     def materials(self, *, subject_id: str, context_id: str,
                   prioritize_content: bool = False, max_records: int | None = None,
                   compact_backfill: int = 0,
-                  stable_creation_order: bool = False) -> dict:
+                  stable_creation_order: bool = False,
+                  task_terms: tuple[str, ...] = ()) -> dict:
         """Offer eligible experiences, not allegedly relevant experiences.
 
         Context privacy is a hard boundary. Explicit subject transfer offers
@@ -458,13 +459,22 @@ class PostureMemory:
         selected = self._journal.list(
             subjects=subjects, context_id=context_id, include_inactive=False,
             history=False, limit=max_records, prioritize_content=prioritize_content,
-            with_remaining=max_records is not None, compact_backfill=compact_backfill)
+            with_remaining=max_records is not None, compact_backfill=compact_backfill,
+            task_terms=task_terms)
         rows, omitted_refs = selected if max_records is not None else (selected, [])
         rows.sort(key=lambda item: (
             item[0]["created_at"] if stable_creation_order else (
                 item[1] if prioritize_content else item[0]["updated_at"]),
             item[0]["id"],
         ), reverse=True)
+        if task_terms:
+            # Literal cue matches make older material available to the optional
+            # pre-action expert; the model still checks conditions and exceptions.
+            # Search only transferable fields, not encounter/feedback text.
+            rows.sort(key=lambda pair: sum(
+                len(term) for term in task_terms
+                if term in experience_search_text(pair[0]).casefold()
+            ), reverse=True)
         episodes = [self._material_record(record, context_id) for record, _ in rows]
         # The single guarded read preserves the complete eligible reference
         # sequence even when the model packet loads only current candidates.
