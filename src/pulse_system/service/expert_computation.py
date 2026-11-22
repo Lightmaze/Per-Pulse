@@ -125,7 +125,7 @@ class ExpertRuntime:
         materials = self.posture_memory.materials(
             subject_id=scope.engram_id, context_id=scope.context_id,
             prioritize_content=True, max_records=128, compact_backfill=16,
-            task_terms=task_terms)
+            task_terms=task_terms, summarize_omissions=True)
         return pack_posture_materials(materials)
 
     def _stale_posture_refs(self, scope, offered, *, cache=None):

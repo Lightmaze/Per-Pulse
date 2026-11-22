@@ -421,3 +421,70 @@ def test_old_cue_rescued_experience_changes_ordinary_work_admission_and_survives
     finally:
         expert.close()
         storage.close()
+
+
+def test_ordinary_work_bounds_omission_metadata_without_losing_old_source(tmp_path):
+    """Long histories must not allocate an identity list on every Work decision.
+
+    Explicit journal reads retain their exact references. Ordinary pre-action
+    material keeps the same selected lessons and exact eligible/omitted counts.
+    """
+    storage = Storage(tmp_path / "bounded-history.db")
+    memory = PostureMemory(storage, "world")
+    try:
+        old = _experience(memory, "provenance-manifest-early")
+        for index in range(230):
+            _experience(memory, f"new-routine-{index:03d}")
+        keywords = ("provenance", "manifest")
+        exact = memory.materials(
+            subject_id=SUBJECT, context_id=TARGET, prioritize_content=True,
+            max_records=128, compact_backfill=16, task_terms=keywords)
+        statements = []
+        storage._conn.set_trace_callback(statements.append)
+        try:
+            compact = memory.materials(
+                subject_id=SUBJECT, context_id=TARGET, prioritize_content=True,
+                max_records=128, compact_backfill=16, task_terms=keywords,
+                summarize_omissions=True)
+        finally:
+            storage._conn.set_trace_callback(None)
+        assert _ids(compact) == _ids(exact)
+        assert old["id"] in _ids(compact)
+        assert compact["omitted_refs"] == []
+        assert compact["omitted_count"] == len(exact["omitted_refs"])
+        packed = pack_posture_materials(compact)
+        assert packed["eligible_count"] == 231
+        assert packed["omitted_posture_revision_count"] == (
+            len(exact["omitted_refs"])
+            + len(compact["episodes"]) - len(packed["episodes"]))
+        assert not any("LIMIT -1 OFFSET" in statement for statement in statements)
+        assert any("COUNT(*) FROM posture_experiences" in statement
+                   for statement in statements)
+
+        # Ordinary Work's native runtime must use the summary, not merely
+        # expose an optional lower-level query that nobody calls.
+        from pulse_harness.plugins.expert_work import make_work_prompt
+        expert = ExpertRuntime(tmp_path / "bounded-expert.db", guard=lambda: None,
+                               posture_memory=memory, expert_active=False)
+        try:
+            scope = HarnessScope("world", SUBJECT, "session", 0, "owner",
+                                 context_id=TARGET, turn_id="next-work")
+            supplied = expert.posture_materials(scope, task_terms=keywords)
+            assert old["id"] in [row["id"] for row in supplied["episodes"]]
+            assert supplied["eligible_count"] == 231
+            assert supplied["omitted_posture_revision_count"] == packed[
+                "omitted_posture_revision_count"]
+            assert len(supplied["omitted_posture_revisions"]) <= 128 + 16 + 2
+            prompt = make_work_prompt(
+                {}, {"episodes": [], "previous_computations": []}, model_round=0,
+                posture_packet=supplied, byte_budget=64 * 1024)
+            visible = json.loads(prompt.split("WORK_MATERIAL_JSON\n", 1)[1])[
+                "posture_experiences"]
+            assert visible["omitted_posture_revision_count"] == supplied[
+                "omitted_posture_revision_count"]
+            assert visible["omitted_posture_revisions_digest"] == "not_enumerated"
+            assert "omitted_posture_revisions" not in visible
+        finally:
+            expert.close()
+    finally:
+        storage.close()

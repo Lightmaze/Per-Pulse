@@ -442,7 +442,8 @@ class PostureMemory:
                   prioritize_content: bool = False, max_records: int | None = None,
                   compact_backfill: int = 0,
                   stable_creation_order: bool = False,
-                  task_terms: tuple[str, ...] = ()) -> dict:
+                  task_terms: tuple[str, ...] = (),
+                  summarize_omissions: bool = False) -> dict:
         """Offer eligible experiences, not allegedly relevant experiences.
 
         Context privacy is a hard boundary. Explicit subject transfer offers
@@ -455,13 +456,18 @@ class PostureMemory:
         alone does not displace newer candidates under the prompt budget.
         """
         self.guard()
+        if summarize_omissions and max_records is None:
+            raise ValueError("omission summary requires a bounded material selection")
         subjects = self._subjects(subject_id)
         selected = self._journal.list(
             subjects=subjects, context_id=context_id, include_inactive=False,
             history=False, limit=max_records, prioritize_content=prioritize_content,
             with_remaining=max_records is not None, compact_backfill=compact_backfill,
-            task_terms=task_terms)
-        rows, omitted_refs = selected if max_records is not None else (selected, [])
+            task_terms=task_terms, summary_only=summarize_omissions)
+        if summarize_omissions:
+            rows, omitted_refs, omitted_count = selected
+        else:
+            rows, omitted_refs = selected if max_records is not None else (selected, [])
         rows.sort(key=lambda item: (
             item[0]["created_at"] if stable_creation_order else (
                 item[1] if prioritize_content else item[0]["updated_at"]),
@@ -476,8 +482,9 @@ class PostureMemory:
                 if term in experience_search_text(pair[0]).casefold()
             ), reverse=True)
         episodes = [self._material_record(record, context_id) for record, _ in rows]
-        # The single guarded read preserves the complete eligible reference
-        # sequence even when the model packet loads only current candidates.
+        # Explicit reads preserve each eligible reference; ordinary Work can
+        # instead carry a bounded selection and the exact omitted count.
         return {"schema": SCHEMA, "episodes": episodes, "eligibility": "subject_scope_and_active_only",
                 "semantic_applicability": "not_yet_assessed", "source_context_id": context_id,
-                **({"omitted_refs": omitted_refs} if max_records is not None else {})}
+                **({"omitted_refs": omitted_refs} if max_records is not None else {}),
+                **({"omitted_count": omitted_count} if summarize_omissions else {})}

@@ -117,9 +117,14 @@ def pack_posture_materials(materials: dict | None, *, byte_budget: int = 16000) 
         offered.append(ref)
         used += size
     omitted.extend(deepcopy(additional_refs))
-    return {"episodes": packed, "offered_posture_revisions": offered,
-            "omitted_posture_revisions": omitted, "eligible_count": len(entries) + len(additional_refs),
-            "packing": "newest_first_explicit_byte_budget", "semantic_applicability": "not_yet_assessed"}
+    summary_count = None if materials is None else materials.get("omitted_count")
+    result = {"episodes": packed, "offered_posture_revisions": offered,
+              "omitted_posture_revisions": omitted,
+              "eligible_count": len(entries) + (len(additional_refs) if summary_count is None else summary_count),
+              "packing": "newest_first_explicit_byte_budget", "semantic_applicability": "not_yet_assessed"}
+    if summary_count is not None:
+        result["omitted_posture_revision_count"] = len(omitted) + summary_count
+    return result
 
 
 def posture_contribution_context(text: str, *, review: bool = False) -> str | None:
