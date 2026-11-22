@@ -18,6 +18,9 @@ from pulse_system.service.runtime import ServiceError
 
 NOTE = "The selected finding from this Work. [Explicit synthetic fixture]"
 FILE_TASK = "Write an attributed file and report its verified result to Home."
+PRIOR_WRITE_TASK = "Write the completed file now; report it during a later Work turn."
+PRIOR_REPORT_TASK = "Report the file written during my earlier Work turn."
+FOREIGN_REPORT_TASK = "Try reporting a file from another Work."
 FILE_TEXT = "# Delivery\n\nDerived from the earlier source Work.\n"
 RESULT = "The original detailed Work result. [Explicit synthetic fixture]"
 
@@ -26,6 +29,7 @@ class ReportFixture:
     def __init__(self, monkeypatch):
         monkeypatch.setenv("NATIVE_REPORT_FIXTURE_KEY", "explicit-synthetic-credential")
         self.requests = []
+        self.prior_artifact_id = None
 
     def factory(self, scope):
         def respond(request):
@@ -53,6 +57,19 @@ class ReportFixture:
                 delta = {"tool_calls": [{"index": 0, "id": f"synthetic-{name}-{len(results)}",
                     "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}]}
                 reason = "tool_calls"
+            elif scope.context_id.startswith("work:") and task == PRIOR_WRITE_TASK and not results:
+                delta = {"tool_calls": [{"index": 0, "id": "synthetic-prior-file-action",
+                    "type": "function", "function": {"name": "mutate_file", "arguments": json.dumps(
+                        {"path": "prior-delivery.md", "expected_digest": None, "content": FILE_TEXT})}}]}
+                reason = "tool_calls"
+            elif scope.context_id.startswith("work:") and task in {
+                    PRIOR_REPORT_TASK, FOREIGN_REPORT_TASK} and not results:
+                assert self.prior_artifact_id is not None
+                delta = {"tool_calls": [{"index": 0, "id": "synthetic-prior-report",
+                    "type": "function", "function": {"name": "work", "arguments": json.dumps(
+                        {"op": "report", "kind": "result", "note": "The earlier file is finished.",
+                         "artifact_id": self.prior_artifact_id})}}]}
+                reason = "tool_calls"
             elif scope.context_id.startswith("work:") and task == "Select a finding for Home." and not results:
                 delta = {"tool_calls": [{"index": 0, "id": "synthetic-report-call", "type": "function",
                     "function": {"name": "work", "arguments": json.dumps(
@@ -61,6 +78,13 @@ class ReportFixture:
             else:
                 if task == FILE_TASK:
                     assert [row["status"] for row in results] == ["succeeded", "failed", "succeeded"], results
+                elif task == PRIOR_WRITE_TASK:
+                    assert len(results) == 1 and results[0]["status"] == "succeeded", results
+                    self.prior_artifact_id = results[0]["output"]["action_request_id"]
+                elif task == PRIOR_REPORT_TASK:
+                    assert len(results) == 1 and results[0]["status"] == "succeeded", results
+                elif task == FOREIGN_REPORT_TASK:
+                    assert len(results) == 1 and results[0]["status"] == "failed", results
                 else:
                     assert all(row["status"] == "succeeded" for row in results), results
                 delta = {"content": RESULT if scope.context_id.startswith("work:")
@@ -399,3 +423,62 @@ def test_work_delivers_verified_file_through_home_and_undo_after_restart(tmp_pat
         assert unrelated.get("reportedArtifact") is None
     finally:
         restarted.runtime.close()
+
+
+def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_claim_it(
+        tmp_path, monkeypatch):
+    """Finish a file, restart, and report it later without minting a new file action.
+
+    Model tool calls are authored synthetic HTTP choices; real Kernel actions,
+    native outbox delivery, Work ownership, persisted bytes and Undo are used.
+    """
+    fixture = ReportFixture(monkeypatch)
+    pages = PageService(tmp_path, model_factory=fixture.factory,
+                        allow_workspace_actions=True, auto_apply_edits=True)
+    try:
+        created = pages.create_page("Long-running delivery", PRIOR_WRITE_TASK)
+        work_id = created["page"]["id"]
+        first = activate(pages, work_id, created["initialMessageId"])
+        assert first.result_event_id is not None
+        artifact, = pages.artifacts.snapshot(work_id)["artifacts"]
+        assert fixture.prior_artifact_id == artifact["id"]
+        assert (tmp_path / "workspace" / "prior-delivery.md").read_text() == FILE_TEXT
+        assert not [r for r in pages.runtime.storage.native_work_requests(limit=32)
+                    if r["arguments"]["op"] == "report"]
+    finally:
+        pages.runtime.close()
+
+    pages = PageService(tmp_path, model_factory=fixture.factory,
+                        allow_workspace_actions=True, auto_apply_edits=True)
+    try:
+        # The same known action ID must not let another Work report the file.
+        outsider = pages.create_page("Another Work", FOREIGN_REPORT_TASK)
+        activate(pages, outsider["page"]["id"], outsider["initialMessageId"])
+        assert not [r for r in pages.runtime.storage.native_work_requests(limit=32)
+                    if r["arguments"]["op"] == "report"]
+
+        sent = pages.send(work_id, PRIOR_REPORT_TASK)
+        second = activate(pages, work_id, sent["messageId"])
+        assert second.turn_id != first.turn_id
+        pages.runtime._native_work.drain()
+        report, = [r for r in pages.runtime.storage.native_work_requests(limit=32)
+                   if r["arguments"]["op"] == "report"]
+        assert report["status"] == "delivered"
+        assert report["source_turn_id"] == second.turn_id
+        assert report["artifact_source"] == {
+            "artifact_id": artifact["id"], "path": artifact["path"], "sha256": artifact["sha256"],
+        }
+        home = message(pages, report["event_id"])
+        assert home["sourcePageId"] == work_id
+        assert home["sourceMessageId"] == second.result_event_id
+        assert home["reportedArtifact"]["artifactId"] == artifact["id"]
+        assert pages.artifacts.download(work_id, artifact["id"])["content"] == FILE_TEXT.encode()
+        pages.runtime.close()
+        pages = PageService(tmp_path, model_factory=None,
+                            allow_workspace_actions=True, auto_apply_edits=True)
+        assert pages.artifacts.read(work_id, artifact["id"])["content"] == FILE_TEXT
+        assert message(pages, report["event_id"])["reportedArtifact"]["artifactId"] == artifact["id"]
+        pages.artifacts.undo(work_id, artifact["id"])
+        assert message(pages, report["event_id"])["reportedArtifact"]["undone"] is True
+    finally:
+        pages.runtime.close()
