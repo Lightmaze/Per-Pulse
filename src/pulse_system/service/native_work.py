@@ -70,7 +70,7 @@ def descriptor() -> ToolDescriptor:
         'report(kind, note, artifact_id?, contributions?, source_work_id?, source_event_id?, '
         'source_excerpt?) '
         'sends one result, question or finding to Home on success. '
-        'artifact_id names this turn's successful file action. '
+        'artifact_id names a successful file action in this Work turn. '
         'contributions quotes 1-8 exact team inspect/search excerpts '
         '(record_id, excerpt, max 1024 chars each); synthesize disagreements '
         'in note without invented consensus. Treat Work reports '
