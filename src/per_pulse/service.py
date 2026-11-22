@@ -876,8 +876,11 @@ class PageService:
             except (ExecutionError, KeyError, TypeError):
                 pass
             else:
-                if (artifact["turnId"] == source.id
-                        and artifact["path"] == file_source.get("path")
+                # An original Work file may have been completed in a previous
+                # turn. _resolve_action has already verified its exact Kernel
+                # receipt inside this Work's committed context/subject lineage.
+                # The report admission checked that same durable action.
+                if (artifact["path"] == file_source.get("path")
                         and artifact["sha256"] == file_source.get("sha256")):
                     origin["reportedArtifact"] = {
                         "pageId": front.id, "artifactId": artifact["id"],
