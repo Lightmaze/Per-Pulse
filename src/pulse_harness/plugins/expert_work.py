@@ -163,9 +163,11 @@ def make_work_prompt(view: dict, materials: dict, *, model_round: int,
             # A long list of omitted identities is accounting metadata, not
             # task material. Its complete list remains in the host receipt.
             omitted = packet["posture_experiences"].pop("omitted_posture_revisions", [])
+            count = packet["posture_experiences"].get("omitted_posture_revision_count")
             packet["posture_experiences"].update(
-                omitted_posture_revision_count=len(omitted),
-                omitted_posture_revisions_digest=digest_json(omitted),
+                omitted_posture_revision_count=len(omitted) if count is None else count,
+                omitted_posture_revisions_digest=(
+                    digest_json(omitted) if count is None else "not_enumerated"),
             )
         instruction += "\n" + POSTURE_INSTRUCTION
     if review_candidate is not None:
