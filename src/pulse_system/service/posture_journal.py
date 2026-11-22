@@ -125,18 +125,23 @@ class PostureJournal:
                     # content, not private episodes or feedback.
                     rescued = []
                     if task_terms:
+                        matches = []
                         for pair in older:
                             record = pair[0]
                             text = " ".join(str(record.get(field, "")) for field in
                                             ("title", "lesson", "excerpt", "note",
                                              "conditions", "shift")).casefold()
+                            score = sum(len(term) for term in task_terms if term in text)
+                            if not score:
+                                continue
                             raw = {key: value for key, value in record.items()
                                    if key not in {"history", "feedback"}}
-                            if (any(term in text for term in task_terms)
-                                    and len(_json(raw).encode()) <= 8192):
-                                rescued.append(pair)
-                                if len(rescued) == 2:
-                                    break
+                            if len(_json(raw).encode()) <= 8192:
+                                matches.append((score, pair))
+                        # Frequent words like "artifact" must not hide an
+                        # older source matching several distinct task cues.
+                        matches.sort(key=lambda item: item[0], reverse=True)
+                        rescued = [pair for _, pair in matches[:2]]
                     rescued_ids = {row["id"] for row, _ in rescued}
                     reserved = []
                     if compact_backfill:
@@ -193,6 +198,9 @@ class PostureJournal:
                         f"coalesce(CAST(json_extract(e.record, '$.{field}') AS TEXT), '')"
                         for field in fields) + ")"
                     matches = " OR ".join(f"instr({searchable}, ?) > 0" for _ in task_terms)
+                    score = " + ".join(
+                        f"CASE WHEN instr({searchable}, ?) > 0 THEN {len(term)} ELSE 0 END"
+                        for term in task_terms)
                     excluded = ",".join("?" for _ in entries)
                     for identity, raw, content_time in conn.execute(
                         "SELECT e.experience_id, e.record, e.content_updated_at "
@@ -200,8 +208,11 @@ class PostureJournal:
                         + f" AND e.experience_id NOT IN ({excluded})"
                         + " AND length(CAST(e.record AS BLOB)) <= 8192"
                         + f" AND ({matches})"
-                        + f" ORDER BY {order} DESC, e.experience_id DESC LIMIT 2",
-                        [*args, *entries, *task_terms],
+                        # Favor multiple distinctive task words over a single
+                        # generic word in many newer experiences. Recency
+                        # breaks ties, while native visibility still gates rows.
+                        + f" ORDER BY ({score}) DESC, {order} DESC, e.experience_id DESC LIMIT 2",
+                        [*args, *entries, *task_terms, *task_terms],
                     ):
                         entries[identity] = [json.loads(raw), content_time]
                 # The previous ID/revision sweep already visits each older row.
