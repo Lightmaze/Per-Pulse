@@ -421,3 +421,44 @@ def test_old_cue_rescued_experience_changes_ordinary_work_admission_and_survives
     finally:
         expert.close()
         storage.close()
+
+
+def test_ordinary_work_bounds_omission_metadata_without_losing_old_source(tmp_path):
+    """Long histories must not allocate an identity list on every Work decision.
+
+    Explicit journal reads retain their exact references. Ordinary pre-action
+    material keeps the same selected lessons and exact eligible/omitted counts.
+    """
+    storage = Storage(tmp_path / "bounded-history.db")
+    memory = PostureMemory(storage, "world")
+    try:
+        old = _experience(memory, "provenance-manifest-early")
+        for index in range(230):
+            _experience(memory, f"new-routine-{index:03d}")
+        keywords = ("provenance", "manifest")
+        exact = memory.materials(
+            subject_id=SUBJECT, context_id=TARGET, prioritize_content=True,
+            max_records=128, compact_backfill=16, task_terms=keywords)
+        statements = []
+        storage._conn.set_trace_callback(statements.append)
+        try:
+            compact = memory.materials(
+                subject_id=SUBJECT, context_id=TARGET, prioritize_content=True,
+                max_records=128, compact_backfill=16, task_terms=keywords,
+                summarize_omissions=True)
+        finally:
+            storage._conn.set_trace_callback(None)
+        assert _ids(compact) == _ids(exact)
+        assert old["id"] in _ids(compact)
+        assert compact["omitted_refs"] == []
+        assert compact["omitted_count"] == len(exact["omitted_refs"])
+        packed = pack_posture_materials(compact)
+        assert packed["eligible_count"] == 231
+        assert packed["omitted_posture_revision_count"] == (
+            len(exact["omitted_refs"])
+            + len(compact["episodes"]) - len(packed["episodes"]))
+        assert not any("LIMIT -1 OFFSET" in statement for statement in statements)
+        assert any("COUNT(*) FROM posture_experiences" in statement
+                   for statement in statements)
+    finally:
+        storage.close()
