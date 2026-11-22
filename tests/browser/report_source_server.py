@@ -34,6 +34,7 @@ def factory(scope):
             requests.append({"context": scope.context_id, "body": body})
         messages = body["messages"]
         current = max(i for i, row in enumerate(messages) if row["role"] == "user")
+        task = messages[current]["content"]
         results = [json.loads(row["content"]) for row in messages[current + 1:] if row["role"] == "tool"]
         if scope.context_id.startswith("work:") and task == WRITE_TASK and not results:
             delta = {"tool_calls": [{"index": 0, "id": "source-browser-mutate_file",
