@@ -59,7 +59,10 @@ class ReportFixture:
                         {"op": "report", "kind": "finding", "note": NOTE})}}]}
                 reason = "tool_calls"
             else:
-                assert all(row["status"] == "succeeded" for row in results), results
+                if task == FILE_TASK:
+                    assert [row["status"] for row in results] == ["succeeded", "failed", "succeeded"], results
+                else:
+                    assert all(row["status"] == "succeeded" for row in results), results
                 delta = {"content": RESULT if scope.context_id.startswith("work:")
                          else "The Home discussion continues. [Explicit synthetic fixture]"}
                 reason = "stop"
