@@ -128,23 +128,46 @@ class ExpertRuntime:
             task_terms=task_terms)
         return pack_posture_materials(materials)
 
-    def work_materials(self, scope, posture_packet):
-        """Do not revive a retired lesson through an earlier contribution.
+    def _stale_posture_refs(self, scope, offered, *, cache=None):
+        """Recheck the actual offered revisions, not today's bounded shortlist.
 
-        A prior computation lists the revisions it was offered, not certified
-        causal credit. Conservatively retain it only while every such revision
-        is still eligible and active. The main conversation remains history;
-        this prevents the learning sidecar from reintroducing withdrawn advice.
+        An older lesson can enter a Work through task-cue rescue even though it
+        is absent from a later cue-free 128+16 selection. Selection coverage
+        cannot determine whether the original source remains authorized.
+        Native World visibility and the exact current revision determine that.
+        """
+        if not offered:
+            return []
+        if self.posture_memory is None:
+            return list(offered)
+        cache = {} if cache is None else cache
+        stale = []
+        for ref in offered:
+            identity = ref["id"]
+            if identity not in cache:
+                current = self.posture_memory.material_experience(
+                    subject_id=scope.engram_id, context_id=scope.context_id,
+                    experience_id=identity)
+                cache[identity] = current["revision"] if current is not None else None
+            if cache[identity] != ref["revision"]:
+                stale.append(ref)
+        return stale
+
+    def work_materials(self, scope, posture_packet):
+        """Reuse earlier work only while its original experience remains valid.
+
+        An old computation may have used a source selected for its *then*
+        task, rather than today's shortlist. Keep the contribution when that
+        source is still visible at the same revision; discard it on withdrawal,
+        revision, or loss of native subject/context access.
         """
         owner = scope.world_id + ":" + scope.engram_id
         materials = self.store.materials(owner, scope.context_id)
-        refs = ((posture_packet or {}).get("offered_posture_revisions", [])
-                + (posture_packet or {}).get("omitted_posture_revisions", []))
-        current = {(ref["id"], ref["revision"]) for ref in refs}
+        cache = {}
         previous, omitted = [], []
         for record in materials["previous_computations"]:
             offered = record.get("computation", {}).get("offered_posture_revisions", [])
-            stale = bool(offered) and any((ref["id"], ref["revision"]) not in current for ref in offered)
+            stale = self._stale_posture_refs(scope, offered, cache=cache)
             if stale or (not self.expert_active and not offered):
                 omitted.append(record["id"])
             else:
@@ -167,10 +190,7 @@ class ExpertRuntime:
         self.guard()
         offered = advice.receipt.get("offered_posture_revisions", [])
         if offered:
-            packet = self.posture_materials(scope) or {}
-            refs = packet.get("offered_posture_revisions", []) + packet.get("omitted_posture_revisions", [])
-            current = {(ref["id"], ref["revision"]) for ref in refs}
-            stale = [ref for ref in offered if (ref["id"], ref["revision"]) not in current]
+            stale = self._stale_posture_refs(scope, offered)
             if stale:
                 return TurnAdvice(receipt={
                     **advice.receipt, "status": "suppressed_before_admission",

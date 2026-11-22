@@ -332,3 +332,92 @@ def test_chinese_work_b_recalls_old_shared_source_before_decision_after_restart(
         assert old["id"] not in {ref["id"] for ref in packet["omitted_refs"]}
     finally:
         reopened.close()
+
+
+def test_old_cue_rescued_experience_changes_ordinary_work_admission_and_survives_restart(
+        tmp_path, monkeypatch):
+    """An old Work A lesson reaches Work B's *main* decision, not only its fork.
+
+    The model is explicitly scripted; this validates the native admission,
+    durable continuation, exact-source revocation, and privacy boundaries.
+    """
+    from pulse_harness.core import HarnessStore, TurnRunner, TurnStatus
+    from pulse_harness.core.turn_advice import TurnAdvice
+    from test_posture_runtime import NoTools, model_fixture
+
+    world_path = tmp_path / "world.db"
+    storage = Storage(world_path)
+    memory = PostureMemory(storage, "world")
+    old = _experience(memory, "provenance-manifest-original")
+    for index in range(180):
+        _experience(memory, f"routine-{index:03d}")
+    storage.close()
+
+    storage = Storage(world_path)
+    memory = PostureMemory(storage, "world")
+    expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None,
+                           posture_memory=memory, expert_active=False)
+    kernel = HarnessStore(tmp_path / "kernel.db")
+    scope = HarnessScope("world", SUBJECT, "session", 0, "owner",
+                         context_id=TARGET, turn_id="ordinary-b")
+    requests = []
+    model = model_fixture(monkeypatch, requests, all_contributions=True)
+    runner = TurnRunner(kernel, model_adapter=model, tool_provider=NoTools(),
+                        turn_advisor=expert.advisor(kernel, model, scope))
+    advice_text = "Use the direct worked example already available before the setup form."
+    original_ref = {"id": old["id"], "revision": 1}
+    try:
+        assert old["id"] not in _ids(expert.posture_materials(scope))
+        outcome = runner.run(
+            scope, prompt="Create a provenance manifest for the final dataset "
+                          "with original source attribution in the artifact.")
+        assert outcome.status is TurnStatus.SUCCEEDED
+        assert len(requests) == 2
+        fork = next(json.dumps(r["messages"], ensure_ascii=False) for r in requests
+                    if "WORK_MATERIAL_JSON" in json.dumps(r["messages"]))
+        main = next(json.dumps(r["messages"], ensure_ascii=False) for r in requests
+                    if "WORK_MATERIAL_JSON" not in json.dumps(r["messages"]))
+        assert old["id"] in fork
+        assert advice_text in main
+        assert "PRIVATE_EPISODE" not in fork + main
+        expert.record_outcome(kernel, scope, outcome)
+        previous = expert.work_materials(scope, expert.posture_materials(scope))
+        assert any(record["context"] == advice_text
+                   for record in previous["previous_computations"])
+        assert expert.current_advice(
+            scope, TurnAdvice(context=advice_text,
+                              receipt={"offered_posture_revisions": [original_ref]})).context == advice_text
+    finally:
+        runner.close()
+        kernel.close()
+        expert.close()
+        storage.close()
+
+    storage = Storage(world_path)
+    memory = PostureMemory(storage, "world")
+    expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None,
+                           posture_memory=memory, expert_active=False)
+    try:
+        # The exact older source remains useful even without cue-based rescue.
+        assert old["id"] not in _ids(expert.posture_materials(scope))
+        restored = expert.work_materials(scope, expert.posture_materials(scope))
+        assert any(record["context"] == advice_text
+                   for record in restored["previous_computations"])
+        foreign = HarnessScope("world", "different-subject", "other", 0, "owner",
+                               context_id=TARGET, turn_id="next")
+        assert expert.current_advice(
+            foreign, TurnAdvice(context=advice_text,
+                                receipt={"offered_posture_revisions": [original_ref]})).context is None
+        memory.record_feedback(old["id"], expected_revision=1,
+                               verdict="withdrawn", evidence="No longer applicable.")
+        suppressed = expert.current_advice(
+            scope, TurnAdvice(context=advice_text,
+                              receipt={"offered_posture_revisions": [original_ref]}))
+        assert suppressed.context is None
+        assert suppressed.receipt["reason"] == "posture_revision_no_longer_eligible"
+        after = expert.work_materials(scope, expert.posture_materials(scope))
+        assert not any(record["context"] == advice_text
+                       for record in after["previous_computations"])
+    finally:
+        expert.close()
+        storage.close()
