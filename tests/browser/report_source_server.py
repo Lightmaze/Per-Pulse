@@ -18,6 +18,7 @@ from per_pulse.service import PulseSettings
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 
 NOTE = "A selected source finding. [Explicit synthetic HTTP fixture]"
+FILE_TEXT = "# Report deliverable\n\nThis is the completed Work file.\n"
 RESULT = "The original detailed source result. [Explicit synthetic HTTP fixture]"
 requests = []
 lock = threading.Lock()
@@ -31,10 +32,17 @@ def factory(scope):
         messages = body["messages"]
         current = max(i for i, row in enumerate(messages) if row["role"] == "user")
         results = [json.loads(row["content"]) for row in messages[current + 1:] if row["role"] == "tool"]
-        if scope.context_id.startswith("work:") and not results:
-            delta = {"tool_calls": [{"index": 0, "id": "source-browser-report", "type": "function",
-                "function": {"name": "work", "arguments": json.dumps(
-                    {"op": "report", "kind": "finding", "note": NOTE})}}]}
+        if scope.context_id.startswith("work:") and len(results) < 2:
+            if not results:
+                name = "mutate_file"
+                arguments = {"path": "report-delivery.md", "expected_digest": None, "content": FILE_TEXT}
+            else:
+                assert results[0]["status"] == "succeeded", results
+                name = "work"
+                arguments = {"op": "report", "kind": "finding", "note": NOTE,
+                             "artifact_id": results[0]["output"]["action_request_id"]}
+            delta = {"tool_calls": [{"index": 0, "id": "source-browser-" + name,
+                "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}]}
             reason = "tool_calls"
         else:
             assert all(row["status"] == "succeeded" for row in results), results
@@ -57,7 +65,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     os.environ["PER_PULSE_REPORT_SOURCE_KEY"] = "explicit-synthetic-browser-credential"
     app = create_app(args.data_dir, model_factory=None if args.offline else factory,
-                     posture=True, pulse=PulseSettings(enabled=False), allow_workspace_actions=True)
+                     posture=True, pulse=PulseSettings(enabled=False),
+                     allow_workspace_actions=True, auto_apply_edits=True)
 
     @app.get("/__report-source/status")
     def status():

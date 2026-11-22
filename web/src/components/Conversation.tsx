@@ -8,6 +8,7 @@ import { CopyButton } from './CopyButton';
 import { ReplayOrigin } from './ReplayOrigin';
 import { messageBody } from '../messageBody';
 import { PageSourceContent } from './PageSourceContent';
+import { ReportedArtifact } from './ReportedArtifact';
 import { initialWorkHandoffExcerpt } from '../workHandoffExcerpt';
 import { readTransferPresentation } from '../transferPresentation';
 import { useLiveReply } from '../liveReply';
@@ -44,6 +45,7 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
           <MessageContent content={transferPresentation.instruction} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />
         </section>
       </div> : <MessageContent content={messageBody(message)} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />}
+      {view.page.kind === 'home' && message.reportedArtifact ? <ReportedArtifact key={message.reportedArtifact.artifactId} source={message.reportedArtifact} homeMessageId={message.id} navigate={navigate} /> : null}
       {message.materials?.length ? <ul className="message-materials" aria-label={t('materials.attached')}>{message.materials.map(material => <li key={material.id}><button className="material-chip" onClick={() => onMaterial?.(material.id, material.pageId)}><Icon name="page" size={16} /><span>{material.name}</span></button></li>)}</ul> : null}
       <div className="message-footer">
         {activity ? <span className={`message-status tone-${activity.tone}`} title={t(activity.detailKey, activity.detailParams)}>{t(activity.labelKey)}</span> : null}

@@ -274,6 +274,12 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" \
           PER_PULSE_INSTALLED_PYTHON="$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" \
           node tests/browser/installed_first_run.mjs
+      - name: Verify a completed Work file reaches Home from the installed wheel
+        run: |
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" \
+          PER_PULSE_PYTHON="$RUNNER_TEMP/per-pulse-wheel-venv/bin/python" \
+          PER_PULSE_INSTALLED_WHEEL=1 \
+          node tests/browser/report_source_flow.mjs
       - name: Verify materials from the installed wheel
         run: |
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/per-pulse-browser-tools/node_modules/playwright" \

@@ -17,6 +17,8 @@ from pulse_system.service.home_conversation import home_conversation
 from pulse_system.service.runtime import ServiceError
 
 NOTE = "The selected finding from this Work. [Explicit synthetic fixture]"
+FILE_TASK = "Write an attributed file and report its verified result to Home."
+FILE_TEXT = "# Delivery\n\nDerived from the earlier source Work.\n"
 RESULT = "The original detailed Work result. [Explicit synthetic fixture]"
 
 
@@ -34,13 +36,33 @@ class ReportFixture:
             task = messages[current]["content"]
             results = [json.loads(row["content"]) for row in messages[current + 1:]
                        if row["role"] == "tool"]
-            if scope.context_id.startswith("work:") and task == "Select a finding for Home." and not results:
+            if scope.context_id.startswith("work:") and task == FILE_TASK and len(results) < 3:
+                if not results:
+                    name = "mutate_file"
+                    arguments = {"path": "delivery.md", "expected_digest": None, "content": FILE_TEXT}
+                elif len(results) == 1:
+                    assert results[0]["status"] == "succeeded", results
+                    name = "work"
+                    arguments = {"op": "report", "kind": "result", "note": "A finished file was produced.",
+                                 "artifact_id": "forged-artifact-not-in-work"}
+                else:
+                    assert results[1]["status"] == "failed", results
+                    name = "work"
+                    arguments = {"op": "report", "kind": "result", "note": "A finished file was produced.",
+                                 "artifact_id": results[0]["output"]["action_request_id"]}
+                delta = {"tool_calls": [{"index": 0, "id": f"synthetic-{name}-{len(results)}",
+                    "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}]}
+                reason = "tool_calls"
+            elif scope.context_id.startswith("work:") and task == "Select a finding for Home." and not results:
                 delta = {"tool_calls": [{"index": 0, "id": "synthetic-report-call", "type": "function",
                     "function": {"name": "work", "arguments": json.dumps(
                         {"op": "report", "kind": "finding", "note": NOTE})}}]}
                 reason = "tool_calls"
             else:
-                assert all(row["status"] == "succeeded" for row in results), results
+                if task == FILE_TASK:
+                    assert [row["status"] for row in results] == ["succeeded", "failed", "succeeded"], results
+                else:
+                    assert all(row["status"] == "succeeded" for row in results), results
                 delta = {"content": RESULT if scope.context_id.startswith("work:")
                          else "The Home discussion continues. [Explicit synthetic fixture]"}
                 reason = "stop"
@@ -299,3 +321,81 @@ def test_inconsistent_native_source_evidence_never_exposes_a_navigation_target(t
                        for row in home_conversation(runtime, runtime.continuity_engram_id)["messages"])
     finally:
         pages.runtime.close()
+
+
+def test_work_delivers_verified_file_through_home_and_undo_after_restart(tmp_path, monkeypatch):
+    """An ordinary Work actually writes a file, reports its action, and returns Home.
+
+    Model calls and its corrected tool choice are explicit synthetic HTTP.
+    File bytes, Kernel action, outbox, source links and Undo are native.
+    """
+    fixture = ReportFixture(monkeypatch)
+    pages = PageService(tmp_path, model_factory=fixture.factory,
+                        allow_workspace_actions=True, auto_apply_edits=True)
+    try:
+        earlier = pages.create_page("Earlier source", "Keep the original source for the next Work.")
+        source_work = earlier["page"]["id"]
+        activate(pages, source_work, earlier["initialMessageId"])
+        correction = pages.send(source_work, "Use the original source in the delivered file.")
+        activate(pages, source_work, correction["messageId"])
+        later = pages.create_page("Completed file delivery", FILE_TASK, source_page_id=source_work,
+                                  source_message_id=correction["messageId"])
+        work_id = later["page"]["id"]
+        completed = activate(pages, work_id, later["initialMessageId"])
+        assert completed.result_event_id is not None
+        pages.runtime._native_work.drain()
+        report, = [row for row in pages.runtime.storage.native_work_requests(limit=32)
+                   if row["arguments"]["op"] == "report"]
+        assert report["status"] == "delivered"
+        artifact, = pages.artifacts.snapshot(work_id)["artifacts"]
+        assert (tmp_path / "workspace" / "delivery.md").read_text() == FILE_TEXT
+        assert artifact["path"] == "delivery.md"
+        assert report["arguments"]["artifact_id"] == artifact["id"]
+        assert report["artifact_source"] == {
+            "artifact_id": artifact["id"], "path": artifact["path"], "sha256": artifact["sha256"],
+        }
+        report_messages = [row for row in pages.view("home")["messages"]
+                           if row["id"] == report["event_id"]]
+        assert len(report_messages) == 1
+        home_result, = report_messages
+        assert home_result["activation"] == "work_report"
+        assert home_result["sourcePageId"] == work_id
+        assert home_result["sourceMessageId"] == completed.result_event_id
+        assert home_result["reportedArtifact"] == {
+            "pageId": work_id, "artifactId": artifact["id"],
+            "path": "delivery.md", "sha256": artifact["sha256"], "undone": False,
+        }
+        assert "historical receipt" in home_result["content"]
+        assert pages.artifacts.read(work_id, artifact["id"])["content"] == FILE_TEXT
+        # The old Work correction remains an exact, independent native message.
+        assert next(row for row in pages.view(source_work)["messages"]
+                    if row["id"] == correction["messageId"])["content"] == (
+                        "Use the original source in the delivered file."
+                    )
+        assert any(result["status"] == "failed"
+                   for _, body in fixture.requests
+                   for result in [json.loads(msg["content"])
+                                  for msg in body["messages"] if msg["role"] == "tool"]
+                   if isinstance(result, dict) and result.get("status") == "failed")
+    finally:
+        pages.runtime.close()
+
+    restarted = PageService(tmp_path, model_factory=None, allow_workspace_actions=True,
+                            auto_apply_edits=True)
+    try:
+        before = next(row for row in restarted.view("home")["messages"]
+                      if row["id"] == report["event_id"])
+        assert before["reportedArtifact"]["artifactId"] == artifact["id"]
+        assert restarted.artifacts.read(work_id, artifact["id"])["content"] == FILE_TEXT
+        assert restarted.artifacts.undo(work_id, artifact["id"])
+        after = next(row for row in restarted.view("home")["messages"]
+                     if row["id"] == report["event_id"])
+        assert after["reportedArtifact"]["undone"] is True
+        assert restarted.artifacts.read(work_id, artifact["id"])["state"] == "unavailable"
+        # A human imitation of report text is never a native file receipt.
+        forged = restarted.send("home", before["content"])
+        unrelated = next(row for row in restarted.view("home")["messages"]
+                         if row["id"] == forged["messageId"])
+        assert unrelated.get("reportedArtifact") is None
+    finally:
+        restarted.runtime.close()
