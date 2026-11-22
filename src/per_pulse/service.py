@@ -30,7 +30,7 @@ from pulse_system.product.files import WorkspaceFiles
 from pulse_system.core.pulse.context import ContextPulseConfig as PulseSettings
 
 from . import __version__
-from .execution import PageExecution
+from .execution import PageExecution, ExecutionError
 from .artifacts import PageArtifacts
 from .background_results import background_result_message
 from .replay import PageReplay, RETURN_PREFIX
@@ -865,7 +865,26 @@ class PageService:
             self._check_message(front.id, result.id)
         except PageError:
             return None
-        return {"pageId": front.id, "messageId": result.id}
+        origin = {"pageId": front.id, "messageId": result.id}
+        file_source = report.get("artifact_source")
+        if isinstance(file_source, dict):
+            try:
+                # The same Kernel action and Undo verification used by the
+                # original Work file reader. No model-authored path is trusted.
+                artifact, _ = self.artifacts._resolve_action(
+                    front.id, file_source["artifact_id"])
+            except (ExecutionError, KeyError, TypeError):
+                pass
+            else:
+                if (artifact["turnId"] == source.id
+                        and artifact["path"] == file_source.get("path")
+                        and artifact["sha256"] == file_source.get("sha256")):
+                    origin["reportedArtifact"] = {
+                        "pageId": front.id, "artifactId": artifact["id"],
+                        "path": artifact["path"], "sha256": artifact["sha256"],
+                        "undone": artifact["undone"],
+                    }
+        return origin
 
     def _messages(self, page_id: str, rows: list[dict], refs: list[dict]) -> list[dict]:
         messages = []
@@ -873,6 +892,7 @@ class PageService:
         for row in rows:
             origin = self._state["messageOrigins"].get(row["event_id"], {})
             activation = None
+            reported_artifact = None
             if row["metadata"].get("context_pulse") == "first_departure":
                 activation = "self_departure"
             if activation is None and row["kind"] in {"stimulus", "spontaneous"} and row["source"] == "self":
@@ -881,6 +901,7 @@ class PageService:
                 report_origin = self._native_report_origin(row)
                 if report_origin is not None:
                     origin = report_origin
+                    reported_artifact = origin.get("reportedArtifact")
                     activation = "work_report"
             if row["kind"] == "propagation" and row["metadata"].get("context_connection_id"):
                 # A propagation's reported source center is metadata, not
@@ -911,6 +932,7 @@ class PageService:
                 "sourcePageId": origin.get("pageId"),
                 "sourceMessageId": origin.get("messageId"),
                 "activation": activation,
+                **({"reportedArtifact": reported_artifact} if reported_artifact else {}),
                 "replay": self.replay.message(page_id, row, origin),
                 "pageSource": source_presentation(row["content"], origin),
                 **self.materials.message(page_id, row),
