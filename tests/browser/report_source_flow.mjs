@@ -83,18 +83,29 @@ try {
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill(title);
   await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
-    .fill('Write report-delivery.md in this Work and report the completed file to Home. [Authored fixture request]');
+    .fill('Write report-delivery.md in this Work; report it on a later turn. [Authored fixture request]');
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
   await page.getByRole('heading', { name: title, exact: true }).waitFor();
+  const workId = decodeURIComponent(new URL(page.url()).pathname.split('/').pop());
+  await wait(async () => {
+    const snapshot = await status();
+    return snapshot.fileActions.length === 1 && (await view(workId)).page.status === 'idle';
+  }, 'first Work turn finishes the actual file without a Home report');
+  const firstFileAction = (await status()).fileActions[0];
+  assert.equal((await status()).reports.length, 0);
+  const workComposer = page.getByRole('textbox', { name: 'Message ' + title, exact: true });
+  await workComposer.fill('Report the previously completed Work file to Home. [Authored fixture request]');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await wait(async () => (await status()).reports.some(row => row.origin && row.status === 'delivered'),
-    'genuine native report delivery');
+    'separate later Work turn delivers the original file to Home');
   const report = (await status()).reports[0];
   assert.ok(report.origin.source_turn_id && report.origin.source_action_id);
+  assert.notEqual(report.origin.source_turn_id, firstFileAction.turnId);
+  assert.equal(report.origin.artifact_source.artifact_id, firstFileAction.id);
   assert.equal(report.origin.artifact_source.path, 'report-delivery.md');
-  assert.ok(report.origin.artifact_source.artifact_id);
   const original = (await view(report.workId)).messages.find(row => row.id === report.sourceResultMessageId);
   assert.equal(original.content, resultText);
-  const workComposer = page.getByRole('textbox', { name: 'Message ' + title, exact: true });
+  checks.push('completed file from an earlier Work turn reaches Home after a separate later native report');
   const workDraft = 'Keep this unsent Work draft while following the Home source.';
   await workComposer.fill(workDraft);
   await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
