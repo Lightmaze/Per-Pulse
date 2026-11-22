@@ -238,3 +238,97 @@ def test_old_task_matched_experience_reaches_ordinary_preaction_work_after_resta
         assert old["id"] not in {ref["id"] for ref in packet["omitted_refs"]}
     finally:
         reopened.close()
+
+
+
+def test_chinese_work_b_recalls_old_shared_source_before_decision_after_restart(
+        tmp_path, monkeypatch):
+    """Ordinary unspaced Chinese Work requests can see older transferable lessons.
+
+    Synthetic HTTP models expose the actual pre-action prompt. Native World,
+    SQLite restart, subject privacy and experience withdrawal are real.
+    """
+    from types import SimpleNamespace
+
+    from pulse_harness.core import HarnessStore, TurnRunner, TurnStatus
+    from pulse_system.service.expert_computation import _task_terms
+    from test_posture_runtime import NoTools, model_fixture
+
+    prompt = "请制作来源清单，并将原始资料的链接写入最终成果。"
+    cues = _task_terms(SimpleNamespace(messages=[
+        {"role": "tool", "content": "PRIVATE_TOOL_SECRET"},
+        {"role": "user", "content": prompt},
+    ]))
+    assert "来源清单" in cues and "原始资料" in cues
+    assert "PRIVATE" not in str(cues)
+    mixed = _task_terms(SimpleNamespace(messages=[
+        {"role": "user", "content":
+         "请为最终报告生成来源清单，请保留原始链接。 Generate a provenance manifest."},
+    ]))
+    assert "来源清单" in mixed
+    assert "provenance" in mixed
+
+    path = tmp_path / "chinese-world.db"
+    storage = Storage(path)
+    memory = PostureMemory(storage, "world")
+    old = _experience(memory, "earlier-chinese-file-source")
+    memory.revise_experience(
+        old["id"], expected_revision=1,
+        changes={
+            "title": "来源清单需要原始资料与真实链接",
+            "lesson": "制作来源清单时保留原始资料链接与可核查的文件收据。",
+        },
+    )
+    for index in range(180):
+        _experience(memory, f"chinese-routine-{index:03d}")
+    without_task = memory.materials(
+        subject_id=SUBJECT, context_id=TARGET, prioritize_content=True,
+        max_records=128, compact_backfill=16)
+    assert old["id"] not in _ids(without_task)
+    storage.close()
+
+    storage = Storage(path)
+    memory = PostureMemory(storage, "world")
+    expert = ExpertRuntime(tmp_path / "chinese-expert.db", guard=lambda: None,
+                           posture_memory=memory, expert_active=False)
+    kernel = HarnessStore(tmp_path / "chinese-kernel.db")
+    scope = HarnessScope("world", SUBJECT, "session", 0, "owner",
+                         context_id=TARGET, turn_id="chinese-work-b")
+    requests = []
+    model = model_fixture(monkeypatch, requests)
+    runner = TurnRunner(kernel, model_adapter=model, tool_provider=NoTools(),
+                        turn_advisor=expert.advisor(kernel, model, scope))
+    try:
+        outcome = runner.run(scope, prompt=prompt)
+        assert outcome.status is TurnStatus.SUCCEEDED
+        preaction = next(json.dumps(item["messages"], ensure_ascii=False)
+                         for item in requests
+                         if "WORK_MATERIAL_JSON" in json.dumps(item["messages"]))
+        assert old["id"] in preaction
+        assert "制作来源清单时保留原始资料链接" in preaction
+        assert "PRIVATE_EPISODE" not in preaction
+        packet = expert.posture_materials(scope, task_terms=cues)
+        assert packet["offered_posture_revisions"][0] == {
+            "id": old["id"], "revision": 2}
+        assert memory.materials(
+            subject_id="other-subject", context_id=TARGET, max_records=128,
+            compact_backfill=16, task_terms=cues)["episodes"] == []
+    finally:
+        runner.close()
+        kernel.close()
+        expert.close()
+        storage.close()
+
+    reopened = Storage(path)
+    try:
+        memory = PostureMemory(reopened, "world")
+        memory.record_feedback(
+            old["id"], expected_revision=2, verdict="withdrawn",
+            evidence="This Chinese source rule has been retired.")
+        packet = memory.materials(
+            subject_id=SUBJECT, context_id=TARGET, prioritize_content=True,
+            max_records=128, compact_backfill=16, task_terms=cues)
+        assert old["id"] not in _ids(packet)
+        assert old["id"] not in {ref["id"] for ref in packet["omitted_refs"]}
+    finally:
+        reopened.close()
