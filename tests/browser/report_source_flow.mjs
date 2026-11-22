@@ -77,13 +77,15 @@ try {
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill(title);
   await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
-    .fill('Check a finding in this Work and report the selected note to Home. [Authored fixture request]');
+    .fill('Write report-delivery.md in this Work and report the completed file to Home. [Authored fixture request]');
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
   await page.getByRole('heading', { name: title, exact: true }).waitFor();
   await wait(async () => (await status()).reports.some(row => row.origin && row.status === 'delivered'),
     'genuine native report delivery');
   const report = (await status()).reports[0];
   assert.ok(report.origin.source_turn_id && report.origin.source_action_id);
+  assert.equal(report.origin.artifact_source.path, 'report-delivery.md');
+  assert.ok(report.origin.artifact_source.artifact_id);
   const original = (await view(report.workId)).messages.find(row => row.id === report.sourceResultMessageId);
   assert.equal(original.content, resultText);
   const workComposer = page.getByRole('textbox', { name: 'Message ' + title, exact: true });
@@ -122,6 +124,13 @@ try {
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   assert.equal(await homeArticle.getByRole('button', { name: 'Save example', exact: true }).count(), 0);
   assert.equal(projected.sourceMessageId, report.sourceResultMessageId);
+  assert.equal(projected.reportedArtifact.artifactId, report.origin.artifact_source.artifact_id);
+  assert.equal(projected.reportedArtifact.path, 'report-delivery.md');
+  assert.equal(projected.reportedArtifact.undone, false);
+  await homeArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await homeArticle.getByText('This is the completed Work file.', { exact: true }).waitFor();
+  await homeArticle.getByRole('button', { name: 'Close file preview' }).click();
+  checks.push('completed native Work file is directly readable in its attributed Home report without new model calls');
   assert.equal(projected.references.length, 0);
   const originalReportContent = projected.content;
   const homePosition = await page.locator('main').evaluate(node => node.scrollTop);
@@ -162,6 +171,12 @@ try {
   assert.equal(await homeComposer.inputValue(), homeDraft);
   assert.equal((await status()).requests, 0);
   assert.equal((await status()).reports[0].origin.source_action_id, report.origin.source_action_id);
+  assert.equal((await view('home')).messages.find(row => row.id === report.eventId).reportedArtifact.artifactId,
+    report.origin.artifact_source.artifact_id);
+  await homeArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await homeArticle.getByText('This is the completed Work file.', { exact: true }).waitFor();
+  await homeArticle.getByRole('button', { name: 'Close file preview' }).click();
+  checks.push('offline restart retains the original file source and exact bytes without a provider');
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('offline process restart retains exact native provenance and source navigation on a phone viewport');
 
@@ -181,6 +196,17 @@ try {
   assert.equal(await page.locator(`#message-${selected.id} .message-label`).innerText(), 'You');
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('verified automatic reports are Workspace messages; human prefix text and selected Home returns stay You');
+  // Undo the real producing action after restart. The old report is still
+  // historical, but its file can no longer be opened as a current deliverable.
+  await sourceLink.click();
+  await page.locator('.page-artifacts').getByRole('button', { name: 'Undo', exact: true }).click();
+  await wait(async () => (await view('home')).messages.find(row => row.id === report.eventId)
+    ?.reportedArtifact?.undone === true, 'reported original file is undone');
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await homeComposer.waitFor();
+  await homeArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await homeArticle.getByText('Undone', { exact: true }).waitFor();
+  checks.push('Undo after restart invalidates the delivered file preview without erasing report provenance');
   assert.deepEqual(errors, []);
   assert.deepEqual(externalRequests, []);
   console.log(JSON.stringify({ checks, errors, externalRequests, restartNetworkErrors,
