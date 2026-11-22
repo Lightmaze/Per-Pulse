@@ -88,7 +88,7 @@ class PostureJournal:
 
     def list(self, *, subjects, context_id, include_inactive, history=True,
              limit=None, prioritize_content=False, with_remaining=False,
-             compact_backfill=0, task_terms=()):
+             compact_backfill=0, task_terms=(), summary_only=False):
         """Read newest full records, optionally reserving older compact candidates.
 
         A raw-record byte size is a cheap *fit hint*, not a relevance or
@@ -98,6 +98,8 @@ class PostureJournal:
             raise ValueError("experience limit must be positive")
         if with_remaining and limit is None:
             raise ValueError("remaining references require a bounded selection")
+        if summary_only and not with_remaining:
+            raise ValueError("omission summary requires bounded material references")
         if type(compact_backfill) is not int or not 0 <= compact_backfill <= 16:
             raise ValueError("compact backfill must be 0..16")
         if compact_backfill and (limit is None or not with_remaining):
@@ -156,7 +158,7 @@ class PostureJournal:
                     omitted = [{"id": row["id"], "revision": row["revision"]}
                                for row, _ in older if row["id"] not in reserved_ids] if with_remaining else []
                     pairs = pairs[:limit] + rescued + reserved
-                    return (pairs, omitted) if with_remaining else pairs
+                    return (pairs, [], len(omitted)) if summary_only else ((pairs, omitted) if with_remaining else pairs)
                 return pairs
 
             # Read the visible current records and their child rows in batches.
@@ -184,7 +186,7 @@ class PostureJournal:
                     query, [*args, limit] if limit is not None else args)
             }
             if not entries:
-                return ([], []) if with_remaining else []
+                return ([], [], 0) if summary_only else (([], []) if with_remaining else [])
             # Both the bounded candidates and the remaining ID/revision
             # references come from one guarded World read. A concurrent
             # revision cannot splice two different journal versions together.
@@ -220,16 +222,36 @@ class PostureJournal:
                 # Check small raw sizes there without decoding full old bodies;
                 # keep at most 16 older candidates under the same SQLite
                 # snapshot. These remain after newer candidates in time order.
-                size_column = ", length(CAST(e.record AS BLOB))" if compact_backfill else ""
-                remaining = list(conn.execute(
-                    "SELECT e.experience_id, json_extract(e.record, '$.revision') "
-                    + size_column + " FROM posture_experiences AS e" + where
-                    + f" ORDER BY {order} DESC, e.experience_id DESC LIMIT -1 OFFSET ?",
-                    [*args, limit]))
-                reserved_ids = [
-                    identity for identity, revision, raw_bytes in remaining
-                    if raw_bytes <= 4096 and identity not in entries
-                ][:compact_backfill] if compact_backfill else []
+                if summary_only:
+                    # The ordinary Work needs a bounded candidate set and a
+                    # count, not an ever-growing list of old identity/revision
+                    # pairs in every model receipt. Current offered revisions
+                    # are revalidated by exact ID at admission.
+                    reserved_ids = []
+                    if compact_backfill:
+                        marks = ",".join("?" for _ in entries)
+                        reserved_ids = [
+                            identity for (identity,) in conn.execute(
+                                "SELECT e.experience_id FROM posture_experiences AS e"
+                                + where + f" AND e.experience_id NOT IN ({marks})"
+                                + " AND length(CAST(e.record AS BLOB)) <= 4096"
+                                + f" ORDER BY {order} DESC, e.experience_id DESC LIMIT ?",
+                                [*args, *entries, compact_backfill],
+                            )
+                        ]
+                else:
+                    # Explicit callers may still request the full legacy
+                    # reference ledger; keep that public behavior unchanged.
+                    size_column = ", length(CAST(e.record AS BLOB))" if compact_backfill else ""
+                    remaining = list(conn.execute(
+                        "SELECT e.experience_id, json_extract(e.record, '$.revision') "
+                        + size_column + " FROM posture_experiences AS e" + where
+                        + f" ORDER BY {order} DESC, e.experience_id DESC LIMIT -1 OFFSET ?",
+                        [*args, limit]))
+                    reserved_ids = [
+                        identity for identity, revision, raw_bytes in remaining
+                        if raw_bytes <= 4096 and identity not in entries
+                    ][:compact_backfill] if compact_backfill else []
                 if reserved_ids:
                     marks = ",".join("?" for _ in reserved_ids)
                     for identity, raw, content_time in conn.execute(
@@ -238,11 +260,19 @@ class PostureJournal:
                         + f" AND e.experience_id IN ({marks})",
                         [*args, *reserved_ids]):
                         entries[identity] = [json.loads(raw), content_time]
-                reserved = set(reserved_ids)
-                omitted = [
-                    {"id": row[0], "revision": row[1]}
-                    for row in remaining if row[0] not in reserved and row[0] not in entries
-                ]
+                if summary_only:
+                    # COUNT can use the native scoped index. Avoid decoding
+                    # or allocating a reference object for every old lesson.
+                    total = conn.execute(
+                        "SELECT COUNT(*) FROM posture_experiences AS e" + where,
+                        args).fetchone()[0]
+                    omitted_count = total - len(entries)
+                else:
+                    reserved = set(reserved_ids)
+                    omitted = [
+                        {"id": row[0], "revision": row[1]}
+                        for row in remaining if row[0] not in reserved and row[0] not in entries
+                    ]
             for record, _ in entries.values():
                 record["feedback"] = []
                 record["history"] = []
@@ -273,7 +303,7 @@ class PostureJournal:
                     previous["feedback"] = deepcopy(entries[identity][0]["feedback"][:count])
                     entries[identity][0]["history"].append(previous)
             pairs = [(record, content_time) for record, content_time in entries.values()]
-            return (pairs, omitted) if with_remaining else pairs
+            return (pairs, [], omitted_count) if summary_only else ((pairs, omitted) if with_remaining else pairs)
         self.guard()
         return self.storage._posture_journal_read(read)
 
