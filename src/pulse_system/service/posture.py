@@ -482,8 +482,8 @@ class PostureMemory:
                 if term in experience_search_text(pair[0]).casefold()
             ), reverse=True)
         episodes = [self._material_record(record, context_id) for record, _ in rows]
-        # The single guarded read preserves the complete eligible reference
-        # sequence even when the model packet loads only current candidates.
+        # Explicit reads preserve each eligible reference; ordinary Work can
+        # instead carry a bounded selection and the exact omitted count.
         return {"schema": SCHEMA, "episodes": episodes, "eligibility": "subject_scope_and_active_only",
                 "semantic_applicability": "not_yet_assessed", "source_context_id": context_id,
                 **({"omitted_refs": omitted_refs} if max_records is not None else {}),

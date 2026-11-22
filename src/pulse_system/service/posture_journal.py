@@ -218,10 +218,8 @@ class PostureJournal:
                         [*args, *entries, *task_terms, *task_terms],
                     ):
                         entries[identity] = [json.loads(raw), content_time]
-                # The previous ID/revision sweep already visits each older row.
-                # Check small raw sizes there without decoding full old bodies;
-                # keep at most 16 older candidates under the same SQLite
-                # snapshot. These remain after newer candidates in time order.
+                # Keep at most 16 compact older candidates under the same
+                # guarded World read, after newer and task-rescued candidates.
                 if summary_only:
                     # The ordinary Work needs a bounded candidate set and a
                     # count, not an ever-growing list of old identity/revision

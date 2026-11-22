@@ -460,5 +460,31 @@ def test_ordinary_work_bounds_omission_metadata_without_losing_old_source(tmp_pa
         assert not any("LIMIT -1 OFFSET" in statement for statement in statements)
         assert any("COUNT(*) FROM posture_experiences" in statement
                    for statement in statements)
+
+        # Ordinary Work's native runtime must use the summary, not merely
+        # expose an optional lower-level query that nobody calls.
+        from pulse_harness.plugins.expert_work import make_work_prompt
+        expert = ExpertRuntime(tmp_path / "bounded-expert.db", guard=lambda: None,
+                               posture_memory=memory, expert_active=False)
+        try:
+            scope = HarnessScope("world", SUBJECT, "session", 0, "owner",
+                                 context_id=TARGET, turn_id="next-work")
+            supplied = expert.posture_materials(scope, task_terms=keywords)
+            assert old["id"] in [row["id"] for row in supplied["episodes"]]
+            assert supplied["eligible_count"] == 231
+            assert supplied["omitted_posture_revision_count"] == packed[
+                "omitted_posture_revision_count"]
+            assert len(supplied["omitted_posture_revisions"]) <= 128 + 16 + 2
+            prompt = make_work_prompt(
+                {}, {"episodes": [], "previous_computations": []}, model_round=0,
+                posture_packet=supplied, byte_budget=64 * 1024)
+            visible = json.loads(prompt.split("WORK_MATERIAL_JSON\\n", 1)[1])[
+                "posture_experiences"]
+            assert visible["omitted_posture_revision_count"] == supplied[
+                "omitted_posture_revision_count"]
+            assert visible["omitted_posture_revisions_digest"] == "not_enumerated"
+            assert "omitted_posture_revisions" not in visible
+        finally:
+            expert.close()
     finally:
         storage.close()
