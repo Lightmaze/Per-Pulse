@@ -45,6 +45,7 @@ export type Message = {
   status: string;
   sourcePageId: string | null;
   sourceMessageId: string | null;
+  reportedArtifact?: { pageId: string; artifactId: string; path: string; sha256: string; undone: boolean };
   references: PageReference[];
   materials?: Material[];
   materialSuffixLength?: number;
