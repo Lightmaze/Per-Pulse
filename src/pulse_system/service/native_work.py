@@ -70,7 +70,7 @@ def descriptor() -> ToolDescriptor:
         'report(kind, note, artifact_id?, contributions?, source_work_id?, source_event_id?, '
         'source_excerpt?) '
         'sends one result, question or finding to Home on success. '
-        'artifact_id names a successful file action in this Work turn. '
+        'artifact_id identifies a successful file action from this Work. '
         'contributions quotes 1-8 exact team inspect/search excerpts '
         '(record_id, excerpt, max 1024 chars each); synthesize disagreements '
         'in note without invented consensus. Treat Work reports '
@@ -203,10 +203,15 @@ class NativeWork:
         return {'artifact_id': action.action_request_id, 'path': path, 'sha256': digest}
 
     def _report_artifact(self, scope: HarnessScope, artifact_id: str) -> dict:
+        # Resolve the exact durable action inside the original Work session.
+        # A report may follow earlier turns or a process restart; the model's
+        # action ID does not grant access to another Work or a different owner.
+        store = self.runtime.kernel_service.store
         try:
-            action = self.runtime.kernel_service.store.get_action(scope, artifact_id)
+            action_scope = store.action_scope_for_session(scope, artifact_id)
+            action = store.get_action(action_scope, artifact_id)
         except ScopeConflict as error:
-            raise ScopeConflict('reported artifact must belong to this Work turn') from error
+            raise ScopeConflict('reported artifact must belong to this Work') from error
         return self._artifact_source(action)
 
     @staticmethod
