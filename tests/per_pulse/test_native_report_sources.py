@@ -425,8 +425,9 @@ def test_work_delivers_verified_file_through_home_and_undo_after_restart(tmp_pat
         restarted.runtime.close()
 
 
+@pytest.mark.parametrize("cross_generation", [False, True])
 def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_claim_it(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, cross_generation):
     """Finish a file, restart, and report it later without minting a new file action.
 
     Model tool calls are authored synthetic HTTP choices; real Kernel actions,
@@ -445,6 +446,14 @@ def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_clai
         assert (tmp_path / "workspace" / "prior-delivery.md").read_text() == FILE_TEXT
         assert not [r for r in pages.runtime.storage.native_work_requests(limit=32)
                     if r["arguments"]["op"] == "report"]
+        if cross_generation:
+            runtime = pages.runtime
+            prepared = runtime._mgr.prepare_succession(
+                runtime.continuity_engram_id, parent_event_id=first.result_event_id,
+                runtime_fence=runtime._current_runtime_fence())
+            successor = runtime._mgr.commit_succession(
+                prepared, runtime_fence=runtime._current_runtime_fence()).new_id
+            assert runtime.world.get_task_front(work_id).focal_engram_id == successor
     finally:
         pages.runtime.close()
 
