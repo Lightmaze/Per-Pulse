@@ -16,6 +16,7 @@ from typing import Any, Mapping
 from pulse_harness.core.contracts import ToolCall, ToolDescriptor, TurnStatus, ActionStatus
 from pulse_harness.core.errors import ScopeConflict
 from pulse_harness.core.scope import HarnessScope
+from pulse_system.core.causality import CausalTransitionError
 from pulse_system.agent.harness.stimulus_firewall import StimulusEnvelope, EvidenceClass
 from pulse_system.core.types import (ActivityOrigin, ActivityCenterStatus, EngramStatus,
     HarnessTurnState, TaskFrontStatus, TaskRelationshipStatus)
@@ -208,11 +209,22 @@ class NativeWork:
         # action ID does not grant access to another Work or a different owner.
         store = self.runtime.kernel_service.store
         try:
-            action_scope = store.action_scope_for_session(scope, artifact_id)
-            action = store.get_action(action_scope, artifact_id)
-        except ScopeConflict as error:
-            raise ScopeConflict('reported artifact must belong to this Work') from error
-        return self._artifact_source(action)
+            lineage = self.runtime.causal_ledger.committed_history_lineage(
+                scope.world_id, scope.engram_id)
+        except CausalTransitionError as error:
+            raise ScopeConflict('reported artifact history is unavailable') from error
+        # Only committed generations of the same subject and the same Work
+        # context can supply an older action; a delegated/foreign session cannot.
+        for subject in lineage:
+            session = (scope if subject == scope.engram_id
+                       else self.runtime.harness.scope_for(subject, scope.context_id))
+            try:
+                action_scope = store.action_scope_for_session(session, artifact_id)
+                action = store.get_action(action_scope, artifact_id)
+            except ScopeConflict:
+                continue
+            return self._artifact_source(action)
+        raise ScopeConflict('reported artifact must belong to this Work')
 
     @staticmethod
     def report_content(record) -> str:
