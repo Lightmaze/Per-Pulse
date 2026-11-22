@@ -35,17 +35,46 @@ _TASK_COMMON = frozenset({
     "making", "using", "should", "would", "could", "before", "after",
     "another", "current", "their", "there", "these", "those", "about",
 })
+_HAN_SPAN = re.compile(r"[\u3400-\u9fff]{2,}")
+_HAN_FUNCTION_WORD = re.compile(r"[的了把将请给与和并从为]")
 
 
 def _task_terms(request) -> tuple[str, ...]:
-    """Literal recall cues from the latest user task, not from tool/file text."""
+    """Bounded literal cues from the latest user task, never tool/file text.
+
+    Chinese requests are often unspaced: a whole sentence is too specific
+    to find in a saved lesson. Preserve short phrases and sample the opening,
+    middle and end of longer Han spans. This offers retrieval candidates,
+    not a language classifier or a judgment that any lesson applies.
+    """
     latest = next((row.get("content", "") for row in reversed(request.messages)
                    if row.get("role") == "user"), "")
     if not isinstance(latest, str):
         return ()
-    words = re.findall(r"[A-Za-z][A-Za-z0-9]{5,31}", latest[:6000].casefold())
-    unique = {word for word in words if word not in _TASK_COMMON}
-    return tuple(sorted(unique, key=lambda word: (-len(word), word))[:6])
+    text = latest[:6000].casefold()
+    words = re.findall(r"[A-Za-z][A-Za-z0-9]{5,31}", text)
+    english = sorted({word for word in words if word not in _TASK_COMMON},
+                     key=lambda word: (-len(word), word))
+    han = []
+    for span in _HAN_SPAN.findall(text):
+        for part in _HAN_FUNCTION_WORD.split(span):
+            if len(part) < 2:
+                continue
+            if len(part) <= 8:
+                han.append(part)
+            if len(part) > 4:
+                han.extend((part[:4], part[-4:]))
+            if len(part) > 12:
+                middle = len(part) // 2
+                han.append(part[middle - 2:middle + 2])
+    if not han:
+        return tuple(english[:6])
+    # Keep late task objects visible; reserve half the packet for each script
+    # in mixed-language requests. Repeated phrases only consume one slot.
+    chinese = list(dict.fromkeys(reversed(han)))
+    first = chinese[:3]
+    latin = english[:6 - len(first)]
+    return tuple((first + latin + chinese[3:])[:6])
 
 
 def _fork_scope(source, identity):
