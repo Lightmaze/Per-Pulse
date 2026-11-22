@@ -3,6 +3,7 @@ import { api, ApiError } from './api';
 import { isSupportedUpload, uploadLimit } from './uploadLimits';
 import { messageBody } from './messageBody';
 import { retryMessageInput } from './retryMessage';
+import { reserveHandoff, confirmHandoff } from './handoffReceipt';
 import { parseTickCommand } from './tickCommand';
 import { useLanguage } from './i18n';
 import { useWorkspace } from './useWorkspace';
@@ -502,9 +503,15 @@ export default function App() {
       && currentRouteSerial.current === sourceSerial && currentModal.current === sourceModal;
     setBusy(true); setModalError('');
     try {
+      const receipt = workspaceId
+        ? await reserveHandoff(workspaceId, 'return', {
+          sourceId, messageId: sourceModal.message.id, content, includeMaterials,
+        }, sourceModal.requestId)
+        : { requestId: sourceModal.requestId, fingerprint: null };
       const response = await api.bringHome(
-        sourceId, content, sourceModal.message.id, includeMaterials, sourceModal.requestId,
+        sourceId, content, sourceModal.message.id, includeMaterials, receipt.requestId,
       );
+      if (workspaceId) confirmHandoff(workspaceId, receipt);
       applyView(response.view);
       if (stillHere()) navigate('home', undefined, response.messageId);
       setToast(t('app.broughtHome'));
@@ -574,7 +581,13 @@ export default function App() {
       && currentRouteSerial.current === sourceSerial && currentModal.current === sourceModal;
     setBusy(true); setModalError('');
     try {
-      const response = await api.transferWork(sourceId, targetId, messageId, excerpt, instruction, sourceModal.requestId);
+      const receipt = workspaceId
+        ? await reserveHandoff(workspaceId, 'transfer', {
+          sourceId, targetId, messageId, excerpt, instruction,
+        }, sourceModal.requestId)
+        : { requestId: sourceModal.requestId, fingerprint: null };
+      const response = await api.transferWork(sourceId, targetId, messageId, excerpt, instruction, receipt.requestId);
+      if (workspaceId) confirmHandoff(workspaceId, receipt);
       applyView(response.view);
       // Back returns to the exact originating message only when this is
       // still the active transfer. Both Works retain their unsent drafts.

@@ -520,7 +520,20 @@ try {
   });
   await retryReturnDialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
   await retryReturnDialog.locator('.form-error').waitFor();
-  await retryReturnDialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  const pendingReturnState = await page.evaluate(() => Object.keys(localStorage)
+    .filter(key => key.endsWith('.pending-handoffs'))
+    .map(key => localStorage.getItem(key) ?? '').join(''));
+  assert.ok(pendingReturnState && !pendingReturnState.includes(retryReturnText),
+    'Only hashed request identity, never the selected result, is kept for browser recovery');
+  // Close the dialog and reload after the original native input was admitted.
+  // Reopening produces a fresh UI UUID, but the same request must recover
+  // the earlier native Home result rather than sending it twice.
+  await page.reload();
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  await selectedSource.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  const resumedReturnDialog = page.getByRole('dialog', { name: 'Bring this back to Home.', exact: true });
+  await resumedReturnDialog.locator('#return-content').fill(retryReturnText);
+  await resumedReturnDialog.getByRole('button', { name: 'Bring to Home', exact: true }).click();
   await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
   await page.unroute(retryReturnUrl);
   assert.equal(returnAttempts.length, 2);
@@ -536,7 +549,7 @@ try {
   await page.goto(base + '/page/' + originalId);
   await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), 'Original draft stays here.');
-  checks.push('lost Home return HTTP receipt retries one native input and retains source and both drafts');
+  checks.push('lost Home return HTTP receipt survives browser reload and re-opened dialog with one native input, original source and both drafts');
 
   // Ordinary composer Send (not a specialized return/transfer dialog) must
   // survive native admission followed by a lost HTTP response and browser
@@ -639,7 +652,19 @@ try {
   });
   await transferDialog.getByRole('button', { name: 'Send to page', exact: true }).click();
   await transferDialog.locator('.form-error').waitFor();
-  await transferDialog.getByRole('button', { name: 'Send to page', exact: true }).click();
+  const pendingTransferState = await page.evaluate(() => Object.keys(localStorage)
+    .filter(key => key.endsWith('.pending-handoffs'))
+    .map(key => localStorage.getItem(key) ?? '').join(''));
+  assert.ok(pendingTransferState && !pendingTransferState.includes('Use this precise finding to improve'),
+    'A pending cross-Work receipt must not persist the private selected text or instruction');
+  await page.reload();
+  await page.getByRole('heading', { name: 'Original product brief', exact: true }).waitFor();
+  await selectedSource.getByRole('button', { name: 'Use in another page', exact: true }).click();
+  const resumedTransferDialog = page.getByRole('dialog', { name: 'Carry this result into another page', exact: true });
+  await resumedTransferDialog.locator('#transfer-work-target').selectOption(beforeId);
+  await resumedTransferDialog.locator('#transfer-work-excerpt').fill(transferAttempts[0].excerpt);
+  await resumedTransferDialog.locator('#transfer-work-instruction').fill(transferAttempts[0].instruction);
+  await resumedTransferDialog.getByRole('button', { name: 'Send to page', exact: true }).click();
   await page.getByRole('heading', { name: 'Uninformed delivery', exact: true }).waitFor();
   await page.unroute(retryTransferUrl);
   assert.equal(transferAttempts.length, 2);
@@ -680,7 +705,7 @@ try {
     'A lost HTTP response and retry must not enqueue the same receiving instruction twice');
   assert.ok(sourceResults.some(m => m.sourcePageId === originalId && m.sourceMessageId),
     'The native receiving message preserves the original Work result source');
-  checks.push('retrying a lost transfer response keeps one sourced Work input and both drafts intact');
+  checks.push('lost Work transfer response survives browser reload and re-opened dialog with one native input and both drafts');
   // A later Work can be created directly from an edited result without first
   // building an empty destination, with one original native source and turn.
   await selectedSource.getByRole('button', { name: 'Use in another page', exact: true }).click();
