@@ -16,10 +16,14 @@ export function ReportedArtifact({ source, homeMessageId, navigate }: {
   const [loading, setLoading] = useState(false);
   const [read, setRead] = useState<ArtifactRead | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [downloadState, setDownloadState] = useState<'ready' | 'loading' | 'started'>('ready');
+  const downloadRequest = useRef<AbortController | null>(null);
   const request = useRef(0);
-  useEffect(() => () => { request.current++; }, []);
+  useEffect(() => () => { request.current++; downloadRequest.current?.abort(); }, []);
 
   const open = async () => {
+    downloadRequest.current?.abort(); downloadRequest.current = null;
+    setDownloadState('ready');
     if (opened) { request.current++; setOpened(false); setRead(null); setLoading(false); return; }
     const id = ++request.current;
     setOpened(true); setLoading(true); setRead(null); setError(null);
@@ -37,6 +41,33 @@ export function ReportedArtifact({ source, homeMessageId, navigate }: {
     }
   };
 
+  const download = async () => {
+    // The preview belongs to the exact producing Work. Download rechecks that
+    // same original action and digest in the native file endpoint.
+    if (downloadRequest.current || read?.state !== 'current' || !read.downloadable) return;
+    const controller = new AbortController();
+    downloadRequest.current = controller;
+    setDownloadState('loading'); setError(null);
+    try {
+      const file = await api.downloadArtifact(source.pageId, read.artifact, controller.signal);
+      if (controller.signal.aborted) return;
+      const url = URL.createObjectURL(file.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = file.filename;
+      document.body.append(anchor); anchor.click(); anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setDownloadState('started');
+    } catch (problem) {
+      if (!controller.signal.aborted) {
+        // The file might have changed since the preview was opened. Do not
+        // leave the previous bytes presented as an available deliverable.
+        setRead(null); setError(problem); setDownloadState('ready');
+      }
+    } finally {
+      if (downloadRequest.current === controller) downloadRequest.current = null;
+    }
+  };
+
   return <section className="artifact-preview reported-artifact" aria-label={t('artifacts.reported')}>
     <p><strong>{t('artifacts.reported')}</strong> · <code>{source.path}</code> · {t('artifacts.version', { digest: source.sha256.slice(0, 8) })}</p>
     <div className="artifact-actions">
@@ -51,6 +82,11 @@ export function ReportedArtifact({ source, homeMessageId, navigate }: {
       {read?.state === 'current' ? <>
         <TextDocument path={source.path} content={read.content ?? ''} truncated={read.truncated} />
         {read.truncated ? <p>{t('artifacts.limited')}</p> : null}
+        {read.downloadable ? <div className="artifact-actions">
+          <button type="button" className="secondary-button" disabled={downloadState === 'loading'}
+            onClick={() => void download()}>{t(downloadState === 'loading' ? 'artifacts.downloading' : 'artifacts.download')}</button>
+          {downloadState === 'started' ? <span role="status">{t('artifacts.downloadStarted')}</span> : null}
+        </div> : null}
       </> : read?.state === 'changed' ? <p role="status">{t('artifacts.changed')}</p>
         : read ? <p role="status">{read.reason === 'artifact_undone' ? t('artifacts.undone') : t('artifacts.missing')}</p> : null}
     </> : null}
