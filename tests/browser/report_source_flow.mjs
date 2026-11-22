@@ -30,7 +30,12 @@ const start = (offline = false) => {
     join(root, 'tests/browser/report_source_server.py'), '--data-dir', directory, '--port', String(port),
     ...(offline ? ['--offline'] : []),
   ], { cwd: root, env: { ...process.env,
-    PYTHONPATH: [join(root, 'src'), process.env.PYTHONPATH].filter(Boolean).join(delimiter) },
+    // Installed-wheel checks must load production modules from the wheel,
+    // not silently import checkout/src before site-packages.
+    PYTHONPATH: [
+      ...(process.env.PER_PULSE_INSTALLED_WHEEL === '1' ? [] : [join(root, 'src')]),
+      process.env.PYTHONPATH,
+    ].filter(Boolean).join(delimiter) },
     stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', data => { serverLog += data; });
   child.stderr.on('data', data => { serverLog += data; });
