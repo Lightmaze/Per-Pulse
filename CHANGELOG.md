@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.1.0a35
+
+- Recover native Work creation after lost HTTP receipts, including a browser-tab close, without re-admitting the original first task (#340, #341).
+- Preserve ordinary sourced Send and new Work-to-Work Send provenance across lost acknowledgements and restart (#342, #345).
+- Keep an existing Work's actual task purpose visible when long conversation history is compacted (#343).
+- Revalidate a selected Work experience when the source changes while expert computation is in flight (#344).
+- Restore a source-bearing file Return Home from its accepted native receipt after the network acknowledgement is lost, without replaying a changed file (#346).
+- Keep /tick completion status consistent with the final visible assistant reply (#347).
+- Resume selected-result transfers and Return Home after browser reload using the same native request identity, without a duplicate effect (#348).
+- Offer bounded older task-matching lessons to the ordinary later Work pre-action decision in English and Chinese, keeping World scope and withdrawal semantics (#349, #350).
+
 ## 0.1.0a34
 
 - Restore the verified selected message and its actual Work task when earlier native context has been omitted, without copying the source Work's private history (#330).
