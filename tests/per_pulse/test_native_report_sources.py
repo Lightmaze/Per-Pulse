@@ -466,12 +466,26 @@ def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_clai
         assert not [r for r in pages.runtime.storage.native_work_requests(limit=32)
                     if r["arguments"]["op"] == "report"]
 
+        # The actual original file must remain resolvable in the Work's
+        # committed Kernel history before a successor attempts to report it.
+        assert pages.artifacts._resolve_action(work_id, artifact["id"])[0]["sha256"] == artifact["sha256"]
         sent = pages.send(work_id, PRIOR_REPORT_TASK)
         second = activate(pages, work_id, sent["messageId"])
         assert second.turn_id != first.turn_id
         pages.runtime._native_work.drain()
-        report, = [r for r in pages.runtime.storage.native_work_requests(limit=32)
+        reports = [r for r in pages.runtime.storage.native_work_requests(limit=32)
                    if r["arguments"]["op"] == "report"]
+        if not reports:
+            scope = pages.execution._scope(work_id)
+            histories = pages.execution._history_scopes(scope)
+            actions = [
+                (action.tool_name, action.status.value, action.error_code)
+                for previous in histories
+                for action in pages.runtime.kernel_service.store.actions_for_session(previous)
+            ]
+            pytest.fail(f"No native report admitted after succession: {actions!r}; "
+                        f"last fixture requests: {fixture.requests[-3:]!r}")
+        report, = reports
         assert report["status"] == "delivered"
         assert report["source_turn_id"] == second.turn_id
         assert report["artifact_source"] == {
