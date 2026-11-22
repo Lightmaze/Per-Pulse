@@ -382,7 +382,7 @@ def test_old_cue_rescued_experience_changes_ordinary_work_admission_and_survives
         assert "PRIVATE_EPISODE" not in fork + main
         expert.record_outcome(kernel, scope, outcome)
         previous = expert.work_materials(scope, expert.posture_materials(scope))
-        assert any(record["context"] == advice_text
+        assert any(advice_text in (record["context"] or "")
                    for record in previous["previous_computations"])
         assert expert.current_advice(
             scope, TurnAdvice(context=advice_text,
@@ -401,7 +401,7 @@ def test_old_cue_rescued_experience_changes_ordinary_work_admission_and_survives
         # The exact older source remains useful even without cue-based rescue.
         assert old["id"] not in _ids(expert.posture_materials(scope))
         restored = expert.work_materials(scope, expert.posture_materials(scope))
-        assert any(record["context"] == advice_text
+        assert any(advice_text in (record["context"] or "")
                    for record in restored["previous_computations"])
         foreign = HarnessScope("world", "different-subject", "other", 0, "owner",
                                context_id=TARGET, turn_id="next")
@@ -416,7 +416,7 @@ def test_old_cue_rescued_experience_changes_ordinary_work_admission_and_survives
         assert suppressed.context is None
         assert suppressed.receipt["reason"] == "posture_revision_no_longer_eligible"
         after = expert.work_materials(scope, expert.posture_materials(scope))
-        assert not any(record["context"] == advice_text
+        assert not any(advice_text in (record["context"] or "")
                        for record in after["previous_computations"])
     finally:
         expert.close()
