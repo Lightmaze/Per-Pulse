@@ -179,12 +179,12 @@ try {
   checks.push('ordinary report-shaped text has no source badge; source reads create no references or model requests');
 
   // Follow-on Work is a different context with its own real native actions.
-  // The fixture selects a source by inspecting the original Work's receipts,
+  // The fixture finds the original Work by title, then inspects its receipts,
   // version-reads it, writes a derived file, and attributes that input.
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Derived source Work');
   await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
-    .fill('Derive a file from the original Work. [Authored fixture request]');
+    .fill('Derive a file from Native report source Work. [Authored fixture request]');
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
   await page.getByRole('heading', { name: 'Derived source Work', exact: true }).waitFor();
   const derivedWorkId = decodeURIComponent(new URL(page.url()).pathname.split('/').pop());
@@ -230,7 +230,7 @@ try {
   await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await homeComposer.waitFor();
   assert.equal(await homeComposer.inputValue(), homeDraft);
-  checks.push('second real Work inspects, version-reads, derives and reports a source; Home opens both file bytes and returns to the same position');
+  checks.push('second real Work finds, inspects, version-reads, derives and reports a source; Home opens both file bytes and returns to the same position');
 
   if (screenshots) await page.screenshot({ path: join(screenshots, 'report-source-home-desktop.png') });
 
