@@ -221,7 +221,7 @@ try {
   await outputCard.getByRole('button', { name: 'Download file' }).click();
   const derivedBytes = await readFile(await (await derivedDownloadEvent).path());
   assert.equal(derivedBytes.toString('utf8'),
-    '# Derived deliverable\\n\\nBased on the verified source Work file.\\n');
+    '# Derived deliverable\n\nBased on the verified source Work file.\n');
   assert.equal(createHash('sha256').update(derivedBytes).digest('hex'),
     derivedProjection.reportedArtifact.sha256);
   await outputCard.getByRole('button', { name: 'Close file preview' }).click();
