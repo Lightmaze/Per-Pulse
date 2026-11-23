@@ -537,4 +537,4 @@ def test_report_by_path_rejects_ambiguous_identity_and_unreadable_paths():
         validate_work({**base, "artifact_path": "deliverables/final.md",
                        "artifact_id": "opaque-old-id"})
     with pytest.raises(ValueError, match="invalid artifact_path"):
-        validate_work({**base, "artifact_path": "deliverables/final.md\\nforged"})
+        validate_work({**base, "artifact_path": "deliverables/final.md\nforged"})
