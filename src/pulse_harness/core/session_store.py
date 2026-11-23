@@ -207,6 +207,10 @@ CREATE TABLE IF NOT EXISTS actions (
 
 CREATE INDEX IF NOT EXISTS actions_turn ON actions(session_id, turn_id);
 CREATE INDEX IF NOT EXISTS actions_status ON actions(status);
+-- The Work file-results view and work.report(path) page successful actions
+-- by (updated_at, id). Keep that keyset scan bounded as a World grows.
+CREATE INDEX IF NOT EXISTS actions_session_status_recent
+    ON actions(session_id, status, updated_at DESC, action_request_id DESC);
 
 CREATE TABLE IF NOT EXISTS action_terminals (
     action_request_id TEXT PRIMARY KEY REFERENCES actions(action_request_id),

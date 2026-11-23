@@ -174,6 +174,59 @@ def test_successful_file_result_has_native_source_and_survives_restart(tmp_path,
 
 
 
+
+def test_existing_world_reindexes_action_history_and_still_delivers_old_file(tmp_path, monkeypatch):
+    """An a37 World opens its Work results without sorting its lifetime of actions.
+
+    Remove only the new index after a real file effect, simulating a World
+    created before this schema optimization. Startup must rebuild the index;
+    the original Kernel action and file bytes remain the authority.
+    """
+    import sqlite3
+
+    content = "Original source-backed report.\n"
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": content},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        execution = client.app.state.pages.execution
+        work = _page(client)
+        artifact_id = _approve(execution, work)
+        db_path = client.app.state.pages.runtime.kernel_service.store.path
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("DROP INDEX IF EXISTS actions_session_status_recent")
+
+    request_count = len(requests)
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        store = client.app.state.pages.runtime.kernel_service.store
+        scope = client.app.state.pages.execution._scope(work)
+        with store._lock:
+            columns = [row[2] for row in store._db.execute(
+                "PRAGMA index_info(actions_session_status_recent)"
+            )]
+            plan = [row[3] for row in store._db.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM actions "
+                "WHERE session_id = ? AND status = ? AND "
+                "(updated_at < ? OR (updated_at = ? AND action_request_id < ?)) "
+                "ORDER BY updated_at DESC, action_request_id DESC LIMIT ?",
+                (scope.session_id, "succeeded", "z", "z", "z", 257),
+            )]
+        assert columns == ["session_id", "status", "updated_at", "action_request_id"]
+        assert any("actions_session_status_recent" in detail for detail in plan), plan
+        assert not any("TEMP B-TREE FOR ORDER BY" in detail for detail in plan), plan
+
+        listed = client.get(f"/api/pages/{work}/artifacts")
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()["artifacts"]] == [artifact_id]
+        downloaded = client.get(f"/api/pages/{work}/artifacts/{artifact_id}/download")
+        assert downloaded.status_code == 200
+        assert downloaded.content == content.encode("utf-8")
+        assert downloaded.headers["etag"] == f'"{_sha(content)}"'
+        assert len(requests) == request_count
+
+
 def test_older_file_results_are_reachable_by_durable_page_scoped_cursor(tmp_path, monkeypatch):
     """A long-lived Work can reach earlier file effects without replaying a model."""
     import per_pulse.artifacts as module
