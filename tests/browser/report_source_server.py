@@ -42,13 +42,12 @@ def factory(scope):
                     {"path": "report-delivery.md", "expected_digest": None, "content": FILE_TEXT})}}]}
             reason = "tool_calls"
         elif scope.context_id.startswith("work:") and task == REPORT_TASK and not results:
-            with lock:
-                prior = file_actions.get(scope.context_id)
-            assert prior is not None
+            # The model may know the finished file path but no longer retain
+            # the original opaque Kernel action ID from its earlier turn.
             delta = {"tool_calls": [{"index": 0, "id": "source-browser-work-report",
                 "type": "function", "function": {"name": "work", "arguments": json.dumps(
                     {"op": "report", "kind": "finding", "note": NOTE,
-                     "artifact_id": prior["id"]})}}]}
+                     "artifact_path": "report-delivery.md"})}}]}
             reason = "tool_calls"
         else:
             assert all(row["status"] == "succeeded" for row in results), results
@@ -94,7 +93,9 @@ if __name__ == "__main__":
             turn = runtime.causal_ledger.get_turn_for_world(record["source_turn_id"], runtime.world_id)
             reports.append({"eventId": event.id, "workId": record["work_id"],
                             "sourceResultMessageId": turn.result_event_id,
-                            "origin": origin, "status": record["status"]})
+                            "origin": origin, "status": record["status"],
+                            "reportedByPath": record["arguments"].get("artifact_path"),
+                            "suppliedArtifactId": "artifact_id" in record["arguments"]})
         with lock:
             return {"reports": reports, "requests": len(requests),
                     "fileActions": list(file_actions.values())}
