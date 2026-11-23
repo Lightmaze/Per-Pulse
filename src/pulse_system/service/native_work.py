@@ -34,6 +34,7 @@ SCHEMA = {'type': 'object', 'properties': {
     'source_excerpt': {'type': 'string', 'maxLength': 1024},
     'before_seq': {'type': 'integer', 'minimum': 1},
     'query': {'type': 'string', 'maxLength': 160},
+    'include_files': {'type': 'boolean'},
     'title': {'type': 'string', 'maxLength': 160},
     'instruction': {'type': 'string', 'maxLength': 8192},
     'note': {'type': 'string', 'maxLength': 4096},
