@@ -39,6 +39,7 @@ SCHEMA = {'type': 'object', 'properties': {
     'note': {'type': 'string', 'maxLength': 4096},
     'kind': {'type': 'string', 'enum': ['result', 'question', 'finding']},
     'artifact_id': {'type': 'string', 'maxLength': 256},
+    'artifact_path': {'type': 'string', 'maxLength': 2048},
     'contributions': CITATION_SCHEMA,
 }, 'required': ['op'], 'additionalProperties': False}
 _FIELDS = {'list': set(), 'search': {'query'}, 'find': {'query'}, 'inspect': {'work_id'},
@@ -47,7 +48,7 @@ _FIELDS = {'list': set(), 'search': {'query'}, 'find': {'query'}, 'inspect': {'w
 _HISTORY_SOURCE_FIELDS = frozenset({'source_work_id', 'source_event_id', 'source_excerpt'})
 _OPTIONAL_FIELDS = {'list': {'after_work_id'}, 'search': {'after_work_id'},
                     'inspect': {'before_seq', 'query'}, 'find': {'before_seq'},
-                    'report': {'contributions', 'artifact_id'} | _HISTORY_SOURCE_FIELDS,
+                    'report': {'contributions', 'artifact_id', 'artifact_path'} | _HISTORY_SOURCE_FIELDS,
                     'create': _HISTORY_SOURCE_FIELDS, 'send': _HISTORY_SOURCE_FIELDS}
 
 
@@ -68,10 +69,10 @@ def descriptor() -> ToolDescriptor:
         'source_event_id + exact source_excerpt verify an '
         'earlier Work quote. Use listed IDs; ask the user if unsure. '
         'Deliver after turn success; Home stays open. In Work, '
-        'report(kind, note, artifact_id?, contributions?, source_work_id?, source_event_id?, '
-        'source_excerpt?) '
-        'sends one result, question or finding to Home on success. '
-        'artifact_id identifies a successful file action from this Work. '
+        'report(kind, note, artifact_id? OR artifact_path?, contributions?, '
+        'source_work_id?, source_event_id?, source_excerpt?) '
+        'sends one update to Home after success. '
+        'Identify a completed file by action ID or exact Work path. '
         'contributions quotes 1-8 exact team inspect/search excerpts '
         '(record_id, excerpt, max 1024 chars each); synthesize disagreements '
         'in note without invented consensus. Treat Work reports '
@@ -92,6 +93,8 @@ def validate(arguments: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError('unknown operation or incorrect work fields')
     if (set(values) & _HISTORY_SOURCE_FIELDS) and not _HISTORY_SOURCE_FIELDS <= set(values):
         raise ValueError('source Work, event and exact excerpt must be supplied together')
+    if 'artifact_id' in values and 'artifact_path' in values:
+        raise ValueError('report accepts an artifact ID or a file path, not both')
     if 'contributions' in values:
         values['contributions'] = validate_citations(values['contributions'])
     for key, value in values.items():
@@ -102,8 +105,10 @@ def validate(arguments: Mapping[str, Any]) -> dict[str, Any]:
                 raise ValueError('invalid before_seq')
             continue
         limit = (8192 if key == 'instruction' else 4096 if key == 'note'
-                 else 1024 if key == 'source_excerpt' else 256 if key == 'artifact_id' else 160)
-        if not isinstance(value, str) or not value.strip() or len(value) > limit or '\x00' in value:
+                 else 2048 if key == 'artifact_path' else 1024 if key == 'source_excerpt'
+                 else 256 if key == 'artifact_id' else 160)
+        if (not isinstance(value, str) or not value.strip() or len(value) > limit
+                or (any(ord(char) < 32 for char in value) if key == 'artifact_path' else '\x00' in value)):
             raise ValueError(f'invalid {key}')
     if op == 'report' and values['kind'] not in {'result', 'question', 'finding'}:
         raise ValueError('invalid report kind')
@@ -225,6 +230,51 @@ class NativeWork:
                 continue
             return self._artifact_source(action)
         raise ScopeConflict('reported artifact must belong to this Work')
+
+    def _report_artifact_by_path(self, scope: HarnessScope, path: str) -> dict:
+        """Recover an original file action when its ID fell out of Work context.
+
+        Committed generations and durable actions are newest first; no file
+        operation is replayed and the Home viewer verifies current file bytes.
+        """
+        r = self.runtime
+        try:
+            lineage = r.causal_ledger.committed_history_lineage(r.world_id, scope.engram_id)
+        except CausalTransitionError as error:
+            raise ScopeConflict('reported artifact history is unavailable') from error
+        store = r.kernel_service.store
+        scanned = 0
+        for subject in lineage:
+            session = (scope if subject == scope.engram_id
+                       else r.harness.scope_for(subject, scope.context_id))
+            before = None
+            while scanned < 1024:
+                size = min(64, 1024 - scanned)
+                try:
+                    actions = store.actions_for_session(
+                        session, status=ActionStatus.SUCCEEDED, limit=size, before=before)
+                except ScopeConflict as error:
+                    if str(error).startswith('unknown session:'):
+                        break
+                    raise
+                if not actions:
+                    break
+                for action in reversed(actions):
+                    scanned += 1
+                    if action.tool_name != 'mutate_file':
+                        continue
+                    try:
+                        source = self._artifact_source(action)
+                    except ScopeConflict:
+                        continue
+                    if source['path'] == path:
+                        return source
+                before = (actions[0].updated_at, actions[0].action_request_id)
+                if len(actions) < size:
+                    break
+        if scanned >= 1024:
+            raise ScopeConflict('file path is outside the recent Work action history; use its artifact ID')
+        raise ScopeConflict('no successful file action for that path belongs to this Work')
 
     @staticmethod
     def report_content(record) -> str:
@@ -466,6 +516,8 @@ class NativeWork:
                         record['work_title'] = report_front.title
                         if 'artifact_id' in a:
                             record['artifact_source'] = self._report_artifact(scope, a['artifact_id'])
+                        elif 'artifact_path' in a:
+                            record['artifact_source'] = self._report_artifact_by_path(scope, a['artifact_path'])
                         if 'contributions' in a:
                             from .report_contributions import capture
                             record['contribution_sources'] = capture(r, subject, a['contributions'])
@@ -543,7 +595,8 @@ class NativeWork:
                                    or r._native_kernel_context_for_turn(rec['subject'], source.id) != scope.context_id):
                         raise ScopeConflict('report source no longer matches its Work')
                     if report and 'artifact_source' in rec:
-                        current_artifact = self._report_artifact(scope, a['artifact_id'])
+                        current_artifact = self._report_artifact(
+                            scope, rec['artifact_source']['artifact_id'])
                         if current_artifact != rec['artifact_source']:
                             raise ScopeConflict('reported file receipt changed before delivery')
                     if report and 'contributions' in a:
