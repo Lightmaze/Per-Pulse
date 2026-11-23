@@ -8,6 +8,7 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 from __future__ import annotations
 
 from per_pulse.service import PageService, PulseSettings
+from pulse_harness.core import session_store
 from pulse_system.service.native_work import validate
 from test_internal_work_organization import WorkFixture, run_event
 
@@ -73,7 +74,13 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
             "Read the original and deliver the derived file to Home.",
         )
         target_id = created["page"]["id"]
-        _activate(second, created["initialMessageId"])
+        # Real model/tool rounds may finish within one timestamp millisecond.
+        # The Kernel event sequence, not an arbitrary ID or a relaxed clock
+        # comparison, must preserve the read-before-write relationship.
+        with monkeypatch.context() as clock:
+            same_millisecond = session_store.utc_now()
+            clock.setattr(session_store, "utc_now", lambda: same_millisecond)
+            _activate(second, created["initialMessageId"])
         assert [result["status"] for result in fixture.outcomes] == [
             "succeeded", "succeeded", "succeeded", "succeeded", "succeeded",
         ], fixture.outcomes
