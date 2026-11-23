@@ -20,7 +20,10 @@ from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapte
 NOTE = "A selected source finding. [Explicit synthetic HTTP fixture]"
 FILE_TEXT = "# Report deliverable\n\nThis is the completed Work file.\n"
 RESULT = "The original detailed source result. [Explicit synthetic HTTP fixture]"
+WRITE_TASK = "Write report-delivery.md in this Work; report it on a later turn. [Authored fixture request]"
+REPORT_TASK = "Report the previously completed Work file to Home. [Authored fixture request]"
 requests = []
+file_actions = {}
 lock = threading.Lock()
 
 
@@ -31,21 +34,31 @@ def factory(scope):
             requests.append({"context": scope.context_id, "body": body})
         messages = body["messages"]
         current = max(i for i, row in enumerate(messages) if row["role"] == "user")
+        task = messages[current]["content"]
         results = [json.loads(row["content"]) for row in messages[current + 1:] if row["role"] == "tool"]
-        if scope.context_id.startswith("work:") and len(results) < 2:
-            if not results:
-                name = "mutate_file"
-                arguments = {"path": "report-delivery.md", "expected_digest": None, "content": FILE_TEXT}
-            else:
-                assert results[0]["status"] == "succeeded", results
-                name = "work"
-                arguments = {"op": "report", "kind": "finding", "note": NOTE,
-                             "artifact_id": results[0]["output"]["action_request_id"]}
-            delta = {"tool_calls": [{"index": 0, "id": "source-browser-" + name,
-                "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}]}
+        if scope.context_id.startswith("work:") and task == WRITE_TASK and not results:
+            delta = {"tool_calls": [{"index": 0, "id": "source-browser-mutate_file",
+                "type": "function", "function": {"name": "mutate_file", "arguments": json.dumps(
+                    {"path": "report-delivery.md", "expected_digest": None, "content": FILE_TEXT})}}]}
+            reason = "tool_calls"
+        elif scope.context_id.startswith("work:") and task == REPORT_TASK and not results:
+            with lock:
+                prior = file_actions.get(scope.context_id)
+            assert prior is not None
+            delta = {"tool_calls": [{"index": 0, "id": "source-browser-work-report",
+                "type": "function", "function": {"name": "work", "arguments": json.dumps(
+                    {"op": "report", "kind": "finding", "note": NOTE,
+                     "artifact_id": prior["id"]})}}]}
             reason = "tool_calls"
         else:
             assert all(row["status"] == "succeeded" for row in results), results
+            if scope.context_id.startswith("work:") and task == WRITE_TASK:
+                assert len(results) == 1
+                with lock:
+                    file_actions[scope.context_id] = {
+                        "id": results[0]["output"]["action_request_id"], "turnId": scope.turn_id}
+            elif scope.context_id.startswith("work:") and task == REPORT_TASK:
+                assert len(results) == 1
             delta = {"content": RESULT if scope.context_id.startswith("work:")
                      else "The Home conversation continues. [Explicit synthetic HTTP fixture]"}
             reason = "stop"
@@ -83,7 +96,8 @@ if __name__ == "__main__":
                             "sourceResultMessageId": turn.result_event_id,
                             "origin": origin, "status": record["status"]})
         with lock:
-            return {"reports": reports, "requests": len(requests)}
+            return {"reports": reports, "requests": len(requests),
+                    "fileActions": list(file_actions.values())}
 
     route = app.router.routes.pop()
     index = next(i for i, value in enumerate(app.router.routes)
