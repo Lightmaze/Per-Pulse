@@ -184,7 +184,7 @@ def test_existing_world_reindexes_action_history_and_still_delivers_old_file(tmp
     """
     import sqlite3
 
-    content = "Original source-backed report.\\n"
+    content = "Original source-backed report.\n"
     requests = []
     factory = _factory(monkeypatch, {
         "WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": content},
