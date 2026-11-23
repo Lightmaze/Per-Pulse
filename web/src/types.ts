@@ -36,6 +36,8 @@ export type PageReference = {
 
 export type PageSource = { role: 'user' | 'assistant' | 'system'; excerpt: string; instruction: string; edited: boolean };
 
+export type OriginalFileReference = { pageId: string; artifactId: string; path: string; sha256: string; undone: boolean };
+
 export type Message = {
   pageSource?: PageSource | null;
   id: string;
@@ -45,7 +47,8 @@ export type Message = {
   status: string;
   sourcePageId: string | null;
   sourceMessageId: string | null;
-  reportedArtifact?: { pageId: string; artifactId: string; path: string; sha256: string; undone: boolean };
+  reportedArtifact?: OriginalFileReference;
+  inputArtifact?: OriginalFileReference;
   references: PageReference[];
   materials?: Material[];
   materialSuffixLength?: number;
