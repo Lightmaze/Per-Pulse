@@ -177,6 +177,61 @@ try {
   assert.equal((await view('home')).messages.find(row => row.id === report.eventId).content, originalReportContent);
   checks.push('native admitted report opens the exact original Work result and returns to the same Home position with both drafts');
   checks.push('ordinary report-shaped text has no source badge; source reads create no references or model requests');
+
+  // Follow-on Work is a different context with its own real native actions.
+  // The fixture finds the original Work by title, then inspects its receipts,
+  // version-reads it, writes a derived file, and attributes that input.
+  await page.getByRole('button', { name: 'Create a page', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Derived source Work');
+  await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
+    .fill('Derive a file from Native report source Work. [Authored fixture request]');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Derived source Work', exact: true }).waitFor();
+  const derivedWorkId = decodeURIComponent(new URL(page.url()).pathname.split('/').pop());
+  await wait(async () => {
+    const snapshot = await status();
+    return snapshot.reports.some(row => row.workId === derivedWorkId && row.status === 'delivered')
+      && (await view(derivedWorkId)).page.status === 'idle';
+  }, 'derived Work reads source, writes new file, and reports verified input', 30000);
+  const derivedReport = (await status()).reports.find(row => row.workId === derivedWorkId);
+  assert.equal(derivedReport.origin.input_file_source.work_id, workId);
+  assert.equal(derivedReport.origin.input_file_source.artifact_id, firstFileAction.id);
+  assert.equal(derivedReport.origin.input_file_source.sha256,
+    createHash('sha256').update(originalBytes).digest('hex'));
+  await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
+  await homeComposer.waitFor();
+  const derivedArticle = page.locator(`#message-${derivedReport.eventId}`);
+  const inputCard = derivedArticle.locator('[aria-label="Verified source file read for this result"]');
+  const outputCard = derivedArticle.locator('[aria-label="File delivered from Work"]');
+  await inputCard.waitFor();
+  assert.equal(await outputCard.count(), 1);
+  const derivedProjection = (await view('home')).messages.find(row => row.id === derivedReport.eventId);
+  assert.equal(derivedProjection.inputArtifact.pageId, workId);
+  assert.equal(derivedProjection.inputArtifact.artifactId, firstFileAction.id);
+  assert.equal(derivedProjection.reportedArtifact.path, 'derived-delivery.md');
+  await inputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await inputCard.getByText('This is the completed Work file.', { exact: true }).waitFor();
+  const sourceDownloadEvent = page.waitForEvent('download');
+  await inputCard.getByRole('button', { name: 'Download file' }).click();
+  assert.deepEqual(await readFile(await (await sourceDownloadEvent).path()), originalBytes);
+  await inputCard.getByRole('button', { name: 'Close file preview' }).click();
+  await outputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await outputCard.getByText('Based on the verified source Work file.', { exact: true }).waitFor();
+  const derivedDownloadEvent = page.waitForEvent('download');
+  await outputCard.getByRole('button', { name: 'Download file' }).click();
+  const derivedBytes = await readFile(await (await derivedDownloadEvent).path());
+  assert.equal(derivedBytes.toString('utf8'),
+    '# Derived deliverable\n\nBased on the verified source Work file.\n');
+  assert.equal(createHash('sha256').update(derivedBytes).digest('hex'),
+    derivedProjection.reportedArtifact.sha256);
+  await outputCard.getByRole('button', { name: 'Close file preview' }).click();
+  await inputCard.getByRole('link', { name: 'Open original source Work' }).click();
+  await page.getByRole('heading', { name: title, exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await homeComposer.waitFor();
+  assert.equal(await homeComposer.inputValue(), homeDraft);
+  checks.push('second real Work finds, inspects, version-reads, derives and reports a source; Home opens both file bytes and returns to the same position');
+
   if (screenshots) await page.screenshot({ path: join(screenshots, 'report-source-home-desktop.png') });
 
   restarting = true;
@@ -196,7 +251,8 @@ try {
   await homeComposer.waitFor();
   assert.equal(await homeComposer.inputValue(), homeDraft);
   assert.equal((await status()).requests, 0);
-  assert.equal((await status()).reports[0].origin.source_action_id, report.origin.source_action_id);
+  assert.equal((await status()).reports.find(row => row.workId === report.workId)
+    .origin.source_action_id, report.origin.source_action_id);
   assert.equal((await view('home')).messages.find(row => row.id === report.eventId).reportedArtifact.artifactId,
     report.origin.artifact_source.artifact_id);
   await homeArticle.getByRole('button', { name: 'Open verified file' }).click();
@@ -207,6 +263,16 @@ try {
   assert.deepEqual(await readFile(await restartedDownload.path()), originalBytes);
   await homeArticle.getByRole('button', { name: 'Close file preview' }).click();
   checks.push('offline SQLite restart preserves direct Home download of the same original file');
+  const restartedDerived = (await view('home')).messages.find(row => row.id === derivedReport.eventId);
+  assert.equal(restartedDerived.inputArtifact.artifactId, firstFileAction.id);
+  assert.equal(restartedDerived.reportedArtifact.path, 'derived-delivery.md');
+  await inputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await inputCard.getByText('This is the completed Work file.', { exact: true }).waitFor();
+  await inputCard.getByRole('button', { name: 'Close file preview' }).click();
+  await outputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await outputCard.getByText('Based on the verified source Work file.', { exact: true }).waitFor();
+  await outputCard.getByRole('button', { name: 'Close file preview' }).click();
+  checks.push('offline SQLite restart preserves distinct verified input and output previews');
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('offline process restart retains exact native provenance and source navigation on a phone viewport');
 
@@ -237,6 +303,15 @@ try {
   await homeArticle.getByRole('button', { name: 'Open verified file' }).click();
   await homeArticle.getByText('Undone', { exact: true }).waitFor();
   assert.equal(await homeArticle.getByRole('button', { name: 'Download file', exact: true }).count(), 0);
+  const finalDerived = (await view('home')).messages.find(row => row.id === derivedReport.eventId);
+  assert.equal(finalDerived.inputArtifact.undone, true);
+  assert.equal(finalDerived.reportedArtifact.undone, false);
+  await inputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await inputCard.getByText('Undone', { exact: true }).waitFor();
+  assert.equal(await inputCard.getByRole('button', { name: 'Download file' }).count(), 0);
+  await outputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await outputCard.getByText('Based on the verified source Work file.', { exact: true }).waitFor();
+  checks.push('undoing the source invalidates input preview without deleting the derived output');
   checks.push('Undo after restart invalidates Home preview and download without erasing report provenance');
   assert.deepEqual(errors, []);
   assert.deepEqual(externalRequests, []);

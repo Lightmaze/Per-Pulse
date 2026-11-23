@@ -887,6 +887,23 @@ class PageService:
                         "path": artifact["path"], "sha256": artifact["sha256"],
                         "undone": artifact["undone"],
                     }
+        input_source = report.get("input_file_source")
+        if isinstance(input_source, dict):
+            input_front = self.runtime.world.get_task_front(input_source.get("work_id", ""))
+            if input_front is not None and input_front.focal_engram_id in lineage:
+                try:
+                    original, _ = self.artifacts._resolve_action(
+                        input_front.id, input_source["artifact_id"])
+                except (ExecutionError, KeyError, TypeError):
+                    pass
+                else:
+                    if (original["path"] == input_source.get("path")
+                            and original["sha256"] == input_source.get("sha256")):
+                        origin["inputArtifact"] = {
+                            "pageId": input_front.id, "artifactId": original["id"],
+                            "path": original["path"], "sha256": original["sha256"],
+                            "undone": original["undone"],
+                        }
         return origin
 
     def _messages(self, page_id: str, rows: list[dict], refs: list[dict]) -> list[dict]:
@@ -896,6 +913,7 @@ class PageService:
             origin = self._state["messageOrigins"].get(row["event_id"], {})
             activation = None
             reported_artifact = None
+            input_artifact = None
             if row["metadata"].get("context_pulse") == "first_departure":
                 activation = "self_departure"
             if activation is None and row["kind"] in {"stimulus", "spontaneous"} and row["source"] == "self":
@@ -905,6 +923,7 @@ class PageService:
                 if report_origin is not None:
                     origin = report_origin
                     reported_artifact = origin.get("reportedArtifact")
+                    input_artifact = origin.get("inputArtifact")
                     activation = "work_report"
             if row["kind"] == "propagation" and row["metadata"].get("context_connection_id"):
                 # A propagation's reported source center is metadata, not
@@ -936,6 +955,7 @@ class PageService:
                 "sourceMessageId": origin.get("messageId"),
                 "activation": activation,
                 **({"reportedArtifact": reported_artifact} if reported_artifact else {}),
+                **({"inputArtifact": input_artifact} if input_artifact else {}),
                 "replay": self.replay.message(page_id, row, origin),
                 "pageSource": source_presentation(row["content"], origin),
                 **self.materials.message(page_id, row),
