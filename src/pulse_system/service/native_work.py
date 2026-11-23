@@ -313,26 +313,51 @@ class NativeWork:
             break
         if source is None:
             raise ScopeConflict('input file must belong to the named owned Work')
-        # A verified source read must finish before the delivered file action starts.
-        # Compare durable action timestamps rather than opaque action IDs.
-        output_started_at = None
+        # A source must have finished being read before the reported output
+        # action was requested. An action's updated_at changes again when its
+        # result is delivered, so it does not represent read completion.
+        output_action = None
         if output_artifact_id is not None:
             for subject in lineage:
                 session = (scope if subject == scope.engram_id
                            else r.harness.scope_for(subject, scope.context_id))
                 try:
                     action_scope = store.action_scope_for_session(session, output_artifact_id)
-                    output_action = store.get_action(action_scope, output_artifact_id)
+                    candidate = store.get_action(action_scope, output_artifact_id)
                 except ScopeConflict:
                     continue
-                self._artifact_source(output_action)
-                output_started_at = output_action.created_at
+                self._artifact_source(candidate)
+                output_action = candidate
                 break
-            if output_started_at is None:
+            if output_action is None:
                 raise ScopeConflict('reported file action is unavailable for source ordering')
-        # A successful action in this reporting Work must have observed the
-        # exact original digest. Bound the history scan and invite a fresh read
-        # if the observation has fallen too far behind.
+
+        def read_precedes_output(read) -> bool:
+            if output_action is None:
+                return True
+            if not read.terminal_at:
+                return False
+            if read.terminal_at < output_action.created_at:
+                return True
+            if read.terminal_at > output_action.created_at:
+                return False
+            # Kernel timestamps have millisecond precision. In a fast sequence,
+            # a completed read and the next model-selected file action can have
+            # the same clock value. Use the original ordered Kernel events,
+            # never the opaque IDs or a permissive <= comparison.
+            if read.scope.session_id != output_action.scope.session_id:
+                return False
+            page = store.replay(scope, after_seq=0, limit=store.max_events_per_session)
+            read_seq = next((event.seq for event in page.events
+                             if event.action_request_id == read.action_request_id
+                             and event.event_type == 'action.terminal'), None)
+            output_seq = next((event.seq for event in page.events
+                               if event.action_request_id == output_action.action_request_id
+                               and event.event_type == 'action.requested'), None)
+            return read_seq is not None and output_seq is not None and read_seq < output_seq
+
+        # Only an actual successful version-pinned read in this Work is
+        # attributable. A report cannot turn an unread pathname into lineage.
         reads = store.actions_for_session(scope, status=ActionStatus.SUCCEEDED, limit=256)
         for read in reversed(reads):
             result = read.result if isinstance(read.result, Mapping) else {}
@@ -343,7 +368,7 @@ class NativeWork:
                     and isinstance(output, Mapping)
                     and output.get('path') == source['path']
                     and output.get('digest') == source['sha256']
-                    and (output_started_at is None or read.updated_at < output_started_at)):
+                    and read_precedes_output(read)):
                 return {**source, 'work_id': work_id,
                         'read_action_id': read.action_request_id}
         raise ScopeConflict('read the original file with its expected digest before attributing it')
