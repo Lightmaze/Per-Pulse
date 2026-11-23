@@ -8,8 +8,8 @@ import { TextDocument } from './TextDocument';
 type ReportedArtifactSource = NonNullable<Message['reportedArtifact']>;
 
 /** Read an actual Work file only through its original scoped Kernel receipt. */
-export function ReportedArtifact({ source, homeMessageId, navigate }: {
-  source: ReportedArtifactSource; homeMessageId: string; navigate: Navigate;
+export function ReportedArtifact({ source, homeMessageId, navigate, origin = 'result' }: {
+  source: ReportedArtifactSource; homeMessageId: string; navigate: Navigate; origin?: 'result' | 'input';
 }) {
   const { t, errorText } = useLanguage();
   const [opened, setOpened] = useState(false);
@@ -68,13 +68,14 @@ export function ReportedArtifact({ source, homeMessageId, navigate }: {
     }
   };
 
-  return <section className="artifact-preview reported-artifact" aria-label={t('artifacts.reported')}>
-    <p><strong>{t('artifacts.reported')}</strong> · <code>{source.path}</code> · {t('artifacts.version', { digest: source.sha256.slice(0, 8) })}</p>
+  const title = origin === 'input' ? 'artifacts.inputUsed' : 'artifacts.reported';
+  return <section className="artifact-preview reported-artifact" aria-label={t(title)}>
+    <p><strong>{t(title)}</strong> · <code>{source.path}</code> · {t('artifacts.version', { digest: source.sha256.slice(0, 8) })}</p>
     <div className="artifact-actions">
       <button type="button" className="secondary-button" aria-expanded={opened} onClick={() => void open()}>
         {t(opened ? 'artifacts.closeReported' : 'artifacts.openReported')}
       </button>
-      <SessionLink pageId={source.pageId} label={t('artifacts.sourceWork')} origin={{ pageId: 'home', messageId: homeMessageId }} navigate={navigate} />
+      <SessionLink pageId={source.pageId} label={t(origin === 'input' ? 'artifacts.inputWork' : 'artifacts.sourceWork')} origin={{ pageId: 'home', messageId: homeMessageId }} navigate={navigate} />
     </div>
     {opened ? <>
       {loading ? <p role="status">{t('artifacts.reading')}</p> : null}
