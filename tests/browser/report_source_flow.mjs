@@ -101,11 +101,13 @@ try {
   const report = (await status()).reports[0];
   assert.ok(report.origin.source_turn_id && report.origin.source_action_id);
   assert.notEqual(report.origin.source_turn_id, firstFileAction.turnId);
+  assert.equal(report.reportedByPath, 'report-delivery.md');
+  assert.equal(report.suppliedArtifactId, false);
   assert.equal(report.origin.artifact_source.artifact_id, firstFileAction.id);
   assert.equal(report.origin.artifact_source.path, 'report-delivery.md');
   const original = (await view(report.workId)).messages.find(row => row.id === report.sourceResultMessageId);
   assert.equal(original.content, resultText);
-  checks.push('completed file from an earlier Work turn reaches Home after a separate later native report');
+  checks.push('later Work reports its completed file by path without an old action ID; Home resolves the original native action');
   const workDraft = 'Keep this unsent Work draft while following the Home source.';
   await workComposer.fill(workDraft);
   await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
