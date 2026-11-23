@@ -15,12 +15,15 @@ from per_pulse.service import PageService
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 from pulse_system.service.home_conversation import home_conversation
 from pulse_system.service.runtime import ServiceError
+from pulse_system.service.native_work import validate as validate_work
 
 NOTE = "The selected finding from this Work. [Explicit synthetic fixture]"
 FILE_TASK = "Write an attributed file and report its verified result to Home."
 PRIOR_WRITE_TASK = "Write the completed file now; report it during a later Work turn."
 PRIOR_REPORT_TASK = "Report the file written during my earlier Work turn."
+PRIOR_REPORT_PATH_TASK = "Report the prior-delivery.md file by its path, without using an old action ID."
 FOREIGN_REPORT_TASK = "Try reporting a file from another Work."
+FOREIGN_REPORT_PATH_TASK = "Try reporting another Work's prior-delivery.md by path."
 FILE_TEXT = "# Delivery\n\nDerived from the earlier source Work.\n"
 RESULT = "The original detailed Work result. [Explicit synthetic fixture]"
 
@@ -42,7 +45,8 @@ class ReportFixture:
             # user message that starts this Work turn. Match the exact last
             # authored task instead of treating the carried context as a new task.
             latest_task = task.rsplit("\n\n", 1)[-1]
-            if latest_task in {PRIOR_WRITE_TASK, PRIOR_REPORT_TASK, FOREIGN_REPORT_TASK}:
+            if latest_task in {PRIOR_WRITE_TASK, PRIOR_REPORT_TASK, PRIOR_REPORT_PATH_TASK,
+                               FOREIGN_REPORT_TASK, FOREIGN_REPORT_PATH_TASK}:
                 task = latest_task
             results = [json.loads(row["content"]) for row in messages[current + 1:]
                        if row["role"] == "tool"]
@@ -69,12 +73,17 @@ class ReportFixture:
                         {"path": "prior-delivery.md", "expected_digest": None, "content": FILE_TEXT})}}]}
                 reason = "tool_calls"
             elif scope.context_id.startswith("work:") and task in {
-                    PRIOR_REPORT_TASK, FOREIGN_REPORT_TASK} and not results:
-                assert self.prior_artifact_id is not None
+                    PRIOR_REPORT_TASK, PRIOR_REPORT_PATH_TASK,
+                    FOREIGN_REPORT_TASK, FOREIGN_REPORT_PATH_TASK} and not results:
+                by_path = task in {PRIOR_REPORT_PATH_TASK, FOREIGN_REPORT_PATH_TASK}
+                args = {"op": "report", "kind": "result", "note": "The earlier file is finished."}
+                if by_path:
+                    args["artifact_path"] = "prior-delivery.md"
+                else:
+                    assert self.prior_artifact_id is not None
+                    args["artifact_id"] = self.prior_artifact_id
                 delta = {"tool_calls": [{"index": 0, "id": "synthetic-prior-report",
-                    "type": "function", "function": {"name": "work", "arguments": json.dumps(
-                        {"op": "report", "kind": "result", "note": "The earlier file is finished.",
-                         "artifact_id": self.prior_artifact_id})}}]}
+                    "type": "function", "function": {"name": "work", "arguments": json.dumps(args)}}]}
                 reason = "tool_calls"
             elif scope.context_id.startswith("work:") and task == "Select a finding for Home." and not results:
                 delta = {"tool_calls": [{"index": 0, "id": "synthetic-report-call", "type": "function",
@@ -87,9 +96,9 @@ class ReportFixture:
                 elif task == PRIOR_WRITE_TASK:
                     assert len(results) == 1 and results[0]["status"] == "succeeded", results
                     self.prior_artifact_id = results[0]["output"]["action_request_id"]
-                elif task == PRIOR_REPORT_TASK:
+                elif task in {PRIOR_REPORT_TASK, PRIOR_REPORT_PATH_TASK}:
                     assert len(results) == 1 and results[0]["status"] == "succeeded", results
-                elif task == FOREIGN_REPORT_TASK:
+                elif task in {FOREIGN_REPORT_TASK, FOREIGN_REPORT_PATH_TASK}:
                     assert len(results) == 1 and results[0]["status"] == "failed", results
                 else:
                     assert all(row["status"] == "succeeded" for row in results), results
@@ -432,8 +441,9 @@ def test_work_delivers_verified_file_through_home_and_undo_after_restart(tmp_pat
 
 
 @pytest.mark.parametrize("cross_generation", [False, True])
+@pytest.mark.parametrize("report_by_path", [False, True])
 def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_claim_it(
-        tmp_path, monkeypatch, cross_generation):
+        tmp_path, monkeypatch, cross_generation, report_by_path):
     """Finish a file, restart, and report it later without minting a new file action.
 
     Model tool calls are authored synthetic HTTP choices; real Kernel actions,
@@ -467,7 +477,8 @@ def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_clai
                         allow_workspace_actions=True, auto_apply_edits=True)
     try:
         # The same known action ID must not let another Work report the file.
-        outsider = pages.create_page("Another Work", FOREIGN_REPORT_TASK)
+        outsider = pages.create_page("Another Work",
+                                    FOREIGN_REPORT_PATH_TASK if report_by_path else FOREIGN_REPORT_TASK)
         activate(pages, outsider["page"]["id"], outsider["initialMessageId"])
         assert not [r for r in pages.runtime.storage.native_work_requests(limit=32)
                     if r["arguments"]["op"] == "report"]
@@ -475,7 +486,7 @@ def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_clai
         # The actual original file must remain resolvable in the Work's
         # committed Kernel history before a successor attempts to report it.
         assert pages.artifacts._resolve_action(work_id, artifact["id"])[0]["sha256"] == artifact["sha256"]
-        sent = pages.send(work_id, PRIOR_REPORT_TASK)
+        sent = pages.send(work_id, PRIOR_REPORT_PATH_TASK if report_by_path else PRIOR_REPORT_TASK)
         second = activate(pages, work_id, sent["messageId"])
         assert second.turn_id != first.turn_id
         pages.runtime._native_work.drain()
@@ -493,6 +504,11 @@ def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_clai
                         f"last fixture requests: {fixture.requests[-3:]!r}")
         report, = reports
         assert report["status"] == "delivered"
+        if report_by_path:
+            assert report["arguments"]["artifact_path"] == "prior-delivery.md"
+            assert "artifact_id" not in report["arguments"]
+        else:
+            assert report["arguments"]["artifact_id"] == artifact["id"]
         assert report["source_turn_id"] == second.turn_id
         assert report["artifact_source"] == {
             "artifact_id": artifact["id"], "path": artifact["path"], "sha256": artifact["sha256"],
@@ -511,3 +527,14 @@ def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_clai
         assert message(pages, report["event_id"])["reportedArtifact"]["undone"] is True
     finally:
         pages.runtime.close()
+
+
+def test_report_by_path_rejects_ambiguous_identity_and_unreadable_paths():
+    base = {"op": "report", "kind": "result", "note": "Finished file."}
+    assert validate_work({**base, "artifact_path": "deliverables/final.md"})["artifact_path"] == (
+        "deliverables/final.md")
+    with pytest.raises(ValueError, match="artifact ID or a file path"):
+        validate_work({**base, "artifact_path": "deliverables/final.md",
+                       "artifact_id": "opaque-old-id"})
+    with pytest.raises(ValueError, match="invalid artifact_path"):
+        validate_work({**base, "artifact_path": "deliverables/final.md\nforged"})
