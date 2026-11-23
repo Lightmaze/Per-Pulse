@@ -340,7 +340,7 @@ try {
   const firstDownload = await initialDownloadEvent;
   assert.equal(firstDownload.suggestedFilename(), 'practice.txt');
   const originalBytes = await readFile(await firstDownload.path());
-  assert.equal(originalBytes.toString('utf8'), 'A playable first interaction.\\n');
+  assert.equal(originalBytes.toString('utf8'), 'A playable first interaction.\n');
   assert.equal(createHash('sha256').update(originalBytes).digest('hex'), originalArtifact.sha256);
   await deliveredArticle.getByRole('button', { name: 'Close file preview' }).click();
   const reportedSourceLink = deliveredArticle.locator('.source-line a.session-link');
