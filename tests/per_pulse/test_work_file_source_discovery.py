@@ -223,3 +223,60 @@ def test_source_file_claim_without_matching_native_read_does_not_reach_home(tmp_
         )
     finally:
         second.runtime.close()
+
+
+def test_report_rejects_source_read_only_after_output_was_written(tmp_path, monkeypatch):
+    """A late read cannot be attributed as an input to an already-created file."""
+    fixture = WorkFixture(monkeypatch.setenv)
+    first = PageService(
+        tmp_path, model_factory=fixture.factory, posture=False,
+        allow_workspace_actions=True, auto_apply_edits=True,
+        pulse=PulseSettings(enabled=False),
+    )
+    try:
+        fixture.plan = [("mutate_file", {
+            "path": "chronology-original.md", "expected_digest": None,
+            "content": "# Original\nSource facts.\n",
+        })]
+        created = first.create_page("Chronology source Work", "Write a source file.")
+        source_id = created["page"]["id"]
+        _activate(first, created["initialMessageId"])
+        original, = first.artifacts.snapshot(source_id)["artifacts"]
+    finally:
+        first.runtime.close()
+
+    second = PageService(
+        tmp_path, model_factory=fixture.factory, posture=False,
+        allow_workspace_actions=True, auto_apply_edits=True,
+        pulse=PulseSettings(enabled=False),
+    )
+    try:
+        fixture.plan = [
+            ("mutate_file", {"path": "chronology-output.md", "expected_digest": None,
+                             "content": "# Result\nCompleted without reading source.\n"}),
+            ("read_file", {"path": "chronology-original.md",
+                           "expected_digest": original["sha256"]}),
+            ("work", {"op": "report", "kind": "result",
+                      "note": "Incorrectly claimed the late read as input.",
+                      "artifact_path": "chronology-output.md",
+                      "input_file_work_id": source_id,
+                      "input_file_artifact_id": original["id"]}),
+        ]
+        created = second.create_page("Chronology result Work", "Write, read, and report.")
+        result_work_id = created["page"]["id"]
+        _activate(second, created["initialMessageId"])
+        assert [outcome["status"] for outcome in fixture.outcomes[:2]] == [
+            "succeeded", "succeeded"]
+        assert fixture.outcomes[2]["status"] != "succeeded"
+        assert (tmp_path / "workspace" / "chronology-output.md").read_text() == (
+            "# Result\nCompleted without reading source.\n")
+        assert second.artifacts.snapshot(result_work_id)["artifacts"]
+        second.runtime._native_work.drain()
+        assert not any(
+            row["arguments"].get("note") == "Incorrectly claimed the late read as input."
+            for row in second.runtime.storage.native_work_requests(limit=32))
+        assert not any(
+            "Incorrectly claimed the late read as input." in message["content"]
+            for message in second.view("home")["messages"])
+    finally:
+        second.runtime.close()
