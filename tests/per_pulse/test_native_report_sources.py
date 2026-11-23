@@ -38,6 +38,12 @@ class ReportFixture:
             messages = body["messages"]
             current = max(i for i, row in enumerate(messages) if row["role"] == "user")
             task = messages[current]["content"]
+            # Committed succession may bring the predecessor result into the
+            # user message that starts this Work turn. Match the exact last
+            # authored task instead of treating the carried context as a new task.
+            latest_task = task.rsplit("\n\n", 1)[-1]
+            if latest_task in {PRIOR_WRITE_TASK, PRIOR_REPORT_TASK, FOREIGN_REPORT_TASK}:
+                task = latest_task
             results = [json.loads(row["content"]) for row in messages[current + 1:]
                        if row["role"] == "tool"]
             if scope.context_id.startswith("work:") and task == FILE_TASK and len(results) < 3:
