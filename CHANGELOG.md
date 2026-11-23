@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a37
+
+- Return files completed in earlier Work turns to Home after SQLite restart or committed subject succession using the original verified Kernel file action, without writing again (#357).
+- Let Work report an earlier completed file by its exact workspace path when the old action ID has left model context; preserve Work ownership, byte integrity and Undo (#358).
+- Keep task-relevant earlier shared corrections available for both Work pre-action decisions and final deliverable review after long histories and restart (#359).
+- Exercise one persisted browser journey through Work A correction, Work B's approved real file, later path-only Home report, source return, original-byte download, restart and Undo, including installed-wheel acceptance (#360).
+
 ## 0.1.0a36
 
 - Keep older, still-applicable Work experiences in the main model decision and later reuse after a long SQLite history; verify their exact revisions and withdrawal instead of rejecting them because they are absent from a recent candidate list (#352).
