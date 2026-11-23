@@ -3,8 +3,9 @@
  * Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -64,7 +65,7 @@ try {
     args: process.env.PLAYWRIGHT_CHROMIUM_ARGS
       ? JSON.parse(process.env.PLAYWRIGHT_CHROMIUM_ARGS) : undefined,
   });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
   const page = await context.newPage();
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(base);
@@ -300,6 +301,83 @@ try {
   const persistedLesson = await (await fetch(base + '/api/pages/' + learnedId + '/posture')).json();
   assert.equal(persistedLesson.experiences.length, 1);
   checks.push('same Work, shared abstract lesson and attributed Home return persist after restart');
+
+  // Close the *whole* ordinary task: earlier Work A correction changes Work B's
+  // chosen file, a subsequent Work B turn reports its original Kernel action
+  // by path, and Home can inspect/download the actual bytes after restarts.
+  // The only scripted component is the synthetic HTTP model's tool choice.
+  await page.locator('.composer textarea').fill('REPORT_PRACTICE_BY_PATH');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => (await (await fetch(base + '/api/pages/home')).json()).messages.some(
+    message => message.sourcePageId === learnedId
+      && message.reportedArtifact?.artifactId === originalArtifact.id),
+  'later Work report reaches Home', 45000);
+  await page.getByText('The playable Work file was reported to Home. [Synthetic browser fixture]',
+    { exact: true }).waitFor();
+  const reportedWork = (await (await fetch(base + '/api/pages/' + learnedId)).json());
+  assert.equal(reportedWork.artifacts.filter(item => item.id === originalArtifact.id).length, 1,
+    'reporting must not re-execute the previous mutate_file');
+  const learnedReport = (await (await fetch(base + '/api/pages/home')).json()).messages.find(
+    message => message.sourcePageId === learnedId
+      && message.reportedArtifact?.artifactId === originalArtifact.id);
+  assert.equal(learnedReport.activation, 'work_report');
+  assert.equal(learnedReport.role, 'system');
+  assert.equal(learnedReport.reportedArtifact.sha256, originalArtifact.sha256);
+  assert.equal(learnedReport.reportedArtifact.path, 'practice.txt');
+  assert.equal(learnedReport.reportedArtifact.undone, false);
+  assert.ok(learnedReport.sourceMessageId, 'the original reporting Work result is linked');
+  await page.locator('.composer textarea').fill(draft);
+  await page.goto(base + '/');
+  const homeComposer = page.locator('.composer textarea');
+  await homeComposer.waitFor();
+  const preservedHomeDraft = await homeComposer.inputValue();
+  const deliveredArticle = page.locator(`#message-${learnedReport.id}`);
+  assert.equal(await deliveredArticle.locator('.message-label').innerText(), 'Workspace');
+  await deliveredArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await deliveredArticle.getByText('A playable first interaction.', { exact: true }).waitFor();
+  const initialDownloadEvent = page.waitForEvent('download');
+  await deliveredArticle.getByRole('button', { name: 'Download file', exact: true }).click();
+  const firstDownload = await initialDownloadEvent;
+  assert.equal(firstDownload.suggestedFilename(), 'practice.txt');
+  const originalBytes = await readFile(await firstDownload.path());
+  assert.equal(originalBytes.toString('utf8'), 'A playable first interaction.\n');
+  assert.equal(createHash('sha256').update(originalBytes).digest('hex'), originalArtifact.sha256);
+  await deliveredArticle.getByRole('button', { name: 'Close file preview' }).click();
+  const reportedSourceLink = deliveredArticle.locator('.source-line a.session-link');
+  assert.equal(await reportedSourceLink.getAttribute('href'),
+    `/page/${learnedId}#message-${learnedReport.sourceMessageId}`);
+  await reportedSourceLink.click();
+  await page.getByRole('heading', { name: 'Informed delivery', exact: true }).waitFor();
+  await page.locator(`#message-${learnedReport.sourceMessageId}`).getByText(
+    'The playable Work file was reported to Home. [Synthetic browser fixture]',
+    { exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), draft);
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await homeComposer.waitFor();
+  assert.equal(await homeComposer.inputValue(), preservedHomeDraft);
+  checks.push('Work A correction changes a real Work B file; later path report gives Home the exact source and downloadable original');
+
+  await stopServer(server);
+  server = startServer();
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'reported Work after SQLite restart');
+  await page.reload();
+  await homeComposer.waitFor();
+  const persistedWorkReport = (await (await fetch(base + '/api/pages/home')).json()).messages.find(
+    message => message.id === learnedReport.id);
+  assert.equal(persistedWorkReport.reportedArtifact.artifactId, originalArtifact.id);
+  assert.equal(persistedWorkReport.reportedArtifact.undone, false);
+  await deliveredArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await deliveredArticle.getByText('A playable first interaction.', { exact: true }).waitFor();
+  const restartedDownloadEvent = page.waitForEvent('download');
+  await deliveredArticle.getByRole('button', { name: 'Download file', exact: true }).click();
+  const restartedDownload = await restartedDownloadEvent;
+  assert.deepEqual(await readFile(await restartedDownload.path()), originalBytes);
+  await deliveredArticle.getByRole('button', { name: 'Close file preview' }).click();
+  assert.equal(await homeComposer.inputValue(), preservedHomeDraft);
+  await page.goto(base + '/page/' + learnedId);
+  await page.getByRole('heading', { name: 'Informed delivery', exact: true }).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), draft);
+  checks.push('SQLite restart preserves Work B file, automatic Home report and original bytes without replay');
 
   // The user explicitly asks for a form. The shared experience reaches the
   // native expert fork but should not displace that adequate simple solution.
@@ -807,6 +885,23 @@ try {
   assert.equal((await (await fetch(base + '/api/pages/' + beforeId)).json())
     .artifacts.some(item => item.id === reviewedFile?.id), true);
   checks.push('explicit Home-to-Work source reading, approved new file, return to Home and restart all survive');
+
+
+  // The same physical file action remains undoable. Undo invalidates the
+  // previously delivered Home file but preserves the historical report link.
+  await page.goto(base + '/page/' + learnedId);
+  await page.getByRole('heading', { name: 'Informed delivery', exact: true }).waitFor();
+  await page.locator('.page-artifacts').getByRole('button', { name: 'Undo', exact: true }).click();
+  await wait(async () => (await (await fetch(base + '/api/pages/home')).json()).messages.find(
+    message => message.id === learnedReport.id)?.reportedArtifact?.undone === true,
+  'Home report sees the native Undo');
+  await page.goto(base + '/');
+  await deliveredArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await deliveredArticle.getByText('Undone', { exact: true }).waitFor();
+  assert.equal(await deliveredArticle.getByRole('button', {
+    name: 'Download file', exact: true,
+  }).count(), 0);
+  checks.push('Undo invalidates the previously learned Work file download, retaining Home source history');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({

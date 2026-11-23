@@ -94,6 +94,21 @@ def handler(request):
     task = json.dumps(current, ensure_ascii=False)
     tool_results = [m for m in current if m["role"] == "tool"]
 
+    if "REPORT_PRACTICE_BY_PATH" in task:
+        # This is a *later Work turn*, after the browser approved the file and
+        # SQLite has restarted. Only the model's tool choice is synthetic;
+        # Kernel must resolve the original file action before Home can see it.
+        if not tool_results:
+            return streamed(tool="work", arguments={
+                "op": "report", "kind": "result",
+                "note": "The playable first interaction is ready.",
+                "artifact_path": "practice.txt",
+            })
+        assert len(tool_results) == 1
+        receipt = json.loads(tool_results[0]["content"])
+        assert receipt["status"] == "succeeded", receipt
+        return streamed(text="The playable Work file was reported to Home. [Synthetic browser fixture]")
+
     if CORRECTION in task:
         if not tool_results:
             return streamed(tool="posture", arguments={"op": "list"})
