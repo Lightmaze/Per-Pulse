@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a38
+
+- Keep historical Work file results responsive in long-lived Worlds with a native SQLite action index that also opens existing databases (#362).
+- Discover original file actions and exact versions from another Work's history, even after the original conversation leaves model context (#363).
+- Return a derived Work file to Home alongside the verified original file it read before producing that result; open and download each independently, preserve source navigation across restart, and invalidate an undone source without deleting the derived file (#364).
+
 ## 0.1.0a37
 
 - Return files completed in earlier Work turns to Home after SQLite restart or committed subject succession using the original verified Kernel file action, without writing again (#357).

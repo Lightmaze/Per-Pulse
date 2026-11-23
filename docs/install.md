@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a37-py3-none-any.whl` from the
-[v0.1.0a37 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a37).
+Download `per_pulse-0.1.0a38-py3-none-any.whl` from the
+[v0.1.0a38 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a38).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a37-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a38-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a37-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a38-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -84,6 +84,19 @@ Kernel history; it does not write the file again. Home can open the source Work,
 preview the still-current file and download its original bytes. If the file was
 changed or undone, reopen the original Work and produce or select a current
 file before trying again. Another Work cannot claim the file by knowing its path.
+
+## Reuse an earlier Work file in another Work
+
+In a new Work, ask the configured model to find the earlier Work by title,
+read the original file and produce a new file. The native `work.search` and
+`work.inspect` tools locate the Work and its original file receipts (use
+`include_files=true`; follow `next_file_before_action_id` for older receipts).
+The model reads the file using its expected SHA-256, then creates the new file
+through the normal file-action controls. When it reports the new file with the
+original input Work and file action, Home shows separate verified input and
+output links. Open either file to preview or download its bytes. A changed or
+undone input cannot be downloaded as the old version; the derived output remains
+independent. Restart retains the source links and Work navigation.
 
 ## Continue a Home file in another Work
 
@@ -184,7 +197,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a37-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a38-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
