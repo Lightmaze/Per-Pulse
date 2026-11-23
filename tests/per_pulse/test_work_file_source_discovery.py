@@ -177,3 +177,49 @@ def test_input_file_source_requires_both_owned_work_and_action():
             assert "input Work" in str(error)
         else:
             raise AssertionError("input attribution must include both original IDs")
+
+def test_source_file_claim_without_matching_native_read_does_not_reach_home(tmp_path, monkeypatch):
+    fixture = WorkFixture(monkeypatch.setenv)
+    first = PageService(
+        tmp_path, model_factory=fixture.factory, posture=False,
+        allow_workspace_actions=True, auto_apply_edits=True,
+        pulse=PulseSettings(enabled=False),
+    )
+    try:
+        fixture.plan = [("mutate_file", {
+            "path": "unread-original.md", "expected_digest": None,
+            "content": "# Original\\nUnseen by the later Work.\\n",
+        })]
+        created = first.create_page("Original source Work", "Create the source file.")
+        source_id = created["page"]["id"]
+        _activate(first, created["initialMessageId"])
+        artifact, = first.artifacts.snapshot(source_id)["artifacts"]
+    finally:
+        first.runtime.close()
+
+    second = PageService(
+        tmp_path, model_factory=fixture.factory, posture=False,
+        allow_workspace_actions=True, auto_apply_edits=True,
+        pulse=PulseSettings(enabled=False),
+    )
+    try:
+        fixture.plan = [("work", {
+            "op": "report", "kind": "result",
+            "note": "Claimed to have used the unread original.",
+            "input_file_work_id": source_id,
+            "input_file_artifact_id": artifact["id"],
+        })]
+        created = second.create_page("Unverified source claim", "Report the original file.")
+        _activate(second, created["initialMessageId"])
+        assert fixture.outcomes[0]["status"] != "succeeded"
+        second.runtime._native_work.drain()
+        assert not any(
+            "Claimed to have used" in str(row.get("arguments", {}))
+            for row in second.runtime.storage.native_work_requests(limit=32)
+        )
+        assert not any(
+            "Claimed to have used" in message["content"]
+            for message in second.view("home")["messages"]
+        )
+    finally:
+        second.runtime.close()
