@@ -334,6 +334,71 @@ def test_chinese_work_b_recalls_old_shared_source_before_decision_after_restart(
         reopened.close()
 
 
+
+def test_old_work_a_lesson_reaches_work_b_final_delivery_review_after_world_restart(
+        tmp_path, monkeypatch):
+    """The final artifact review sees the lesson used before Work B acted.
+
+    This runs real persistent World and Kernel paths with a synthetic HTTP
+    model. It verifies source admission and continuation, not model quality.
+    """
+    from pulse_harness.core import HarnessStore, TurnRunner, TurnStatus
+    from test_posture_runtime import NoTools, model_fixture
+
+    world_path = tmp_path / "world.db"
+    storage = Storage(world_path)
+    memory = PostureMemory(storage, "world")
+    old = _experience(memory, "provenance-manifest-original")
+    for index in range(180):
+        _experience(memory, f"routine-{index:03d}")
+    assert old["id"] not in _ids(memory.materials(
+        subject_id=SUBJECT, context_id=TARGET, prioritize_content=True,
+        max_records=128, compact_backfill=16))
+    storage.close()
+
+    storage = Storage(world_path)
+    memory = PostureMemory(storage, "world")
+    expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None,
+                           posture_memory=memory, expert_active=False)
+    kernel = HarnessStore(tmp_path / "kernel.db")
+    scope = HarnessScope("world", SUBJECT, "session", 0, "owner",
+                         context_id=TARGET, turn_id="work-b-delivery")
+    requests = []
+    model = model_fixture(monkeypatch, requests, correction=True)
+    runner = TurnRunner(kernel, model_adapter=model, tool_provider=NoTools(),
+                        turn_advisor=expert.advisor(kernel, model, scope),
+                        response_reviewer=expert.posture_reviewer(kernel, model, scope))
+    try:
+        outcome = runner.run(
+            scope, prompt="Create the provenance manifest for the final dataset, "
+                          "with original source attribution in the artifact.")
+        assert outcome.status is TurnStatus.SUCCEEDED
+        forks = [json.dumps(row["messages"], ensure_ascii=False)
+                 for row in requests
+                 if "WORK_MATERIAL_JSON" in json.dumps(row["messages"])]
+        main = [json.dumps(row["messages"], ensure_ascii=False)
+                for row in requests
+                if "WORK_MATERIAL_JSON" not in json.dumps(row["messages"])]
+        assert len(forks) == 2 and len(main) == 2
+        assert old["id"] in forks[0], "The earlier lesson must guide the next action."
+        assert old["id"] in forks[1], "Delivery must not discard the same relevant lesson."
+        assert "candidate_response" in forks[1]
+        assert "PRIVATE_EPISODE" not in "".join(forks + main)
+        assert "Use the direct worked example" in main[1]
+        decisions = expert.store.turn_decisions(scope.as_dict())
+        assert {item["computation"].get("checkpoint", "before_action")
+                for item in decisions} == {"before_action", "delivery"}
+        assert all({"id": old["id"], "revision": 1}
+                   in item["computation"]["offered_posture_revisions"]
+                   for item in decisions)
+    finally:
+        runner.close()
+        expert.close()
+        kernel.close()
+        storage.close()
+
+
+
 def test_old_cue_rescued_experience_changes_ordinary_work_admission_and_survives_restart(
         tmp_path, monkeypatch):
     """An old Work A lesson reaches Work B's *main* decision, not only its fork.

@@ -415,7 +415,11 @@ class _PostureReviewer:
         if saved is not None:
             advice = self.runtime.current_advice(request.scope, helper._advice(saved))
             return ResponseReview(context=advice.context, receipt=advice.receipt)
-        posture_packet = self.runtime.posture_materials(request.scope)
+        # The final candidate needs the same task-matched Work A lessons that
+        # informed the pre-action decision. A cue-free recent shortlist can
+        # evict an older, relevant lesson before the deliverable is reviewed.
+        posture_packet = self.runtime.posture_materials(
+            request.scope, task_terms=_task_terms(request))
         if not posture_packet or not posture_packet["episodes"]:
             return ResponseReview(receipt={"plugin": "expert_computation", "mode": "semantic",
                                            "checkpoint": "delivery",
