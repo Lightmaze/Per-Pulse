@@ -22,6 +22,7 @@ FILE_TEXT = "# Report deliverable\n\nThis is the completed Work file.\n"
 RESULT = "The original detailed source result. [Explicit synthetic HTTP fixture]"
 WRITE_TASK = "Write report-delivery.md in this Work; report it on a later turn. [Authored fixture request]"
 REPORT_TASK = "Report the previously completed Work file to Home. [Authored fixture request]"
+DERIVED_TASK = "Derive a file from the original Work. [Authored fixture request]"
 requests = []
 file_actions = {}
 lock = threading.Lock()
