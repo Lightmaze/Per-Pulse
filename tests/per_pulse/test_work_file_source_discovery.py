@@ -36,10 +36,10 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         ]
         created = first.create_page("Prior evidence Work", "Write two versions of the research.")
         source_id = created["page"]["id"]
-        completed = _activate(first, created["initialMessageId"])
-        source_turn = completed.turn_id
+        _activate(first, created["initialMessageId"])
         assert [result["status"] for result in fixture.outcomes] == ["succeeded", "succeeded"]
         originals = {item["path"]: item for item in first.artifacts.snapshot(source_id)["artifacts"]}
+        source_turn = next(iter(originals.values()))["turnId"]
         assert set(originals) == {"source-draft.md", "source-approved.md"}
         assert (tmp_path / "workspace" / "source-approved.md").read_text() == (
             "# Evidence\nVerified original source.\n"
