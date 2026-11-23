@@ -57,12 +57,15 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
             ("work", {"op": "inspect", "work_id": source_id, "include_files": True}),
             ("work", {"op": "inspect", "work_id": source_id, "include_files": True,
                       "file_before_action_id": originals["source-approved.md"]["id"]}),
-            ("read_file", {"path": "source-approved.md"}),
+            ("read_file", {"path": "source-approved.md",
+                           "expected_digest": originals["source-approved.md"]["sha256"]}),
             ("mutate_file", {"path": "delivered-evidence.md", "expected_digest": None,
                              "content": "# Delivered\nVerified original source, not the draft.\n"}),
             ("work", {"op": "report", "kind": "result",
                       "note": "Used the approved source and completed the file.",
-                      "artifact_path": "delivered-evidence.md"}),
+                      "artifact_path": "delivered-evidence.md",
+                      "input_file_work_id": source_id,
+                      "input_file_artifact_id": originals["source-approved.md"]["id"]}),
         ]
         created = second.create_page(
             "Follow-on delivered Work",
@@ -106,6 +109,14 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
                     if row["id"] == reports[0]["event_id"])
         assert home["reportedArtifact"]["artifactId"] == target_artifact["id"]
         assert home["sourcePageId"] == target_id
+        assert home["inputArtifact"] == {
+            "pageId": source_id,
+            "artifactId": originals["source-approved.md"]["id"],
+            "path": "source-approved.md",
+            "sha256": originals["source-approved.md"]["sha256"],
+            "undone": False,
+        }
+        assert "Verified input read from earlier Work" in home["content"]
     finally:
         second.runtime.close()
 
@@ -118,10 +129,14 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         assert third.artifacts.download(target_id, target_artifact["id"])["content"] == (
             b"# Delivered\nVerified original source, not the draft.\n"
         )
+        assert third.artifacts.download(source_id, originals["source-approved.md"]["id"])[
+            "content"] == b"# Evidence\nVerified original source.\n"
         third.artifacts.undo(target_id, target_artifact["id"])
         final = next(row for row in third.view("home")["messages"]
                      if row["id"] == reports[0]["event_id"])
         assert final["reportedArtifact"]["undone"] is True
+        assert final["inputArtifact"]["artifactId"] == originals["source-approved.md"]["id"]
+        assert final["inputArtifact"]["undone"] is False
         assert third.artifacts.read(target_id, target_artifact["id"])["state"] == "unavailable"
     finally:
         third.runtime.close()
@@ -148,3 +163,17 @@ def test_file_history_cursor_requires_inspection():
         assert "include_files" in str(error)
     else:
         raise AssertionError("a file cursor must request file history")
+
+def test_input_file_source_requires_both_owned_work_and_action():
+    good = {"op": "report", "kind": "result", "note": "The file was used.",
+            "input_file_work_id": "source-work",
+            "input_file_artifact_id": "original-file-action"}
+    assert validate(good)["input_file_work_id"] == "source-work"
+    for missing in ("input_file_work_id", "input_file_artifact_id"):
+        incomplete = {key: value for key, value in good.items() if key != missing}
+        try:
+            validate(incomplete)
+        except ValueError as error:
+            assert "input Work" in str(error)
+        else:
+            raise AssertionError("input attribution must include both original IDs")
