@@ -60,6 +60,8 @@ Kernel implementation.
   with its original source still linked. A Work can report a file from an earlier
   turn by its exact path after restart; Home verifies the original action,
   downloads the original bytes and keeps its source link until the file changes or is undone.
+  Ask a later Work to find an earlier Work's file, read its exact version and
+  produce a new file. Home can open the verified input and derived output separately.
 - Visit a shared Habitat region across Home and Works: approve a regional file
   change once, continue that file from another Work, and revisit it after restart.
   Later Works can discover and search past regions without knowing their names;
@@ -76,13 +78,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a37-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a37)
+[`per_pulse-0.1.0a38-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a38)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a37-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a38-py3-none-any.whl
 per-pulse --example
 ```
 
