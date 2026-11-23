@@ -55,6 +55,8 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
     try:
         fixture.plan = [
             ("work", {"op": "inspect", "work_id": source_id, "include_files": True}),
+            ("work", {"op": "inspect", "work_id": source_id, "include_files": True,
+                      "file_before_action_id": originals["source-approved.md"]["id"]}),
             ("read_file", {"path": "source-approved.md"}),
             ("mutate_file", {"path": "delivered-evidence.md", "expected_digest": None,
                              "content": "# Delivered\nVerified original source, not the draft.\n"}),
@@ -70,7 +72,7 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         target_id = created["page"]["id"]
         _activate(second, created["initialMessageId"])
         assert [result["status"] for result in fixture.outcomes] == [
-            "succeeded", "succeeded", "succeeded", "succeeded",
+            "succeeded", "succeeded", "succeeded", "succeeded", "succeeded",
         ], fixture.outcomes
         inspection = fixture.outcomes[0]["output"]
         assert inspection["file_receipts_are_historical"] is True
@@ -85,7 +87,9 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         assert {entry["path"]: entry["sha256"] for entry in files} == {
             path: artifact["sha256"] for path, artifact in originals.items()
         }
-        assert "Verified original source" in fixture.outcomes[1]["output"]["content"]
+        older = fixture.outcomes[1]["output"]["completed_files"]
+        assert [entry["path"] for entry in older] == ["source-draft.md"]
+        assert "Verified original source" in fixture.outcomes[2]["output"]["content"]
         assert (tmp_path / "workspace" / "delivered-evidence.md").read_text() == (
             "# Delivered\nVerified original source, not the draft.\n"
         )
@@ -134,3 +138,13 @@ def test_include_files_only_accepts_explicit_boolean():
             assert "include_files" in str(error)
         else:
             raise AssertionError("include_files must be a boolean")
+
+
+def test_file_history_cursor_requires_inspection():
+    try:
+        validate({"op": "inspect", "work_id": "owned-work",
+                  "file_before_action_id": "a-prior-action"})
+    except ValueError as error:
+        assert "include_files" in str(error)
+    else:
+        raise AssertionError("a file cursor must request file history")
