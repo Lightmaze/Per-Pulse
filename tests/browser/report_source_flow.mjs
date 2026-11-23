@@ -263,6 +263,16 @@ try {
   assert.deepEqual(await readFile(await restartedDownload.path()), originalBytes);
   await homeArticle.getByRole('button', { name: 'Close file preview' }).click();
   checks.push('offline SQLite restart preserves direct Home download of the same original file');
+  const restartedDerived = (await view('home')).messages.find(row => row.id === derivedReport.eventId);
+  assert.equal(restartedDerived.inputArtifact.artifactId, firstFileAction.id);
+  assert.equal(restartedDerived.reportedArtifact.path, 'derived-delivery.md');
+  await inputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await inputCard.getByText('This is the completed Work file.', { exact: true }).waitFor();
+  await inputCard.getByRole('button', { name: 'Close file preview' }).click();
+  await outputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await outputCard.getByText('Based on the verified source Work file.', { exact: true }).waitFor();
+  await outputCard.getByRole('button', { name: 'Close file preview' }).click();
+  checks.push('offline SQLite restart preserves distinct verified input and output previews');
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('offline process restart retains exact native provenance and source navigation on a phone viewport');
 
@@ -293,6 +303,15 @@ try {
   await homeArticle.getByRole('button', { name: 'Open verified file' }).click();
   await homeArticle.getByText('Undone', { exact: true }).waitFor();
   assert.equal(await homeArticle.getByRole('button', { name: 'Download file', exact: true }).count(), 0);
+  const finalDerived = (await view('home')).messages.find(row => row.id === derivedReport.eventId);
+  assert.equal(finalDerived.inputArtifact.undone, true);
+  assert.equal(finalDerived.reportedArtifact.undone, false);
+  await inputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await inputCard.getByText('Undone', { exact: true }).waitFor();
+  assert.equal(await inputCard.getByRole('button', { name: 'Download file' }).count(), 0);
+  await outputCard.getByRole('button', { name: 'Open verified file' }).click();
+  await outputCard.getByText('Based on the verified source Work file.', { exact: true }).waitFor();
+  checks.push('undoing the source invalidates input preview without deleting the derived output');
   checks.push('Undo after restart invalidates Home preview and download without erasing report provenance');
   assert.deepEqual(errors, []);
   assert.deepEqual(externalRequests, []);
