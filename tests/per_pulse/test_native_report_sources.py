@@ -15,6 +15,7 @@ from per_pulse.service import PageService
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 from pulse_system.service.home_conversation import home_conversation
 from pulse_system.service.runtime import ServiceError
+from pulse_system.service.native_work import validate as validate_work
 
 NOTE = "The selected finding from this Work. [Explicit synthetic fixture]"
 FILE_TASK = "Write an attributed file and report its verified result to Home."
@@ -526,3 +527,14 @@ def test_prior_work_turn_file_reports_after_restart_but_another_work_cannot_clai
         assert message(pages, report["event_id"])["reportedArtifact"]["undone"] is True
     finally:
         pages.runtime.close()
+
+
+def test_report_by_path_rejects_ambiguous_identity_and_unreadable_paths():
+    base = {"op": "report", "kind": "result", "note": "Finished file."}
+    assert validate_work({**base, "artifact_path": "deliverables/final.md"})["artifact_path"] == (
+        "deliverables/final.md")
+    with pytest.raises(ValueError, match="artifact ID or a file path"):
+        validate_work({**base, "artifact_path": "deliverables/final.md",
+                       "artifact_id": "opaque-old-id"})
+    with pytest.raises(ValueError, match="invalid artifact_path"):
+        validate_work({**base, "artifact_path": "deliverables/final.md\\nforged"})
