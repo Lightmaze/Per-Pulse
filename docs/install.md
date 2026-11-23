@@ -5,8 +5,8 @@ Node.js and Git are needed only when developing from source.
 
 ## Download and install
 
-Download `per_pulse-0.1.0a36-py3-none-any.whl` from the
-[v0.1.0a36 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a36).
+Download `per_pulse-0.1.0a37-py3-none-any.whl` from the
+[v0.1.0a37 release](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a37).
 In the directory containing the download, create an environment and install it.
 
 Linux or macOS:
@@ -14,7 +14,7 @@ Linux or macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a36-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a37-py3-none-any.whl
 per-pulse --example
 ```
 
@@ -22,7 +22,7 @@ Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a36-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install .\per_pulse-0.1.0a37-py3-none-any.whl
 .\.venv\Scripts\per-pulse.exe --example
 ```
 
@@ -71,6 +71,19 @@ pages can continue in the background, up to 12 turns per hour by default.
 Use `--pulse-budget N` to change this or `--no-pulse` to switch it off. Model
 file changes apply by default and offer Undo; `--ask-before-edits` asks first.
 See [workspace actions](workspace-actions.md) for what Undo can restore.
+
+## Return an earlier Work file to Home
+
+In a Work, finish a file with the normal file-action controls. You can continue
+working, restart the application or resume after a committed subject succession,
+then ask the configured model to report the previously completed file to Home.
+The native `work.report` tool accepts `artifact_path` with the exact Work-relative
+file path, even when the original file-action ID is no longer in model context.
+The report resolves the original successful action from that Work's persisted
+Kernel history; it does not write the file again. Home can open the source Work,
+preview the still-current file and download its original bytes. If the file was
+changed or undone, reopen the original Work and produce or select a current
+file before trying again. Another Work cannot claim the file by knowing its path.
 
 ## Continue a Home file in another Work
 
@@ -171,7 +184,7 @@ from the download directory (both archives must be present). On macOS run
 `shasum -a 256 -c SHA256SUMS`. On Windows compare the wheel's entry with:
 
 ```powershell
-Get-FileHash .\per_pulse-0.1.0a36-py3-none-any.whl -Algorithm SHA256
+Get-FileHash .\per_pulse-0.1.0a37-py3-none-any.whl -Algorithm SHA256
 ```
 
 ## If startup fails
