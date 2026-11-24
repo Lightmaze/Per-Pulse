@@ -107,7 +107,11 @@ class AutonomousPracticeFixture:
                     if continuation_boundary > user_boundary:
                         assert user_boundary >= 0 and messages[user_boundary]["content"] == REVISION_TASK
                         if self.learned_revision:
-                            results = [json.loads(row["content"]) for row in tools]
+                            # A new bounded activation keeps the same revised purpose.
+                            # Use the actual receipts since that user revision, including
+                            # the preceding slice, rather than repeat its file effects.
+                            results = [json.loads(row["content"]) for row in messages[user_boundary:]
+                                       if row["role"] == "tool"]
                             assert all(row["status"] == "succeeded" for row in results), results
                             if not results:
                                 return response(tool="work", arguments={"op": "search", "query": SOURCE_TITLE})

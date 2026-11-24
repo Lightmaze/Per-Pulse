@@ -8414,6 +8414,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         turn = self._causal_ledger.get_turn_for_world(turn_id, self._world_id)
         if turn is not None and turn.error_code in {
             "autonomous_weekly_requests_exhausted", "autonomous_weekly_requests_paused",
+            "autonomous_round_slice_complete",
         }:
             with self._provider_continuation_lock:
                 self._provider_continuations.add(turn_id)
@@ -8444,7 +8445,9 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 if not safe or event is None:
                     remove = True
                 else:
-                    remove = self._context_pulse.request_provider_continuation(event, turn_id) is not None
+                    remove = self._context_pulse.request_provider_continuation(
+                        event, turn_id, round_slice=turn.error_code == "autonomous_round_slice_complete",
+                    ) is not None
             if remove:
                 with self._provider_continuation_lock:
                     self._provider_continuations.discard(turn_id)
@@ -8563,15 +8566,21 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 or event.source is not CausalEventSource.SELF
                 or source is None or source.engram_id != engram_id
                 or source.error_code not in {"autonomous_weekly_requests_exhausted",
-                                             "autonomous_weekly_requests_paused"}
+                                             "autonomous_weekly_requests_paused",
+                                             "autonomous_round_slice_complete"}
                 or parent is None or parent.id != source.event_id
+                or (source.error_code == "autonomous_round_slice_complete"
+                    and parent.metadata.get("context_pulse") != "provider_continuation")
                 or parent.world_id != self._world_id or parent.engram_id != engram_id
                 or parent.center_id != event.center_id
                 or event.idempotency_key != f"provider-continuation-v1:{self._world_id}:{source_id}"):
             raise ScopeConflict("provider continuation has no matching retained source")
+        reason = ("yielded at its local model-round boundary"
+                  if source.error_code == "autonomous_round_slice_complete"
+                  else "paused at the autonomous request allowance")
         return (
-            "Internal provider continuation, not a user message. A previous turn paused "
-            "at the autonomous request allowance. Its confirmed actions remain in history. "
+            f"Internal provider continuation, not a user message. A previous turn {reason}. "
+            "Its confirmed actions remain in history. "
             "Reassess the current purpose using the latest actual user messages and available "
             "evidence. If the person revised the task while waiting, follow the revised purpose. "
             "Continue useful unfinished work; do not repeat confirmed effects or replay uncertain "
@@ -8597,7 +8606,24 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 or (event.kind is CausalEventKind.PROPAGATION
                     and event.source is CausalEventSource.PROPAGATION)
                 or (event.kind is CausalEventKind.PULSE and event.source is CausalEventSource.SELF)):
-            return config.max_background_main_model_rounds_per_turn
+            limit = config.max_background_main_model_rounds_per_turn
+            if event.metadata.get("context_pulse") == "provider_continuation":
+                # A retained autonomous task can require several bounded local
+                # activations. Yield before dispatching another model request;
+                # the existing continuation path checks all effect receipts
+                # and re-enters through the ordinary Pulse/allowance gates.
+                # Explicit ticks and unrelated round ceilings keep their
+                # existing semantics.
+                from pulse_harness.core.errors import ProviderUnavailable
+
+                context = "" if turn.execution_context in {"", "home"} else turn.execution_context
+                scope = self._harness.scope_for(engram_id, context).for_turn(turn_id)
+                if self._harness.kernel.store.next_model_round_index(scope) >= limit:
+                    raise ProviderUnavailable(
+                        "The retained background task reached its local round boundary.",
+                        code="autonomous_round_slice_complete",
+                    )
+            return limit
         return None
 
     def _harness_summary(self) -> dict[str, Any]:

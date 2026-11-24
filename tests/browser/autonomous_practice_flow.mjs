@@ -243,9 +243,20 @@ try {
   await revisionPage.getByRole('spinbutton', { name: 'Requests per week', exact: true }).fill('20');
   await revisionPage.getByRole('button', { name: 'Save limit', exact: true }).click();
   try {
-    await wait(() => get('/__autonomous/status'),
-      value => value.continuations.some(c => c.id === continuation && c.status === 'settled'),
-      learned ? 'learned retained continuation settles' : 'isolated retained continuation settles');
+    const completed = await wait(() => get('/__autonomous/status'),
+      value => learned
+        ? value.continuations.some(c => c.parent === continuation && c.status === 'settled')
+        : value.continuations.some(c => c.id === continuation && c.status === 'settled'),
+      learned ? 'learned retained continuation yields and its child settles' : 'isolated retained continuation settles');
+    if (learned) {
+      // Four main rounds finish search, inspect, read and write. The next
+      // admitted activation must deliver that same file, without rewriting it.
+      assert.equal(completed.continuations.find(c => c.id === continuation).status, 'uncertain');
+      assert.equal(completed.continuations.filter(c => c.parent === continuation).length, 1);
+      const finished = await workView();
+      assert.deepEqual(finished.artifacts.map(a => a.path).sort(), ['planning-brief.md', 'retained.txt']);
+      checks.push('the local main-round boundary yields to one causally linked autonomous activation and preserves the completed file');
+    }
   } catch (error) {
     // Surface the actual terminal Work state, physical allowance, and
     // synthetic provider traffic before tearing down the persistent World.

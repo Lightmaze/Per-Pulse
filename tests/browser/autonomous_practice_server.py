@@ -67,7 +67,8 @@ if __name__ == "__main__":
                 latest = next((item["content"] for item in reversed(messages) if item["role"] == "user"), None)
                 resume_inputs.append({"context": request["context"], "latestUser": latest})
         return {"requests": len(requests), "resumeInputs": resume_inputs, "requestTrace": request_trace,
-                "continuations": [{"id": event.id, "status": event.status.value}
+                "continuations": [{"id": event.id, "status": event.status.value,
+                                   "parent": event.parent_event_id}
                                   for event in roots if event.metadata.get("context_pulse") == "provider_continuation"],
                 "departures": [{"id": event.id, "source": event.source.value,
                                  "status": event.status.value, "parent": event.parent_event_id}
