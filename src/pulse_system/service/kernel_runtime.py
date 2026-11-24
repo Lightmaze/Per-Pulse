@@ -1203,8 +1203,8 @@ class KernelHarnessRuntime:
                     raise _error("kernel_recovery_required", "resolve the previous nonterminal Kernel turn before new work")
             internal = self._input_for_turn(engram_id, scope.turn_id) if self._input_for_turn and turn_id is not None else None
             if internal is not None:
-                # The trusted host supplies only provenance and an instruction to
-                # fetch actual work through a real tool. Never forge a user turn.
+                # The trusted host supplies a notice derived from causal provenance.
+                # Internal activity must not become a new user turn.
                 from pulse_harness.core.transcript import TranscriptStore
                 submitted = internal
             self.kernel.store.create_turn(scope, submitted)
@@ -1223,7 +1223,7 @@ class KernelHarnessRuntime:
                 )
             if internal is not None:
                 TranscriptStore(self.kernel.store).append(scope, role="system", content=submitted,
-                    item_id="cognition-return:" + scope.turn_id)
+                    item_id="internal-input:" + scope.turn_id)
             accepted = True
             expired = threading.Event()
             def expire():
