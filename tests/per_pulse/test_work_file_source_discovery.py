@@ -287,3 +287,88 @@ def test_report_rejects_source_read_only_after_output_was_written(tmp_path, monk
             for message in second.view("home")["messages"])
     finally:
         second.runtime.close()
+
+
+def test_prepared_report_replacement_requires_the_latest_action_and_delivers_once(tmp_path, monkeypatch):
+    """A changed report cannot overwrite another revision or leak an obsolete file."""
+    import hashlib
+    import json
+
+    draft = "# Draft\n"
+    final = "# Final\n"
+
+    class RevisionFixture(WorkFixture):
+        def handler(self, request):
+            messages = json.loads(request.content)["messages"]
+            current = max(i for i, item in enumerate(messages) if item["role"] == "user")
+            results = [json.loads(item["content"]) for item in messages[current + 1:]
+                       if item["role"] == "tool"]
+            index = len(results)
+            if index == 0:
+                args = {"path": "revision.md", "expected_digest": None, "content": draft}
+                return self.response(tool="mutate_file", arguments=args, sequence=index)
+            if index == 1:
+                args = {"op": "report", "kind": "result", "note": "Draft report.",
+                        "artifact_path": "revision.md"}
+            elif index == 2:
+                args = {"path": "revision.md",
+                        "expected_digest": hashlib.sha256(draft.encode()).hexdigest(),
+                        "content": final}
+                return self.response(tool="mutate_file", arguments=args, sequence=index)
+            elif index in {3, 4, 5, 6}:
+                args = {"op": "report", "kind": "result",
+                        "note": "Final report." if index == 5 else "Wrong revision.",
+                        "artifact_path": "revision.md"}
+                if index == 4:
+                    args["replace_report_action_id"] = "foreign-action"
+                elif index in {5, 6}:
+                    args["replace_report_action_id"] = results[1]["output"]["report_action_id"]
+            else:
+                self.outcomes = results
+                return self.response("The final file is ready. [Explicit synthetic fixture]")
+            return self.response(tool="work", arguments=args, sequence=index)
+
+    fixture = RevisionFixture(monkeypatch.setenv)
+    pages = PageService(
+        tmp_path, model_factory=fixture.factory, posture=False,
+        allow_workspace_actions=True, auto_apply_edits=True,
+        pulse=PulseSettings(enabled=False),
+    )
+    try:
+        created = pages.create_page("Revised Work", "Prepare and revise the file before returning Home.")
+        work_id = created["page"]["id"]
+        _activate(pages, created["initialMessageId"])
+        assert [item["status"] for item in fixture.outcomes] == [
+            "succeeded", "succeeded", "succeeded", "failed", "failed", "succeeded", "failed",
+        ], fixture.outcomes
+        first, last = fixture.outcomes[1]["output"], fixture.outcomes[5]["output"]
+        assert first["request_id"] == last["request_id"]
+        assert first["report_action_id"] != last["report_action_id"]
+        pages.runtime._native_work.drain()
+        record, = pages.runtime.storage.native_work_requests(limit=32)
+        assert record["status"] == "delivered"
+        assert record["source_action_id"] == last["report_action_id"]
+        assert record["arguments"]["note"] == "Final report."
+        event_id = record["event_id"]
+        artifact_id = record["artifact_source"]["artifact_id"]
+        assert pages.artifacts.download(work_id, artifact_id)["content"] == final.encode()
+    finally:
+        pages.runtime.close()
+
+    restored = PageService(
+        tmp_path, model_factory=None, posture=False,
+        allow_workspace_actions=True, auto_apply_edits=True,
+        pulse=PulseSettings(enabled=False),
+    )
+    try:
+        restored.runtime._native_work.drain()
+        messages = restored.view("home")["messages"]
+        delivered = [row for row in messages if row["id"] == event_id]
+        assert len(delivered) == 1
+        assert delivered[0]["reportedArtifact"]["artifactId"] == artifact_id
+        assert "Final report." in delivered[0]["content"]
+        assert not any("Draft report." in row["content"] or "Wrong revision." in row["content"]
+                       for row in messages)
+        assert restored.artifacts.download(work_id, artifact_id)["content"] == final.encode()
+    finally:
+        restored.runtime.close()

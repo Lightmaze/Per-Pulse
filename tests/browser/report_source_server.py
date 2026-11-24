@@ -25,6 +25,10 @@ REPORT_TASK = "Report the previously completed Work file to Home. [Authored fixt
 SOURCE_TITLE = "Native report source Work"
 DERIVED_TASK = "Derive a file from Native report source Work. [Authored fixture request]"
 DERIVED_TEXT = "# Derived deliverable\n\nBased on the verified source Work file.\n"
+DRAFT_TEXT = "# Provisional deliverable\n\nDraft, not ready for Home.\n"
+DRAFT_RESULT = "The provisional file is ready to report."
+EXAMPLE_NOTE = "Replace provisional derived text with a verified final version before returning it to Home."
+REVIEW_FIX = "Replace the provisional file with the verified final text and replace its prepared Home report."
 requests = []
 file_actions = {}
 lock = threading.Lock()
@@ -36,6 +40,19 @@ def factory(scope):
         with lock:
             requests.append({"context": scope.context_id, "body": body})
         messages = body["messages"]
+        packet = next((row["content"].split("WORK_MATERIAL_JSON\n", 1)[1]
+                       for row in messages if isinstance(row.get("content"), str)
+                       and "WORK_MATERIAL_JSON\n" in row["content"]), None)
+        if packet is not None:
+            work = json.loads(packet)
+            answer = "PASS"
+            if work.get("candidate_response") == DRAFT_RESULT:
+                assert EXAMPLE_NOTE in json.dumps(work["posture_experiences"])
+                answer = REVIEW_FIX
+            payload = {"choices": [{"index": 0, "delta": {"content": answer},
+                                   "finish_reason": "stop"}]}
+            return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                content="data: " + json.dumps(payload) + "\n\ndata: [DONE]\n\n")
         current = max(i for i, row in enumerate(messages) if row["role"] == "user")
         task = messages[current]["content"]
         results = [json.loads(row["content"]) for row in messages[current + 1:] if row["role"] == "tool"]
@@ -56,7 +73,12 @@ def factory(scope):
                     {"op": "report", "kind": "finding", "note": NOTE,
                      "artifact_path": "report-delivery.md"})}}]}
             reason = "tool_calls"
-        elif scope.context_id.startswith("work:") and task == DERIVED_TASK and len(results) < 5:
+        elif scope.context_id.startswith("work:") and task == DERIVED_TASK and len(results) < 7:
+            if len(results) == 5 and REVIEW_FIX not in json.dumps(messages):
+                payload = {"choices": [{"index": 0, "delta": {"content": DRAFT_RESULT},
+                                       "finish_reason": "stop"}]}
+                return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                    content="data: " + json.dumps(payload) + "\n\ndata: [DONE]\n\n")
             assert all(row["status"] == "succeeded" for row in results), results
             if len(results) == 0:
                 # A Kernel context carries an ActivityCenter ID, not the
@@ -83,15 +105,25 @@ def factory(scope):
                         assert FILE_TEXT.strip() in results[2]["output"]["content"]
                         name, arguments = "mutate_file", {
                             "path": "derived-delivery.md", "expected_digest": None,
+                            "content": DRAFT_TEXT,
+                        }
+                    elif len(results) == 5:
+                        name, arguments = "mutate_file", {
+                            "path": "derived-delivery.md",
+                            "expected_digest": results[3]["output"]["after_digest"],
                             "content": DERIVED_TEXT,
                         }
                     else:
                         name, arguments = "work", {
-                            "op": "report", "kind": "result", "note": "Completed the derived file.",
+                            "op": "report", "kind": "result",
+                            "note": ("Completed the derived file." if len(results) == 6
+                                     else "Provisional report; not ready for Home."),
                             "artifact_path": "derived-delivery.md",
                             "input_file_work_id": original_work_id,
                             "input_file_artifact_id": selected["artifact_id"],
                         }
+                        if len(results) == 6:
+                            arguments["replace_report_action_id"] = results[4]["output"]["report_action_id"]
             delta = {"tool_calls": [{"index": 0, "id": f"derived-browser-{len(results)}",
                 "type": "function", "function": {
                     "name": name, "arguments": json.dumps(arguments),
@@ -107,7 +139,9 @@ def factory(scope):
             elif scope.context_id.startswith("work:") and task == REPORT_TASK:
                 assert len(results) == 1
             elif scope.context_id.startswith("work:") and task == DERIVED_TASK:
-                assert len(results) == 5
+                assert len(results) == 7
+                assert results[4]["output"]["request_id"] == results[6]["output"]["request_id"]
+                assert results[4]["output"]["report_action_id"] != results[6]["output"]["report_action_id"]
             delta = {"content": RESULT if scope.context_id.startswith("work:")
                      else "The Home conversation continues. [Explicit synthetic HTTP fixture]"}
             reason = "stop"
