@@ -242,7 +242,19 @@ try {
   await revisionPage.getByRole('button', { name: 'Activity', exact: true }).click();
   await revisionPage.getByRole('spinbutton', { name: 'Requests per week', exact: true }).fill('20');
   await revisionPage.getByRole('button', { name: 'Save limit', exact: true }).click();
-  await wait(() => get('/__autonomous/status'), value => value.continuations.some(c => c.id === continuation && c.status === 'settled'), 'same retained continuation settles');
+  try {
+    await wait(() => get('/__autonomous/status'),
+      value => value.continuations.some(c => c.id === continuation && c.status === 'settled'),
+      learned ? 'learned retained continuation settles' : 'isolated retained continuation settles');
+  } catch (error) {
+    // Surface the actual terminal Work state, physical allowance, and
+    // synthetic provider traffic before tearing down the persistent World.
+    const [execution, allowance, trace] = await Promise.allSettled([
+      workView(), get('/api/pulse/weekly-usage'), get('/__autonomous/status'),
+    ]);
+    console.error(JSON.stringify({ learned, continuation, execution, allowance, trace }));
+    throw error;
+  }
   const revisedHome = await wait(() => get('/api/pages/home'), value => value.page.status === 'idle'
     && value.messages.some(m => m.activation === 'work_report' && m.sourcePageId === revisedWork && m.reportedArtifact), 'revised result reaches Home');
   const revisedReport = revisedHome.messages.find(m => m.activation === 'work_report' && m.sourcePageId === revisedWork && m.reportedArtifact);

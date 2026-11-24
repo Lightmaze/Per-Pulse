@@ -38,16 +38,35 @@ if __name__ == "__main__":
         runtime = app.state.pages.runtime
         roots = runtime.causal_ledger.list_events(world_id=runtime.world_id, limit=100)
         resume_inputs = []
+        request_trace = []
         with fixture.lock:
             requests = list(fixture.requests)
         for request in requests:
             messages = json.loads(request["material"])
+            packet = next((item["content"].split("WORK_MATERIAL_JSON\\n", 1)[1]
+                           for item in messages if isinstance(item.get("content"), str)
+                           and "WORK_MATERIAL_JSON\\n" in item["content"]), None)
+            if packet is not None:
+                material = json.loads(packet)
+                request_trace.append({"context": request["context"], "kind": "expert",
+                                      "round": material.get("native_model_round"),
+                                      "review": "candidate_response" in material,
+                                      "experienceCount": len(material.get("posture_experiences", {}).get("episodes", [])),
+                                      "internalContinuation": any(
+                                          "Internal provider continuation, not a user message." in item["content"]
+                                          for item in material["current_work"]["messages"])})
+            else:
+                request_trace.append({"context": request["context"], "kind": "executor",
+                                      "admittedAdvice": any("POSTURE_WORK_CONTRIBUTION" in item.get("content", "")
+                                                            for item in messages if item["role"] == "system"),
+                                      "toolResults": [json.loads(item["content"]) for item in messages
+                                                      if item["role"] == "tool"][-5:]})
             if any(item["role"] == "system" and
                    "Internal provider continuation, not a user message." in item["content"]
                    for item in messages):
                 latest = next((item["content"] for item in reversed(messages) if item["role"] == "user"), None)
                 resume_inputs.append({"context": request["context"], "latestUser": latest})
-        return {"requests": len(requests), "resumeInputs": resume_inputs,
+        return {"requests": len(requests), "resumeInputs": resume_inputs, "requestTrace": request_trace,
                 "continuations": [{"id": event.id, "status": event.status.value}
                                   for event in roots if event.metadata.get("context_pulse") == "provider_continuation"],
                 "departures": [{"id": event.id, "source": event.source.value,

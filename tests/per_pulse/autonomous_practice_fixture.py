@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+import traceback
 
 import httpx
 
@@ -115,15 +116,21 @@ class AutonomousPracticeFixture:
                             if len(results) == 1:
                                 return response(tool="work", arguments={"op": "inspect", "work_id": original["id"],
                                                                        "include_files": True})
-                            # The admitted expert contribution, rather than the fixture task label,
-                            # controls which real source the main executor reads.
-                            choice = ("planning-hypothesis.md" if SOURCE_ADVICE in material
-                                      else "release-evidence.md")
-                            selected, = (row for row in results[1]["output"]["completed_files"]
-                                         if row["path"] == choice)
+                            originals = results[1]["output"]["completed_files"]
                             if len(results) == 2:
+                                # Only the admitted contribution can choose the input at this decision.
+                                admitted = any(row["role"] == "system"
+                                               and "POSTURE_WORK_CONTRIBUTION" in row["content"]
+                                               and SOURCE_ADVICE in row["content"] for row in messages)
+                                choice = "planning-hypothesis.md" if admitted else "release-evidence.md"
+                                selected, = (row for row in originals if row["path"] == choice)
                                 return response(tool="read_file", arguments={"path": selected["path"],
                                                                            "expected_digest": selected["sha256"]})
+                            # Carry the actual read receipt forward, not a newly evaluated preference.
+                            # An advisory message may be omitted from a subsequent request.
+                            read_digest = results[2]["output"]["digest"]
+                            selected, = (row for row in originals if row["sha256"] == read_digest)
+                            assert selected["source_work_id"] == original["id"]
                             if len(results) == 3:
                                 return response(tool="mutate_file", arguments={
                                     "path": "planning-brief.md", "expected_digest": None,
@@ -169,7 +176,16 @@ class AutonomousPracticeFixture:
                 return response(content="I opened a focused practice Work. [Synthetic model fixture]")
             return response(content="The practice result is ready to continue. [Synthetic model fixture]")
 
+        def diagnosed_handler(request):
+            try:
+                return handler(request)
+            except Exception:
+                # Synthetic traffic only. Keep the first actual fixture error in CI
+                # even if the transport adapter converts it to a stopped turn.
+                traceback.print_exc()
+                raise
+
         return ChatHTTPModelAdapter(ChatHTTPConfig(
             "https://fixture.invalid/chat/completions", "synthetic-autonomous-practice",
             credential_env="PER_PULSE_AUTONOMOUS_FIXTURE_KEY", max_retries=0,
-        ), transport=httpx.MockTransport(handler))
+        ), transport=httpx.MockTransport(diagnosed_handler))
