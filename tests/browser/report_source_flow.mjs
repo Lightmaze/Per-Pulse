@@ -178,6 +178,18 @@ try {
   checks.push('native admitted report opens the exact original Work result and returns to the same Home position with both drafts');
   checks.push('ordinary report-shaped text has no source badge; source reads create no references or model requests');
 
+  // Retain the real prior Work response as an operator-selected example.
+  // The synthetic reviewer must actually receive this example from the
+  // existing posture journal before it can request the file correction.
+  const saved = await fetch(base + '/api/pages/' + workId + '/posture/examples', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sourceMessageId: report.sourceResultMessageId, excerpt: resultText,
+      title: 'Final derived file delivery',
+      note: 'Replace provisional derived text with a verified final version before returning it to Home.',
+    }),
+  });
+  assert.equal(saved.status, 201, await saved.text());
   // Follow-on Work is a different context with its own real native actions.
   // The fixture finds the original Work by title, then inspects its receipts,
   // version-reads it, writes a derived file, and attributes that input.
@@ -193,7 +205,10 @@ try {
     return snapshot.reports.some(row => row.workId === derivedWorkId && row.status === 'delivered')
       && (await view(derivedWorkId)).page.status === 'idle';
   }, 'derived Work reads source, writes new file, and reports verified input', 30000);
-  const derivedReport = (await status()).reports.find(row => row.workId === derivedWorkId);
+  const derivedReports = (await status()).reports.filter(row => row.workId === derivedWorkId);
+  assert.equal(derivedReports.length, 1);
+  const derivedReport = derivedReports[0];
+  assert.equal(derivedReport.origin.note, 'Completed the derived file.');
   assert.equal(derivedReport.origin.input_file_source.work_id, workId);
   assert.equal(derivedReport.origin.input_file_source.artifact_id, firstFileAction.id);
   assert.equal(derivedReport.origin.input_file_source.sha256,
@@ -205,7 +220,9 @@ try {
   const outputCard = derivedArticle.locator('[aria-label="File delivered from Work"]');
   await inputCard.waitFor();
   assert.equal(await outputCard.count(), 1);
-  const derivedProjection = (await view('home')).messages.find(row => row.id === derivedReport.eventId);
+  const derivedHome = (await view('home')).messages;
+  assert.ok(!derivedHome.some(row => row.content.includes('Provisional report; not ready for Home.')));
+  const derivedProjection = derivedHome.find(row => row.id === derivedReport.eventId);
   assert.equal(derivedProjection.inputArtifact.pageId, workId);
   assert.equal(derivedProjection.inputArtifact.artifactId, firstFileAction.id);
   assert.equal(derivedProjection.reportedArtifact.path, 'derived-delivery.md');
@@ -230,7 +247,7 @@ try {
   await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await homeComposer.waitFor();
   assert.equal(await homeComposer.inputValue(), homeDraft);
-  checks.push('second real Work finds, inspects, version-reads, derives and reports a source; Home opens both file bytes and returns to the same position');
+  checks.push('a retained Work A example reaches the synthetic delivery reviewer; Work B revises its real file and prepared report, and Home receives only the final source-linked bytes');
 
   if (screenshots) await page.screenshot({ path: join(screenshots, 'report-source-home-desktop.png') });
 
