@@ -89,9 +89,14 @@ def working_view(request, *, byte_budget: int = 24000) -> tuple[dict, dict]:
     messages = [m for m in request.messages
                 if not m["item_id"].startswith((TURN_ADVICE_PREFIX, RESPONSE_REVIEW_PREFIX))]
     selected, used = [], 0
-    # Keep the origin and the most recent evidence; admit all messages that fit.
-    order = ([messages[0]] if messages else []) + list(reversed(messages[1:]))
-    for message in order:
+    # The current user task must survive a burst of large tool results.
+    # Keep it ahead of the historical origin, then fill with recent evidence.
+    latest_user = next((i for i in range(len(messages) - 1, -1, -1)
+                        if messages[i]["role"] == "user"), None)
+    priority = ([latest_user] if latest_user is not None else []) + ([0] if messages else [])
+    order = dict.fromkeys(priority + list(range(len(messages) - 1, -1, -1)))
+    for index in order:
+        message = messages[index]
         record = {"item_id": message["item_id"], "role": message["role"],
                   "content": preview_work_message(message["content"], 5000)}
         size = len(canonical(record).encode())

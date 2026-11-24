@@ -83,3 +83,28 @@ def test_recent_long_task_keeps_its_latest_instruction_under_existing_view_budge
     )
     assert view["content_bound_bytes_per_message"] == 5000
     assert all(len(message["content"].encode()) <= 5000 for message in view["messages"])
+
+
+def test_current_user_task_survives_large_tool_batch_before_the_next_action():
+    """Keep the continuing purpose and recent evidence, not just old history."""
+    task = ("Compare the four prepared release notes. " + "Comparison constraints. " * 300
+            + " Use the verified result rather than a provisional candidate.")
+    original = _request("Prepare comparison notes for a later task.", task)
+    messages = original.messages + tuple(
+        {"role": "tool", "content": f"Evidence {i}: " + "Detailed observations. " * 350,
+         "item_id": f"result-{i}", "transcript_seq": i + 3}
+        for i in range(4)
+    )
+    request = ModelRequest(original.scope, messages, (), 0)
+    for budget in (18000, 14000):
+        view, evidence = working_view(request, byte_budget=budget)
+        assert "user-2" in evidence["visible_items"]
+        current = next(row["content"] for row in view["messages"] if row["item_id"] == "user-2")
+        assert current.startswith("Compare the four prepared release notes.")
+        assert current.endswith("Use the verified result rather than a provisional candidate.")
+        assert "result-3" in evidence["visible_items"]
+        assert view["omitted_messages"] > 0
+        assert evidence["visible_items"] == [
+            message["item_id"] for message in messages
+            if message["item_id"] in evidence["visible_items"]
+        ]
