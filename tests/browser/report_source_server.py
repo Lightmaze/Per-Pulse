@@ -29,6 +29,12 @@ DRAFT_TEXT = "# Provisional deliverable\n\nDraft, not ready for Home.\n"
 DRAFT_RESULT = "The provisional file is ready to report."
 EXAMPLE_NOTE = "Replace provisional derived text with a verified final version before returning it to Home."
 REVIEW_FIX = "Replace the provisional file with the verified final text and replace its prepared Home report."
+COMPARE_PREPARE = "Prepare four comparison notes in this Work for a later decision. [Authored fixture request]"
+COMPARE_PREFIX = "Compare the four prepared notes and deliver a concise release evidence summary."
+COMPARE_END = "Include only the finding that actually supports the decision."
+VERIFIED_LINE = "Verified release evidence: independent installation succeeded."
+COMPARE_ADVICE = "Select the verified release evidence, not the provisional candidates, for the actual comparison file."
+COMPARE_RESULT = "Completed the comparison evidence summary."
 requests = []
 file_actions = {}
 lock = threading.Lock()
@@ -49,6 +55,14 @@ def factory(scope):
             if work.get("candidate_response") == DRAFT_RESULT:
                 assert EXAMPLE_NOTE in json.dumps(work["posture_experiences"])
                 answer = REVIEW_FIX
+            elif work.get("native_model_round") == 1 and "candidate_response" not in work:
+                visible = work["current_work"]["messages"]
+                current_task = next((row["content"] for row in reversed(visible)
+                                     if row["role"] == "user"), "")
+                if current_task.startswith(COMPARE_PREFIX) and current_task.endswith(COMPARE_END):
+                    assert EXAMPLE_NOTE in json.dumps(work["posture_experiences"])
+                    assert any(VERIFIED_LINE in row["content"] for row in visible if row["role"] == "tool")
+                    answer = COMPARE_ADVICE
             payload = {"choices": [{"index": 0, "delta": {"content": answer},
                                    "finish_reason": "stop"}]}
             return httpx.Response(200, headers={"content-type": "text/event-stream"},
@@ -60,7 +74,40 @@ def factory(scope):
             # Synthetic data only: expose the failed native outcome in CI
             # rather than allowing a swallowed fixture assertion to time out.
             print("Derived Work tool failed:", json.dumps(results[-1]), flush=True)
-        if scope.context_id.startswith("work:") and task == WRITE_TASK and not results:
+        comparison = task.startswith(COMPARE_PREFIX) and task.endswith(COMPARE_END)
+        if scope.context_id.startswith("work:") and (task == COMPARE_PREPARE or comparison):
+            assert all(row["status"] == "succeeded" for row in results), results
+            calls = []
+            if not results:
+                for index in range(4):
+                    path = f"comparison-note-{index}.md"
+                    if comparison:
+                        calls.append(("read_file", {"path": path, "max_chars": 8000}))
+                    else:
+                        line = VERIFIED_LINE if index == 3 else f"Provisional candidate {index}: unverified."
+                        calls.append(("mutate_file", {"path": path, "expected_digest": None,
+                            "content": line + "\n" + "Supporting comparison observations. " * 180}))
+            elif comparison and len(results) == 4:
+                # Only the admitted pre-action contribution switches the
+                # synthetic executor from its provisional default.
+                selected = results[3] if COMPARE_ADVICE in json.dumps(messages) else results[0]
+                line = selected["output"]["content"].splitlines()[0]
+                calls.append(("mutate_file", {"path": "comparison-summary.md", "expected_digest": None,
+                    "content": "# Selected comparison\n\n" + line + "\n"}))
+            elif comparison and len(results) == 5:
+                calls.append(("work", {"op": "report", "kind": "result", "note": COMPARE_RESULT,
+                    "artifact_path": "comparison-summary.md"}))
+            else:
+                assert len(results) == (6 if comparison else 4), results
+            if calls:
+                delta = {"tool_calls": [{"index": index, "id": f"comparison-{len(results)}-{index}",
+                    "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}
+                    for index, (name, arguments) in enumerate(calls)]}
+                reason = "tool_calls"
+            else:
+                delta = {"content": COMPARE_RESULT if comparison else "Prepared the four comparison notes."}
+                reason = "stop"
+        elif scope.context_id.startswith("work:") and task == WRITE_TASK and not results:
             delta = {"tool_calls": [{"index": 0, "id": "source-browser-mutate_file",
                 "type": "function", "function": {"name": "mutate_file", "arguments": json.dumps(
                     {"path": "report-delivery.md", "expected_digest": None, "content": FILE_TEXT})}}]}

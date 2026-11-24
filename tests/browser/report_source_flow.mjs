@@ -249,6 +249,44 @@ try {
   assert.equal(await homeComposer.inputValue(), homeDraft);
   checks.push('a retained Work A example reaches the synthetic delivery reviewer; Work B revises its real file and prepared report, and Home receives only the final source-linked bytes');
 
+  // Another ordinary Work uses the retained example before choosing which
+  // real source to use. Four substantial reads displace the latest task in
+  // the old bounded expert projection; no delivery review repairs this result.
+  const comparisonTitle = 'Comparison selection Work';
+  await page.getByRole('button', { name: 'Create a page', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Page name', exact: true }).fill(comparisonTitle);
+  await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
+    .fill('Prepare four comparison notes in this Work for a later decision. [Authored fixture request]');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: comparisonTitle, exact: true }).waitFor();
+  const comparisonId = decodeURIComponent(new URL(page.url()).pathname.split('/').pop());
+  await wait(async () => {
+    const snapshot = await view(comparisonId);
+    return snapshot.page.status === 'idle' &&
+      snapshot.messages.some(row => row.content === 'Prepared the four comparison notes.');
+  }, 'prepare four actual comparison files', 30000);
+  const comparisonComposer = page.getByRole('textbox', { name: 'Message ' + comparisonTitle, exact: true });
+  await comparisonComposer.fill('Compare the four prepared notes and deliver a concise release evidence summary.\n' +
+    'Preserve the distinction between a proposed candidate and observed release evidence. '.repeat(90) +
+    '\nInclude only the finding that actually supports the decision.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => (await status()).reports.some(row => row.workId === comparisonId &&
+    row.status === 'delivered') && (await view(comparisonId)).page.status === 'idle',
+    'choose and deliver a real comparison file before review', 30000);
+  const comparisonReport = (await status()).reports.find(row => row.workId === comparisonId);
+  await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
+  await homeComposer.waitFor();
+  const comparisonArticle = page.locator(`#message-${comparisonReport.eventId}`);
+  await comparisonArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await comparisonArticle.getByText('Verified release evidence: independent installation succeeded.', { exact: true }).waitFor();
+  const comparisonDownloadEvent = page.waitForEvent('download');
+  await comparisonArticle.getByRole('button', { name: 'Download file', exact: true }).click();
+  const comparisonBytes = await readFile(await (await comparisonDownloadEvent).path());
+  assert.equal(comparisonBytes.toString('utf8'),
+    '# Selected comparison\n\nVerified release evidence: independent installation succeeded.\n');
+  await comparisonArticle.getByRole('button', { name: 'Close file preview' }).click();
+  checks.push('current task survives four large native reads; attributed pre-action advice changes source selection and the final Home file without a delivery correction');
+
   if (screenshots) await page.screenshot({ path: join(screenshots, 'report-source-home-desktop.png') });
 
   restarting = true;
@@ -290,6 +328,9 @@ try {
   await outputCard.getByText('Based on the verified source Work file.', { exact: true }).waitFor();
   await outputCard.getByRole('button', { name: 'Close file preview' }).click();
   checks.push('offline SQLite restart preserves distinct verified input and output previews');
+  await comparisonArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await comparisonArticle.getByText('Verified release evidence: independent installation succeeded.', { exact: true }).waitFor();
+  await comparisonArticle.getByRole('button', { name: 'Close file preview' }).click();
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('offline process restart retains exact native provenance and source navigation on a phone viewport');
 
