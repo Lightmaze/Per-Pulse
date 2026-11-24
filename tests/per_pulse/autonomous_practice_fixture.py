@@ -20,10 +20,15 @@ PRACTICE_INSTRUCTION = "AUTONOMOUS_PRACTICE_FIXTURE: create practice.txt and rep
 REVISION_TASK = "Change the purpose: produce a planning brief instead."
 RETAINED_TEXT = "Keep this exact effect.\n"
 PLANNING_TEXT = "# Planning brief\nVerify the assumptions before release.\n"
+SOURCE_TITLE = "Planning source Work"
+SOURCE_TASK = "Prepare the release evidence and the planning hypothesis for later use."
+SOURCE_REPLY = "The release evidence and planning hypothesis are distinct source files. [Synthetic fixture]"
+SOURCE_NOTE = "For a planning brief, choose planning-hypothesis.md, not release-evidence.md. Keep the hypothesis unverified."
+SOURCE_ADVICE = "Read planning-hypothesis.md from Planning source Work instead of release-evidence.md."
 
 
-def response(*, content=None, tool=None, arguments=None):
-    delta = ({"tool_calls": [{"index": 0, "id": "fixture-" + tool + "-" + arguments.get("op", "call"),
+def response(*, content=None, tool=None, arguments=None, call_id=None):
+    delta = ({"tool_calls": [{"index": 0, "id": call_id or "fixture-" + tool + "-" + arguments.get("op", "call"),
               "type": "function", "function": {"name": tool, "arguments": json.dumps(arguments)}}]}
              if tool else {"content": content})
     frames = [
@@ -36,8 +41,9 @@ def response(*, content=None, tool=None, arguments=None):
 
 
 class AutonomousPracticeFixture:
-    def __init__(self, setenv, *, purpose_revision=False):
+    def __init__(self, setenv, *, purpose_revision=False, learned_revision=False):
         self.purpose_revision = purpose_revision
+        self.learned_revision = learned_revision
         setenv("PER_PULSE_AUTONOMOUS_FIXTURE_KEY", "explicit-synthetic-test-credential")
         self.requests = []
         self.lock = threading.Lock()
@@ -50,6 +56,20 @@ class AutonomousPracticeFixture:
             with self.lock:
                 self.requests.append({"context": scope.context_id, "material": material})
             if "WORK_MATERIAL_JSON" in material:
+                if self.learned_revision:
+                    packet = next((row["content"].split("WORK_MATERIAL_JSON\n", 1)[1]
+                                   for row in messages if "WORK_MATERIAL_JSON\n" in row["content"]), None)
+                    if packet is not None:
+                        work = json.loads(packet)
+                        visible = work["current_work"]["messages"]
+                        latest = next((row["content"] for row in reversed(visible)
+                                       if row["role"] == "user"), "")
+                        resumed = any(row["role"] == "system" and
+                                      "Internal provider continuation, not a user message." in row["content"]
+                                      for row in visible)
+                        if (latest == REVISION_TASK and resumed and "candidate_response" not in work
+                                and SOURCE_NOTE in json.dumps(work.get("posture_experiences", {}))):
+                            return response(content=SOURCE_ADVICE)
                 return response(content="PASS")
             if "UNTRUSTED_REVIEW_DATA_JSON" in material:
                 return response(content='{"mode":"none"}')
@@ -71,8 +91,49 @@ class AutonomousPracticeFixture:
             tools = [message for message in current if message["role"] == "tool"]
             if self.purpose_revision:
                 if scope.context_id.startswith("work:"):
+                    if self.learned_revision and orientation == SOURCE_TASK:
+                        if not tools:
+                            return response(tool="mutate_file", call_id="source-release", arguments={
+                                "path": "release-evidence.md", "expected_digest": None,
+                                "content": "Installation is confirmed.\n"})
+                        if len(tools) == 1:
+                            return response(tool="mutate_file", call_id="source-planning", arguments={
+                                "path": "planning-hypothesis.md", "expected_digest": None,
+                                "content": "Verify the assumptions before release.\n"})
+                        assert len(tools) == 2
+                        assert all(json.loads(row["content"])["status"] == "succeeded" for row in tools)
+                        return response(content=SOURCE_REPLY)
                     if continuation_boundary > user_boundary:
                         assert user_boundary >= 0 and messages[user_boundary]["content"] == REVISION_TASK
+                        if self.learned_revision:
+                            results = [json.loads(row["content"]) for row in tools]
+                            assert all(row["status"] == "succeeded" for row in results), results
+                            if not results:
+                                return response(tool="work", arguments={"op": "search", "query": SOURCE_TITLE})
+                            original, = (row for row in results[0]["output"]["works"]
+                                         if row["title"] == SOURCE_TITLE)
+                            if len(results) == 1:
+                                return response(tool="work", arguments={"op": "inspect", "work_id": original["id"],
+                                                                       "include_files": True})
+                            # The admitted expert contribution, rather than the fixture task label,
+                            # controls which real source the main executor reads.
+                            choice = ("planning-hypothesis.md" if SOURCE_ADVICE in material
+                                      else "release-evidence.md")
+                            selected, = (row for row in results[1]["output"]["completed_files"]
+                                         if row["path"] == choice)
+                            if len(results) == 2:
+                                return response(tool="read_file", arguments={"path": selected["path"],
+                                                                           "expected_digest": selected["sha256"]})
+                            if len(results) == 3:
+                                return response(tool="mutate_file", arguments={
+                                    "path": "planning-brief.md", "expected_digest": None,
+                                    "content": "# Planning brief\n" + results[2]["output"]["content"]})
+                            if len(results) == 4:
+                                return response(tool="work", arguments={"op": "report", "kind": "result",
+                                    "note": "The revised planning brief is ready.", "artifact_path": "planning-brief.md",
+                                    "input_file_work_id": original["id"], "input_file_artifact_id": selected["artifact_id"]})
+                            assert len(results) == 5
+                            return response(content="Planning brief completed. [Synthetic fixture]")
                         if not tools:
                             return response(tool="mutate_file", arguments={
                                 "path": "planning-brief.md", "expected_digest": None, "content": PLANNING_TEXT})
