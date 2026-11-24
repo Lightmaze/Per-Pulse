@@ -43,9 +43,9 @@ if __name__ == "__main__":
             requests = list(fixture.requests)
         for request in requests:
             messages = json.loads(request["material"])
-            packet = next((item["content"].split("WORK_MATERIAL_JSON\\n", 1)[1]
+            packet = next((item["content"].split("WORK_MATERIAL_JSON\n", 1)[1]
                            for item in messages if isinstance(item.get("content"), str)
-                           and "WORK_MATERIAL_JSON\\n" in item["content"]), None)
+                           and "WORK_MATERIAL_JSON\n" in item["content"]), None)
             if packet is not None:
                 material = json.loads(packet)
                 request_trace.append({"context": request["context"], "kind": "expert",
