@@ -12,6 +12,13 @@ FIRST_DEPARTURE_ORIENTATION = (
     "The person has enabled this activity without sending a new task."
 )
 
+ROUND_SLICE_CONTINUATION_ORIENTATION = (
+    "The retained background task yielded at its local model-round boundary. "
+    "Its confirmed actions remain in this context's history. "
+    "Continue useful unfinished work when the next activation is admitted. "
+    "Check the current status of any prepared handoffs before relying on delivery."
+)
+
 PROVIDER_CONTINUATION_ORIENTATION = (
     "The previous turn reached the autonomous request limit or pause. "
     "Its confirmed actions remain in this context's history. "

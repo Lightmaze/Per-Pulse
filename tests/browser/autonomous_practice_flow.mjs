@@ -23,10 +23,11 @@ const port = socket.address().port;
 await new Promise(done => socket.close(done));
 const base = `http://127.0.0.1:${port}`;
 let serverLog = '';
-const start = (dataDir = directory, purposeRevision = false) => {
+const start = (dataDir = directory, purposeRevision = false, learnedRevision = false) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/autonomous_practice_server.py'), '--data-dir', dataDir, '--port', String(port),
     ...(purposeRevision ? ['--purpose-revision'] : []),
+    ...(learnedRevision ? ['--learned-revision'] : []),
   ], { cwd: root, env: { ...process.env, PYTHONPATH: join(root, 'src') }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stderr.on('data', data => { serverLog += data; });
   return child;
@@ -157,14 +158,32 @@ try {
   // action, a user revision, an allowance hold and delivery after restart.
   await page.close();
   await stop(server);
-  const revisionDirectory = join(directory, 'purpose-revision');
+  // Keep the isolated baseline and repeat the entire journey with a prior Work's actual experience.
+  for (const learned of [false, true]) {
+  const revisionDirectory = join(directory, learned ? 'learned-revision' : 'purpose-revision');
   await mkdir(revisionDirectory);
-  server = start(revisionDirectory, true);
+  server = start(revisionDirectory, true, learned);
   await wait(() => fetch(base + '/api/health'), value => value.ok, 'purpose-revision server');
   const revisionPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   revisionPage.on('pageerror', error => errors.push(error.message));
   await revisionPage.goto(base);
   await revisionPage.getByRole('button', { name: 'Create a page', exact: true }).click();
+  let sourceWork, sourceMessage;
+  if (learned) {
+    await revisionPage.getByRole('textbox', { name: 'Page name', exact: true }).fill('Planning source Work');
+    await revisionPage.getByRole('textbox', { name: 'Where should we begin?', exact: true })
+      .fill('Prepare the release evidence and the planning hypothesis for later use.');
+    await revisionPage.getByRole('button', { name: 'Create page', exact: true }).click();
+    await revisionPage.getByRole('heading', { name: 'Planning source Work', exact: true }).waitFor();
+    sourceWork = decodeURIComponent(new URL(revisionPage.url()).pathname.split('/').pop());
+    const source = await wait(() => get('/api/pages/' + sourceWork), value => value.page.status === 'idle'
+      && value.artifacts.length === 2 && value.messages.some(m => m.content ===
+        'The release evidence and planning hypothesis are distinct source files. [Synthetic fixture]'), 'actual source Work');
+    sourceMessage = source.messages.find(m => m.role === 'assistant' && m.content ===
+      'The release evidence and planning hypothesis are distinct source files. [Synthetic fixture]');
+    assert.ok(sourceMessage);
+    await revisionPage.getByRole('button', { name: 'Create a page', exact: true }).click();
+  }
   const title = 'Retained work';
   await revisionPage.getByRole('textbox', { name: 'Page name', exact: true }).fill(title);
   await revisionPage.getByRole('textbox', { name: 'Where should we begin?', exact: true }).fill('Initial context.');
@@ -201,9 +220,20 @@ try {
   assert.equal((await get('/api/pulse/weekly-usage')).usage.consumed, 1);
   assert.equal((await stat(originalPath, { bigint: true })).mtimeNs, originalMtime);
   checks.push('a real user revises the same held Work while its confirmed file and pending SELF continuation remain intact');
+  if (learned) {
+    // Retain the original source only after the foreground revision settles.
+    // The next autonomous decision must obtain it from the persisted journal.
+    const saved = await fetch(base + '/api/pages/' + sourceWork + '/posture/examples', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceMessageId: sourceMessage.id, excerpt: sourceMessage.content,
+        title: 'Planning hypothesis selection',
+        note: 'For a planning brief, choose planning-hypothesis.md, not release-evidence.md. Keep the hypothesis unverified.' }),
+    });
+    assert.equal(saved.status, 201, await saved.text());
+  }
 
   await stop(server);
-  server = start(revisionDirectory, true);
+  server = start(revisionDirectory, true, learned);
   await wait(() => fetch(base + '/api/health'), value => value.ok, 'purpose-revision restart');
   await revisionPage.reload();
   await composer.waitFor();
@@ -212,7 +242,30 @@ try {
   await revisionPage.getByRole('button', { name: 'Activity', exact: true }).click();
   await revisionPage.getByRole('spinbutton', { name: 'Requests per week', exact: true }).fill('20');
   await revisionPage.getByRole('button', { name: 'Save limit', exact: true }).click();
-  await wait(() => get('/__autonomous/status'), value => value.continuations.some(c => c.id === continuation && c.status === 'settled'), 'same retained continuation settles');
+  try {
+    const completed = await wait(() => get('/__autonomous/status'),
+      value => learned
+        ? value.continuations.some(c => c.parent === continuation && c.status === 'settled')
+        : value.continuations.some(c => c.id === continuation && c.status === 'settled'),
+      learned ? 'learned retained continuation yields and its child settles' : 'isolated retained continuation settles');
+    if (learned) {
+      // Four main rounds finish search, inspect, read and write. The next
+      // admitted activation must deliver that same file, without rewriting it.
+      assert.equal(completed.continuations.find(c => c.id === continuation).status, 'uncertain');
+      assert.equal(completed.continuations.filter(c => c.parent === continuation).length, 1);
+      const finished = await workView();
+      assert.deepEqual(finished.artifacts.map(a => a.path).sort(), ['planning-brief.md', 'retained.txt']);
+      checks.push('the local main-round boundary yields to one causally linked autonomous activation and preserves the completed file');
+    }
+  } catch (error) {
+    // Surface the actual terminal Work state, physical allowance, and
+    // synthetic provider traffic before tearing down the persistent World.
+    const [execution, allowance, trace] = await Promise.allSettled([
+      workView(), get('/api/pulse/weekly-usage'), get('/__autonomous/status'),
+    ]);
+    console.error(JSON.stringify({ learned, continuation, execution, allowance, trace }));
+    throw error;
+  }
   const revisedHome = await wait(() => get('/api/pages/home'), value => value.page.status === 'idle'
     && value.messages.some(m => m.activation === 'work_report' && m.sourcePageId === revisedWork && m.reportedArtifact), 'revised result reaches Home');
   const revisedReport = revisedHome.messages.find(m => m.activation === 'work_report' && m.sourcePageId === revisedWork && m.reportedArtifact);
@@ -234,12 +287,17 @@ try {
   const reportArticle = revisionPage.locator('#message-' + revisedReport.id);
   assert.equal(revisedReport.reportedArtifact.path, 'planning-brief.md');
   assert.equal(revisedReport.reportedArtifact.pageId, revisedWork);
+  if (learned) {
+    assert.equal(revisedReport.inputArtifact.pageId, sourceWork);
+    assert.equal(revisedReport.inputArtifact.path, 'planning-hypothesis.md');
+  }
+  const outputCard = learned ? reportArticle.locator('[aria-label="File delivered from Work"]') : reportArticle;
   const downloadBrief = async (screenshot) => {
     // The report starts collapsed. Open its version-checked original before
     // downloading, just as the person must do on Home after each restart.
-    await reportArticle.getByRole('button', { name: 'Open verified file', exact: true }).click();
-    await reportArticle.getByText('Verify the assumptions before release.', { exact: true }).waitFor();
-    const button = reportArticle.getByRole('button', { name: 'Download file', exact: true });
+    await outputCard.getByRole('button', { name: 'Open verified file', exact: true }).click();
+    await outputCard.getByText('Verify the assumptions before release.', { exact: true }).waitFor();
+    const button = outputCard.getByRole('button', { name: 'Download file', exact: true });
     await button.waitFor({ state: 'visible' });
     const [download] = await Promise.all([
       revisionPage.waitForEvent('download'), button.click(),
@@ -248,8 +306,8 @@ try {
     const bytes = await readFile(await download.path());
     assert.equal(bytes.toString('utf8'), brief);
     assert.equal(createHash('sha256').update(bytes).digest('hex'), revisedReport.reportedArtifact.sha256);
-    await revisionPage.screenshot({ path: join(output, screenshot) });
-    await reportArticle.getByRole('button', { name: 'Close file preview', exact: true }).click();
+    await revisionPage.screenshot({ path: join(output, learned ? 'learned-' + screenshot : screenshot) });
+    await outputCard.getByRole('button', { name: 'Close file preview', exact: true }).click();
   };
   await downloadBrief('revised-home-delivery.png');
   await reportArticle.locator('.source-line a.session-link').click();
@@ -259,7 +317,7 @@ try {
   checks.push('restoring allowance after restart uses the actual revised user message, produces a different file without replay and delivers exact bytes to Home');
 
   await stop(server);
-  server = start(revisionDirectory, true);
+  server = start(revisionDirectory, true, learned);
   await wait(() => fetch(base + '/api/health'), value => value.ok, 'paused result restart');
   await revisionPage.goto(base);
   await downloadBrief('revised-home-restart.png');
@@ -267,6 +325,24 @@ try {
   assert.equal((await get('/api/pulse/weekly-usage')).usage.consumed, resumedUsage.usage.consumed);
   assert.equal((await stat(originalPath, { bigint: true })).mtimeNs, originalMtime);
   checks.push('paused restart preserves the revised Home deliverable, original effect and allowance without further provider requests');
+  if (learned) {
+    const inputCard = reportArticle.locator('[aria-label="Verified source file read for this result"]');
+    await inputCard.getByRole('button', { name: 'Open verified file' }).click();
+    const [inputDownload] = await Promise.all([
+      revisionPage.waitForEvent('download'),
+      inputCard.getByRole('button', { name: 'Download file' }).click(),
+    ]);
+    const bytes = await readFile(await inputDownload.path());
+    assert.equal(bytes.toString('utf8'), 'Verify the assumptions before release.\n');
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), revisedReport.inputArtifact.sha256);
+    await inputCard.getByRole('link', { name: 'Open original source Work' }).click();
+    await revisionPage.getByRole('heading', { name: 'Planning source Work', exact: true }).waitFor();
+    assert.equal((await get('/__autonomous/status')).requests, 0);
+    checks.push('the persisted prior Work example changes the resumed decision to a version-locked source read, exact new file, and original source return after restart');
+  }
+  await revisionPage.close();
+  await stop(server);
+  }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks, output,
     modelEvidence: 'explicit synthetic HTTP decisions; production World/Kernel/SQLite/files/accounting' }));

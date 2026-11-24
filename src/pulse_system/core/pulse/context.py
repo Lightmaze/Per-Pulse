@@ -307,9 +307,12 @@ class ContextPulseController:
             except _QuotaReached as exc:
                 raise TickError("background_budget_held", "Background allowance is held. Start again when allowance is available.") from exc
 
-    def request_provider_continuation(self, event, turn_id):
+    def request_provider_continuation(self, event, turn_id, *, round_slice=False):
         """Retain safe unfinished work with its confirmed state as SELF input."""
-        from .autonomy import PROVIDER_CONTINUATION_ORIENTATION
+        from .autonomy import PROVIDER_CONTINUATION_ORIENTATION, ROUND_SLICE_CONTINUATION_ORIENTATION
+        if round_slice and event.metadata.get("context_pulse") != "provider_continuation":
+            return None
+        orientation = ROUND_SLICE_CONTINUATION_ORIENTATION if round_slice else PROVIDER_CONTINUATION_ORIENTATION
         if not self.config.enabled or event.world_id != self.world_id or event.engram_id != self.subject():
             return None
         with self.storage._lock:
@@ -317,7 +320,7 @@ class ContextPulseController:
                 return self.ledger.enqueue(
                     world_id=self.world_id, flow=None, domain=CausalEventDomain.PULSE,
                     kind=CausalEventKind.SPONTANEOUS, source=CausalEventSource.SELF,
-                    content=PROVIDER_CONTINUATION_ORIENTATION, parent_event_id=event.id,
+                    content=orientation, parent_event_id=event.id,
                     engram_id=self.subject(), center_id=event.center_id,
                     metadata={"context_pulse": "provider_continuation", "source_turn_id": turn_id,
                               "depth": event.metadata.get("depth", 0)},

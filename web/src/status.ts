@@ -33,6 +33,7 @@ export function failureReason(code: string | null | undefined): { key: MessageKe
   if (code === 'provider_content_filtered') return { key: 'status.failureFiltered', text: "The model service's content filter stopped this reply." };
   if (code === 'provider_stream_too_long') return { key: 'status.failureStreamTooLong', text: 'The reply kept streaming past the time limit (P_PULSE_CHAT_MAX_SECONDS).' };
   if (code === 'provider_generation_incomplete') return { key: 'status.failureIncomplete', text: 'The model service ended the reply early. Send again.' };
+  if (code === 'autonomous_round_slice_complete') return { key: 'status.failureRoundYield', text: 'Background work reached a local step boundary. Completed actions are saved. Activity can admit the next continuation, or you can send a message to continue now.' };
   if (code === 'model_loop_limit') return { key: 'status.failureStepLimit', text: 'This turn reached its step limit. Send a message to continue.' };
   if (code === 'world_turn_timeout') return { key: 'status.failureTimeout', text: 'This turn ran out of time.' };
   if (code === 'autonomous_weekly_requests_exhausted' || code === 'autonomous_weekly_requests_paused') {
