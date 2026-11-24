@@ -39,19 +39,15 @@ _HAN_SPAN = re.compile(r"[\u3400-\u9fff]{2,}")
 _HAN_FUNCTION_WORD = re.compile(r"[的了把将请给与和并从为]")
 
 
-def _task_terms(request) -> tuple[str, ...]:
-    """Bounded literal cues from the latest user task, never tool/file text.
+def _literal_task_terms(text: str) -> tuple[str, ...]:
+    """Extract literal cues from a bounded user-authored passage.
 
     Chinese requests are often unspaced: a whole sentence is too specific
     to find in a saved lesson. Preserve short phrases and sample the opening,
     middle and end of longer Han spans. This offers retrieval candidates,
     not a language classifier or a judgment that any lesson applies.
     """
-    latest = next((row.get("content", "") for row in reversed(request.messages)
-                   if row.get("role") == "user"), "")
-    if not isinstance(latest, str):
-        return ()
-    text = latest[:6000].casefold()
+    text = text.casefold()
     words = re.findall(r"[A-Za-z][A-Za-z0-9]{5,31}", text)
     english = sorted({word for word in words if word not in _TASK_COMMON},
                      key=lambda word: (-len(word), word))
@@ -75,6 +71,39 @@ def _task_terms(request) -> tuple[str, ...]:
     first = chinese[:3]
     latin = english[:6 - len(first)]
     return tuple((first + latin + chinese[3:])[:6])
+
+
+def _task_terms(request) -> tuple[str, ...]:
+    """Offer cues for the current purpose, with limited continuity for revisions.
+
+    A long user message can contain source material followed by the actual
+    request. Keep the closing passage in the existing 6,000-character budget
+    and reserve cue slots for it. A terse follow-up can refer to the previous
+    user task; borrow a few missing cues from that task only. These are
+    retrieval candidates, not a resolution of intent or authority.
+    """
+    tasks = (row.get("content", "") for row in reversed(request.messages)
+             if row.get("role") == "user")
+    latest = next(tasks, "")
+    if not isinstance(latest, str):
+        return ()
+
+    def bounded_terms(text):
+        if len(text) <= 6000:
+            return _literal_task_terms(text)
+        head = _literal_task_terms(text[:4000])
+        tail = _literal_task_terms(text[-2000:])
+        # Keep passages separate; do not create words at the omitted seam.
+        return tuple(dict.fromkeys(tail[:3] + head[:3] + tail[3:] + head[3:]))[:6]
+
+    current = bounded_terms(latest)
+    if len(latest) <= 120 and len(current) < 3:
+        previous = next(tasks, "")
+        if isinstance(previous, str):
+            # The new request gets the first slots; previous task cues can
+            # recover its object without making historical text a directive.
+            return tuple(dict.fromkeys(current + bounded_terms(previous)[:3]))[:6]
+    return current
 
 
 def _fork_scope(source, identity):
