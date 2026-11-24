@@ -38,8 +38,8 @@ COMPARE_RESULT = "Completed the comparison evidence summary."
 REVISION_PREFIX = "Reconsider the comparison catalogue and earlier release summary."
 REVISION_END = "Instead, select the interoperability hypothesis for planning, not proof."
 REVISION_NOTE = "For interoperability planning, retain a hypothesis explicitly as a proposal, not as established evidence."
-REVISION_ADVICE = "Use candidate 1 as an interoperability hypothesis, not an established release result."
-REVISION_LINE = "Provisional candidate 1: interoperability proposal for testing."
+REVISION_ADVICE = "Use candidate 2 as an interoperability hypothesis, not an established release result."
+REVISION_LINE = "Provisional candidate 2: interoperability proposal for testing."
 REVISION_RESULT = "Completed the revised planning file."
 requests = []
 file_actions = {}
@@ -96,7 +96,7 @@ def factory(scope):
                     if reading:
                         calls.append(("read_file", {"path": path, "max_chars": 8000}))
                     else:
-                        line = (VERIFIED_LINE if index == 3 else REVISION_LINE if index == 1
+                        line = (VERIFIED_LINE if index == 3 else REVISION_LINE if index == 2
                                 else f"Provisional candidate {index}: unverified.")
                         calls.append(("mutate_file", {"path": path, "expected_digest": None,
                             "content": line + "\n" + "Supporting comparison observations. " * 180}))
@@ -104,7 +104,7 @@ def factory(scope):
                 # Only the admitted pre-action contribution changes the
                 # synthetic executor's actual source choice.
                 if revision:
-                    selected = results[1] if REVISION_ADVICE in json.dumps(messages) else results[0]
+                    selected = results[2] if REVISION_ADVICE in json.dumps(messages) else results[0]
                     path, heading = "comparison-plan.md", "# Planning hypothesis"
                 else:
                     selected = results[3] if COMPARE_ADVICE in json.dumps(messages) else results[0]
