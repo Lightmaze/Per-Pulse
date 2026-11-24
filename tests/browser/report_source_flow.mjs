@@ -321,12 +321,12 @@ try {
   await homeComposer.waitFor();
   const revisionArticle = page.locator(`#message-${revisionReport.eventId}`);
   await revisionArticle.getByRole('button', { name: 'Open verified file' }).click();
-  await revisionArticle.getByText('Provisional candidate 1: interoperability proposal for testing.', { exact: true }).waitFor();
+  await revisionArticle.getByText('Provisional candidate 2: interoperability proposal for testing.', { exact: true }).waitFor();
   const revisionDownload = page.waitForEvent('download');
   await revisionArticle.getByRole('button', { name: 'Download file', exact: true }).click();
   const revisionBytes = await readFile(await (await revisionDownload).path());
   assert.equal(revisionBytes.toString('utf8'),
-    '# Planning hypothesis\n\nProvisional candidate 1: interoperability proposal for testing.\n');
+    '# Planning hypothesis\n\nProvisional candidate 2: interoperability proposal for testing.\n');
   await revisionArticle.getByRole('button', { name: 'Close file preview' }).click();
   checks.push('a revised purpose at the end of a long user message retrieves an older planning example, changes source selection, and delivers a separate real file');
 
@@ -375,7 +375,7 @@ try {
   await comparisonArticle.getByText('Verified release evidence: independent installation succeeded.', { exact: true }).waitFor();
   await comparisonArticle.getByRole('button', { name: 'Close file preview' }).click();
   await revisionArticle.getByRole('button', { name: 'Open verified file' }).click();
-  await revisionArticle.getByText('Provisional candidate 1: interoperability proposal for testing.', { exact: true }).waitFor();
+  await revisionArticle.getByText('Provisional candidate 2: interoperability proposal for testing.', { exact: true }).waitFor();
   await revisionArticle.getByRole('button', { name: 'Close file preview' }).click();
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('offline process restart retains exact native provenance and source navigation on a phone viewport');
