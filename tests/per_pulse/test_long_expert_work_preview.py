@@ -108,3 +108,42 @@ def test_current_user_task_survives_large_tool_batch_before_the_next_action():
             message["item_id"] for message in messages
             if message["item_id"] in evidence["visible_items"]
         ]
+
+
+def test_experience_cues_reserve_space_for_the_revised_purpose():
+    from pulse_system.service.expert_computation import _task_terms
+
+    task = ("Review the comparison catalogue. " + "comparison catalogue " * 360
+            + " Instead select an interoperability hypothesis for planning.")
+    terms = _task_terms(_request(task))
+    assert "interoperability" in terms
+    assert "hypothesis" in terms
+    assert "comparison" in terms
+    assert len(terms) <= 6
+    assert len(set(terms)) == len(terms)
+
+
+def test_terse_revision_borrows_only_previous_user_task_objects():
+    from pulse_system.service.expert_computation import _task_terms
+
+    original = _request("Prepare the microscopy calibration report.", "Use the alternative.")
+    messages = original.messages[:1] + (
+        {"role": "tool", "content": "unauthorized fabricated observation",
+         "item_id": "tool-1", "transcript_seq": 2},
+        {**original.messages[1], "transcript_seq": 3},
+    )
+    terms = _task_terms(ModelRequest(original.scope, messages, (), 0))
+    assert terms[0] == "alternative"
+    assert "microscopy" in terms
+    assert "calibration" in terms
+    assert "unauthorized" not in terms
+    assert "fabricated" not in terms
+    assert len(terms) <= 6
+
+
+def test_long_chinese_revision_keeps_late_task_objects():
+    from pulse_system.service.expert_computation import _task_terms
+
+    terms = _task_terms(_request("背景材料。" * 1800 + "请改为互操作性验证和原型测试。"))
+    assert "互操作" in "".join(terms)
+    assert len(terms) <= 6

@@ -35,6 +35,12 @@ COMPARE_END = "Include only the finding that actually supports the decision."
 VERIFIED_LINE = "Verified release evidence: independent installation succeeded."
 COMPARE_ADVICE = "Select the verified release evidence, not the provisional candidates, for the actual comparison file."
 COMPARE_RESULT = "Completed the comparison evidence summary."
+REVISION_PREFIX = "Reconsider the comparison catalogue and earlier release summary."
+REVISION_END = "Instead, select the interoperability hypothesis for planning, not proof."
+REVISION_NOTE = "For interoperability planning, retain a hypothesis explicitly as a proposal, not as established evidence."
+REVISION_ADVICE = "Use candidate 2 as an interoperability hypothesis, not an established release result."
+REVISION_LINE = "Provisional candidate 2: interoperability proposal for testing."
+REVISION_RESULT = "Completed the revised planning file."
 requests = []
 file_actions = {}
 lock = threading.Lock()
@@ -63,6 +69,10 @@ def factory(scope):
                     assert EXAMPLE_NOTE in json.dumps(work["posture_experiences"])
                     assert any(VERIFIED_LINE in row["content"] for row in visible if row["role"] == "tool")
                     answer = COMPARE_ADVICE
+                elif current_task.startswith(REVISION_PREFIX) and current_task.endswith(REVISION_END):
+                    if REVISION_NOTE in json.dumps(work["posture_experiences"]):
+                        assert any(REVISION_LINE in row["content"] for row in visible if row["role"] == "tool")
+                        answer = REVISION_ADVICE
             payload = {"choices": [{"index": 0, "delta": {"content": answer},
                                    "finish_reason": "stop"}]}
             return httpx.Response(200, headers={"content-type": "text/event-stream"},
@@ -75,37 +85,47 @@ def factory(scope):
             # rather than allowing a swallowed fixture assertion to time out.
             print("Derived Work tool failed:", json.dumps(results[-1]), flush=True)
         comparison = task.startswith(COMPARE_PREFIX) and task.endswith(COMPARE_END)
-        if scope.context_id.startswith("work:") and (task == COMPARE_PREPARE or comparison):
+        revision = task.startswith(REVISION_PREFIX) and task.endswith(REVISION_END)
+        reading = comparison or revision
+        if scope.context_id.startswith("work:") and (task == COMPARE_PREPARE or reading):
             assert all(row["status"] == "succeeded" for row in results), results
             calls = []
             if not results:
                 for index in range(4):
                     path = f"comparison-note-{index}.md"
-                    if comparison:
+                    if reading:
                         calls.append(("read_file", {"path": path, "max_chars": 8000}))
                     else:
-                        line = VERIFIED_LINE if index == 3 else f"Provisional candidate {index}: unverified."
+                        line = (VERIFIED_LINE if index == 3 else REVISION_LINE if index == 2
+                                else f"Provisional candidate {index}: unverified.")
                         calls.append(("mutate_file", {"path": path, "expected_digest": None,
                             "content": line + "\n" + "Supporting comparison observations. " * 180}))
-            elif comparison and len(results) == 4:
-                # Only the admitted pre-action contribution switches the
-                # synthetic executor from its provisional default.
-                selected = results[3] if COMPARE_ADVICE in json.dumps(messages) else results[0]
+            elif reading and len(results) == 4:
+                # Only the admitted pre-action contribution changes the
+                # synthetic executor's actual source choice.
+                if revision:
+                    selected = results[2] if REVISION_ADVICE in json.dumps(messages) else results[0]
+                    path, heading = "comparison-plan.md", "# Planning hypothesis"
+                else:
+                    selected = results[3] if COMPARE_ADVICE in json.dumps(messages) else results[0]
+                    path, heading = "comparison-summary.md", "# Selected comparison"
                 line = selected["output"]["content"].splitlines()[0]
-                calls.append(("mutate_file", {"path": "comparison-summary.md", "expected_digest": None,
-                    "content": "# Selected comparison\n\n" + line + "\n"}))
-            elif comparison and len(results) == 5:
-                calls.append(("work", {"op": "report", "kind": "result", "note": COMPARE_RESULT,
-                    "artifact_path": "comparison-summary.md"}))
+                calls.append(("mutate_file", {"path": path, "expected_digest": None,
+                    "content": heading + "\n\n" + line + "\n"}))
+            elif reading and len(results) == 5:
+                calls.append(("work", {"op": "report", "kind": "result",
+                    "note": REVISION_RESULT if revision else COMPARE_RESULT,
+                    "artifact_path": "comparison-plan.md" if revision else "comparison-summary.md"}))
             else:
-                assert len(results) == (6 if comparison else 4), results
+                assert len(results) == (6 if reading else 4), results
             if calls:
                 delta = {"tool_calls": [{"index": index, "id": f"comparison-{len(results)}-{index}",
                     "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}
                     for index, (name, arguments) in enumerate(calls)]}
                 reason = "tool_calls"
             else:
-                delta = {"content": COMPARE_RESULT if comparison else "Prepared the four comparison notes."}
+                delta = {"content": (REVISION_RESULT if revision else COMPARE_RESULT if comparison
+                                     else "Prepared the four comparison notes.")}
                 reason = "stop"
         elif scope.context_id.startswith("work:") and task == WRITE_TASK and not results:
             delta = {"tool_calls": [{"index": 0, "id": "source-browser-mutate_file",
