@@ -92,15 +92,32 @@ class AutonomousPracticeFixture:
             current = messages[max(0, boundary):]
             orientation = messages[boundary]["content"] if boundary >= 0 else ""
             tools = [message for message in current if message["role"] == "tool"]
-            # The first departure and the first Work can each reach the
-            # fourth round without a budget interruption. Put the actual
-            # handoff at that boundary, not just another read-only tool.
+            # The initial SELF departure has a four-round local allowance.
+            # A native reflected Work is the ordinary longer-turn control.
+            # Put the actual handoff on round four in both paths.
             if (self.long_boundary == "create" and not scope.context_id.startswith("work:")
                     and (FIRST_DEPARTURE_ORIENTATION in orientation or
                          (continuation_boundary > user_boundary
                           and FIRST_DEPARTURE_ORIENTATION in material))):
                 results = [json.loads(row["content"]) for row in messages if row["role"] == "tool"]
                 assert all(row["status"] == "succeeded" for row in results), results
+                if continuation_boundary > user_boundary:
+                    assert len(results) >= 4
+                    prepared = results[3]["output"]
+                    assert prepared["status"] == "prepared"
+                    if not tools:
+                        return response(tool="work", call_id="boundary-check", arguments={"op": "list"})
+                    checked, = (row for row in json.loads(tools[0]["content"])["output"]["recent_requests"]
+                                if row["request_id"] == prepared["request_id"])
+                    assert checked["status"] == "cancelled" and checked["event_id"] is None
+                    assert checked["error_code"] == "source_did_not_settle"
+                    if len(tools) == 1:
+                        return response(tool="work", call_id="boundary-prepare-again", arguments={
+                            "op": "create", "title": PRACTICE_TITLE, "instruction": PRACTICE_INSTRUCTION})
+                    assert len(tools) == 2
+                    new = json.loads(tools[1]["content"])["output"]
+                    assert new["status"] == "prepared" and new["request_id"] != prepared["request_id"]
+                    return response(content="I prepared the practice Work after checking the prior delivery. [Synthetic fixture]")
                 if len(results) == 0:
                     return response(tool="work", arguments={"op": "list"})
                 if len(results) == 1:

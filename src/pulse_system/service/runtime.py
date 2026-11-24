@@ -173,6 +173,7 @@ from pulse_system.core.habitat import ManagedHabitat
 from pulse_system.core.pulse import PulseEngine, PulseEngineConfig, PulseEvent
 from pulse_system.core.pulse.engine import SpontaneousDispatch
 from pulse_system.core.pulse.context import ContextPulseConfig, ContextPulseController
+from pulse_system.core.pulse.autonomy import permits_round_slice
 from pulse_system.core.runtime import (
     CenterSchedulingConfig,
     DurableCenterScheduler,
@@ -8445,6 +8446,10 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 if not safe or event is None:
                     remove = True
                 else:
+                    # Resolve known-undelivered Work preparations before the
+                    # next model can inspect their status. Delivery still
+                    # requires a successful originating turn.
+                    self._native_work.cancel_unsettled_source(turn)
                     remove = self._context_pulse.request_provider_continuation(
                         event, turn_id, round_slice=turn.error_code == "autonomous_round_slice_complete",
                     ) is not None
@@ -8570,7 +8575,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                                              "autonomous_round_slice_complete"}
                 or parent is None or parent.id != source.event_id
                 or (source.error_code == "autonomous_round_slice_complete"
-                    and parent.metadata.get("context_pulse") != "provider_continuation")
+                    and not permits_round_slice(parent))
                 or parent.world_id != self._world_id or parent.engram_id != engram_id
                 or parent.center_id != event.center_id
                 or event.idempotency_key != f"provider-continuation-v1:{self._world_id}:{source_id}"):
@@ -8584,7 +8589,9 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             "Reassess the current purpose using the latest actual user messages and available "
             "evidence. If the person revised the task while waiting, follow the revised purpose. "
             "Continue useful unfinished work; do not repeat confirmed effects or replay uncertain "
-            "actions. Check any prepared handoff before relying on delivery. "
+            "actions. Use work.list to check prepared handoffs before relying on delivery. "
+            "If a handoff was cancelled because its source did not settle, it was not delivered; "
+            "prepare it anew only if it still serves the current purpose. "
             "The resumed allowance grants no additional tool permission."
         )
 
@@ -8607,8 +8614,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                     and event.source is CausalEventSource.PROPAGATION)
                 or (event.kind is CausalEventKind.PULSE and event.source is CausalEventSource.SELF)):
             limit = config.max_background_main_model_rounds_per_turn
-            if event.metadata.get("context_pulse") == "provider_continuation":
-                # A retained autonomous task can require several bounded local
+            if permits_round_slice(event):
+                # An explicitly started practice can require several bounded local
                 # activations. Yield before dispatching another model request;
                 # the existing continuation path checks all effect receipts
                 # and re-enters through the ordinary Pulse/allowance gates.

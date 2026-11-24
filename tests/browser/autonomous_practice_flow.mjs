@@ -376,6 +376,16 @@ try {
     assert.equal((await get('/api/bootstrap')).pages.filter(p => p.title === 'A small practice').length, 1);
     const trace = await get('/__autonomous/status');
     assert.equal(trace.departures.length, 1);
+    if (boundary === 'create') {
+      assert.equal(trace.continuations.length, 1);
+      assert.equal(trace.continuations[0].parent, trace.departures[0].id);
+      assert.equal(trace.continuations[0].status, 'settled');
+      assert.ok(trace.requestTrace.some(request => request.toolResults?.some(result =>
+        result.output?.recent_requests?.some(item => item.status === 'cancelled' &&
+          item.error_code === 'source_did_not_settle' && item.event_id === null))));
+    } else {
+      assert.equal(trace.continuations.length, 0);
+    }
     assert.deepEqual(trace.userRoots, []);
     const usage = await wait(() => get('/api/pulse/weekly-usage'), value =>
       value.usage.states.completed === trace.requests && value.usage.consumed === trace.requests,

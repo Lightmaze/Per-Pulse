@@ -12,6 +12,15 @@ FIRST_DEPARTURE_ORIENTATION = (
     "The person has enabled this activity without sending a new task."
 )
 
+def permits_round_slice(event):
+    """Only the explicitly started practice and its retained activations yield."""
+    from pulse_system.core.types import CausalEventKind, CausalEventSource
+
+    return (event.kind is CausalEventKind.SPONTANEOUS
+            and event.source is CausalEventSource.SELF
+            and event.metadata.get("context_pulse") in {"first_departure", "provider_continuation"})
+
+
 ROUND_SLICE_CONTINUATION_ORIENTATION = (
     "The retained background task yielded at its local model-round boundary. "
     "Its confirmed actions remain in this context's history. "

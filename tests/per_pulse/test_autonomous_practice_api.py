@@ -132,7 +132,7 @@ def test_a_single_request_allowance_can_expand_and_finish_the_original_practice(
         assert [event.id for event in departures] == [departure]
 
 @pytest.mark.parametrize("boundary", ["create", "report"])
-def test_first_autonomous_work_delivers_a_handoff_at_the_local_round_boundary(tmp_path, monkeypatch, boundary):
+def test_first_autonomous_work_delivers_a_handoff_after_four_tool_rounds(tmp_path, monkeypatch, boundary):
     fixture = AutonomousPracticeFixture(monkeypatch.setenv, long_boundary=boundary)
     settings = PulseSettings(enabled=True, spontaneous_rate=0, refractory_seconds=0)
     def app():
@@ -175,6 +175,19 @@ def test_first_autonomous_work_delivers_a_handoff_at_the_local_round_boundary(tm
         assert 0 < usage["consumed"] < 30
         events = runtime.causal_ledger.list_events(world_id=runtime.world_id, limit=100)
         assert [event.id for event in events if event.metadata.get("context_pulse") == "first_departure"] == [departure]
+        continuations = [event for event in events if event.metadata.get("context_pulse") == "provider_continuation"]
+        requests = runtime.storage.native_work_requests(pending=False, limit=64)
+        creates = [row for row in requests if row["arguments"]["op"] == "create"]
+        delivered, = [row for row in creates if row["status"] == "delivered"]
+        assert delivered["work_id"] == work
+        if boundary == "create":
+            child, = continuations
+            assert child.parent_event_id == departure and child.status.value == "settled"
+            cancelled, = [row for row in creates if row["status"] == "cancelled"]
+            assert cancelled["event_id"] is None and cancelled["error_code"] == "source_did_not_settle"
+            assert len(creates) == 2
+        else:
+            assert not continuations and len(creates) == 1
         assert not [event for event in events if event.source.value == "user" and event.parent_event_id is None]
         before = len(fixture.requests)
         assert client.patch("/api/pulse/weekly-usage", json={"enabled": False}).status_code == 200
