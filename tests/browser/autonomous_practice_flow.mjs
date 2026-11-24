@@ -3,7 +3,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -22,9 +22,10 @@ const port = socket.address().port;
 await new Promise(done => socket.close(done));
 const base = `http://127.0.0.1:${port}`;
 let serverLog = '';
-const start = () => {
+const start = (dataDir = directory, purposeRevision = false) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
-    join(root, 'tests/browser/autonomous_practice_server.py'), '--data-dir', directory, '--port', String(port),
+    join(root, 'tests/browser/autonomous_practice_server.py'), '--data-dir', dataDir, '--port', String(port),
+    ...(purposeRevision ? ['--purpose-revision'] : []),
   ], { cwd: root, env: { ...process.env, PYTHONPATH: join(root, 'src') }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stderr.on('data', data => { serverLog += data; });
   return child;
@@ -151,6 +152,108 @@ try {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await page.screenshot({ path: join(output, 'autonomous-file-mobile.png') });
   checks.push('SQLite restart preserves pause, usage, Work draft, SELF identity and the real file with no replay on mobile');
+  // A second isolated journey follows one Work through a retained SELF
+  // action, a user revision, an allowance hold and delivery after restart.
+  await page.close();
+  await stop(server);
+  const revisionDirectory = join(directory, 'purpose-revision');
+  await mkdir(revisionDirectory);
+  server = start(revisionDirectory, true);
+  await wait(() => fetch(base + '/api/health'), value => value.ok, 'purpose-revision server');
+  const revisionPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  revisionPage.on('pageerror', error => errors.push(error.message));
+  await revisionPage.goto(base);
+  await revisionPage.getByRole('button', { name: 'Create a page', exact: true }).click();
+  const title = 'Retained work';
+  await revisionPage.getByRole('textbox', { name: 'Page name', exact: true }).fill(title);
+  await revisionPage.getByRole('textbox', { name: 'Where should we begin?', exact: true }).fill('Initial context.');
+  await revisionPage.getByRole('button', { name: 'Create page', exact: true }).click();
+  await revisionPage.getByRole('heading', { name: title, exact: true }).waitFor();
+  const revisedWork = decodeURIComponent(new URL(revisionPage.url()).pathname.split('/').pop());
+  const workView = () => get('/api/pages/' + revisedWork);
+  await wait(workView, value => value.page.status === 'idle' && value.messages.some(m => m.role === 'assistant'), 'initial Work');
+  // Seed the same host-owned SELF activation as the native regression.
+  // Actual work and subsequent user interaction use production paths.
+  const world = await get('/api/pulse/observation');
+  const configured = await fetch(base + '/api/pulse/weekly-usage', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json',
+      'X-Per-Pulse-World': world.workspaceId, 'X-Per-Pulse-Service-Instance': world.serviceInstanceId },
+    body: JSON.stringify({ enabled: true, weeklyLimit: 1 }),
+  });
+  assert.equal(configured.status, 200, await configured.text());
+  const queued = await fetch(base + '/__autonomous/reentry/' + revisedWork, { method: 'POST' });
+  assert.equal(queued.status, 200, await queued.text());
+  const held = await wait(workView, value => value.execution.providerWaiting && value.artifacts.length === 1, 'retained file and allowance hold');
+  assert.equal(held.execution.recoveryRequired, false);
+  const originalPath = join(revisionDirectory, 'workspace', 'retained.txt');
+  assert.equal(await readFile(originalPath, 'utf8'), 'Keep this exact effect.\n');
+  const originalMtime = (await stat(originalPath, { bigint: true })).mtimeNs;
+  const receipt = await wait(() => get('/__autonomous/status'), value => value.continuations.some(c => c.status === 'queued'), 'durable continuation');
+  const continuation = receipt.continuations.find(c => c.status === 'queued').id;
+  const revisionTask = 'Change the purpose: produce a planning brief instead.';
+  const composer = revisionPage.getByRole('textbox', { name: 'Message ' + title, exact: true });
+  await composer.fill(revisionTask);
+  await revisionPage.getByRole('button', { name: 'Send message', exact: true }).click();
+  await revisionPage.getByText('Revision accepted. [Synthetic fixture]', { exact: true }).waitFor();
+  await wait(workView, value => value.page.status !== 'working' && value.messages.some(m => m.role === 'user' && m.content === revisionTask), 'actual user revision');
+  assert.equal((await get('/__autonomous/status')).continuations.find(c => c.id === continuation).status, 'queued');
+  assert.equal((await get('/api/pulse/weekly-usage')).usage.consumed, 1);
+  assert.equal((await stat(originalPath, { bigint: true })).mtimeNs, originalMtime);
+  checks.push('a real user revises the same held Work while its confirmed file and pending SELF continuation remain intact');
+
+  await stop(server);
+  server = start(revisionDirectory, true);
+  await wait(() => fetch(base + '/api/health'), value => value.ok, 'purpose-revision restart');
+  await revisionPage.reload();
+  await composer.waitFor();
+  assert.equal((await get('/__autonomous/status')).requests, 0);
+  assert.equal((await get('/__autonomous/status')).continuations.find(c => c.id === continuation).status, 'queued');
+  await revisionPage.getByRole('button', { name: 'Activity', exact: true }).click();
+  await revisionPage.getByRole('spinbutton', { name: 'Requests per week', exact: true }).fill('20');
+  await revisionPage.getByRole('button', { name: 'Save limit', exact: true }).click();
+  await wait(() => get('/__autonomous/status'), value => value.continuations.some(c => c.id === continuation && c.status === 'settled'), 'same retained continuation settles');
+  const revisedHome = await wait(() => get('/api/pages/home'), value => value.page.status === 'idle'
+    && value.messages.some(m => m.activation === 'work_report' && m.sourcePageId === revisedWork && m.reportedArtifact), 'revised result reaches Home');
+  const revisedReport = revisedHome.messages.find(m => m.activation === 'work_report' && m.sourcePageId === revisedWork && m.reportedArtifact);
+  assert.ok(revisedReport.sourceMessageId);
+  const inputs = (await get('/__autonomous/status')).resumeInputs.filter(r => r.context.startsWith('work:'));
+  assert.ok(inputs.length > 0 && inputs.every(r => r.latestUser === revisionTask));
+  assert.equal(await readFile(originalPath, 'utf8'), 'Keep this exact effect.\n');
+  assert.equal((await stat(originalPath, { bigint: true })).mtimeNs, originalMtime);
+  const brief = '# Planning brief\nVerify the assumptions before release.\n';
+  assert.equal(await readFile(join(revisionDirectory, 'workspace', 'planning-brief.md'), 'utf8'), brief);
+  const resumedUsage = await wait(() => get('/api/pulse/weekly-usage'), value =>
+    value.usage.consumed === value.usage.states.completed && value.usage.consumed > 1, 'settled allowance accounting');
+  assert.ok(resumedUsage.usage.consumed <= 20);
+  assert.equal(resumedUsage.usage.consumed, 1 + (await get('/__autonomous/status')).requests);
+  await revisionPage.getByRole('button', { name: 'Pause autonomous practice', exact: true }).click();
+  await revisionPage.getByText('Autonomous model requests are disabled.', { exact: true }).waitFor();
+  await revisionPage.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await revisionPage.goto(base);
+  const reportArticle = revisionPage.locator('#message-' + revisedReport.id);
+  const downloadBrief = async () => {
+    const downloadEvent = revisionPage.waitForEvent('download');
+    await reportArticle.getByRole('button', { name: 'Download file', exact: true }).click();
+    const download = await downloadEvent;
+    assert.equal(download.suggestedFilename(), 'planning-brief.md');
+    assert.equal(await readFile(await download.path(), 'utf8'), brief);
+  };
+  await downloadBrief();
+  await reportArticle.locator('.source-line a.session-link').click();
+  await revisionPage.getByRole('heading', { name: title, exact: true }).waitFor();
+  await revisionPage.getByRole('button', { name: /planning-brief\.md/ }).click();
+  await revisionPage.getByText('Verify the assumptions before release.', { exact: true }).waitFor();
+  checks.push('restoring allowance after restart uses the actual revised user message, produces a different file without replay and delivers exact bytes to Home');
+
+  await stop(server);
+  server = start(revisionDirectory, true);
+  await wait(() => fetch(base + '/api/health'), value => value.ok, 'paused result restart');
+  await revisionPage.goto(base);
+  await downloadBrief();
+  assert.equal((await get('/__autonomous/status')).requests, 0);
+  assert.equal((await get('/api/pulse/weekly-usage')).usage.consumed, resumedUsage.usage.consumed);
+  assert.equal((await stat(originalPath, { bigint: true })).mtimeNs, originalMtime);
+  checks.push('paused restart preserves the revised Home deliverable, original effect and allowance without further provider requests');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks, output,
     modelEvidence: 'explicit synthetic HTTP decisions; production World/Kernel/SQLite/files/accounting' }));
