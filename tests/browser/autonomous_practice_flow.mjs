@@ -3,6 +3,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -231,14 +232,26 @@ try {
   await revisionPage.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await revisionPage.goto(base);
   const reportArticle = revisionPage.locator('#message-' + revisedReport.id);
-  const downloadBrief = async () => {
-    const downloadEvent = revisionPage.waitForEvent('download');
-    await reportArticle.getByRole('button', { name: 'Download file', exact: true }).click();
-    const download = await downloadEvent;
+  assert.equal(revisedReport.reportedArtifact.path, 'planning-brief.md');
+  assert.equal(revisedReport.reportedArtifact.pageId, revisedWork);
+  const downloadBrief = async (screenshot) => {
+    // The report starts collapsed. Open its version-checked original before
+    // downloading, just as the person must do on Home after each restart.
+    await reportArticle.getByRole('button', { name: 'Open verified file', exact: true }).click();
+    await reportArticle.getByText('Verify the assumptions before release.', { exact: true }).waitFor();
+    const button = reportArticle.getByRole('button', { name: 'Download file', exact: true });
+    await button.waitFor({ state: 'visible' });
+    const [download] = await Promise.all([
+      revisionPage.waitForEvent('download'), button.click(),
+    ]);
     assert.equal(download.suggestedFilename(), 'planning-brief.md');
-    assert.equal(await readFile(await download.path(), 'utf8'), brief);
+    const bytes = await readFile(await download.path());
+    assert.equal(bytes.toString('utf8'), brief);
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), revisedReport.reportedArtifact.sha256);
+    await revisionPage.screenshot({ path: join(output, screenshot) });
+    await reportArticle.getByRole('button', { name: 'Close file preview', exact: true }).click();
   };
-  await downloadBrief();
+  await downloadBrief('revised-home-delivery.png');
   await reportArticle.locator('.source-line a.session-link').click();
   await revisionPage.getByRole('heading', { name: title, exact: true }).waitFor();
   await revisionPage.getByRole('button', { name: /planning-brief\.md/ }).click();
@@ -249,7 +262,7 @@ try {
   server = start(revisionDirectory, true);
   await wait(() => fetch(base + '/api/health'), value => value.ok, 'paused result restart');
   await revisionPage.goto(base);
-  await downloadBrief();
+  await downloadBrief('revised-home-restart.png');
   assert.equal((await get('/__autonomous/status')).requests, 0);
   assert.equal((await get('/api/pulse/weekly-usage')).usage.consumed, resumedUsage.usage.consumed);
   assert.equal((await stat(originalPath, { bigint: true })).mtimeNs, originalMtime);
