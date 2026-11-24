@@ -7,6 +7,7 @@ import time
 
 from fastapi.testclient import TestClient
 import httpx
+import pytest
 
 from per_pulse.app import create_app
 from per_pulse.service import PulseSettings
@@ -24,7 +25,9 @@ def until(read, ready, timeout=20):
     raise AssertionError(f"The native continuation did not settle: {value}")
 
 
-def test_budget_exhausted_after_file_write_survives_restart_and_continues_without_rewriting(tmp_path, monkeypatch):
+@pytest.mark.parametrize("revise_purpose", [False, True])
+def test_budget_exhausted_after_file_write_survives_restart_and_continues_without_rewriting(
+        tmp_path, monkeypatch, revise_purpose):
     monkeypatch.setenv("PER_PULSE_CONTINUE_KEY", "synthetic-credential")
     calls = []
     def factory(_scope):
@@ -33,7 +36,22 @@ def test_budget_exhausted_after_file_write_survives_restart_and_continues_withou
             messages = json.loads(request.content)["messages"]
             boundary = max(i for i, item in enumerate(messages) if item["role"] == "user")
             current = messages[boundary:]
-            if "WRITE_RESUME" in messages[boundary]["content"] and not any(item["role"] == "tool" for item in current):
+            notices = [i for i, item in enumerate(messages)
+                       if item["role"] == "system"
+                       and "Internal provider continuation, not a user message." in item["content"]]
+            if revise_purpose and notices and notices[-1] > boundary:
+                assert messages[boundary]["content"] == "Change the purpose: produce a planning brief instead."
+                if not any(item["role"] == "tool" for item in messages[notices[-1]:]):
+                    delta = {"tool_calls": [{"index": 0, "id": "fixture-revised-write", "type": "function",
+                        "function": {"name": "mutate_file", "arguments": json.dumps({
+                            "path": "planning-brief.md", "expected_digest": None,
+                            "content": "# Planning brief\nVerify the assumptions before release.\n"})}}]}
+                    finish = "tool_calls"
+                else:
+                    delta, finish = {"content": "Planning brief completed. [Synthetic fixture]"}, "stop"
+            elif messages[boundary]["content"] == "Change the purpose: produce a planning brief instead.":
+                delta, finish = {"content": "Revision accepted. [Synthetic fixture]"}, "stop"
+            elif "WRITE_RESUME" in messages[boundary]["content"] and not any(item["role"] == "tool" for item in current):
                 delta = {"tool_calls": [{"index": 0, "id": "fixture-write", "type": "function", "function": {
                     "name": "mutate_file", "arguments": json.dumps({"path": "retained.txt", "expected_digest": None,
                                                                   "content": "Keep this exact effect.\n"})}}]}
@@ -70,15 +88,36 @@ def test_budget_exhausted_after_file_write_survives_restart_and_continues_withou
         # Another foreground context remains usable while this one waits.
         assert client.post("/api/pages/home/messages", json={"content": "A direct foreground question."}).status_code == 202
         _settled(client, "home")
+        if revise_purpose:
+            response = client.post(f"/api/pages/{work}/messages",
+                json={"content": "Change the purpose: produce a planning brief instead."})
+            assert response.status_code == 202, response.text
+            until(lambda: client.get(f"/api/pages/{work}").json(),
+                  lambda view: any("Revision accepted." in item.get("content", "")
+                                   for item in view["messages"] if item["role"] == "assistant")
+                  and view["page"]["status"] != "working")
+            assert runtime.causal_ledger.get_event(continuation).status.value == "queued"
+            assert target.stat().st_mtime_ns == mtime
         before = len(calls)
     with TestClient(app(), base_url="http://localhost") as client:
         runtime = client.app.state.pages.runtime
         assert runtime.causal_ledger.get_event(continuation).status.value == "queued"
         assert len(calls) == before
-        assert client.patch("/api/pulse/weekly-usage", json={"enabled": True, "weeklyLimit": 2}).status_code == 200
+        limit = 3 if revise_purpose else 2
+        assert client.patch("/api/pulse/weekly-usage", json={"enabled": True, "weeklyLimit": limit}).status_code == 200
         until(lambda: runtime.causal_ledger.get_event(continuation), lambda event: event.status.value == "settled")
         assert target.read_text() == "Keep this exact effect.\n"
         assert target.stat().st_mtime_ns == mtime
-        assert len(calls) == before + 1
-        assert client.get("/api/pulse/weekly-usage").json()["usage"]["consumed"] == 2
+        assert len(calls) == before + (2 if revise_purpose else 1)
+        assert client.get("/api/pulse/weekly-usage").json()["usage"]["consumed"] == limit
+        sent = json.loads(calls[before].content)["messages"]
+        assert any(row["role"] == "system" and "Internal provider continuation" in row["content"]
+                   for row in sent)
+        assert not any(row["role"] == "user" and "previous turn reached the autonomous" in row["content"]
+                       for row in sent)
         assert client.get(f"/api/pages/{work}").json()["artifacts"]
+        if revise_purpose:
+            brief = tmp_path / "workspace" / "planning-brief.md"
+            assert brief.read_text() == "# Planning brief\nVerify the assumptions before release.\n"
+            latest = next(row for row in reversed(sent) if row["role"] == "user")
+            assert latest["content"] == "Change the purpose: produce a planning brief instead."

@@ -17,6 +17,9 @@ from pulse_system.core.pulse.autonomy import FIRST_DEPARTURE_ORIENTATION, PROVID
 PRACTICE_TITLE = "A small practice"
 PRACTICE_TEXT = "A persisted result from explicitly synthetic autonomous practice.\n"
 PRACTICE_INSTRUCTION = "AUTONOMOUS_PRACTICE_FIXTURE: create practice.txt and report the actual result."
+REVISION_TASK = "Change the purpose: produce a planning brief instead."
+RETAINED_TEXT = "Keep this exact effect.\n"
+PLANNING_TEXT = "# Planning brief\nVerify the assumptions before release.\n"
 
 
 def response(*, content=None, tool=None, arguments=None):
@@ -33,7 +36,8 @@ def response(*, content=None, tool=None, arguments=None):
 
 
 class AutonomousPracticeFixture:
-    def __init__(self, setenv):
+    def __init__(self, setenv, *, purpose_revision=False):
+        self.purpose_revision = purpose_revision
         setenv("PER_PULSE_AUTONOMOUS_FIXTURE_KEY", "explicit-synthetic-test-credential")
         self.requests = []
         self.lock = threading.Lock()
@@ -49,9 +53,39 @@ class AutonomousPracticeFixture:
                 return response(content="PASS")
             if "UNTRUSTED_REVIEW_DATA_JSON" in material:
                 return response(content='{"mode":"none"}')
-            boundary = max(i for i, message in enumerate(messages) if message["role"] == "user")
-            current = messages[boundary:]
+            # A budget continuation is a system input, not a new user turn.
+            # Start its fixture decision at that notice, not the earlier departure
+            # or an already completed tool in the preceding turn.
+            user_boundary = max((i for i, message in enumerate(messages)
+                                 if message["role"] == "user"), default=-1)
+            continuation_boundary = max((i for i, message in enumerate(messages)
+                                         if message["role"] == "system"
+                                         and "Internal provider continuation, not a user message."
+                                         in message["content"]), default=-1)
+            if continuation_boundary > user_boundary:
+                boundary = continuation_boundary
+            else:
+                boundary = user_boundary
+            current = messages[max(0, boundary):]
+            orientation = messages[boundary]["content"] if boundary >= 0 else ""
             tools = [message for message in current if message["role"] == "tool"]
+            if self.purpose_revision:
+                if scope.context_id.startswith("work:"):
+                    if continuation_boundary > user_boundary:
+                        assert user_boundary >= 0 and messages[user_boundary]["content"] == REVISION_TASK
+                        if not tools:
+                            return response(tool="mutate_file", arguments={
+                                "path": "planning-brief.md", "expected_digest": None, "content": PLANNING_TEXT})
+                        if len(tools) == 1:
+                            return response(tool="work", arguments={"op": "report", "kind": "result",
+                                "note": "The revised planning brief is ready.", "artifact_path": "planning-brief.md"})
+                        return response(content="Planning brief completed. [Synthetic fixture]")
+                    if orientation == REVISION_TASK:
+                        return response(content="Revision accepted. [Synthetic fixture]")
+                    if "WRITE_RESUME" in orientation and not tools:
+                        return response(tool="mutate_file", arguments={
+                            "path": "retained.txt", "expected_digest": None, "content": RETAINED_TEXT})
+                return response(content="Ready to continue. [Synthetic fixture]")
             if scope.context_id.startswith("work:"):
                 if not tools:
                     return response(tool="mutate_file", arguments={
@@ -60,10 +94,11 @@ class AutonomousPracticeFixture:
                     return response(tool="work", arguments={"op": "report", "kind": "result",
                         "note": "The practice is saved in practice.txt. [Synthetic model fixture]"})
                 return response(content="The practice is saved in practice.txt. [Synthetic model fixture]")
-            if FIRST_DEPARTURE_ORIENTATION in messages[boundary]["content"] and not tools:
+            if FIRST_DEPARTURE_ORIENTATION in orientation and not tools:
                 return response(tool="work", arguments={"op": "create", "title": PRACTICE_TITLE,
                                                          "instruction": PRACTICE_INSTRUCTION})
-            if messages[boundary]["content"] == "" or PROVIDER_CONTINUATION_ORIENTATION in messages[boundary]["content"]:
+            if (orientation == "" or continuation_boundary > user_boundary
+                    or PROVIDER_CONTINUATION_ORIENTATION in orientation):
                 if not tools:
                     return response(tool="work", arguments={"op": "list"})
                 if len(tools) == 1:

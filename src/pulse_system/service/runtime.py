@@ -6129,7 +6129,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 notice=self._native_notice,
                 attention=(self._native_attention if c.context_pulse is not None
                            and c.context_pulse.enabled else None),
-                input_for_turn=self._native_cognition_return.input_for_turn,
+                input_for_turn=self._native_internal_input_for_turn,
                 world_storage=self._storage, posture=self._native_posture,
                 background_main_round_limit_for_turn=self._native_kernel_background_main_round_limit_for_turn,
             )
@@ -8540,6 +8540,44 @@ class RuntimeService(_RuntimeShutdownCoordinator):
     ) -> str:
         """Compatibility entry point for existing native runtime callbacks."""
         return self.native_kernel_context_for_turn(engram_id, turn_id)
+
+    def _native_internal_input_for_turn(self, engram_id: str, turn_id: str) -> str | None:
+        """Project trusted continuation metadata without inventing a user message."""
+        from pulse_harness.core.errors import ScopeConflict
+
+        turn = self._causal_ledger.get_turn_for_world(turn_id, self._world_id)
+        event = self._causal_ledger.get_event(turn.event_id) if turn else None
+        if (turn is None or turn.engram_id != engram_id or event is None
+                or event.world_id != self._world_id or event.engram_id != engram_id):
+            raise ScopeConflict("internal input requires an owned causal admission")
+        if event.metadata.get("context_pulse") != "provider_continuation":
+            return self._native_cognition_return.input_for_turn(engram_id, turn_id)
+
+        # Derive the notice from the admitted receipt, not its saved text.
+        # This also handles continuations already queued before this upgrade.
+        source_id = event.metadata.get("source_turn_id")
+        source = (self._causal_ledger.get_turn_for_world(source_id, self._world_id)
+                  if isinstance(source_id, str) else None)
+        parent = self._causal_ledger.get_event(event.parent_event_id) if event.parent_event_id else None
+        if (event.kind is not CausalEventKind.SPONTANEOUS
+                or event.source is not CausalEventSource.SELF
+                or source is None or source.engram_id != engram_id
+                or source.error_code not in {"autonomous_weekly_requests_exhausted",
+                                             "autonomous_weekly_requests_paused"}
+                or parent is None or parent.id != source.event_id
+                or parent.world_id != self._world_id or parent.engram_id != engram_id
+                or parent.center_id != event.center_id
+                or event.idempotency_key != f"provider-continuation-v1:{self._world_id}:{source_id}"):
+            raise ScopeConflict("provider continuation has no matching retained source")
+        return (
+            "Internal provider continuation, not a user message. A previous turn paused "
+            "at the autonomous request allowance. Its confirmed actions remain in history. "
+            "Reassess the current purpose using the latest actual user messages and available "
+            "evidence. If the person revised the task while waiting, follow the revised purpose. "
+            "Continue useful unfinished work; do not repeat confirmed effects or replay uncertain "
+            "actions. Check any prepared handoff before relying on delivery. "
+            "The resumed allowance grants no additional tool permission."
+        )
 
     def _native_kernel_background_main_round_limit_for_turn(
         self, engram_id: str, turn_id: str,
