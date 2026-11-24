@@ -1,0 +1,1300 @@
+"""Native write provenance and bounded previews using synthetic model choices.
+
+Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
+
+The HTTP model transport is explicitly scripted; file effects, approvals,
+World/Kernel persistence, path validation, and digests are real. No external
+model is contacted by these checks.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import time
+import threading
+
+from fastapi.testclient import TestClient
+import httpx
+import pytest
+
+from per_pulse.app import create_app
+from per_pulse.artifacts import ArtifactError, PageArtifacts
+from per_pulse.execution import ExecutionError, PageExecution
+from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
+from pulse_harness.core.events import EventDraft
+
+
+def _sha(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _factory(monkeypatch, plans, requests, *, tool_name="mutate_file", tool_call_id="synthetic-file-request",
+             argument_chunk_chars=None):
+    monkeypatch.setenv("PER_PULSE_ARTIFACT_TEST_KEY", "synthetic-test-credential")
+
+    def handler(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        messages = body["messages"]
+        last_user = max((i for i, message in enumerate(messages) if message.get("role") == "user"), default=0)
+        current = messages[last_user:]
+        prompt = json.dumps(current)
+        selected = next((value for marker, value in plans.items() if marker in prompt), None)
+        if selected is not None and not any(message.get("role") == "tool" for message in current):
+            delta = {"tool_calls": [{"index": 0, "id": tool_call_id, "type": "function", "function": {
+                "name": tool_name, "arguments": json.dumps(selected),
+            }}]}
+            finish = "tool_calls"
+        else:
+            # An assistant's claim is not itself evidence of a file result.
+            delta = {"content": "Synthetic assistant: the report is ready."}
+            finish = "stop"
+        chunks = [
+            {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
+        ]
+        if argument_chunk_chars and finish == "tool_calls":
+            arguments = json.dumps(selected)
+            chunks = [{"choices": [{"index": 0, "delta": {"tool_calls": [{
+                "index": 0, **({"id": tool_call_id, "type": "function"} if start == 0 else {}),
+                "function": {**({"name": tool_name} if start == 0 else {}),
+                             "arguments": arguments[start:start + argument_chunk_chars]},
+            }]}, "finish_reason": None}]} for start in range(0, len(arguments), argument_chunk_chars)]
+            chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]})
+        data = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=data)
+
+    def factory(_scope):
+        return ChatHTTPModelAdapter(
+            ChatHTTPConfig("https://fixture.invalid/chat/completions", "artifact-fixture", credential_env="PER_PULSE_ARTIFACT_TEST_KEY"),
+            transport=httpx.MockTransport(handler),
+        )
+
+    return factory
+
+
+def _client(path: Path, **kwargs):
+    return TestClient(create_app(path, **kwargs), base_url="http://localhost")
+
+
+def _page(client, instruction="WRITE_REPORT"):
+    response = client.post("/api/pages", json={"title": instruction, "instruction": instruction})
+    assert response.status_code == 201, response.text
+    return response.json()["page"]["id"]
+
+
+def _wait(execution, page_id, predicate, timeout=8):
+    deadline = time.monotonic() + timeout
+    view = None
+    while time.monotonic() < deadline:
+        view = execution.snapshot(page_id)
+        if predicate(view):
+            return view
+        time.sleep(0.025)
+    pytest.fail(f"Page did not reach the expected state: {view}")
+
+
+def _approve(execution, page_id):
+    waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+    action_id = waiting["pendingActions"][0]["actionId"]
+    execution.resolve_approval(page_id, action_id, "allow_once")
+    _wait(execution, page_id, lambda view: view["status"] in {"idle", "error"})
+    return action_id
+
+
+def test_listing_without_a_session_has_no_runtime_or_file_effect(tmp_path):
+    with _client(tmp_path, model_factory=None) as client:
+        runtime = client.app.state.pages.runtime
+        artifacts = PageArtifacts(runtime)
+        page_id = _page(client, "A queued report.")
+        before = runtime.kernel_service.store.sessions_for_world(runtime.world_id)
+        for target in ("home", page_id):
+            assert artifacts.snapshot(target)["artifacts"] == []
+        assert runtime.kernel_service.store.sessions_for_world(runtime.world_id) == before
+        assert not runtime.kernel_service._runtimes
+        assert runtime.tick_count == 0
+        with pytest.raises(ExecutionError) as missing:
+            artifacts.snapshot("missing")
+        assert missing.value.status == 404
+        with pytest.raises(ArtifactError):
+            artifacts.read(page_id, "../../world.db")
+
+
+def test_successful_file_result_has_native_source_and_survives_restart(tmp_path, monkeypatch):
+    content, requests = "A confirmed report.\n", []
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": content}}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        page_id = _page(client)
+        pending = _wait(execution, page_id, lambda view: bool(view["pendingActions"]))
+        assert artifacts.snapshot(page_id)["artifacts"] == []
+        action_id = _approve(execution, page_id)
+        item, = artifacts.snapshot(page_id)["artifacts"]
+        assert item["id"] == item["actionId"] == action_id
+        assert item["sha256"] == item["version"] == _sha(content)
+        assert item["turnId"] == pending["turnId"]
+        assert item["sessionId"] == pending["sessionId"]
+        assert item["path"] == "report.txt" and item["state"] == "unchecked"
+        assert item["changeId"].startswith("change-")
+        assert item["checkpointId"] and item["operationId"]
+        assert runtime.kernel_service.store.has_event(
+            execution._scope(page_id), "change.applied", action_request_id=action_id,
+        )
+        preview = artifacts.read(page_id, action_id)
+        assert preview["state"] == "current"
+        assert preview["content"] == content
+        assert preview["observedSha256"] == item["sha256"]
+        assert preview["bytes"] == len(content.encode("utf-8"))
+        assert not preview["redacted"] and not preview["truncated"]
+        listed = client.get(f"/api/pages/{page_id}/artifacts")
+        assert listed.status_code == 200 and listed.json()["artifacts"] == [item]
+        assert client.get(f"/api/pages/{page_id}").json()["artifacts"] == [item]
+        opened = client.get(f"/api/pages/{page_id}/artifacts/{action_id}")
+        assert opened.status_code == 200 and opened.json() == preview
+        assert opened.headers["cache-control"] == "no-store"
+        assert artifacts.snapshot("home")["artifacts"] == []
+        second_page = _page(client, "No file request.")
+        for wrong_page in ("home", second_page):
+            with pytest.raises(ArtifactError) as mismatch:
+                artifacts.read(wrong_page, action_id)
+            assert mismatch.value.status == 404
+            assert client.get(f"/api/pages/{wrong_page}/artifacts/{action_id}").status_code == 404
+
+    round_count = len(requests)
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        runtime = client.app.state.pages.runtime
+        artifacts = PageArtifacts(runtime)
+        assert artifacts.snapshot(page_id)["artifacts"] == [item]
+        assert artifacts.read(page_id, action_id)["content"] == content
+        assert len(requests) == round_count
+        assert not runtime.kernel_service._runtimes
+
+
+
+
+def test_existing_world_reindexes_action_history_and_still_delivers_old_file(tmp_path, monkeypatch):
+    """An a37 World opens its Work results without sorting its lifetime of actions.
+
+    Remove only the new index after a real file effect, simulating a World
+    created before this schema optimization. Startup must rebuild the index;
+    the original Kernel action and file bytes remain the authority.
+    """
+    import sqlite3
+
+    content = "Original source-backed report.\n"
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": content},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        execution = client.app.state.pages.execution
+        work = _page(client)
+        artifact_id = _approve(execution, work)
+        db_path = client.app.state.pages.runtime.kernel_service.store.path
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("DROP INDEX IF EXISTS actions_session_status_recent")
+
+    request_count = len(requests)
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        store = client.app.state.pages.runtime.kernel_service.store
+        scope = client.app.state.pages.execution._scope(work)
+        with store._lock:
+            columns = [row[2] for row in store._db.execute(
+                "PRAGMA index_info(actions_session_status_recent)"
+            )]
+            plan = [row[3] for row in store._db.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM actions "
+                "WHERE session_id = ? AND status = ? AND "
+                "(updated_at < ? OR (updated_at = ? AND action_request_id < ?)) "
+                "ORDER BY updated_at DESC, action_request_id DESC LIMIT ?",
+                (scope.session_id, "succeeded", "z", "z", "z", 257),
+            )]
+        assert columns == ["session_id", "status", "updated_at", "action_request_id"]
+        assert any("actions_session_status_recent" in detail for detail in plan), plan
+        assert not any("TEMP B-TREE FOR ORDER BY" in detail for detail in plan), plan
+
+        listed = client.get(f"/api/pages/{work}/artifacts")
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()["artifacts"]] == [artifact_id]
+        downloaded = client.get(f"/api/pages/{work}/artifacts/{artifact_id}/download")
+        assert downloaded.status_code == 200
+        assert downloaded.content == content.encode("utf-8")
+        assert downloaded.headers["etag"] == f'"{_sha(content)}"'
+        assert len(requests) == request_count
+
+
+def test_older_file_results_are_reachable_by_durable_page_scoped_cursor(tmp_path, monkeypatch):
+    """A long-lived Work can reach earlier file effects without replaying a model."""
+    import per_pulse.artifacts as module
+
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_FIRST": {"path": "first.txt", "expected_digest": None, "content": "First version.\n"},
+        "WRITE_SECOND": {"path": "second.txt", "expected_digest": None, "content": "Second version.\n"},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        execution = client.app.state.pages.execution
+        work = _page(client, "WRITE_FIRST")
+        first_id = _approve(execution, work)
+        response = client.post(f"/api/pages/{work}/messages", json={"content": "WRITE_SECOND"})
+        assert response.status_code in {200, 201, 202}, response.text
+        second_id = _approve(execution, work)
+        assert first_id != second_id
+        request_count = len(requests)
+        monkeypatch.setattr(module, "MAX_ARTIFACTS", 1)
+        monkeypatch.setattr(module, "MAX_ACTION_SCAN", 1)
+
+        recent = client.get(f"/api/pages/{work}/artifacts")
+        assert recent.status_code == 200, recent.text
+        recent_page = recent.json()
+        assert [entry["id"] for entry in recent_page["artifacts"]] == [second_id]
+        cursor = recent_page["nextCursor"]
+        assert isinstance(cursor, str) and cursor and recent_page["truncated"]
+        assert client.get(f"/api/pages/home/artifacts", params={"cursor": cursor}).status_code == 409
+        assert client.get(f"/api/pages/{work}/artifacts", params={"cursor": "bad!"}).status_code == 400
+
+        earlier = client.get(f"/api/pages/{work}/artifacts", params={"cursor": cursor})
+        assert earlier.status_code == 200, earlier.text
+        earlier_page = earlier.json()
+        assert [entry["id"] for entry in earlier_page["artifacts"]] == [first_id]
+        assert earlier_page["nextCursor"] is None
+        assert client.get(f"/api/pages/{work}/artifacts/{first_id}").json()["content"] == "First version.\n"
+        assert len(requests) == request_count
+
+    # Cursor positions, exact file versions and page ownership are durable.
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        earlier = client.get(f"/api/pages/{work}/artifacts", params={"cursor": cursor})
+        assert earlier.status_code == 200
+        assert [entry["id"] for entry in earlier.json()["artifacts"]] == [first_id]
+        assert client.get(f"/api/pages/{work}/artifacts/{first_id}").json()["content"] == "First version.\n"
+
+
+def test_original_work_effect_evidence_survives_native_succession_without_replay(tmp_path, monkeypatch):
+    """A committed generation changes the holder, not the Work's file sources."""
+    import per_pulse.execution as execution_module
+    from pulse_harness.core import TurnStatus
+    from pulse_harness.core.contracts import ActionClassification, TerminalOutcome
+
+    requests = []
+    content = "The original approved report.\n"
+    plans = {"WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": content}}
+    factory = _factory(monkeypatch, plans, requests)
+    monkeypatch.setattr(execution_module, "_MAX_ACTIONS", 2)
+
+    def uncertain_fixture(store, scope, prefix, count):
+        # These are explicitly synthetic read-only outcomes, not claims of
+        # physical effects. The confirmed file below uses actual approval/write.
+        store.create_turn(scope, "Synthetic retained uncertain read evidence")
+        for index in range(count):
+            identity = f"{prefix}-{index}"
+            store.create_action(scope, action_request_id=identity, tool_name="fixture_read",
+                                arguments={"path": f"{prefix}-{index}.txt", "api_key": "SYNTHETIC_SECRET_VALUE"},
+                                requires_approval=False, classification=ActionClassification.READ_ONLY_NOT_REQUIRED)
+            store.claim_action_start(scope, identity)
+            store.mark_action_running(scope, identity)
+            store.terminal_action(scope, identity, TerminalOutcome.UNCERTAIN)
+        store.set_turn_status(scope, TurnStatus.CANCELLED)
+
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        runtime, execution, artifacts = pages.runtime, pages.execution, pages.artifacts
+        work = _page(client)
+        action = _approve(execution, work)
+        item, = artifacts.snapshot(work)["artifacts"]
+        _wait(execution, work, lambda _value: bool(
+            runtime.causal_ledger.get_turn_for_world(item["turnId"], runtime.world_id).result_event_id,
+        ))
+        source_result = runtime.causal_ledger.get_turn_for_world(item["turnId"], runtime.world_id).result_event_id
+        original_subject = runtime.continuity_engram_id
+        original_mtime = (tmp_path / "workspace" / "report.txt").stat().st_mtime_ns
+        store = runtime.kernel_service.store
+        old_scope = execution._scope(work).for_turn("synthetic-uncertain-predecessor")
+        uncertain_fixture(store, old_scope, "older-uncertain", 3)
+
+        # Summary and future explicit input use a declared reply-only fixture.
+        # Native prepare/commit performs the real generation and Work handoff.
+        plans.clear()
+        prepared = runtime._mgr.prepare_succession(
+            original_subject, parent_event_id=source_result, runtime_fence=runtime._current_runtime_fence(),
+        )
+        assert artifacts.snapshot(work)["artifacts"] == [item]
+        assert runtime.causal_ledger.committed_history_lineage(runtime.world_id, prepared.successor_id) == (prepared.successor_id,)
+        rotated = runtime._mgr.commit_succession(prepared, runtime_fence=runtime._current_runtime_fence())
+        assert runtime.world.get_task_front(work).focal_engram_id == rotated.new_id
+        assert runtime.causal_ledger.committed_history_lineage(runtime.world_id, rotated.new_id) == (rotated.new_id, original_subject)
+        before_sessions = store.sessions_for_world(runtime.world_id)
+        before_runners = set(runtime.kernel_service._runtimes)
+        before_requests = len(requests)
+
+        assert artifacts.snapshot(work)["artifacts"] == [item]
+        assert artifacts.read(work, action)["content"] == content
+        inherited = client.get(f"/api/pages/{work}").json()
+        assert inherited["artifacts"] == [item]
+        state = inherited["execution"]
+        assert state["sessionId"] is None  # Reading must not open the new Work session.
+        assert state["historicalUncertainty"] and state["uncertainActionsTruncated"]
+        assert [record["actionId"] for record in state["uncertainActions"]] == ["older-uncertain-2", "older-uncertain-1"]
+        assert not state["canCancel"] and not state["pendingActions"] and not state["recoveryRequired"]
+        assert all(record["arguments"]["api_key"] == "SYNTHETIC_SECRET_VALUE" for record in state["uncertainActions"])
+        assert store.sessions_for_world(runtime.world_id) == before_sessions
+        assert set(runtime.kernel_service._runtimes) == before_runners
+        assert len(requests) == before_requests
+        for operation in (
+            lambda: execution.cancel(work, old_scope.turn_id),
+            lambda: execution.resolve_approval(work, action, "allow_once"),
+        ):
+            with pytest.raises(ExecutionError):
+                operation()
+        assert (tmp_path / "workspace" / "report.txt").stat().st_mtime_ns == original_mtime
+
+        sibling = _page(client, "A different Work after succession.")
+        for other in ("home", sibling):
+            assert artifacts.snapshot(other)["artifacts"] == []
+            assert execution.snapshot(other)["uncertainActions"] == []
+            assert client.get(f"/api/pages/{other}/artifacts/{action}").status_code == 404
+        sent = client.post(f"/api/pages/{work}/messages", json={"content": "Continue the same Work with a new explicit instruction."})
+        assert sent.status_code == 202
+        _wait(execution, work, lambda value: value["sessionId"] is not None and value["status"] == "idle")
+        uncertain_fixture(store, execution._scope(work).for_turn("synthetic-uncertain-successor"), "newer-uncertain", 1)
+        latest = execution.snapshot(work)
+        assert [record["actionId"] for record in latest["uncertainActions"]] == ["newer-uncertain-0", "older-uncertain-2"]
+        assert latest["uncertainActionsTruncated"] is True  # One bound across generations.
+        assert artifacts.snapshot(work)["artifacts"] == [item]
+        assert (tmp_path / "workspace" / "report.txt").stat().st_mtime_ns == original_mtime
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        assert pages.runtime.continuity_engram_id == rotated.new_id
+        assert pages.artifacts.snapshot(work)["artifacts"] == [item]
+        assert pages.artifacts.read(work, action)["content"] == content
+        assert [record["actionId"] for record in pages.execution.snapshot(work)["uncertainActions"]] == ["newer-uncertain-0", "older-uncertain-2"]
+        assert not pages.runtime.kernel_service._runtimes
+        assert (tmp_path / "workspace" / "report.txt").stat().st_mtime_ns == original_mtime
+
+
+def test_unverifiable_history_fails_closed_before_reading_effects(tmp_path, monkeypatch):
+    from pulse_system.core.causality import CausalTransitionError
+
+    with _client(tmp_path, model_factory=None) as client:
+        pages = client.app.state.pages
+
+        def invalid_lineage(*_args):
+            raise CausalTransitionError("synthetic ambiguous ancestry")
+
+        monkeypatch.setattr(pages.runtime.causal_ledger, "committed_history_lineage", invalid_lineage)
+        for path in ("/api/pages/home/execution", "/api/pages/home/artifacts"):
+            response = client.get(path)
+            assert response.status_code == 503
+            assert response.json()["error"]["code"] == "execution_history_unavailable"
+
+
+@pytest.mark.parametrize("decision", ["deny", "cancel"])
+def test_rejected_file_actions_and_unattributed_files_are_not_artifacts(tmp_path, monkeypatch, decision):
+    requests = []
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": "A report."}}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        page_id = _page(client)
+        waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action_id = waiting["pendingActions"][0]["actionId"]
+        execution.resolve_approval(page_id, action_id, decision)
+        (tmp_path / "workspace" / "unattributed.txt").write_text("A user file, not a page-owned output.", encoding="utf-8", newline="")
+        assert artifacts.snapshot(page_id)["artifacts"] == []
+        with pytest.raises(ArtifactError):
+            artifacts.read(page_id, action_id)
+        with pytest.raises(ArtifactError):
+            artifacts.read(page_id, "unattributed.txt")
+
+
+def test_failed_digest_guard_does_not_claim_an_artifact(tmp_path, monkeypatch):
+    requests = []
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": "A replacement."}}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        original = tmp_path / "workspace" / "report.txt"
+        original.write_text("Existing source.", encoding="utf-8", newline="")
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        page_id = _page(client)
+        action_id = _approve(execution, page_id)
+        assert artifacts.snapshot(page_id)["artifacts"] == []
+        assert original.read_text(encoding="utf-8") == "Existing source."
+        with pytest.raises(ArtifactError):
+            artifacts.read(page_id, action_id)
+
+
+def test_other_page_overwrite_marks_the_original_version_changed(tmp_path, monkeypatch):
+    first, second, requests = "First page version.\n", "Second page version.\n", []
+    factory = _factory(monkeypatch, {
+        "WRITE_FIRST": {"path": "shared.txt", "expected_digest": None, "content": first},
+        "WRITE_SECOND": {"path": "shared.txt", "expected_digest": _sha(first), "content": second},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        first_page = _page(client, "WRITE_FIRST")
+        first_id = _approve(execution, first_page)
+        second_page = _page(client, "WRITE_SECOND")
+        second_id = _approve(execution, second_page)
+        stale = artifacts.read(first_page, first_id)
+        assert stale["state"] == stale["artifact"]["state"] == "changed"
+        assert stale["reason"] == "artifact_version_changed"
+        assert stale["artifact"]["sha256"] == _sha(first)
+        assert stale["observedSha256"] == _sha(second)
+        assert stale["content"] is None
+        assert second not in json.dumps(stale)
+        response = client.get(f"/api/pages/{first_page}/artifacts/{first_id}")
+        assert response.status_code == 200 and response.json()["state"] == "changed"
+        assert response.json()["content"] is None
+        denied_download = client.get(f"/api/pages/{first_page}/artifacts/{first_id}/download")
+        assert denied_download.status_code == 409
+        assert denied_download.json()["error"]["code"] == "artifact_version_changed"
+        assert second not in denied_download.text
+        assert artifacts.read(second_page, second_id)["content"] == second
+        assert artifacts.snapshot(first_page)["artifacts"][0]["id"] == first_id
+        with pytest.raises(ArtifactError):
+            artifacts.read(first_page, second_id)
+
+
+def test_preview_uses_existing_path_file_type_and_size_guards(tmp_path, monkeypatch):
+    requests = []
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": "A report."}}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        page_id = _page(client)
+        action_id = _approve(execution, page_id)
+        target = tmp_path / "workspace" / "report.txt"
+        outside = tmp_path / "private.txt"
+        outside.write_text("Outside the tool workspace.", encoding="utf-8", newline="")
+        target.unlink()
+        assert artifacts.read(page_id, action_id)["state"] == "unavailable"
+        target.symlink_to(outside)
+        linked = artifacts.read(page_id, action_id)
+        assert linked["state"] == "unavailable" and linked["content"] is None
+        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").status_code == 404
+        target.unlink()
+        os.link(outside, target)
+        linked = artifacts.read(page_id, action_id)
+        assert linked["reason"] == "not_a_single_regular_file" and linked["content"] is None
+        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").status_code == 403
+        target.unlink()
+        for data, reason in (
+            (b"\xff\x00", "text_files_only"),
+            (b"x" * (1024 * 1024 + 1), "file_too_large"),
+        ):
+            target.write_bytes(data)
+            preview = artifacts.read(page_id, action_id)
+            assert preview["state"] == "unavailable" and preview["content"] is None
+            assert preview["reason"] == reason
+            denied = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+            assert denied.status_code in {403, 413, 415}
+            assert denied.json()["error"]["code"] == reason
+        # The user's own file is never withheld for looking like it holds a
+        # credential; a different version is reported as changed.
+        target.write_bytes(b"password=synthetic-sensitive-value")
+        changed = artifacts.read(page_id, action_id)
+        assert changed["state"] == "changed" and changed["reason"] == "artifact_version_changed"
+        workspace = tmp_path / "workspace"
+        original_workspace = tmp_path / "original-workspace"
+        replacement = tmp_path / "replacement"
+        replacement.mkdir()
+        (replacement / "report.txt").write_text("A replacement root's private content.", encoding="utf-8", newline="")
+        workspace.rename(original_workspace)
+        try:
+            workspace.symlink_to(replacement, target_is_directory=True)
+            root_preview = artifacts.read(page_id, action_id)
+            assert root_preview["state"] == "unavailable" and root_preview["content"] is None
+            workspace.unlink()
+            replacement.rename(workspace)
+            root_preview = artifacts.read(page_id, action_id)
+            assert root_preview["state"] == "changed" and root_preview["content"] is None
+            assert "private content" not in json.dumps(root_preview)
+        finally:
+            if workspace.is_symlink():
+                workspace.unlink()
+            elif workspace.exists():
+                workspace.rename(replacement)
+            original_workspace.rename(workspace)
+
+
+@pytest.mark.parametrize("preexisting", [False, True], ids=["new-file", "rewrite"])
+def test_undo_receipt_recovery_keeps_native_workspace_boundary(tmp_path, monkeypatch, preexisting):
+    """A lost Undo receipt cannot be reconstructed through an external symlink.
+
+    The file effect, approval, original action receipt, and final Undo are
+    native. Only the injected digest disagreement is a test double.
+    """
+    from pulse_harness.adapters.workspace import WorkspaceDigestConflict
+
+    before = "Original user draft.\n"
+    after = "Finished Work artifact.\n"
+    plans = {"WRITE_REPORT": {
+        "path": "report.txt",
+        "expected_digest": _sha(before) if preexisting else None,
+        "content": after,
+    }}
+    requests = []
+    factory = _factory(monkeypatch, plans, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        workspace = tmp_path / "workspace"
+        target = workspace / "report.txt"
+        if preexisting:
+            target.write_text(before, encoding="utf-8", newline="")
+        pages = client.app.state.pages
+        work = _page(client, "WRITE_REPORT")
+        action_id = _approve(pages.execution, work)
+        item, = pages.artifacts.snapshot(work)["artifacts"]
+        assert item["actionId"] == action_id
+        assert target.read_text(encoding="utf-8") == after
+
+        # The already-restored version is recognized on a genuine workspace
+        # path, including the absence of an originally new file.
+        if preexisting:
+            target.write_text(before, encoding="utf-8", newline="")
+        else:
+            target.unlink()
+        assert pages.artifacts._has_before_image(item)
+        target.write_text(after, encoding="utf-8", newline="")
+
+        external = tmp_path / "outside-workspace"
+        external.mkdir()
+        if preexisting:
+            (external / "report.txt").write_text(before, encoding="utf-8", newline="")
+        displaced = tmp_path / "original-workspace"
+        workspace.rename(displaced)
+        try:
+            workspace.symlink_to(external, target_is_directory=True)
+            assert not pages.artifacts._has_before_image(item)
+            with monkeypatch.context() as injected:
+                def digest_conflict(*_args, **_kwargs):
+                    raise WorkspaceDigestConflict("Simulated lost Undo receipt")
+                injected.setattr(pages.execution._kernel, "restore_checkpoint", digest_conflict)
+                blocked = client.post(f"/api/pages/{work}/artifacts/{action_id}/undo", json={})
+            assert blocked.status_code == 409, blocked.text
+            assert blocked.json()["error"]["code"] == "artifact_version_changed"
+            assert not pages.artifacts.snapshot(work)["artifacts"][0]["undone"]
+            # Recovery did not remove, edit or consume any outside source.
+            if preexisting:
+                assert (external / "report.txt").read_text(encoding="utf-8") == before
+            else:
+                assert list(external.iterdir()) == []
+        finally:
+            if workspace.is_symlink():
+                workspace.unlink()
+            displaced.rename(workspace)
+
+        # The original confirmed Work change is still undoable exactly once.
+        assert target.read_text(encoding="utf-8") == after
+        restored = client.post(f"/api/pages/{work}/artifacts/{action_id}/undo", json={})
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["artifact"]["undone"]
+        if preexisting:
+            assert target.read_text(encoding="utf-8") == before
+        else:
+            assert not target.exists()
+        assert pages.artifacts.snapshot(work)["artifacts"][0]["undone"]
+        assert len(requests) >= 1
+
+
+def test_preview_shows_the_users_own_text_bounded_after_verifying_original_bytes(tmp_path, monkeypatch):
+    import per_pulse.artifacts as module
+
+    monkeypatch.setattr(module, "MAX_PREVIEW_BYTES", 256)
+    before = "Draft heading.\npassword=abc\n" + "Ordinary report content.\n" * 80
+    after = before.replace("Draft heading.", "Final heading.")
+    requests = []
+    factory = _factory(monkeypatch, {"PATCH_REPORT": {
+        "path": "report.txt", "expected_digest": _sha(before),
+        "patch": {"edits": [{"old": "Draft heading.", "new": "Final heading."}]},
+    }}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        (tmp_path / "workspace" / "report.txt").write_text(before, encoding="utf-8", newline="")
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        page_id = _page(client, "PATCH_REPORT")
+        waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action_id = waiting["pendingActions"][0]["actionId"]
+        try:
+            execution.resolve_approval(page_id, action_id, "allow_once")
+        except ExecutionError as error:
+            # The existing runner can reject a previously redacted tool
+            # result during continuation. A confirmed file effect still has
+            # its original artifact even when that later step cannot finish.
+            assert error.code == "redaction_required"
+        preview = artifacts.read(page_id, action_id)
+        assert preview["state"] == "current"
+        assert preview["observedSha256"] == _sha(after)
+        assert preview["truncated"] and not preview["redacted"]
+        assert preview["content"] == after.encode("utf-8")[:256].decode("utf-8")
+        assert "password=abc" in preview["content"]
+        assert preview["bytes"] == len(after.encode("utf-8"))
+        assert preview["downloadable"] is True
+        download = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert download.status_code == 200
+        assert download.content == after.encode("utf-8")
+
+def test_literal_marker_beyond_preview_does_not_block_verified_file_download(tmp_path, monkeypatch):
+    """A local file's text is data, including outside the displayed preview."""
+    import per_pulse.artifacts as module
+
+    monkeypatch.setattr(module, "MAX_PREVIEW_BYTES", 256)
+    before = "Draft status.\n" + "Public details only.\n" * 32 + "[REDACTED]\n"
+    after = before.replace("Draft status.", "Final status.", 1)
+    factory = _factory(monkeypatch, {"PATCH_LATE_MARKER": {
+        "path": "late-marker.txt", "expected_digest": _sha(before),
+        "patch": {"edits": [{"old": "Draft status.", "new": "Final status."}]},
+    }}, [])
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        (tmp_path / "workspace" / "late-marker.txt").write_text(before, encoding="utf-8", newline="")
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        page_id = _page(client, "PATCH_LATE_MARKER")
+        waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action_id = waiting["pendingActions"][0]["actionId"]
+        try:
+            execution.resolve_approval(page_id, action_id, "allow_once")
+        except ExecutionError as error:
+            assert error.code == "redaction_required"
+        preview = artifacts.read(page_id, action_id)
+        assert preview["state"] == "current"
+        assert preview["observedSha256"] == _sha(after)
+        assert preview["truncated"]
+        assert "[REDACTED]" not in preview["content"]
+        assert preview["redacted"] is False
+        assert preview["downloadable"] is True
+        downloaded = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert downloaded.status_code == 200
+        assert downloaded.content == after.encode("utf-8")
+        assert downloaded.headers["ETag"] == '"' + _sha(after) + '"'
+
+
+def test_download_keeps_complete_utf8_bytes_and_filename_after_restart(tmp_path, monkeypatch):
+    from urllib.parse import quote
+    import per_pulse.artifacts as artifact_module
+
+    # Exercise preview clipping independently of the native write ceiling.
+    # The preview bound is independent of the native write envelope.
+    monkeypatch.setattr(artifact_module, "MAX_PREVIEW_BYTES", 4096)
+    before = "\ufeffDRAFT\r\n" + "Café and 文本 retain  two spaces.\r\n" * 1200
+    after = before.replace("DRAFT", "FINAL", 1)
+    filename = "Café 100% 文本.txt"
+    relative = "results/" + filename
+    requests = []
+    factory = _factory(monkeypatch, {"PATCH_FULL_REPORT": {
+        "path": relative, "expected_digest": _sha(before),
+        "patch": {"edits": [{"old": "DRAFT", "new": "FINAL"}]},
+    }}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        (tmp_path / "workspace" / "results").mkdir()
+        (tmp_path / "workspace" / relative).write_bytes(before.encode("utf-8"))
+        page_id = _page(client, "PATCH_FULL_REPORT")
+        action_id = _approve(PageExecution(client.app.state.pages.runtime), page_id)
+        preview = client.get(f"/api/pages/{page_id}/artifacts/{action_id}").json()
+        assert preview["state"] == "current" and preview["truncated"]
+        assert preview["downloadable"] is True  # Preview clipping is not stored file truncation.
+        download = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert download.status_code == 200, download.text
+        assert download.content == after.encode("utf-8")
+        assert len(download.content) > len(preview["content"].encode("utf-8"))
+        assert download.headers["etag"] == '"' + _sha(after) + '"'
+        assert download.headers["x-per-pulse-content-sha256"] == _sha(after)
+        assert download.headers["content-type"] == "application/octet-stream"
+        assert download.headers["content-length"] == str(len(after.encode("utf-8")))
+        disposition = download.headers["content-disposition"]
+        assert disposition.startswith('attachment; filename="Caf_ 100_ __.txt";')
+        assert "filename*=UTF-8''" + quote(filename, safe="") in disposition
+        assert "results/" not in disposition
+        assert download.headers["cache-control"] == "no-store"
+        assert download.headers["x-content-type-options"] == "nosniff"
+        assert client.get(f"/api/pages/home/artifacts/{action_id}/download").status_code == 404
+    round_count = len(requests)
+    with _client(tmp_path, model_factory=None) as client:
+        download = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert download.status_code == 200 and download.content == after.encode("utf-8")
+        assert len(requests) == round_count
+        assert not client.app.state.pages.runtime.kernel_service._runtimes
+
+
+def test_download_serves_verified_snapshot_without_reopening_a_replaced_path(tmp_path, monkeypatch):
+    from pulse_system.product.files import WorkspaceFiles
+
+    original = "The exact recorded file.\r\n"
+    replacement = "A later writer's different file.\n"
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {
+        "path": "report.txt", "expected_digest": None, "content": original,
+    }}, [])
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        page_id = _page(client)
+        action_id = _approve(PageExecution(client.app.state.pages.runtime), page_id)
+        read = WorkspaceFiles.read_with_bytes
+
+        def replace_after_read(files, path):
+            snapshot = read(files, path)
+            (tmp_path / "workspace" / path).write_text(replacement, encoding="utf-8", newline="")
+            return snapshot
+
+        monkeypatch.setattr(WorkspaceFiles, "read_with_bytes", replace_after_read)
+        downloaded = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert downloaded.status_code == 200 and downloaded.content == original.encode()
+        assert (tmp_path / "workspace" / "report.txt").read_text(encoding="utf-8") == replacement
+        refused = client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download")
+        assert refused.status_code == 409 and replacement not in refused.text
+
+
+def test_native_pdf_download_keeps_original_bytes_and_digest_after_restart(tmp_path, monkeypatch):
+    from pdf_samples import synthetic_pdf
+
+    data = synthetic_pdf(["The exact PDF report."])
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {
+        "path": "report.pdf", "expected_digest": None, "content": data.decode("ascii"),
+    }}, [])
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        page_id = _page(client)
+        action_id = _approve(PageExecution(client.app.state.pages.runtime), page_id)
+        preview = client.get(f"/api/pages/{page_id}/artifacts/{action_id}")
+        assert preview.status_code == 200
+        assert "The exact PDF report." in preview.json()["content"]
+        assert "%PDF" not in preview.json()["content"]
+        url = f"/api/pages/{page_id}/artifacts/{action_id}/download"
+        response = client.get(url)
+        assert response.status_code == 200
+        assert response.content == data
+        assert response.headers["x-per-pulse-content-sha256"] == hashlib.sha256(data).hexdigest()
+        assert response.headers["content-type"] == "application/octet-stream"
+        assert response.headers["x-content-type-options"] == "nosniff"
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        response = client.get(url)
+        assert response.status_code == 200 and response.content == data
+        assert client.get(f"/api/pages/home/artifacts/{action_id}/download").status_code == 404
+        (tmp_path / "workspace" / "report.pdf").write_bytes(synthetic_pdf(["A later private report."]))
+        refused = client.get(url)
+        assert refused.status_code == 409
+        assert "A later private report." not in refused.text
+
+
+def test_artifact_identity_survives_event_retention_and_list_bounds(tmp_path, monkeypatch):
+    import per_pulse.artifacts as module
+
+    requests = []
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {"path": "report.txt", "expected_digest": None, "content": "A report."}}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        page_id = _page(client)
+        action_id = _approve(execution, page_id)
+        store = runtime.kernel_service.store
+        scope = store.action_scope_for_session(execution._scope(page_id), action_id)
+        store.max_events_per_session = 8
+        for index in range(12):
+            store.append_event(EventDraft(scope=scope, event_type="test.retention", source="test", phase="test", status="succeeded", payload={"index": index}))
+        assert not store.has_event(scope, "change.applied", action_request_id=action_id)
+        assert artifacts.snapshot(page_id)["artifacts"][0]["id"] == action_id
+        monkeypatch.setattr(module, "MAX_ARTIFACTS", 0)
+        assert artifacts.snapshot(page_id)["artifacts"] == []
+        assert artifacts.snapshot(page_id)["truncated"]
+        assert artifacts.read(page_id, action_id)["content"] == "A report."
+
+
+@pytest.mark.parametrize("body", ["x" * 50_000, '\\"\t' * 7_000, "💡" * 12_000], ids=["plain", "escaped", "multibyte"])
+def test_large_native_diff_preserves_compact_receipt_artifact_and_continuation(tmp_path, monkeypatch, body):
+    before = "DRAFT " + body + "\n"
+    after = before.replace("DRAFT", "FINAL")
+    requests = []
+    factory = _factory(monkeypatch, {"PATCH_LARGE": {
+        "path": "large.txt", "expected_digest": _sha(before),
+        "patch": {"edits": [{"old": "DRAFT", "new": "FINAL"}]},
+    }}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        target = tmp_path / "workspace" / "large.txt"
+        target.write_text(before, encoding="utf-8", newline="")
+        runtime = client.app.state.pages.runtime
+        execution, artifacts = PageExecution(runtime), PageArtifacts(runtime)
+        page_id = _page(client, "PATCH_LARGE")
+        waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action_id = waiting["pendingActions"][0]["actionId"]
+        execution.resolve_approval(page_id, action_id, "allow_once")
+        _wait(execution, page_id, lambda view: view["status"] == "idle")
+        assert target.read_text(encoding="utf-8") == after
+        snapshot = artifacts.snapshot(page_id)
+        item, = snapshot["artifacts"]
+        assert item["id"] == action_id and item["sha256"] == _sha(after)
+        assert not snapshot["truncated"]
+        assert artifacts.read(page_id, action_id)["content"] == after
+        store = runtime.kernel_service.store
+        action_scope = store.action_scope_for_session(execution._scope(page_id), action_id)
+        action = store.get_action(action_scope, action_id)
+        assert action.status.value == "succeeded"
+        assert action.result.get("_truncated") is not True
+        output = action.result["output"]
+        assert output["diff_truncated"] and not output["diff_redacted"]
+        assert output["before_digest"] == _sha(before) and output["after_digest"] == _sha(after)
+        assert output["action_request_id"] == action_id
+        assert output["operation_id"] == action.operation_id
+        assert output["workspace_provenance"]["adapter"] == "pulse_harness.workspace.v1"
+        delivered = [message for message in requests[-1]["messages"] if message["role"] == "tool"]
+        assert len(delivered) == 1
+        assert len(delivered[0]["content"].encode()) <= store.max_payload_bytes
+        assert json.loads(delivered[0]["content"])["output"] == output
+        mtime = target.stat().st_mtime_ns
+        request_count = len(requests)
+        execution.resolve_approval(page_id, action_id, "allow_once")
+        assert len(requests) == request_count and target.stat().st_mtime_ns == mtime
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        artifacts = client.app.state.pages.artifacts
+        assert artifacts.snapshot(page_id)["artifacts"] == [item]
+        assert artifacts.read(page_id, action_id)["content"] == after
+        assert target.stat().st_mtime_ns == mtime
+
+
+@pytest.mark.parametrize("body", ['A quoted line: "text" with a tab\tand slash \\\n' * 5_000,
+                                  "A multibyte document: 💡 café.\n" * 5_000], ids=["escaped", "multibyte"])
+def test_large_native_read_reaches_continuation_with_bounded_text_and_exact_digest(tmp_path, monkeypatch, body):
+    requests = []
+    factory = _factory(monkeypatch, {"READ_LARGE": {"path": "large.txt"}}, requests,
+                       tool_name="read_file", tool_call_id="fixture-read-" * 250)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        target = tmp_path / "workspace" / "large.txt"
+        target.write_text(body, encoding="utf-8", newline="")
+        runtime = client.app.state.pages.runtime
+        execution = client.app.state.pages.execution
+        page_id = _page(client, "READ_LARGE")
+        _wait(execution, page_id, lambda view: len(requests) == 2 and view["status"] == "idle")
+        delivered = [message for message in requests[-1]["messages"] if message["role"] == "tool"]
+        assert len(delivered) == 1
+        assert len(delivered[0]["content"].encode()) <= runtime.kernel_service.store.max_payload_bytes
+        result = json.loads(delivered[0]["content"])
+        assert result["status"] == "succeeded"
+        output = result["output"]
+        assert output["path"] == "large.txt" and output["digest"] == _sha(body)
+        assert output["truncated"] and not output["redacted"]
+        assert output["content"] == body[:output["position"]["end_char"]]
+        assert output["position"]["start_char"] == 0 and not output["eof"]
+        assert output["next"]["offset"] == output["position"]["end_char"]
+        assert output["next"]["expected_digest"] == _sha(body)
+        assert output["workspace_provenance"]["adapter"] == "pulse_harness.workspace.v1"
+        assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
+        assert target.read_text(encoding="utf-8") == body
+
+
+def test_unrepresentable_receipt_metadata_rejects_before_the_file_effect(tmp_path, monkeypatch):
+    monkeypatch.setattr("per_pulse.service.NATIVE_PAYLOAD_BYTES", 64 * 1024, raising=False)
+    requests = []
+    factory = _factory(monkeypatch, {"WRITE_REPORT": {
+        "path": "report.txt", "expected_digest": None, "content": "A short report.\n",
+    }}, requests, tool_call_id="fixture-wide-" * 1_900)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        runtime = client.app.state.pages.runtime
+        execution = client.app.state.pages.execution
+        page_id = _page(client)
+        waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+        action_id = waiting["pendingActions"][0]["actionId"]
+        execution.resolve_approval(page_id, action_id, "allow_once")
+        _wait(execution, page_id, lambda view: view["status"] == "idle")
+        store = runtime.kernel_service.store
+        scope = store.action_scope_for_session(execution._scope(page_id), action_id)
+        action = store.get_action(scope, action_id)
+        assert action.status.value == "failed" and action.error_code == "payload_too_large"
+        assert action.operation_id is None
+        assert not (tmp_path / "workspace" / "report.txt").exists()
+        assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
+
+
+@pytest.mark.parametrize("line", ['Quoted: "text" with slash \\\tand tab.\r\n',
+                                  'Multibyte: café and 文本 💡.\n'], ids=["escaped", "multibyte"])
+@pytest.mark.parametrize("automatic", [True, False], ids=["auto-apply", "approval"])
+def test_large_native_rewrite_continues_downloads_and_undoes_after_restart(tmp_path, monkeypatch, line, automatic):
+    before = "Original report.\n"
+    after = line * 4_000
+    assert len(after.encode("utf-8")) > 64 * 1024
+    requests = []
+    factory = _factory(monkeypatch, {"LARGE_REWRITE": {
+        "path": "report.txt", "expected_digest": _sha(before), "content": after,
+    }}, requests, argument_chunk_chars=257)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True,
+                 auto_apply_edits=automatic) as client:
+        target = tmp_path / "workspace" / "report.txt"
+        target.write_bytes(before.encode())
+        page_id = _page(client, "LARGE_REWRITE")
+        execution = client.app.state.pages.execution
+        if not automatic:
+            waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+            pending, = waiting["pendingActions"]
+            assert pending["arguments"]["content"] == after and not pending["argumentsTruncated"]
+            execution.resolve_approval(page_id, pending["actionId"], "allow_once")
+        _wait(execution, page_id, lambda view: len(requests) >= 2 and view["status"] == "idle")
+        item, = client.app.state.pages.artifacts.snapshot(page_id)["artifacts"]
+        action_id = item["actionId"]
+        assert target.read_bytes() == after.encode()
+        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").content == after.encode()
+        tool, = [message for message in requests[-1]["messages"] if message["role"] == "tool"]
+        assert json.loads(tool["content"])["status"] == "succeeded"
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True,
+                 auto_apply_edits=True) as client:
+        assert client.get(f"/api/pages/{page_id}/artifacts/{action_id}/download").content == after.encode()
+        response = client.post(f"/api/pages/{page_id}/artifacts/{action_id}/undo", json={})
+        assert response.status_code == 200, response.text
+        assert target.read_bytes() == before.encode()
+
+
+@pytest.mark.parametrize("observe_transition", [False, True], ids=["settled", "during-transition"])
+def test_native_rewrite_over_envelope_stops_before_changing_the_file(tmp_path, monkeypatch, observe_transition):
+    from per_pulse.service import NATIVE_PAYLOAD_BYTES
+    from pulse_harness.core import TurnRunner, TurnStatus
+
+    entered, release = threading.Event(), threading.Event()
+    original_transition = TurnRunner._transition_turn
+
+    def pause_at_failure(runner, scope, status):
+        original_transition(runner, scope, status)
+        if status is TurnStatus.FAILED:
+            entered.set()
+            assert release.wait(8), "Release the observed failure transition."
+
+    if observe_transition:
+        monkeypatch.setattr(TurnRunner, "_transition_turn", pause_at_failure)
+
+    before = "Keep the existing report.\n"
+    requests = []
+    factory = _factory(monkeypatch, {"OVER_ENVELOPE": {
+        "path": "report.txt", "expected_digest": _sha(before),
+        "content": "x" * NATIVE_PAYLOAD_BYTES,
+    }}, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True,
+                 auto_apply_edits=True) as client:
+        target = tmp_path / "workspace" / "report.txt"
+        target.write_bytes(before.encode())
+        page_id = _page(client, "OVER_ENVELOPE")
+        execution = client.app.state.pages.execution
+        try:
+            if observe_transition:
+                assert entered.wait(8), "The Kernel must reach the failed state."
+            view = _wait(execution, page_id, lambda view: view["status"] == "error")
+            assert view["failureCode"] == "payload_too_large"
+            assert target.read_bytes() == before.encode()
+            assert client.app.state.pages.artifacts.snapshot(page_id)["artifacts"] == []
+        finally:
+            release.set()
+
+
+def test_legacy_truncated_receipt_is_not_reconstructed_from_file_existence(tmp_path, monkeypatch):
+    from pulse_harness.adapters.workspace import StructuredWorkspaceToolProvider, _safe_observer_text
+
+    monkeypatch.setattr("per_pulse.service.NATIVE_PAYLOAD_BYTES", 64 * 1024, raising=False)
+
+    before = "DRAFT " + "x" * 50_000 + "\n"
+    after = before.replace("DRAFT", "FINAL")
+    requests = []
+    factory = _factory(monkeypatch, {"PATCH_LEGACY": {
+        "path": "legacy.txt", "expected_digest": _sha(before),
+        "patch": {"edits": [{"old": "DRAFT", "new": "FINAL"}]},
+    }}, requests)
+
+    def old_text_only_bound(self, metadata, text, *, text_key, redacted_key, truncated_key, **_kwargs):
+        # Explicit legacy adapter fixture: each text field fits, but its JSON
+        # envelope exceeds the store bound and loses the full receipt identity.
+        preview, redacted, truncated = _safe_observer_text(text, self.store.max_payload_bytes)
+        return {**metadata, text_key: preview, redacted_key: redacted, truncated_key: truncated}
+
+    with monkeypatch.context() as legacy:
+        legacy.setattr(StructuredWorkspaceToolProvider, "_bounded_text_output", old_text_only_bound)
+        with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+            target = tmp_path / "workspace" / "legacy.txt"
+            target.write_text(before, encoding="utf-8", newline="")
+            execution = client.app.state.pages.execution
+            page_id = _page(client, "PATCH_LEGACY")
+            waiting = _wait(execution, page_id, lambda view: bool(view["pendingActions"]) and view["pendingActions"][0]["canResolve"])
+            action_id = waiting["pendingActions"][0]["actionId"]
+            receipt = execution.resolve_approval(page_id, action_id, "allow_once")
+            assert receipt["actionCompleted"]
+            assert receipt["continuationError"]["code"] == "payload_too_large"
+            assert target.read_text(encoding="utf-8") == after
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        artifacts = client.app.state.pages.artifacts
+        snapshot = artifacts.snapshot(page_id)
+        assert snapshot["artifacts"] == [] and snapshot["truncated"]
+        with pytest.raises(ArtifactError):
+            artifacts.read(page_id, action_id)
+        assert target.read_text(encoding="utf-8") == after
+
+
+def test_generated_file_handoff_retains_exact_native_action_source_across_works_and_restart(tmp_path, monkeypatch):
+    """A file's matching path and bytes do not by themselves prove its creator."""
+    content, requests = "The finished deliverable, not a model claim.\n", []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "deliverable.md", "expected_digest": None, "content": content}
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        producer = _page(client)
+        action_id = _approve(pages.execution, producer)
+        artifact, = pages.artifacts.snapshot(producer)["artifacts"]
+        assert artifact["id"] == action_id and artifact["sha256"] == _sha(content)
+        receiver = _page(client, "Continue editing the delivered result.")
+        identity = {
+            "X-Per-Pulse-World": pages.runtime.world_id,
+            "X-Per-Pulse-Service-Instance": pages.service_instance_id,
+        }
+
+        def attach(to, **overrides):
+            payload = {
+                "path": artifact["path"], "sha256": artifact["sha256"],
+                "sourcePageId": producer, "sourceArtifactId": action_id,
+                **overrides,
+            }
+            return client.post(f"/api/pages/{to}/materials/reference", json=payload, headers=identity)
+
+        generated = attach(receiver)
+        assert generated.status_code == 201, generated.text
+        received = generated.json()["material"]
+        assert (received["pageId"], received["originArtifactPageId"],
+                received["originArtifactId"]) == (receiver, producer, action_id)
+        assert received["source"] == "workspace_reference"
+        assert attach(receiver).json()["material"] == received
+        assert attach("home").json()["material"]["originArtifactId"] == action_id
+        assert client.get(f"/api/pages/{receiver}/materials/{received['id']}").json()["material"] == received
+        message = client.post(f"/api/pages/{receiver}/messages",
+                              json={"content": "Improve this finished work.", "materials": [received["id"]]})
+        assert message.status_code == 202
+        assert message.json()["view"]["messages"][-1]["materials"] == [received]
+        assert producer not in message.json()["view"]["messages"][-1]["content"]
+
+        # A page ID, an action ID, and the file digest must agree with the
+        # original succeeded native write; neither a different Work nor a
+        # matching naked pathname can assert that native provenance.
+        assert attach(receiver, sourcePageId=receiver).status_code == 409
+        assert attach(receiver, sourceArtifactId="no-such-action").status_code == 409
+        assert attach(receiver, sha256="0" * 64).status_code == 409
+        assert attach(receiver, path="not-deliverable.md").status_code == 409
+        assert client.post(f"/api/pages/{receiver}/materials/reference",
+            json={"path": artifact["path"], "sha256": artifact["sha256"],
+                  "sourcePageId": producer}, headers=identity).status_code == 422
+        assert client.post(f"/api/pages/{receiver}/materials/reference",
+            json={"path": artifact["path"], "sha256": artifact["sha256"],
+                  "sourceArtifactId": action_id}, headers=identity).status_code == 422
+        assert client.get(f"/api/pages/{producer}/materials/{received['id']}").status_code == 404
+
+        # A raw file-browsing reference remains valid but must not inherit
+        # the asserted producing action from another reference to these bytes.
+        plain = client.post(f"/api/pages/{receiver}/materials/reference",
+            json={"path": artifact["path"], "sha256": artifact["sha256"]}, headers=identity)
+        assert plain.status_code == 201
+        assert plain.json()["material"]["id"] != received["id"]
+        assert "originArtifactId" not in plain.json()["material"]
+        assert len(client.get(f"/api/pages/{receiver}/materials").json()["materials"]) == 2
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        record = client.get(f"/api/pages/{receiver}/materials/{received['id']}").json()["material"]
+        assert record == received
+        assert client.get(f"/api/pages/{producer}/artifacts/{action_id}").json()["state"] == "current"
+        assert client.app.state.pages.runtime.kernel_service._runtimes == {}
+
+
+def test_undone_file_result_cannot_resurrect_sourced_work_from_identical_bytes(tmp_path, monkeypatch):
+    """A receiver can finish with a real file, but its old producer stays undone.
+
+    The provider chooses one file action synthetically; the approval, native
+    receipt, source transfer, Undo, file bytes and restart are real. A separate
+    writer later recreating exactly the same bytes cannot restore authorship.
+    """
+    content = "Deliverable with an attributed source.\n"
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "deliverable.md", "expected_digest": None, "content": content},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        producer = _page(client, "WRITE_REPORT")
+        action_id = _approve(pages.execution, producer)
+        producer_action, = pages.artifacts.snapshot(producer)["artifacts"]
+        receiver = _page(client, "Continue from the finished document.")
+        identity = {
+            "X-Per-Pulse-World": pages.runtime.world_id,
+            "X-Per-Pulse-Service-Instance": pages.service_instance_id,
+        }
+        payload = {
+            "path": producer_action["path"], "sha256": producer_action["sha256"],
+            "sourcePageId": producer, "sourceArtifactId": action_id,
+        }
+        linked = client.post(f"/api/pages/{receiver}/materials/reference",
+                             json=payload, headers=identity)
+        assert linked.status_code == 201, linked.text
+        linked_id = linked.json()["material"]["id"]
+        assert client.get(f"/api/pages/{receiver}/materials/{linked_id}").status_code == 200
+        assert pages.artifacts.read(producer, action_id)["state"] == "current"
+
+        target = tmp_path / "workspace" / "deliverable.md"
+        assert target.read_text(encoding="utf-8") == content
+        restored = client.post(f"/api/pages/{producer}/artifacts/{action_id}/undo", json={})
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["artifact"]["undone"] and not target.exists()
+
+        # This is a new unattributed filesystem write, not a replay of the
+        # producer's action. It intentionally has the exact old SHA-256.
+        target.write_text(content, encoding="utf-8", newline="")
+        assert _sha(target.read_text(encoding="utf-8")) == producer_action["sha256"]
+        preview = client.get(f"/api/pages/{producer}/artifacts/{action_id}")
+        assert preview.status_code == 200
+        assert preview.json()["state"] == "unavailable"
+        assert preview.json()["reason"] == "artifact_undone"
+        assert not preview.json()["downloadable"]
+        old_download = client.get(f"/api/pages/{producer}/artifacts/{action_id}/download")
+        assert old_download.status_code == 409
+        assert old_download.json()["error"]["code"] == "artifact_undone"
+        assert client.get(f"/api/pages/{receiver}/materials/{linked_id}").status_code == 409
+        assert client.get(f"/api/pages/{receiver}/materials/{linked_id}/download").status_code == 409
+        refused_send = client.post(f"/api/pages/{receiver}/messages",
+            json={"content": "Continue with the undone source.", "materials": [linked_id]})
+        assert refused_send.status_code == 409
+        assert refused_send.json()["error"]["code"] == "material_unavailable"
+
+        # Explicitly taking these present bytes as a plain workspace source
+        # remains possible, but never inherits the withdrawn action identity.
+        plain = client.post(f"/api/pages/{receiver}/materials/reference",
+            json={"path": producer_action["path"], "sha256": producer_action["sha256"]},
+            headers=identity)
+        assert plain.status_code == 201, plain.text
+        assert "originArtifactId" not in plain.json()["material"]
+        assert client.get(
+            f"/api/pages/{receiver}/materials/{plain.json()['material']['id']}"
+        ).status_code == 200
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        pages = client.app.state.pages
+        assert pages.artifacts.snapshot(producer)["artifacts"][0]["undone"]
+        assert pages.artifacts.read(producer, action_id)["reason"] == "artifact_undone"
+        assert client.get(f"/api/pages/{receiver}/materials/{linked_id}").status_code == 409
+        assert client.get(f"/api/pages/{producer}/artifacts/{action_id}/download").status_code == 409
+        assert pages.runtime.kernel_service._runtimes == {}
+
+
+def test_new_work_starts_with_verified_file_before_first_model_stimulus(tmp_path, monkeypatch):
+    """The original Kernel file receipt is durable before the first Work message."""
+    requests = []
+    source_text = "Evidence from the first Work.\\n"
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "handoff.txt", "expected_digest": None, "content": source_text},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        source_id = _page(client)
+        _approve(service.execution, source_id)
+        item, = service.artifacts.snapshot(source_id)["artifacts"]
+        selected = {"id": item["id"], "pageId": source_id,
+                    "path": item["path"], "sha256": item["sha256"]}
+        creation = client.post("/api/pages", json={
+            "title": "Continue the confirmed result", "instruction": "Inspect the original source.",
+            "sourcePageId": source_id, "sourceArtifact": selected,
+        })
+        assert creation.status_code == 201, creation.text
+        body = creation.json()
+        target = body["page"]["id"]
+        initial = next(row for row in body["view"]["messages"]
+                       if row["id"] == body["initialMessageId"])
+        assert len(initial["materials"]) == 1
+        receipt = initial["materials"][0]
+        assert receipt["originArtifactPageId"] == source_id
+        assert receipt["originArtifactId"] == item["id"]
+        assert receipt["pageId"] == target
+        assert receipt["sha256"] == item["sha256"]
+        assert "per-pulse.material-references.v1" in initial["content"]
+        assert service.runtime.storage.get_page_material(service.runtime.world_id, receipt["id"])
+        before_count = len(service.runtime.list_task_fronts())
+        invalid = client.post("/api/pages", json={
+            "title": "Wrong original", "instruction": "Inspect.",
+            "sourcePageId": source_id,
+            "sourceArtifact": {**selected, "sha256": "0" * 64},
+        })
+        assert invalid.status_code == 409
+        assert len(service.runtime.list_task_fronts()) == before_count
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        persisted = client.get(f"/api/pages/{target}").json()
+        saved = next(row for row in persisted["messages"] if row["id"] == body["initialMessageId"])
+        assert saved["materials"][0]["originArtifactId"] == item["id"]
+        assert saved["materials"][0]["sha256"] == item["sha256"]
+        assert service.materials.read(target, receipt["id"])["content"] == source_text
+
+
+def test_failed_file_sourced_work_creation_leaves_no_empty_front_or_receipt(tmp_path, monkeypatch):
+    """An oversized initial message must not strand a new Work in SQLite."""
+    source_text = "A verified original document.\n"
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "source.txt", "expected_digest": None, "content": source_text},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        source_id = _page(client)
+        _approve(service.execution, source_id)
+        original, = service.artifacts.snapshot(source_id)["artifacts"]
+        selected = {"id": original["id"], "pageId": source_id,
+                    "path": original["path"], "sha256": original["sha256"]}
+        before = {row["id"] for row in service.runtime.list_task_fronts()}
+        response = client.post("/api/pages", json={
+            "title": "Continue this source", "instruction": "x" * 31_900,
+            "sourcePageId": source_id, "sourceArtifact": selected,
+        })
+        assert response.status_code == 422, response.text
+        assert response.json()["error"]["code"] == "page_source_too_large"
+        assert {row["id"] for row in service.runtime.list_task_fronts()} == before
+        assert service.runtime.storage.find_page_material_versions(
+            service.runtime.world_id, "source.txt", original["sha256"],
+            len(source_text.encode("utf-8")),
+        ) == []
+        assert service.artifacts.snapshot(source_id)["artifacts"][0]["id"] == original["id"]
+
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        assert {row["id"] for row in service.runtime.list_task_fronts()} == before
+        assert service.runtime.storage.find_page_material_versions(
+            service.runtime.world_id, "source.txt", original["sha256"],
+            len(source_text.encode("utf-8")),
+        ) == []
+        assert service.artifacts.snapshot(source_id)["artifacts"][0]["id"] == original["id"]
+
+
+def test_file_changed_during_new_work_preparation_does_not_leave_empty_front(tmp_path, monkeypatch):
+    """A source mutation after the first check must not create a ghost Work."""
+    source_text = "Original sourced result.\n"
+    requests = []
+    factory = _factory(monkeypatch, {
+        "WRITE_REPORT": {"path": "source.txt", "expected_digest": None, "content": source_text},
+    }, requests)
+    with _client(tmp_path, model_factory=factory, allow_workspace_actions=True) as client:
+        service = client.app.state.pages
+        source_id = _page(client)
+        _approve(service.execution, source_id)
+        original, = service.artifacts.snapshot(source_id)["artifacts"]
+        selected = {"id": original["id"], "pageId": source_id,
+                    "path": original["path"], "sha256": original["sha256"]}
+        before = {row["id"] for row in service.runtime.list_task_fronts()}
+        reference_existing = service.materials.reference_existing
+
+        def change_after_preflight(*args, **kwargs):
+            (tmp_path / "workspace" / "source.txt").write_text(
+                "File changed after preflight.\n", encoding="utf-8",
+            )
+            return reference_existing(*args, **kwargs)
+
+        monkeypatch.setattr(service.materials, "reference_existing", change_after_preflight)
+        response = client.post("/api/pages", json={
+            "title": "Continue original", "instruction": "Read the selected file.",
+            "sourcePageId": source_id, "sourceArtifact": selected,
+        })
+        assert response.status_code == 409, response.text
+        assert {row["id"] for row in service.runtime.list_task_fronts()} == before
+        assert service.runtime.storage.find_page_material_versions(
+            service.runtime.world_id, "source.txt", original["sha256"],
+            len(source_text.encode("utf-8")),
+        ) == []
+    with _client(tmp_path, model_factory=None, allow_workspace_actions=True) as client:
+        assert {row["id"] for row in client.app.state.pages.runtime.list_task_fronts()} == before

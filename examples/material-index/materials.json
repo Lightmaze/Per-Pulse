@@ -1,0 +1,17 @@
+[
+  {
+    "title": "Python: display literal <tags> & quoted text",
+    "url": "https://docs.python.org/3.12/library/html.html#html.escape",
+    "note": "Character escaping is one operation. Choosing a link destination is another."
+  },
+  {
+    "title": "Python: URL parsing security",
+    "url": "https://docs.python.org/3.12/library/urllib.parse.html#url-parsing-security",
+    "note": "Inspect components before deciding which URLs to turn into links."
+  },
+  {
+    "title": "Imported note: <img src=x onerror=alert(1)>",
+    "url": "javascript:document.body.dataset.executed=1",
+    "note": "Synthetic counterexample. Keep the title as literal text; do not create a link."
+  }
+]

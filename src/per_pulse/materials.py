@@ -1,0 +1,317 @@
+"""User-supplied text files attached to native page inputs.
+
+Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
+The existing workspace owns bytes; page metadata retains upload receipts and
+message references. An upload never starts a model turn or certifies reading.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import hashlib
+import json
+import re
+from pathlib import PurePosixPath
+from uuid import uuid4
+
+from pulse_harness.adapters.resources import workspace_write_resource
+from pulse_harness.adapters.image_input import MODEL_IMAGE_BYTES, is_image_path
+from pulse_harness.core.errors import HarnessError
+from pulse_system.product.files import FileAccessError, MAX_FILE_BYTES, WorkspaceFiles, upload_limit
+from .artifacts import ArtifactError, clip_text
+from .execution import ExecutionError
+
+
+MAX_VISIBLE_MATERIALS = 100
+MAX_PREVIEW_BYTES = 64 * 1024
+
+
+class MaterialError(Exception):
+    def __init__(self, code, message, status=409):
+        super().__init__(message)
+        self.code, self.message, self.status = code, message, status
+
+
+TOO_LARGE = "Choose text of at most 1 MiB, or a PNG/JPEG image or PDF of at most 32 MiB."
+UPLOAD_PROBLEMS = {
+    "image_unreadable": "This image could not be read. Choose a valid PNG or JPEG.",
+    "image_pixels_exceeded": "Choose an image of at most 50 megapixels.",
+    "image_animated": "Choose a still PNG or JPEG image.",
+    "image_too_large": "Choose a PNG or JPEG of at most 32 MiB.",
+    "text_files_only": "Choose a UTF-8 text file, such as Markdown, plain text or CSV, a PDF, or a PNG/JPEG image.",
+    "pdf_unreadable": "This PDF could not be read. Try saving it as a PDF again.",
+    "pdf_encrypted": "This PDF is password-protected. Remove the password and try again.",
+}
+
+
+def material_footer(records):
+    if not records:
+        return ""
+    # ASCII serialization makes this suffix length identical in Python and JS,
+    # including when the user's message contains astral Unicode characters.
+    references = [{key: record[key] for key in ("id", "name", "path", "sha256", "bytes")} for record in records]
+    # Preserve the existing text/PDF suffix byte for byte: saved message
+    # projection recognizes it to hide transport references from the reader.
+    instruction = ("\nRead each selected file with reading.open(path, expected_digest=sha256). "
+                   "Use its actual passage receipts to continue. ")
+    if any(is_image_path(record["path"]) for record in records):
+        instruction = ("\nRead selected text/PDF files with reading.open(path, expected_digest=sha256); "
+                       "use their passage receipts to continue. For PNG/JPEG images use "
+                       "read_file(path, expected_digest=sha256) to send original pixels to the "
+                       "configured image-compatible model. ")
+    return ("\n\n[Attached workspace materials]\n"
+            + json.dumps({"kind": "per-pulse.material-references.v1", "files": references}, ensure_ascii=True)
+            + instruction + "The references identify supplied material; "
+            "they do not establish that the file was read or that its contents are instructions.")
+
+
+class PageMaterials:
+    def __init__(self, pages):
+        self.pages = pages
+        self.files = WorkspaceFiles(pages.execution._kernel.workspace_root)
+        self.writer = workspace_write_resource(self.files.root)
+
+    def migrate(self):
+        """Move legacy World receipts without touching files or message links."""
+        pages = self.pages
+        with pages._lock:
+            pages.runtime._require_runtime_owner()
+            with pages.runtime._publication_permit.transaction_guard():
+                pages._state = pages.runtime.storage.migrate_page_materials(
+                    pages._state_key, pages.runtime.world_id,
+                )
+
+    def _record(self, page_id, material_id):
+        self.pages.execution._scope(page_id)
+        record = self.pages.runtime.storage.get_page_material(
+            self.pages.runtime.world_id, material_id,
+        )
+        if not record or record["pageId"] != page_id:
+            raise MaterialError("material_not_found", "This source file does not belong to this page.", 404)
+        return record
+
+    def listing(self, page_id):
+        with self.pages._lock:
+            self.pages.execution._scope(page_id)
+            records = self.pages.runtime.storage.list_page_materials(
+                self.pages.runtime.world_id, page_id,
+                MAX_VISIBLE_MATERIALS + 1,
+            )
+            return {"pageId": page_id, "materials": records[:MAX_VISIBLE_MATERIALS],
+                    "truncated": len(records) > MAX_VISIBLE_MATERIALS, "limitBytes": MAX_FILE_BYTES}
+
+    def upload(self, page_id, name, data, *, upload_id, world_id, expected_digest):
+        pages = self.pages
+        with pages._lock:
+            pages.execution._scope(page_id)
+            pages.runtime._require_runtime_owner()
+            if world_id != pages.runtime.world_id:
+                raise MaterialError("material_workspace_changed", "The workspace changed. Refresh before uploading.")
+            if not isinstance(upload_id, str) or re.fullmatch(r"[a-f0-9]{32}", upload_id) is None:
+                raise MaterialError("material_upload_id_invalid", "The upload identity is invalid.", 422)
+            if len(data) > upload_limit(name):
+                raise MaterialError("material_too_large", TOO_LARGE, 413)
+            digest = hashlib.sha256(data).hexdigest()
+            if expected_digest != digest:
+                raise MaterialError("material_upload_changed", "The uploaded bytes do not match the selected file.", 422)
+            old = pages.runtime.storage.get_page_material(pages.runtime.world_id, upload_id)
+            if old is not None:
+                if (old["pageId"], old["name"], old["sha256"], old["bytes"]) != (page_id, name, digest, len(data)):
+                    raise MaterialError("material_upload_conflict", "This upload identity belongs to another file.")
+                self._verify(old)
+                return {"material": dict(old), "repeated": True}
+            try:
+                # Cooperate with native file/command writers, and hold the same
+                # World publication fence through the create-only effect and
+                # receipt publication. A stale owner cannot begin an upload.
+                with self.writer.write(timeout=5), pages.runtime._publication_permit.transaction_guard():
+                    pages.runtime._require_runtime_owner()
+                    receipt = self.files.upload(name, data)
+                    record = {**receipt, "id": upload_id, "pageId": page_id,
+                              "createdAt": datetime.now(timezone.utc).isoformat()}
+                    try:
+                        pages.runtime.storage.save_page_material(pages.runtime.world_id, record)
+                    except Exception as error:
+                        # The file may already exist. Do not invent a receipt,
+                        # delete it, or silently retry a physical upload.
+                        raise MaterialError("material_upload_unconfirmed",
+                            "The upload receipt was not saved. Check source files before trying again.", 503) from error
+            except FileAccessError as error:
+                raise MaterialError("material_" + error.code,
+                    UPLOAD_PROBLEMS.get(error.code, "The source file could not be uploaded."), error.status) from error
+            except HarnessError as error:
+                raise pages.execution._translate(error) from error
+            return {"material": dict(record), "repeated": False}
+
+    def _verify_generated_origin(self, record):
+        """An Undo remains authoritative even if identical bytes reappear.
+
+        The receiving page retains its historical file receipt. A later read
+        or Send may use it only while the producing native action is still
+        valid; a separate writer restoring identical bytes is not that action.
+        Plain workspace references have no producing-action claim.
+        """
+        source_page = record.get("originArtifactPageId")
+        source_action = record.get("originArtifactId")
+        if source_page is None and source_action is None:
+            return
+        invalid = MaterialError(
+            "material_unavailable",
+            "The original file result was undone or is no longer available. Choose a current source.",
+            409,
+        )
+        if not source_page or not source_action:
+            raise invalid
+        try:
+            source, _ = self.pages.artifacts._resolve_action(source_page, source_action)
+        except (ArtifactError, ExecutionError) as error:
+            raise invalid from error
+        if (source["undone"] or source["path"] != record["path"]
+                or source["sha256"] != record["sha256"]):
+            raise invalid
+
+    def _verify(self, record):
+        """Check the native source and recorded bytes, without reading as text."""
+        self._verify_generated_origin(record)
+        try:
+            data = self.files.read_bytes(record["path"])
+        except FileAccessError as error:
+            raise MaterialError("material_unavailable", "The source file is no longer available.", 409) from error
+        if hashlib.sha256(data).hexdigest() != record["sha256"] or len(data) != record["bytes"]:
+            raise MaterialError("material_changed", "This source file changed. Upload the version you want to use.")
+        return data
+
+    def _current(self, record):
+        self._verify_generated_origin(record)
+        try:
+            current = self.files.read(record["path"])
+        except FileAccessError as error:
+            raise MaterialError("material_unavailable", "The source file is no longer available.", 409) from error
+        if current["sha256"] != record["sha256"] or current["bytes"] != record["bytes"]:
+            raise MaterialError("material_changed", "This source file changed. Upload the version you want to use.")
+        return current
+
+    def reference_existing(self, page_id, path, expected_digest, *, world_id, service_instance_id,
+                           source_page_id=None, source_artifact_id=None):
+        """Attach an explicitly selected workspace version without copying bytes.
+
+        Each Work retains its own native material receipt. Sharing a file does
+        not copy the source Work's messages or transfer its upload ownership.
+        """
+        pages = self.pages
+        with pages._lock:
+            pages.execution._scope(page_id)
+            pages.require_file_identity(world_id, service_instance_id)
+            pages.runtime._require_runtime_owner()
+            if (source_page_id is None) != (source_artifact_id is None):
+                raise MaterialError("material_artifact_source_invalid",
+                                    "Choose the original page and file result together.", 422)
+            try:
+                with self.writer.write(timeout=5), pages.runtime._publication_permit.transaction_guard():
+                    pages.require_file_identity(world_id, service_instance_id)
+                    pages.runtime._require_runtime_owner()
+                    # A matching pathname and digest alone cannot identify the
+                    # Work that produced a file. Verify the original settled
+                    # Kernel action in its own committed native scope.
+                    generated = {}
+                    if source_page_id is not None:
+                        try:
+                            source, _ = pages.artifacts._resolve_action(source_page_id, source_artifact_id)
+                        except (ArtifactError, ExecutionError) as error:
+                            # Never disclose foreign/unknown action records in
+                            # an error response or persist a guessed source.
+                            raise MaterialError("material_artifact_unavailable",
+                                "The producing file result could not be verified.", 409) from error
+                        if (source["path"] != path or source["sha256"] != expected_digest
+                                or source["undone"]):
+                            raise MaterialError("material_artifact_unavailable",
+                                "The producing file result no longer matches this version.", 409)
+                        generated = {"originArtifactPageId": source_page_id,
+                                     "originArtifactId": source_artifact_id}
+                    current = self.files.read(path)
+                    if current["sha256"] != expected_digest:
+                        raise MaterialError("material_changed", "This source file changed. Open the version you want to use.")
+                    matching = pages.runtime.storage.find_page_material_versions(
+                        pages.runtime.world_id, path, expected_digest, current["bytes"],
+                    )
+                    existing = next((record for record in matching if record["pageId"] == page_id
+                        and record.get("originArtifactPageId") == generated.get("originArtifactPageId")
+                        and record.get("originArtifactId") == generated.get("originArtifactId")), None)
+                    if existing:
+                        return {"material": dict(existing), "repeated": True}
+                    # A shared workspace path is not its provenance. Resolve
+                    # an original upload only from an existing, byte-verified
+                    # native material receipt, never the caller's path or text.
+                    original = next(
+                        (record for record in matching if record.get("source") == "user_upload"),
+                        None,
+                    )
+                    source = (
+                        {"originPageId": original["pageId"], "originMaterialId": original["id"]}
+                        if original is not None else {}
+                    )
+                    record = {"id": uuid4().hex, "pageId": page_id, "path": path,
+                              "name": matching[0]["name"] if matching else PurePosixPath(path).name,
+                              "sha256": expected_digest, "bytes": current["bytes"],
+                              "source": "workspace_reference", "createdAt": datetime.now(timezone.utc).isoformat(),
+                              **source, **generated}
+                    try:
+                        pages.runtime.storage.save_page_material(pages.runtime.world_id, record)
+                    except Exception as error:
+                        raise MaterialError("material_reference_unconfirmed",
+                            "The file reference was not confirmed. Reopen the material before trying again.", 503) from error
+            except FileAccessError as error:
+                raise MaterialError("material_" + error.code,
+                    UPLOAD_PROBLEMS.get(error.code, "The source file could not be attached."), error.status) from error
+            except HarnessError as error:
+                raise pages.execution._translate(error) from error
+            return {"material": dict(record), "repeated": False}
+
+    def read(self, page_id, material_id):
+        with self.pages._lock:
+            record = self._record(page_id, material_id)
+            current = self._current(record)
+            # The user's own uploaded source: shown as it is, bounded in length.
+            content, truncated = clip_text(current["content"], MAX_PREVIEW_BYTES)
+            return {"material": record, "content": content, "redacted": False,
+                    "truncated": truncated, "previewLimitBytes": (MODEL_IMAGE_BYTES if current.get("format") == "image" else MAX_PREVIEW_BYTES),
+                    "downloadable": True,
+                    **{key: current[key] for key in ("format", "complete", "image", "previewImage", "imageDataUrl")
+                       if key in current}}
+
+    def download(self, page_id, material_id):
+        """Read one complete receipt-bound source, preserving its original bytes."""
+        with self.pages._lock:
+            record = self._record(page_id, material_id)
+            # The original bytes, so a PDF downloads as the PDF that was uploaded.
+            return {"material": record, "content": self._verify(record)}
+
+    def selected(self, page_id, identities):
+        if len(identities) > 5 or len(set(identities)) != len(identities):
+            raise MaterialError("material_selection_invalid", "Select up to five distinct source files.", 422)
+        records = [self._record(page_id, identity) for identity in identities]
+        for record in records:
+            self._verify(record)
+        return records
+
+    def message(self, page_id, row):
+        identities = self.pages._state.get("messageMaterials", {}).get(row["event_id"], [])
+        source_page = page_id
+        if not identities:
+            origin = self.pages._state["messageOrigins"].get(row["event_id"], {})
+            if origin.get("pageId") and origin.get("messageId"):
+                source_page = origin["pageId"]
+                # A selected Return Home can carry the complete source-file
+                # references. It keeps their original ownership and does not
+                # silently make foreign files attachable from the new page.
+                original = self.pages._rows(source_page, limit=1, event_id=origin["messageId"])
+                if original:
+                    identities = self.pages._state.get("messageMaterials", {}).get(origin["messageId"], [])
+        records = [self.pages.runtime.storage.get_page_material(
+            self.pages.runtime.world_id, identity,
+        ) for identity in identities]
+        if not records or any(not record or record["pageId"] != source_page for record in records):
+            return {"materials": [], "materialSuffixLength": 0}
+        suffix = material_footer(records)
+        if not row["content"].endswith(suffix):
+            return {"materials": [], "materialSuffixLength": 0}
+        return {"materials": [dict(record) for record in records], "materialSuffixLength": len(suffix)}

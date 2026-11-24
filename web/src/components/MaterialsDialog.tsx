@@ -1,0 +1,255 @@
+import { useEffect, useId, useRef, useState } from 'react';
+import { UPLOAD_ACCEPT, isSupportedUpload, pdfHasText, uploadLimit } from '../uploadLimits';
+import { api, ApiError } from '../api';
+import { useLanguage, type MessageKey } from '../i18n';
+import type { Material, WorkspaceFile, WorkspaceFileIdentity, WorkspaceFileList } from '../types';
+import { Dialog } from './Dialog';
+import { Icon } from './Icon';
+import { TextDocument } from './TextDocument';
+import { ImagePreview } from './ImagePreview';
+
+const PREVIEW_CHARS = 64_000;
+// The same native file errors also serve result downloads. Keep upload advice
+// in this flow rather than replacing their explanations across the product.
+const materialErrors: Record<string, MessageKey> = {
+  image_unreadable: 'library.imageUnreadable', material_image_unreadable: 'library.imageUnreadable',
+  image_pixels_exceeded: 'library.imagePixels', material_image_pixels_exceeded: 'library.imagePixels',
+  image_animated: 'library.imageAnimated', material_image_animated: 'library.imageAnimated',
+  image_too_large: 'library.tooLarge', material_image_too_large: 'library.tooLarge',
+  workspace_changed: 'library.workspaceChanged', file_too_large: 'library.tooLarge',
+  empty_file: 'library.emptyFile', text_files_only: 'library.textOnly',
+  pdf_unreadable: 'library.pdfUnreadable', pdf_encrypted: 'library.pdfEncrypted',
+  protected_or_invalid_path: 'library.invalidPath',
+  invalid_directory_cursor: 'library.directoryCursorInvalid', directory_changed_retry: 'library.directoryRetry',
+  invalid_path: 'library.invalidPath', filename_only: 'library.invalidPath',
+  file_changed_retry: 'library.changed', file_unavailable: 'library.unavailable',
+  path_unavailable: 'library.unavailable', not_a_single_regular_file: 'library.invalidPath',
+  upload_failed_or_unconfirmed: 'library.uploadUnconfirmed',
+  material_file_too_large: 'library.tooLarge', material_too_large: 'library.tooLarge',
+  material_text_files_only: 'library.textOnly',
+  material_pdf_unreadable: 'library.pdfUnreadable', material_pdf_encrypted: 'library.pdfEncrypted',
+  material_upload_unconfirmed: 'library.uploadUnconfirmed',
+  material_reference_unconfirmed: 'library.referenceUnconfirmed',
+};
+
+export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
+  identity: WorkspaceFileIdentity; pageId: string; selectedIds: string[];
+  close: () => void; add: (material: Material, keepOpen?: boolean) => boolean;
+}) {
+  const { t, errorText } = useLanguage();
+  const [listing, setListing] = useState<WorkspaceFileList | null>(null);
+  const [preview, setPreview] = useState<WorkspaceFile | null>(null);
+  const [selected, setSelected] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [stale, setStale] = useState(false);
+  const [attachmentError, setAttachmentError] = useState('');
+  const request = useRef<{ sequence: number; controller: AbortController | null; busy: boolean }>({ sequence: 0, controller: null, busy: false });
+  const input = useRef<HTMLInputElement>(null);
+  const previewHeading = useRef<HTMLHeadingElement>(null);
+  const inputId = useId();
+  const uploadId = useRef('');
+
+  function checked<T extends WorkspaceFileIdentity>(value: T): T {
+    if (value.workspaceId !== identity.workspaceId || value.serviceInstanceId !== identity.serviceInstanceId) {
+      throw new ApiError(t('library.workspaceChanged'), 'workspace_changed', 409);
+    }
+    return value;
+  }
+
+  async function perform(work: (signal: AbortSignal, current: () => boolean) => Promise<void>, uploading = false, attaching = false) {
+    if (request.current.busy || stale) return;
+    const sequence = ++request.current.sequence;
+    const controller = new AbortController();
+    request.current.controller = controller;
+    request.current.busy = true;
+    setBusy(true); setError(''); setNotice(''); setAttachmentError('');
+    const current = () => request.current.sequence === sequence && !controller.signal.aborted;
+    try {
+      await work(controller.signal, current);
+    } catch (problem) {
+      if (!current()) return;
+      if (problem instanceof ApiError && problem.code === 'workspace_changed') {
+        setStale(true); setPreview(null); setError(t('library.workspaceChanged'));
+      } else {
+        const key = problem instanceof ApiError ? materialErrors[problem.code] : undefined;
+        const message = uploading && problem instanceof ApiError && problem.code === 'network_error'
+          ? t('library.uploadUnconfirmed') : key ? t(key) : errorText(problem);
+        if (attaching) setAttachmentError(message); else setError(message);
+      }
+    } finally {
+      if (current()) { request.current.busy = false; setBusy(false); }
+    }
+  }
+
+  function browse(path: string, cursor?: string) {
+    void perform(async (signal, current) => {
+      const result = checked(await api.files(path, identity, signal, cursor));
+      if (!current()) return;
+      if (result.continuedAfterChange) setNotice(t('library.directoryContinued'));
+      else if (result.restartedDueToChange) setNotice(t('library.directoryChanged'));
+      if (cursor) {
+        // A page continues the same anchored directory. Keep already-opened
+        // files in view; sorting the collected pages avoids chunk boundaries
+        // deciding whether a folder appears before a file.
+        setListing(previous => {
+          if (!previous || previous.path !== result.path || result.restartedDueToChange) return result;
+          const entries = new Map([...previous.entries, ...result.entries].map(entry => [entry.path, entry]));
+          return { ...result, entries: [...entries.values()].sort((a, b) =>
+            Number(a.kind === 'file') - Number(b.kind === 'file')
+            || a.name.toLocaleLowerCase().localeCompare(b.name.toLocaleLowerCase())
+            || a.name.localeCompare(b.name)) };
+        });
+      } else {
+        setListing(result);
+        setPreview(null);
+      }
+    });
+  }
+
+  function openFile(path: string) {
+    // Choosing an existing file replaces any pending upload selection, including
+    // after an upload whose response was lost but whose bytes were saved.
+    setSelected([]);
+    if (input.current) input.current.value = '';
+    setPreview(null);
+    void perform(async (signal, current) => {
+      const result = checked(await api.file(path, identity, signal));
+      if (current()) setPreview(result);
+    });
+  }
+
+  function upload() {
+    if (!selected.length || busy || stale) return;
+    // A single file keeps its existing inspect-then-attach workflow.
+    // Multi-select confirms each native receipt into this Work's unsent draft.
+    if (selected.length > 1) {
+      const files = selected;
+      setPreview(null);
+      void perform(async (signal, current) => {
+        let attached = 0;
+        try {
+          for (const file of files) {
+            if (!current()) return;
+            if (selectedIds.length + attached >= 5) { setError(t('materials.selectionFull')); break; }
+            if (!isSupportedUpload(file)) { setError(t('library.textOnly')); break; }
+            if (!file.size) { setError(t('library.emptyFile')); break; }
+            if (file.size > uploadLimit(file.name)) { setError(t('library.tooLarge')); break; }
+            // Each file gets its own native source and identity. Never replay
+            // a request whose response was lost: its write is uncertain.
+            const id = crypto.randomUUID().replaceAll('-', '');
+            const result = checked(await api.uploadMaterial(pageId, identity, id, file, signal));
+            if (!current()) return;
+            if (!add(result.material, true)) { setError(t('materials.selectionFull')); break; }
+            attached++;
+            setNotice(t('library.batchAttached', { count: attached, total: files.length }));
+          }
+        } finally {
+          if (current()) {
+            // Keep confirmed items; an accidental retry must not duplicate
+            // the beginning of a partially completed batch.
+            setSelected([]);
+            if (input.current) input.current.value = '';
+            if (attached === files.length) close();
+          }
+        }
+      }, true);
+      return;
+    }
+    const file = selected[0];
+    if (!file.size) { setError(t('library.emptyFile')); return; }
+    if (file.size > uploadLimit(file.name)) { setError(t('library.tooLarge')); return; }
+    setPreview(null);
+    void perform(async (signal, current) => {
+      const result = checked(await api.uploadMaterial(pageId, identity, uploadId.current, file, signal));
+      if (!current()) return;
+      setNotice(t('library.uploaded', { name: file.name }));
+      setSelected([]);
+      if (input.current) input.current.value = '';
+      const [files, content] = await Promise.all([
+        api.files('uploads', identity, signal).then(checked),
+        api.file(result.material.path, identity, signal).then(checked),
+      ]);
+      if (!current()) return;
+      if (content.sha256 !== result.material.sha256) throw new ApiError(t('library.changed'), 'file_changed_retry', 409);
+      setListing(files); setPreview(content);
+    }, true);
+  }
+
+  function attach() {
+    if (!preview || busy || stale) return;
+    if (selectedIds.length >= 5) { setAttachmentError(t('materials.selectionFull')); return; }
+    void perform(async (signal, current) => {
+      const result = checked(await api.referenceMaterial(pageId, preview, identity, signal));
+      if (current() && !add(result.material)) setAttachmentError(t('materials.selectionFull'));
+    }, false, true);
+  }
+
+  useEffect(() => {
+    browse('');
+    return () => {
+      ++request.current.sequence;
+      request.current.controller?.abort();
+      request.current.busy = false;
+    };
+    // This dialog is keyed to World, service instance and page by its owner.
+  }, []);
+
+  useEffect(() => {
+    // Opening a source should take keyboard and phone users to its content,
+    // rather than leaving a successful preview below the upload controls.
+    if (preview) {
+      setAttachmentError('');
+      previewHeading.current?.focus({ preventScroll: true });
+      previewHeading.current?.scrollIntoView({ block: 'start' });
+    }
+  }, [preview]);
+
+  const disabled = busy || stale;
+  const directory = listing?.path ?? '';
+  return <Dialog title={t('library.title')} onClose={close} className="materials-dialog">
+    <div className="material-body">
+    <p className="dialog-description">{t('library.description')}</p>
+    <form className="material-upload" onSubmit={event => { event.preventDefault(); upload(); }}>
+      <label className="field-label" htmlFor={inputId}>{t('library.choose')}</label>
+      <p id={`${inputId}-hint`} className="material-hint">{t('library.hint')}</p>
+      <input ref={input} id={inputId} type="file" multiple accept={UPLOAD_ACCEPT} disabled={disabled}
+        aria-describedby={`${inputId}-hint${error ? ` ${inputId}-error` : ''}`}
+        onChange={event => { setSelected(Array.from(event.target.files ?? [])); uploadId.current = crypto.randomUUID().replaceAll('-', ''); setPreview(null); setError(''); setNotice(''); }} />
+      {selected.length ? <p className="material-selected">{selected.map(file => `${file.name} (${file.size.toLocaleString()} ${t('library.bytes')})`).join(' · ')}</p> : null}
+      <button className="secondary-button" type="submit" disabled={disabled || !selected.length}>{selected.length > 1 ? t('library.uploadBatch', { count: selected.length }) : t('library.upload')}</button>
+    </form>
+    {error ? <p className="form-error" id={`${inputId}-error`} role="alert">{error}</p> : null}
+    {stale ? <button className="secondary-button" onClick={() => window.location.reload()}>{t('library.reload')}</button> : null}
+    <p className="material-notice" role="status" aria-live="polite">{busy && !notice ? t('library.working') : notice}</p>
+    <section className="material-browser" aria-label={t('library.existing')}>
+      <div className="material-browser-heading"><h3>{t('library.existing')}</h3><button className="text-button" disabled={disabled} onClick={() => browse(directory)}>{t('library.refresh')}</button></div>
+      <div className="material-location"><button className="text-button" disabled={disabled || !directory} onClick={() => browse('')}>{t('library.workspace')}</button>{directory ? <><span aria-hidden="true">/</span><span>{directory}</span><button className="text-button" disabled={disabled} onClick={() => browse(directory.split('/').slice(0, -1).join('/'))}>{t('library.up')}</button></> : null}</div>
+      {listing?.entries.length ? <ul className="material-list">{listing.entries.map(entry => <li key={entry.path}>
+        <button disabled={disabled} className={preview?.path === entry.path ? 'selected' : ''} onClick={() => entry.kind === 'directory' ? browse(entry.path) : openFile(entry.path)}>
+          <Icon name={entry.kind === 'directory' ? 'chevron' : 'page'} size={16} /><span>{entry.name}{entry.kind === 'directory' ? '/' : ''}</span>
+          {entry.bytes !== null ? <small>{entry.bytes.toLocaleString()} {t('library.bytes')}</small> : null}
+        </button>
+      </li>)}</ul> : listing && !listing.nextCursor ? <p className="material-hint">{t('library.empty')}</p> : null}
+      {listing?.nextCursor ? <button type="button" className="secondary-button" disabled={disabled} onClick={() => browse(directory, listing.nextCursor!)}>{t('library.loadMore')}</button> : null}
+      {listing?.truncated && !listing?.nextCursor ? <p className="material-hint">{t('library.listLimited')}</p> : null}
+    </section>
+    {preview ? <section className="material-preview" aria-label={t('library.preview')}>
+      <h3 ref={previewHeading} tabIndex={-1}>{preview.path.split('/').at(-1)}</h3>
+      {preview.format === 'pdf_text' ? <p className="material-hint">{t(pdfHasText(preview.content) ? 'materials.pdfText' : 'materials.pdfNoText')}</p> : null}
+      {preview.format === 'pdf_text' && preview.complete === false ? <p className="material-hint">{t('materials.pdfPartial')}</p> : null}
+      {preview.format === 'image'
+        ? <ImagePreview name={preview.path.split('/').at(-1) ?? preview.path} image={preview.image} scaled={preview.previewImage} source={preview.imageDataUrl} />
+        : <TextDocument key={`${preview.path}/${preview.sha256}`} path={preview.path} content={preview.content.slice(0, PREVIEW_CHARS)} truncated={preview.content.length > PREVIEW_CHARS} />}
+      {preview.content.length > PREVIEW_CHARS ? <p className="material-hint">{t('library.previewLimited')}</p> : null}
+      <details><summary>{t('library.details')}</summary><p>{preview.path}</p><p>SHA-256: {preview.sha256}</p></details>
+    </section> : null}
+    </div>
+    {preview ? <div className="material-footer">
+      <p className="material-hint">{t('library.draftHint')}</p>
+      <button className="primary-button" disabled={disabled || selected.length > 0} onClick={attach}>{t('library.add')}</button>
+      {attachmentError ? <p className="form-error" role="alert">{attachmentError}</p> : null}
+    </div> : null}
+  </Dialog>;
+}

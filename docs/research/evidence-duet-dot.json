@@ -1,0 +1,519 @@
+{
+  "schema_version": 1,
+  "target_repository": "Lightmaze/Per-Pulse",
+  "as_of": "2026-10-23",
+  "method": "Public official product behavior and documented architecture analogues; no closed-source inspection or live account test.",
+  "sources": [
+    {
+      "id": "duet_announcement",
+      "url": "https://claude.com/resources/articles/claude-duet",
+      "title": "Introducing Claude Duet",
+      "published": "2026-10-21",
+      "accessed": "2026-10-23",
+      "source_type": "official_product_announcement",
+      "retrieval_ref": "turn6view0",
+      "short_quote": "checks your connected accounts every few hours"
+    },
+    {
+      "id": "duet_product",
+      "url": "https://claude.com/product/claude-duet",
+      "title": "Claude Duet | Your personal AI assistant",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_product_page",
+      "retrieval_ref": "turn10view2",
+      "short_quote": "background checks count toward those limits"
+    },
+    {
+      "id": "duet_help",
+      "url": "https://support.claude.com/en/articles/17631495-get-started-with-claude-duet",
+      "title": "Get started with Claude Duet",
+      "published": null,
+      "updated_as_displayed": "Updated yesterday",
+      "accessed": "2026-10-23",
+      "source_type": "official_support",
+      "retrieval_ref": "turn19view0",
+      "short_quote": "only you can mark a task as completed"
+    },
+    {
+      "id": "dot_overview",
+      "url": "https://learn.chatgpt.com/docs/dots",
+      "title": "Meet dots",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_product_docs",
+      "retrieval_ref": "turn3view0",
+      "short_quote": "You can keep talking to it while it works"
+    },
+    {
+      "id": "dot_tasks",
+      "url": "https://learn.chatgpt.com/docs/dots/tasks-and-memory",
+      "title": "Tasks and memory",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_product_docs",
+      "retrieval_ref": "turn11view0",
+      "short_quote": "A completed run doesn’t by itself confirm"
+    },
+    {
+      "id": "dot_controls",
+      "url": "https://learn.chatgpt.com/docs/dots/controls",
+      "title": "Control your dot",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_product_docs",
+      "retrieval_ref": "turn11view1",
+      "short_quote": "Pause stops your dot’s current main task"
+    },
+    {
+      "id": "dot_computers",
+      "url": "https://learn.chatgpt.com/docs/dots/computers-and-apps",
+      "title": "Connect computers and apps to your dot",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_product_docs",
+      "retrieval_ref": "turn11view2",
+      "short_quote": "the computer can keep its state between periods of use"
+    },
+    {
+      "id": "anthropic_managed",
+      "url": "https://www.anthropic.com/research/managed-agents",
+      "title": "Scaling Managed Agents: Decoupling the brain from the hands",
+      "published": "2026-04-08",
+      "accessed": "2026-10-23",
+      "source_type": "official_engineering",
+      "retrieval_ref": "turn16view0",
+      "short_quote": "The session is not Claude’s context window"
+    },
+    {
+      "id": "openai_architecture",
+      "url": "https://developers.openai.com/api/docs/guides/agents-api/architecture",
+      "title": "Architecture",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_api_docs",
+      "retrieval_ref": "turn21view0",
+      "short_quote": "The harness can work without an environment"
+    },
+    {
+      "id": "openai_sessions",
+      "url": "https://developers.openai.com/api/docs/guides/agents-api/sessions",
+      "title": "Run and continue sessions",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_api_docs",
+      "retrieval_ref": "turn21view1",
+      "short_quote": "Create one idempotency key for each logical message submission"
+    },
+    {
+      "id": "openai_multiagent",
+      "url": "https://developers.openai.com/api/docs/guides/agents-api/multi-agent",
+      "title": "Multi-agent",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_api_docs",
+      "retrieval_ref": "turn21view2",
+      "short_quote": "Creating a subagent does not create another environment"
+    },
+    {
+      "id": "claude_memory",
+      "url": "https://support.claude.com/en/articles/11817273-use-claude-s-chat-search-and-memory-to-build-on-previous-context",
+      "title": "Use Claude’s chat search and memory to build on previous context",
+      "published": null,
+      "updated_as_displayed": "Updated yesterday",
+      "accessed": "2026-10-23",
+      "source_type": "official_support",
+      "retrieval_ref": "turn30view0",
+      "short_quote": "related memory entries generated from it won’t be removed"
+    },
+    {
+      "id": "claude_skills",
+      "url": "https://support.claude.com/en/articles/12512180-use-skills-in-claude",
+      "title": "Use skills in Claude",
+      "published": "2026-09-22",
+      "accessed": "2026-10-23",
+      "source_type": "official_support",
+      "retrieval_ref": "turn30view1",
+      "short_quote": "recipients automatically get the updated version at next use"
+    },
+    {
+      "id": "dot_admin",
+      "url": "https://learn.chatgpt.com/docs/enterprise/dots-admin-guide",
+      "title": "Manage dots permissions and capabilities",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_product_docs",
+      "retrieval_ref": "turn30view2",
+      "short_quote": "Deleting a dot removes its own context"
+    },
+    {
+      "id": "openai_configuration",
+      "url": "https://developers.openai.com/api/docs/guides/agents-api/configuration",
+      "title": "Configuring Agents",
+      "published": null,
+      "accessed": "2026-10-23",
+      "source_type": "official_api_docs",
+      "retrieval_ref": "turn31view0",
+      "short_quote": "Saved-agent updates apply only to new sessions"
+    }
+  ],
+  "facts": [
+    {
+      "id": "D1",
+      "source_ids": [
+        "duet_announcement"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Duet preserves account memory, skills and app connections and executes work in a cloud VM/browser after user devices disconnect."
+    },
+    {
+      "id": "D2",
+      "source_ids": [
+        "duet_announcement",
+        "duet_product"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Duet checks connected accounts every few hours; background checks consume plan limits and users can tune notification interests/frequency."
+    },
+    {
+      "id": "D3",
+      "source_ids": [
+        "duet_help"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Duet separates Tasks from editable Make outputs; only the user marks tasks completed, and pending approval does not prevent completing other work."
+    },
+    {
+      "id": "D4",
+      "source_ids": [
+        "duet_help"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Duet supports separate topic channels with shared memory and chat search; its current preview cannot display or hand over its browser."
+    },
+    {
+      "id": "D5",
+      "source_ids": [
+        "duet_announcement"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Duet explicitly references Managed Agents credential handling and separate action review plus sensitive-message checks."
+    },
+    {
+      "id": "O1",
+      "source_ids": [
+        "dot_overview",
+        "dot_tasks"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "dot remains conversational while background agents execute in parallel, with adaptive continuation and saved time/event triggers."
+    },
+    {
+      "id": "O2",
+      "source_ids": [
+        "dot_tasks"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Delegated work has selected instructions/context, its own conversation, and its original execution environment; run completion does not establish successful delivery."
+    },
+    {
+      "id": "O3",
+      "source_ids": [
+        "dot_tasks"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Conversation context, ChatGPT saved memory and dot notes differ; channels share relevant continuity but keep distinct audience disclosure scopes."
+    },
+    {
+      "id": "O4",
+      "source_ids": [
+        "dot_controls",
+        "dot_tasks"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Proactive research tools cannot send messages, change connected apps or control a browser/computer; findings return to the dot before follow-up action."
+    },
+    {
+      "id": "O5",
+      "source_ids": [
+        "dot_controls"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Main-task pause, delegated-task stop and recurring-schedule cancellation are distinct operations; completed external effects are not undone."
+    },
+    {
+      "id": "O6",
+      "source_ids": [
+        "dot_computers"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "dot cloud computers preserve state and browser sessions and support takeover/return; channels, cloud/local computers and app authorization are separate connections."
+    },
+    {
+      "id": "A1",
+      "source_ids": [
+        "anthropic_managed"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Managed Agents publicly separates a durable event session, the harness loop, and sandboxes with credentials outside untrusted execution."
+    },
+    {
+      "id": "A2",
+      "source_ids": [
+        "anthropic_managed"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Managed Agents keeps queryable historical events outside the model context; harnesses may independently transform selected context."
+    },
+    {
+      "id": "A3",
+      "source_ids": [
+        "openai_architecture"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "OpenAI Agents API separately exposes a hosted harness, optional environment and application server responsibilities."
+    },
+    {
+      "id": "A4",
+      "source_ids": [
+        "openai_sessions"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Inputs steer active turns or start new turns in idle sessions, and logical message submissions retain idempotency keys."
+    },
+    {
+      "id": "A5",
+      "source_ids": [
+        "openai_multiagent"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "OpenAI Agents API multi-agent sessions share an environment filesystem and support a configured concurrency limit."
+    },
+    {
+      "id": "D6",
+      "source_ids": [
+        "claude_memory"
+      ],
+      "evidence_level": "direct_official_statement",
+      "product_scope": "current Claude account memory; separate from legacy memory section",
+      "claim": "Current Claude memory uses editable Topics. Deleting a source chat does not delete its derived memory; changes to topics apply to subsequent conversations."
+    },
+    {
+      "id": "D7",
+      "source_ids": [
+        "claude_skills",
+        "duet_announcement"
+      ],
+      "evidence_level": "direct_official_statement",
+      "product_scope": "Claude skill ecosystem; Duet-specific synchronization timing is unconfirmed",
+      "claim": "Duet carries over account skills. Broader Claude documentation gives directly shared skills next-use updates and keeps organization-published skills on approved versions until updates are approved."
+    },
+    {
+      "id": "O7",
+      "source_ids": [
+        "dot_admin"
+      ],
+      "evidence_level": "direct_official_statement",
+      "claim": "Turning off ChatGPT Memory sharing or disconnecting a plugin does not erase retained dot context. Dot deletion removes its own context but not every separately stored file, Codex thread or ChatGPT conversation."
+    },
+    {
+      "id": "A6",
+      "source_ids": [
+        "openai_configuration"
+      ],
+      "evidence_level": "direct_official_statement",
+      "product_scope": "OpenAI Agents API architectural analogue, not proof of dot implementation",
+      "claim": "Saved-agent settings are copied into new sessions. Session setting updates apply to new turns after the update; an active turn keeps its configuration even when steered."
+    }
+  ],
+  "requirements": [
+    {
+      "id": "responsibility_registry",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "D1",
+        "D3",
+        "O1"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Separate ongoing responsibility, task, activation and attempt identities."
+    },
+    {
+      "id": "durable_inbox",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "O1",
+        "O2",
+        "A1",
+        "A4"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Persist inputs before execution; deduplicate resubmissions; consume steering independently of long-running work."
+    },
+    {
+      "id": "work_supervisor",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "D3",
+        "O1",
+        "O5"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Track ownership, lineage, cancellation and bounded concurrency; block only dependent branches."
+    },
+    {
+      "id": "context_builder",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "O2",
+        "O3",
+        "A2"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Select task-relevant material with provenance and revision; preserve source history outside the context window."
+    },
+    {
+      "id": "tool_executor",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "D1",
+        "O6",
+        "A3"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Standardize model/tool loop, schema, timeout, error, effect classification and invocation IDs."
+    },
+    {
+      "id": "environment_registry",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "O2",
+        "O6",
+        "A3",
+        "A5"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Bind each task to an explicit environment and capabilities; do not silently migrate it when defaults change."
+    },
+    {
+      "id": "capability_policy",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "D5",
+        "O4",
+        "O5"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Make authorization scope enforceable outside prompt text and limit observation-only background tools."
+    },
+    {
+      "id": "artifact_acceptance_delivery",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "D3",
+        "O2"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Separate execution return, artifact existence, acceptance and delivery states."
+    },
+    {
+      "id": "budgeted_activation",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "D2",
+        "O1"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Unify timed, external-event and unfinished-work triggers while enforcing deduplication, backpressure and budgets."
+    },
+    {
+      "id": "notification_outbox",
+      "priority": "P0",
+      "supporting_fact_ids": [
+        "D2",
+        "D3",
+        "O1"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Persist meaningful user updates separately from computation with deduplication, audience and delivery state."
+    },
+    {
+      "id": "observability_replay",
+      "priority": "P1",
+      "supporting_fact_ids": [
+        "A1",
+        "A4"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Link event, work, tool, environment, artifact, latency and cost records."
+    },
+    {
+      "id": "memory_revision",
+      "priority": "P1",
+      "supporting_fact_ids": [
+        "O3",
+        "A2"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Record supersession and supporting evidence when preferences, decisions or work facts change."
+    },
+    {
+      "id": "connector_skill_catalog",
+      "priority": "P1",
+      "supporting_fact_ids": [
+        "D1",
+        "O6"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Discover available abilities without conflating installation, authentication and authorization."
+    },
+    {
+      "id": "human_handoff",
+      "priority": "P1",
+      "supporting_fact_ids": [
+        "D4",
+        "O6"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Represent a resumable human step and explicit environment control transfer; UI streaming can follow later."
+    },
+    {
+      "id": "cross_channel_identity",
+      "priority": "P1",
+      "supporting_fact_ids": [
+        "D4",
+        "O3"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Preserve one durable responsibility identity while constraining disclosure across channel audiences."
+    },
+    {
+      "id": "memory_deletion",
+      "priority": "P1",
+      "supporting_fact_ids": [
+        "D6",
+        "O7"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Separate source-access revocation, source deletion, derived-memory forgetting, and whole-agent deletion; return scoped receipts and prevent stale workers from restoring forgotten context."
+    },
+    {
+      "id": "skill_versioning",
+      "priority": "P1",
+      "supporting_fact_ids": [
+        "D1",
+        "D7",
+        "A6"
+      ],
+      "evidence_level": "engineering_inference",
+      "proposal": "Record skill identities, content versions and provenance at activation; apply ordinary upgrades at a declared boundary without silently mutating active work, while honoring revocation."
+    }
+  ],
+  "limits": [
+    "Managed Agents documentation does not establish the full private Duet implementation; only credential-design reuse is explicitly documented by Duet.",
+    "OpenAI Agents API documentation is an architectural reference, not proof that dot uses the identical private stack.",
+    "No claim is made about internal databases, queue technology, exact prompts, worker counts or repository implementation state.",
+    "Continuous computation requires durable evolving context and responsibilities, not only restart/resume infrastructure.",
+    "Claude skill sharing documentation describes the surrounding ecosystem; it does not establish Duet hot-reload timing. Current Claude memory behavior must be distinguished from the legacy section on the same support page."
+  ]
+}

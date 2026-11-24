@@ -1,0 +1,57 @@
+[
+  {
+    "title": "Let the first visit deliver the intended experience",
+    "lesson": "When someone asks for an experience, make a useful first encounter available before asking for information that can be deferred.",
+    "encounter": {
+      "situation": "In a constructed tutoring prototype, the opening screen collected a long learner profile before offering any practice.",
+      "action": "The prototype was revised to open with a short worked situation and a choice whose consequence could be explored.",
+      "outcome": "A scripted walkthrough could try the intended activity and continue. This is a constructed teaching example, not a real user study."
+    },
+    "conditions": {
+      "all": [
+        "The requested product primarily offers an experience or activity.",
+        {"any": ["A useful first attempt can be offered now.", "A concrete preview can support a meaningful choice."]},
+        {"not": "Collecting the information is itself the requested utility."}
+      ]
+    },
+    "counterexamples": [
+      "A workshop registration tool should collect the requested attendee data directly.",
+      "A small repair to an existing tool should not become a new onboarding or redesign project."
+    ],
+    "shift": {
+      "understanding": "Identify the action the person came to experience and which setup can wait.",
+      "candidates": "Consider a direct attempt or concrete preview as an initial candidate, alongside the existing approach.",
+      "delivery": "Inspect the actual first action and its continuation. An explanation about experience is insufficient."
+    },
+    "source": {"kind": "constructed_fixture", "case": "first-encounter-teaching-example-v1"},
+    "scope": "subject",
+    "record_type": "constructed_fixture"
+  },
+  {
+    "title": "Match the unit of evidence to the unit of the decision",
+    "lesson": "Before aggregating convenient measurements, identify what the recommendation is about and how repeated observations are grouped.",
+    "encounter": {
+      "situation": "A constructed city comparison used many traffic sensors in one city and a single sensor in another, although the decision concerned typical city performance.",
+      "action": "The analysis separated the deployment population, summarized observations within each city, and then compared cities with the intended weighting.",
+      "outcome": "The scripted calculation changed when repeated measurements stopped dominating the decision. No real deployment outcome is claimed."
+    },
+    "conditions": {
+      "all": [
+        "A recommendation is based on repeated or grouped measurements.",
+        "The unit receiving the decision may differ from the unit of each row."
+      ]
+    },
+    "counterexamples": [
+      "If the user's estimand explicitly concerns individual events, event weighting may be correct.",
+      "A request to repair a mean function does not require redesigning the caller's statistical estimand."
+    ],
+    "shift": {
+      "understanding": "Determine the target population and independent unit before choosing an average.",
+      "candidates": "Compare the intended estimand with the tempting row-level aggregate; compute the one that answers the question.",
+      "delivery": "Make the reported unit, population, sample count, arithmetic, and recommendation agree."
+    },
+    "source": {"kind": "constructed_fixture", "case": "grouped-evidence-teaching-example-v1"},
+    "scope": "subject",
+    "record_type": "constructed_fixture"
+  }
+]

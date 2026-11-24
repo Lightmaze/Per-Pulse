@@ -1,0 +1,48 @@
+:root {
+  color-scheme: dark;
+  --pw-bg: #0d0f10;
+  --pw-sidebar: #090b0c;
+  --pw-canvas: #0f1112;
+  --pw-rail: #0b0d0e;
+  --pw-surface: #131617;
+  --pw-surface-raised: #171a1c;
+  --pw-surface-hover: #1b1e20;
+  --pw-border: #272b2d;
+  --pw-border-soft: #1c2022;
+  --pw-text: #e8e9e9;
+  --pw-text-soft: #c4c7c8;
+  --pw-muted: #8c9296;
+  --pw-faint: #5c6368;
+  --pw-pulse: #ff725e;
+  --pw-pulse-soft: #a94b40;
+  --pw-amber: #e8a23a;
+  --pw-blue: #5796dc;
+  --pw-violet: #9b7bda;
+  --pw-green: #6bbb80;
+  --pw-danger: #e26f6f;
+  --pw-sidebar-width: 290px;
+  --pw-rail-width: 442px;
+  --pw-header-height: 58px;
+  --pw-radius: 7px;
+  --pw-font:
+    Inter, "Segoe UI Variable", "Segoe UI", "SF Pro Text",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --pw-mono:
+    "SFMono-Regular", Consolas, "Liberation Mono", "Microsoft YaHei UI",
+    monospace;
+}
+
+:root[data-accent="blue"] {
+  --pw-pulse: #6da8e8;
+  --pw-pulse-soft: #426f9f;
+}
+
+:root[data-accent="violet"] {
+  --pw-pulse: #a88ae8;
+  --pw-pulse-soft: #7159a7;
+}
+
+:root[data-accent="green"] {
+  --pw-pulse: #6fc58a;
+  --pw-pulse-soft: #437c56;
+}

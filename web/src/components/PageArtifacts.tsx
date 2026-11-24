@@ -1,0 +1,189 @@
+import { useEffect, useRef, useState } from 'react';
+import { api, ApiError } from '../api';
+import { useLanguage, type Translate } from '../i18n';
+import type { Artifact, ArtifactRead, PageView } from '../types';
+import { TextDocument } from './TextDocument';
+
+function unavailableReason(reason: string | null, t: Translate): string {
+  if (reason === 'file_too_large') return t('artifacts.tooLarge');
+  if (reason === 'text_files_only') return t('artifacts.nonText');
+  if (reason === 'credential_content_blocked') return t('artifacts.sensitive');
+  if (reason === 'file_changed_retry') return t('artifacts.retry');
+  if (reason === 'artifact_undone') return t('artifacts.undone');
+  return t('artifacts.missing');
+}
+
+export function PageArtifacts({ view, onUseInHome, onUseInWork, onCreateWork, onChanged }: { view: PageView & { artifactsNextCursor?: string | null }; onUseInHome?: (artifact: Artifact) => Promise<void>; onUseInWork?: (artifact: Artifact) => void; onCreateWork?: (artifact: Artifact) => void; onChanged?: () => Promise<unknown> }) {
+  const { t, errorText } = useLanguage();
+  const [opened, setOpened] = useState<string | null>(null);
+  const [result, setResult] = useState<ArtifactRead | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [downloadState, setDownloadState] = useState<'ready' | 'loading' | 'started'>('ready');
+  const [carrying, setCarrying] = useState(false);
+  const carryingRequest = useRef(false);
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [undoError, setUndoError] = useState<{ id: string; problem: unknown } | null>(null);
+  const undoRequest = useRef(false);
+  const downloadRequest = useRef<AbortController | null>(null);
+  const requestId = useRef(0);
+  // The recent page stays cheap; older file results are loaded on demand from
+  // the same page-scoped Kernel history, not from a new artifacts database.
+  const [older, setOlder] = useState<Artifact[]>([]);
+  const [olderCursor, setOlderCursor] = useState<string | null | undefined>(undefined);
+  const [olderLoading, setOlderLoading] = useState(false);
+  const [olderError, setOlderError] = useState<unknown>(null);
+  const olderInFlight = useRef(false);
+  const olderEpoch = useRef(0);
+  const headId = view.artifacts?.[0]?.id ?? null;
+  useEffect(() => {
+    olderEpoch.current++;
+    setOlder([]);
+    setOlderCursor(undefined);
+    setOlderLoading(false);
+    setOlderError(null);
+    olderInFlight.current = false;
+  }, [headId]);
+  useEffect(() => () => {
+    requestId.current++;
+    olderEpoch.current++;
+    downloadRequest.current?.abort();
+  }, []);
+  const seen = new Set<string>();
+  const visibleArtifacts = [...(view.artifacts ?? []), ...older].filter(artifact => {
+    if (seen.has(artifact.id)) return false;
+    seen.add(artifact.id);
+    return true;
+  });
+  const nextCursor = olderCursor === undefined ? (view.artifactsNextCursor ?? null) : olderCursor;
+  const loadEarlier = async () => {
+    if (!nextCursor || olderInFlight.current) return;
+    const epoch = olderEpoch.current;
+    olderInFlight.current = true;
+    setOlderLoading(true);
+    setOlderError(null);
+    try {
+      const next = await api.artifacts(view.page.id, nextCursor);
+      if (epoch !== olderEpoch.current) return;
+      setOlder(current => {
+        const ids = new Set([...view.artifacts, ...current].map(item => item.id));
+        return [...current, ...next.artifacts.filter(item => !ids.has(item.id))];
+      });
+      setOlderCursor(next.nextCursor);
+    } catch (problem) {
+      if (epoch === olderEpoch.current) setOlderError(problem);
+    } finally {
+      if (epoch === olderEpoch.current) {
+        olderInFlight.current = false;
+        setOlderLoading(false);
+      }
+    }
+  };
+  if (!view.artifacts?.length && !view.artifactsTruncated) return null;
+
+  const read = async (artifact: Artifact, refresh = false) => {
+    const current = ++requestId.current;
+    downloadRequest.current?.abort(); downloadRequest.current = null;
+    setDownloadState('ready');
+    if (opened === artifact.id && !refresh) { setOpened(null); setResult(null); setLoading(false); return; }
+    setOpened(artifact.id); setResult(null); setLoading(true); setError('');
+    try {
+      const next = await api.artifact(view.page.id, artifact.id);
+      if (current === requestId.current) setResult(next);
+    } catch (problem) {
+      if (current === requestId.current) setError(problem);
+    } finally { if (current === requestId.current) setLoading(false); }
+  };
+
+  const download = async (artifact: Artifact) => {
+    if (downloadRequest.current) return;
+    const controller = new AbortController();
+    downloadRequest.current = controller; setDownloadState('loading'); setError(null);
+    try {
+      const file = await api.downloadArtifact(view.page.id, artifact, controller.signal);
+      // Leaving this page, closing the preview or opening another result
+      // cancels a pending download before any browser-side file action.
+      if (controller.signal.aborted) return;
+      const url = URL.createObjectURL(file.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = file.filename;
+      document.body.append(anchor); anchor.click(); anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setDownloadState('started');
+    } catch (problem) {
+      if (!controller.signal.aborted) { setError(problem); setDownloadState('ready'); }
+    } finally { if (downloadRequest.current === controller) downloadRequest.current = null; }
+  };
+
+  const useInHome = async (artifact: Artifact) => {
+    if (!onUseInHome || carryingRequest.current) return;
+    carryingRequest.current = true; setCarrying(true); setError(null);
+    try {
+      await onUseInHome(artifact);
+    } catch (problem) {
+      setError(problem);
+    } finally {
+      carryingRequest.current = false; setCarrying(false);
+    }
+  };
+
+  const undo = async (artifact: Artifact) => {
+    if (undoRequest.current) return;
+    undoRequest.current = true; setUndoing(artifact.id); setUndoError(null);
+    try {
+      await api.undoArtifact(view.page.id, artifact.id);
+      setOlder(current => current.map(item => item.id === artifact.id ? { ...item, undone: true } : item));
+      if (opened === artifact.id) { requestId.current++; setOpened(null); setResult(null); }
+      await onChanged?.();
+    } catch (problem) {
+      setUndoError({ id: artifact.id, problem });
+    } finally {
+      undoRequest.current = false; setUndoing(null);
+    }
+  };
+  const undoErrorText = (problem: unknown) =>
+    problem instanceof ApiError && problem.code === 'artifact_version_changed' ? t('artifacts.undoChanged') : errorText(problem);
+  const canUndo = Boolean(view.provider?.workspaceActions);
+
+  return <section className="page-artifacts" aria-label={t('artifacts.title')}>
+    <h2>{t('artifacts.title')}</h2>
+    <p className="artifact-intro">{t('artifacts.intro')}</p>
+    <ul>{visibleArtifacts.map(artifact => <li key={artifact.id}>
+      <div className="artifact-row">
+        <button className="artifact-open" aria-expanded={opened === artifact.id} onClick={() => read(artifact)}>
+          <span id={`artifact-path-${artifact.id}`}>{artifact.path}</span><small>{artifact.undone ? t('artifacts.undone') : t('artifacts.version', { digest: artifact.sha256.slice(0, 8) })}</small>
+        </button>
+        {!artifact.undone && canUndo ? <button type="button" className="text-button artifact-undo"
+          aria-describedby={`artifact-path-${artifact.id}`} disabled={undoing !== null}
+          onClick={() => void undo(artifact)}>{t(undoing === artifact.id ? 'artifacts.undoing' : 'artifacts.undo')}</button> : null}
+      </div>
+      {undoError?.id === artifact.id ? <p className="artifact-undo-error" role="alert">{undoErrorText(undoError.problem)}</p> : null}
+      {opened === artifact.id ? <div className="artifact-preview">
+        {loading ? <p role="status">{t('artifacts.reading')}</p> : null}
+        {error ? <p role="alert">{errorText(error)}</p> : null}
+        {result?.state === 'current' ? <>
+          <TextDocument key={artifact.id} path={artifact.path} content={result.content ?? ''} truncated={result.truncated} />
+          {result.truncated ? <p>{t('artifacts.limited')}</p> : null}
+          {result.redacted ? <p>{t('artifacts.redacted')}</p> : null}
+          <p className="artifact-provenance">{t('artifacts.provenance', { time: new Date(artifact.createdAt).toLocaleString() })}</p>
+          {result.downloadable ? <div className="artifact-actions">
+            <button type="button" className="secondary-button" disabled={downloadState === 'loading' || carrying} onClick={() => void download(artifact)}>{t(downloadState === 'loading' ? 'artifacts.downloading' : 'artifacts.download')}</button>
+            {onUseInHome && view.page.kind === 'work' ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => void useInHome(artifact)}>{t(carrying ? 'library.artifactToHomeBusy' : 'library.artifactToHome')}</button> : null}
+            {onUseInWork ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => onUseInWork(artifact)}>{t('library.artifactToWork')}</button> : null}
+            {onCreateWork ? <button type="button" className="secondary-button" disabled={carrying || downloadState === 'loading'} onClick={() => onCreateWork(artifact)}>{t('library.artifactToNewWork')}</button> : null}
+            {downloadState === 'started' ? <span role="status">{t('artifacts.downloadStarted')}</span> : null}
+          </div> : null}
+          {!result.downloadable && !result.redacted ? <p className="artifact-intro">{t('artifacts.originalUnavailable')}</p> : null}
+          {onUseInHome && view.page.kind === 'work' && result.downloadable ? <p className="artifact-intro">{t('library.artifactToHomeHint')}</p> : null}
+          {onUseInWork && result.downloadable ? <p className="artifact-intro">{t('library.artifactToWorkHint')}</p> : null}
+        </> : result?.state === 'changed' ? <p role="status">{t('artifacts.changed')}</p> : result ? <p role="status">{unavailableReason(result.reason, t)}</p> : null}
+        {!loading ? <button type="button" className="text-button" onClick={() => void read(artifact, true)}>{t('artifacts.refresh')}</button> : null}
+      </div> : null}
+    </li>)}</ul>
+    {nextCursor ? <button type="button" className="text-button" disabled={olderLoading}
+      onClick={() => void loadEarlier()}>{t(olderLoading ? 'artifacts.loadingEarlier' : 'artifacts.showEarlier')}</button> : null}
+    {olderError ? <p role="alert">{errorText(olderError)}</p> : null}
+    {view.artifactsTruncated && !view.artifactsNextCursor
+      ? <p className="artifact-intro">{t('artifacts.more')}</p> : null}
+  </section>;
+}

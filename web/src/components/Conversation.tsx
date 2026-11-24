@@ -1,0 +1,93 @@
+import type { Message, PageSummary, PageView } from '../types';
+import { Icon } from './Icon';
+import { SessionLink, type Navigate } from './SessionLink';
+import { getMessageActivity } from '../status';
+import { useLanguage } from '../i18n';
+import { MessageContent } from './MessageContent';
+import { CopyButton } from './CopyButton';
+import { ReplayOrigin } from './ReplayOrigin';
+import { messageBody } from '../messageBody';
+import { PageSourceContent } from './PageSourceContent';
+import { ReportedArtifact } from './ReportedArtifact';
+import { initialWorkHandoffExcerpt } from '../workHandoffExcerpt';
+import { readTransferPresentation } from '../transferPresentation';
+import { useLiveReply } from '../liveReply';
+
+export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
+  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
+  onSaveExample?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void;
+  onMaterial?: (materialId: string, pageId: string) => void;
+}) {
+  const { t, pageTitle } = useLanguage();
+  const pageMap = new Map(pages.map(page => [page.id, page]));
+  const pageReferences = view.references.filter(reference => !reference.sourceMessageId);
+  const liveReply = useLiveReply(view.page.id, view.provider.configured && view.page.status === 'working' && !stale);
+  return <div className="conversation" aria-label={t("conversation.label")}>
+    {view.hasMore ? <p className="conversation-note">{view.earlierSourceMessageId ? t('conversation.earlierSource') : t('conversation.recentMessages')}</p> : null}
+    {view.messages.length ? <div className="conversation-history">
+      {view.historyBeforeMessageId ? <button className="text-button" onClick={() => onHistory(view.historyBeforeMessageId!)}>{t('history.title')}</button> : null}
+      <button className="text-button" onClick={onFind}><Icon name="search" size={14} />{t('find.title')}</button>
+    </div> : null}
+    {view.messages.map(message => { const activity = getMessageActivity(message.status, view.provider.configured, stale);
+      const transferPresentation = readTransferPresentation(message);
+      const referenceKey = JSON.stringify(message.references.map(({ id, targetPageId, label }) => ({ id, targetPageId, label })));
+      return <article className={`message message-${message.role}`} id={`message-${message.id}`} data-message-id={message.id} key={message.id} tabIndex={-1} aria-label={t(message.role === 'user' ? 'conversation.yourMessage' : message.role === 'assistant' ? 'conversation.assistantMessage' : 'conversation.workspaceMessage')}>
+      <div className="message-label">{message.pageSource ? t('source.heading') : message.role === 'user' ? t('conversation.you') : message.role === 'assistant' ? 'Per Pulse' : t('conversation.workspace')}</div>
+      {!message.pageSource && message.sourcePageId && message.sourcePageId !== view.page.id ? <div className="source-line">{t("conversation.from")} <SessionLink pageId={message.sourcePageId} label={pageMap.get(message.sourcePageId) ? pageTitle(pageMap.get(message.sourcePageId)!) : t('conversation.sourcePage')} targetMessageId={message.sourceMessageId ?? undefined} origin={{ pageId: view.page.id, messageId: message.id }} navigate={navigate} /></div> : null}
+      <ReplayOrigin message={message} pageId={view.page.id} navigate={navigate} />
+      {message.pageSource ? <PageSourceContent message={message} pageId={view.page.id} navigate={navigate} sourceTitle={message.sourcePageId && pageMap.get(message.sourcePageId) ? pageTitle(pageMap.get(message.sourcePageId)!) : undefined} /> : transferPresentation ? <div className="transfer-presentation">
+        <section className="transfer-presentation-source" aria-label={t('conversation.transferSource')}>
+          <div className="transfer-presentation-label">{t(transferPresentation.edited ? 'conversation.transferSourceEdited' : 'conversation.transferSource')}</div>
+          <MessageContent content={transferPresentation.excerpt} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />
+        </section>
+        <section className="transfer-presentation-request" aria-label={t('conversation.transferRequest')}>
+          <div className="transfer-presentation-label">{t('conversation.transferRequest')}</div>
+          <MessageContent content={transferPresentation.instruction} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />
+        </section>
+      </div> : <MessageContent content={messageBody(message)} referenceKey={referenceKey} pageId={view.page.id} messageId={message.id} navigate={navigate} />}
+      {view.page.kind === 'home' && message.reportedArtifact ? <ReportedArtifact key={message.reportedArtifact.artifactId} source={message.reportedArtifact} homeMessageId={message.id} navigate={navigate} /> : null}
+      {view.page.kind === 'home' && message.inputArtifact ? <ReportedArtifact key={`input-${message.inputArtifact.artifactId}`} source={message.inputArtifact} homeMessageId={message.id} navigate={navigate} origin="input" /> : null}
+      {message.materials?.length ? <ul className="message-materials" aria-label={t('materials.attached')}>{message.materials.map(material => <li key={material.id}><button className="material-chip" onClick={() => onMaterial?.(material.id, material.pageId)}><Icon name="page" size={16} /><span>{material.name}</span></button></li>)}</ul> : null}
+      <div className="message-footer">
+        {activity ? <span className={`message-status tone-${activity.tone}`} title={t(activity.detailKey, activity.detailParams)}>{t(activity.labelKey)}</span> : null}
+        <div className="message-actions">
+          <CopyButton text={message.content} label={t('conversation.copyMessage')} />
+          <button onClick={() => onCreate(message)} title={t("conversation.newPageTitle")}><Icon name="plus" size={14} />{t("conversation.newPage")}</button>
+          <button onClick={() => onReference(message)} title={t("conversation.linkPageTitle")}><Icon name="link" size={14} />{t("conversation.linkPage")}</button>
+          {onSaveExample && message.role === 'assistant' && message.status === 'settled' ? <button onClick={() => {
+            const selected = window.getSelection();
+            const node = document.getElementById(`message-${message.id}`);
+            const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString() : '';
+            // A rendered selection that differs from its original must not
+            // silently become a whole example exposed to other Works.
+            const { excerpt, needsExactExcerpt } = initialWorkHandoffExcerpt(message.content, text);
+            onSaveExample(message, excerpt, needsExactExcerpt);
+          }}>{t('learning.saveExample')}</button> : null}
+          {onTransfer && view.page.kind === 'work' && message.role === 'assistant' && message.status === 'settled'
+            && pages.some(page => page.kind === 'work' && page.id !== view.page.id) ? <button onClick={() => {
+            const selected = window.getSelection();
+            const node = document.getElementById(`message-${message.id}`);
+            const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString() : '';
+            // Any selection can be sent; the dialog marks text that differs from the source.
+            onTransfer(message, text.trim() || messageBody(message));
+          }} title={t('conversation.transferTitle')}><Icon name="link" size={14} />{t('conversation.transfer')}</button> : null}
+          {view.page.kind === 'work' ? <button onClick={() => {
+            const selected = window.getSelection();
+            const node = document.getElementById(`message-${message.id}`);
+            const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString() : '';
+            // A rendered Markdown selection need not be contiguous in the
+            // original. Never silently turn that selection into the full Work.
+            const { excerpt, needsExactExcerpt } = initialWorkHandoffExcerpt(messageBody(message), text);
+            onReturn(message, excerpt, needsExactExcerpt);
+          }} title={t("conversation.bringHomeTitle")}><Icon name="return" size={14} />{t("conversation.bringHome")}</button> : null}
+        </div>
+      </div>
+    </article>; })}
+    {liveReply?.text ? <article className="message message-live" aria-label={t('conversation.replyInProgress')} aria-busy="true">
+      <div className="message-label">Per Pulse</div>
+      <MessageContent content={liveReply.text} referenceKey="[]" pageId={view.page.id} messageId={`live-${liveReply.turnId}`} navigate={navigate} />
+    </article> : null}
+    {pageReferences.length ? <div className="page-references">{pageReferences.map(reference => <SessionLink key={reference.id} pageId={reference.targetPageId} label={reference.label} referenceId={reference.id} origin={{ pageId: view.page.id, referenceId: reference.id }} navigate={navigate} />)}</div> : null}
+    {!view.messages.length && !pageReferences.length ? <p className="empty-conversation">{view.page.kind === 'home' ? t('conversation.emptyHome') : t('conversation.emptyPage')}</p> : null}
+  </div>;
+}
