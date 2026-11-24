@@ -49,8 +49,21 @@ class AutonomousPracticeFixture:
                 return response(content="PASS")
             if "UNTRUSTED_REVIEW_DATA_JSON" in material:
                 return response(content='{"mode":"none"}')
-            boundary = max(i for i, message in enumerate(messages) if message["role"] == "user")
-            current = messages[boundary:]
+            # A budget continuation is a system input, not a new user turn.
+            # Start its fixture decision at that notice, not the earlier departure
+            # or an already completed tool in the preceding turn.
+            user_boundary = max((i for i, message in enumerate(messages)
+                                 if message["role"] == "user"), default=-1)
+            continuation_boundary = max((i for i, message in enumerate(messages)
+                                         if message["role"] == "system"
+                                         and "Internal provider continuation, not a user message."
+                                         in message["content"]), default=-1)
+            if continuation_boundary > user_boundary:
+                boundary = continuation_boundary
+            else:
+                boundary = user_boundary
+            current = messages[max(0, boundary):]
+            orientation = messages[boundary]["content"] if boundary >= 0 else ""
             tools = [message for message in current if message["role"] == "tool"]
             if scope.context_id.startswith("work:"):
                 if not tools:
@@ -60,10 +73,11 @@ class AutonomousPracticeFixture:
                     return response(tool="work", arguments={"op": "report", "kind": "result",
                         "note": "The practice is saved in practice.txt. [Synthetic model fixture]"})
                 return response(content="The practice is saved in practice.txt. [Synthetic model fixture]")
-            if FIRST_DEPARTURE_ORIENTATION in messages[boundary]["content"] and not tools:
+            if FIRST_DEPARTURE_ORIENTATION in orientation and not tools:
                 return response(tool="work", arguments={"op": "create", "title": PRACTICE_TITLE,
                                                          "instruction": PRACTICE_INSTRUCTION})
-            if messages[boundary]["content"] == "" or PROVIDER_CONTINUATION_ORIENTATION in messages[boundary]["content"]:
+            if (orientation == "" or continuation_boundary > user_boundary
+                    or PROVIDER_CONTINUATION_ORIENTATION in orientation):
                 if not tools:
                     return response(tool="work", arguments={"op": "list"})
                 if len(tools) == 1:
