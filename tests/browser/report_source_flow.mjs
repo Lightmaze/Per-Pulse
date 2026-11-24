@@ -259,7 +259,8 @@ try {
     .fill('Prepare four comparison notes in this Work for a later decision. [Authored fixture request]');
   await page.getByRole('button', { name: 'Create page', exact: true }).click();
   await page.getByRole('heading', { name: comparisonTitle, exact: true }).waitFor();
-  const comparisonId = decodeURIComponent(new URL(page.url()).pathname.split('/').pop());
+  const comparisonUrl = page.url();
+  const comparisonId = decodeURIComponent(new URL(comparisonUrl).pathname.split('/').pop());
   await wait(async () => {
     const snapshot = await view(comparisonId);
     return snapshot.page.status === 'idle' &&
@@ -286,6 +287,48 @@ try {
     '# Selected comparison\n\nVerified release evidence: independent installation succeeded.\n');
   await comparisonArticle.getByRole('button', { name: 'Close file preview' }).click();
   checks.push('current task survives four large native reads; attributed pre-action advice changes source selection and the final Home file without a delivery correction');
+
+  // Retain an earlier example for a different purpose, then grow the
+  // journal with newer material matching the opening of the revised request.
+  // Each saved passage belongs to the original, completed Work response.
+  const saveRevisionExample = async (excerpt, title, note) => {
+    const response = await fetch(base + '/api/pages/' + workId + '/posture/examples', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceMessageId: report.sourceResultMessageId, excerpt, title, note }),
+    });
+    assert.equal(response.status, 201, await response.text());
+  };
+  await saveRevisionExample(resultText.slice(0, 20), 'Planning hypothesis',
+    'For interoperability planning, retain a hypothesis explicitly as a proposal, not as established evidence. ' +
+    'A tentative approach is useful for designing a later test. '.repeat(48));
+  for (let i = 0; i < 8; i++) {
+    await saveRevisionExample(resultText.slice(0, 24 + i), 'Catalogue observation ' + i,
+      'For the comparison catalogue, preserve the evidence for the earlier release summary. ' +
+      'The comparison catalogue records earlier release observations. '.repeat(54));
+  }
+  await page.goto(comparisonUrl);
+  await comparisonComposer.waitFor();
+  await comparisonComposer.fill('Reconsider the comparison catalogue and earlier release summary.\n' +
+    'comparison catalogue '.repeat(360) +
+    '\nInstead, select the interoperability hypothesis for planning, not proof.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await wait(async () => (await status()).reports.some(row => row.workId === comparisonId &&
+    row.reportedByPath === 'comparison-plan.md' && row.status === 'delivered') &&
+    (await view(comparisonId)).page.status === 'idle', 'deliver a revised planning file', 30000);
+  const revisionReport = (await status()).reports.find(row => row.workId === comparisonId &&
+    row.reportedByPath === 'comparison-plan.md');
+  await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
+  await homeComposer.waitFor();
+  const revisionArticle = page.locator(`#message-${revisionReport.eventId}`);
+  await revisionArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await revisionArticle.getByText('Provisional candidate 1: interoperability proposal for testing.', { exact: true }).waitFor();
+  const revisionDownload = page.waitForEvent('download');
+  await revisionArticle.getByRole('button', { name: 'Download file', exact: true }).click();
+  const revisionBytes = await readFile(await (await revisionDownload).path());
+  assert.equal(revisionBytes.toString('utf8'),
+    '# Planning hypothesis\n\nProvisional candidate 1: interoperability proposal for testing.\n');
+  await revisionArticle.getByRole('button', { name: 'Close file preview' }).click();
+  checks.push('a revised purpose at the end of a long user message retrieves an older planning example, changes source selection, and delivers a separate real file');
 
   if (screenshots) await page.screenshot({ path: join(screenshots, 'report-source-home-desktop.png') });
 
@@ -331,6 +374,9 @@ try {
   await comparisonArticle.getByRole('button', { name: 'Open verified file' }).click();
   await comparisonArticle.getByText('Verified release evidence: independent installation succeeded.', { exact: true }).waitFor();
   await comparisonArticle.getByRole('button', { name: 'Close file preview' }).click();
+  await revisionArticle.getByRole('button', { name: 'Open verified file' }).click();
+  await revisionArticle.getByText('Provisional candidate 1: interoperability proposal for testing.', { exact: true }).waitFor();
+  await revisionArticle.getByRole('button', { name: 'Close file preview' }).click();
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('offline process restart retains exact native provenance and source navigation on a phone viewport');
 
