@@ -23,11 +23,12 @@ const port = socket.address().port;
 await new Promise(done => socket.close(done));
 const base = `http://127.0.0.1:${port}`;
 let serverLog = '';
-const start = (dataDir = directory, purposeRevision = false, learnedRevision = false) => {
+const start = (dataDir = directory, purposeRevision = false, learnedRevision = false, longBoundary = null) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/autonomous_practice_server.py'), '--data-dir', dataDir, '--port', String(port),
     ...(purposeRevision ? ['--purpose-revision'] : []),
     ...(learnedRevision ? ['--learned-revision'] : []),
+    ...(longBoundary ? ['--long-boundary', longBoundary] : []),
   ], { cwd: root, env: { ...process.env, PYTHONPATH: join(root, 'src') }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stderr.on('data', data => { serverLog += data; });
   return child;
@@ -342,6 +343,85 @@ try {
   }
   await revisionPage.close();
   await stop(server);
+  }
+  // Exercise first activations with ample allowance, without the earlier
+  // budget-resume path. The native API covers both independently as well.
+  for (const boundary of ['create', 'report']) {
+    const longDirectory = join(directory, 'first-boundary-' + boundary);
+    await mkdir(longDirectory);
+    server = start(longDirectory, false, false, boundary);
+    await wait(() => fetch(base + '/api/health'), value => value.ok, 'first boundary server');
+    const longPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    longPage.on('pageerror', error => errors.push(error.message));
+    await longPage.goto(base);
+    await longPage.getByRole('button', { name: 'Activity', exact: true }).click();
+    await longPage.getByRole('spinbutton', { name: 'Requests per week', exact: true }).fill('30');
+    await longPage.getByRole('button', { name: 'Start autonomous practice', exact: true }).click();
+    let delivered;
+    try {
+      delivered = await wait(() => get('/api/pages/home'), value => value.page.status === 'idle'
+        && value.messages.some(m => m.activation === 'work_report' && m.reportedArtifact?.path === 'practice.txt'),
+        'first activation ' + boundary + ' handoff reaches Home');
+    } catch (error) {
+      console.error(JSON.stringify({ boundary, trace: await get('/__autonomous/status'),
+        usage: await get('/api/pulse/weekly-usage') }));
+      throw error;
+    }
+    const reports = delivered.messages.filter(m => m.activation === 'work_report' && m.reportedArtifact?.path === 'practice.txt');
+    assert.equal(reports.length, 1);
+    const report = reports[0];
+    const work = report.sourcePageId;
+    assert.equal(report.reportedArtifact.pageId, work);
+    assert.ok(report.sourceMessageId);
+    assert.equal((await get('/api/bootstrap')).pages.filter(p => p.title === 'A small practice').length, 1);
+    const trace = await get('/__autonomous/status');
+    assert.equal(trace.departures.length, 1);
+    if (boundary === 'create') {
+      assert.equal(trace.continuations.length, 1);
+      assert.equal(trace.continuations[0].parent, trace.departures[0].id);
+      assert.equal(trace.continuations[0].status, 'settled');
+      assert.ok(trace.requestTrace.some(request => request.toolResults?.some(result =>
+        result.output?.recent_requests?.some(item => item.status === 'cancelled' &&
+          item.error_code === 'source_did_not_settle' && item.event_id === null))));
+    } else {
+      assert.equal(trace.continuations.length, 0);
+    }
+    assert.deepEqual(trace.userRoots, []);
+    const usage = await wait(() => get('/api/pulse/weekly-usage'), value =>
+      value.usage.states.completed === trace.requests && value.usage.consumed === trace.requests,
+      'first boundary physical accounting');
+    assert.ok(usage.usage.consumed > 0 && usage.usage.consumed < 30);
+    await longPage.getByRole('button', { name: 'Pause autonomous practice', exact: true }).click();
+    await longPage.getByText('Autonomous model requests are disabled.', { exact: true }).waitFor();
+    await longPage.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await longPage.goto(base);
+    const downloadOriginal = async () => {
+      const article = longPage.locator('#message-' + report.id);
+      await article.getByRole('button', { name: 'Open verified file', exact: true }).click();
+      const [download] = await Promise.all([longPage.waitForEvent('download'),
+        article.getByRole('button', { name: 'Download file', exact: true }).click()]);
+      const bytes = await readFile(await download.path());
+      assert.equal(bytes.toString('utf8'), 'A persisted result from explicitly synthetic autonomous practice.\n');
+      assert.equal(createHash('sha256').update(bytes).digest('hex'), report.reportedArtifact.sha256);
+      await article.getByRole('button', { name: 'Close file preview', exact: true }).click();
+    };
+    await downloadOriginal();
+    await longPage.locator('#message-' + report.id).locator('.source-line a.session-link').click();
+    await longPage.getByRole('heading', { name: 'A small practice', exact: true }).waitFor();
+    const file = join(longDirectory, 'workspace', 'practice.txt');
+    const mtime = (await stat(file, { bigint: true })).mtimeNs;
+    await stop(server);
+    server = start(longDirectory, false, false, boundary);
+    await wait(() => fetch(base + '/api/health'), value => value.ok, 'first boundary restart');
+    await longPage.goto(base);
+    await downloadOriginal();
+    assert.equal((await stat(file, { bigint: true })).mtimeNs, mtime);
+    assert.equal((await get('/__autonomous/status')).requests, 0);
+    assert.equal((await get('/api/pulse/weekly-usage')).usage.consumed, usage.usage.consumed);
+    await longPage.screenshot({ path: join(output, 'first-boundary-' + boundary + '.png') });
+    checks.push('first autonomous ' + boundary + ' handoff completes within its original allowance, reaches Home and survives restart');
+    await longPage.close();
+    await stop(server);
   }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ passed: checks.length, checks, output,

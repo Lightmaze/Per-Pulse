@@ -737,6 +737,23 @@ class NativeWork:
                 self._finish(rec, 'cancelled', 'subject_stopped')
             return len(pending)
 
+    def cancel_unsettled_source(self, source) -> None:
+        """Make a yielded source's undelivered preparations visible before reentry."""
+        r = self.runtime
+        with self._lock:
+            r._require_runtime_owner()
+            if source.state is not HarnessTurnState.UNCERTAIN:
+                return
+            for rec in r.storage.native_work_requests(subject=source.engram_id, pending=True, limit=64):
+                if rec['world_id'] != r.world_id or rec['source_turn_id'] != source.id:
+                    continue
+                # Reconcile a committed admission before marking non-delivery.
+                existing = r.causal_ledger.find_causal_event_by_idempotency(r.world_id, rec['request_id'])
+                if existing is not None:
+                    self._finish(rec, 'delivered', event_id=existing.id)
+                else:
+                    self._finish(rec, 'cancelled', 'source_did_not_settle')
+
     def _finish(self, record, status, error=None, event_id=None):
         record = {**record, 'status': status, 'error_code': error, 'event_id': event_id}
         self.runtime.storage.save_component_state(record['request_id'], record)

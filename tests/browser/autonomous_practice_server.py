@@ -24,13 +24,15 @@ if __name__ == "__main__":
     parser.add_argument("--port", required=True, type=int)
     parser.add_argument("--purpose-revision", action="store_true")
     parser.add_argument("--learned-revision", action="store_true")
+    parser.add_argument("--long-boundary", choices=["create", "report"])
     args = parser.parse_args()
     fixture = AutonomousPracticeFixture(os.environ.__setitem__, purpose_revision=args.purpose_revision,
-                                        learned_revision=args.learned_revision)
+                                        learned_revision=args.learned_revision, long_boundary=args.long_boundary)
     pulse = (PulseSettings(enabled=True, spontaneous_rate=0, refractory_seconds=0)
-             if args.purpose_revision else PulseSettings(enabled=True, spontaneous_rate=0))
+             if args.purpose_revision or args.long_boundary else PulseSettings(enabled=True, spontaneous_rate=0))
     app = create_app(args.data_dir, pulse=pulse,
-                     posture=not args.purpose_revision or args.learned_revision, allow_workspace_actions=True, auto_apply_edits=True,
+                     posture=(not args.purpose_revision or args.learned_revision) and not args.long_boundary,
+                     allow_workspace_actions=True, auto_apply_edits=True,
                      model_factory=fixture.factory)
 
     @app.get("/__autonomous/status")

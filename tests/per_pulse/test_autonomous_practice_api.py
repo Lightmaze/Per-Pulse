@@ -130,3 +130,71 @@ def test_a_single_request_allowance_can_expand_and_finish_the_original_practice(
         departures = [event for event in runtime.causal_ledger.list_events(world_id=runtime.world_id, limit=100)
                       if event.metadata.get("context_pulse") == "first_departure"]
         assert [event.id for event in departures] == [departure]
+
+@pytest.mark.parametrize("boundary", ["create", "report"])
+def test_first_autonomous_work_delivers_a_handoff_after_four_tool_rounds(tmp_path, monkeypatch, boundary):
+    fixture = AutonomousPracticeFixture(monkeypatch.setenv, long_boundary=boundary)
+    settings = PulseSettings(enabled=True, spontaneous_rate=0, refractory_seconds=0)
+    def app():
+        return create_app(tmp_path, pulse=settings, posture=False, model_factory=fixture.factory,
+                          allow_workspace_actions=True, auto_apply_edits=True)
+
+    with TestClient(app(), base_url="http://localhost") as client:
+        enabled = client.post("/api/pulse/practice", json={"weeklyLimit": 30})
+        assert enabled.status_code == 200, enabled.text
+        departure = enabled.json()["departureEventId"]
+        runtime = client.app.state.pages.runtime
+        try:
+            pages = wait_for(lambda: client.get("/api/bootstrap").json()["pages"],
+                             lambda value: any(page["title"] == PRACTICE_TITLE for page in value))
+            work, = [page["id"] for page in pages if page["title"] == PRACTICE_TITLE]
+            home = wait_for(lambda: client.get("/api/pages/home").json(),
+                            lambda view: view["page"]["status"] == "idle" and any(
+                                message.get("activation") == "work_report" and message.get("sourcePageId") == work
+                                and message.get("reportedArtifact") for message in view["messages"]))
+        except AssertionError:
+            # Keep the real causal and tool evidence on the first failing run.
+            print("Departure:", runtime.causal_ledger.get_event(departure))
+            print("Native Work requests:", runtime.storage.native_work_requests(pending=False, limit=64))
+            print("Synthetic HTTP requests:", fixture.requests[-5:])
+            raise
+        reports = [message for message in home["messages"] if message.get("activation") == "work_report"
+                   and message.get("sourcePageId") == work]
+        report, = reports
+        assert report["sourceMessageId"]
+        assert report["reportedArtifact"]["path"] == "practice.txt"
+        produced = client.get(f"/api/pages/{work}").json()
+        artifact, = produced["artifacts"]
+        assert client.get(f"/api/pages/{work}/artifacts/{artifact['actionId']}/download").content.decode() == PRACTICE_TEXT
+        file_path = tmp_path / "workspace" / "practice.txt"
+        assert file_path.read_text() == PRACTICE_TEXT
+        original_mtime = file_path.stat().st_mtime_ns
+        usage = wait_for(lambda: client.get("/api/pulse/weekly-usage").json()["usage"],
+                         lambda value: value["consumed"] == len(fixture.requests)
+                         and value["states"]["completed"] == value["consumed"])
+        assert 0 < usage["consumed"] < 30
+        events = runtime.causal_ledger.list_events(world_id=runtime.world_id, limit=100)
+        assert [event.id for event in events if event.metadata.get("context_pulse") == "first_departure"] == [departure]
+        continuations = [event for event in events if event.metadata.get("context_pulse") == "provider_continuation"]
+        requests = runtime.storage.native_work_requests(pending=False, limit=64)
+        creates = [row for row in requests if row["arguments"]["op"] == "create"]
+        delivered, = [row for row in creates if row["status"] == "delivered"]
+        assert delivered["work_id"] == work
+        if boundary == "create":
+            child, = continuations
+            assert child.parent_event_id == departure and child.status.value == "settled"
+            cancelled, = [row for row in creates if row["status"] == "cancelled"]
+            assert cancelled["event_id"] is None and cancelled["error_code"] == "source_did_not_settle"
+            assert len(creates) == 2
+        else:
+            assert not continuations and len(creates) == 1
+        assert not [event for event in events if event.source.value == "user" and event.parent_event_id is None]
+        before = len(fixture.requests)
+        assert client.patch("/api/pulse/weekly-usage", json={"enabled": False}).status_code == 200
+
+    with TestClient(app(), base_url="http://localhost") as client:
+        assert client.get("/api/pages/home").json()["messages"] == home["messages"]
+        assert client.get(f"/api/pages/{work}").json()["artifacts"] == produced["artifacts"]
+        assert client.get("/api/pulse/weekly-usage").json()["usage"]["consumed"] == usage["consumed"]
+        assert file_path.stat().st_mtime_ns == original_mtime
+        assert len(fixture.requests) == before

@@ -309,8 +309,9 @@ class ContextPulseController:
 
     def request_provider_continuation(self, event, turn_id, *, round_slice=False):
         """Retain safe unfinished work with its confirmed state as SELF input."""
-        from .autonomy import PROVIDER_CONTINUATION_ORIENTATION, ROUND_SLICE_CONTINUATION_ORIENTATION
-        if round_slice and event.metadata.get("context_pulse") != "provider_continuation":
+        from .autonomy import (PROVIDER_CONTINUATION_ORIENTATION,
+                               ROUND_SLICE_CONTINUATION_ORIENTATION, permits_round_slice)
+        if round_slice and not permits_round_slice(event):
             return None
         orientation = ROUND_SLICE_CONTINUATION_ORIENTATION if round_slice else PROVIDER_CONTINUATION_ORIENTATION
         if not self.config.enabled or event.world_id != self.world_id or event.engram_id != self.subject():

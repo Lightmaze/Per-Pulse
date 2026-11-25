@@ -6,6 +6,7 @@ Licensed under Apache-2.0.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import traceback
@@ -42,9 +43,10 @@ def response(*, content=None, tool=None, arguments=None, call_id=None):
 
 
 class AutonomousPracticeFixture:
-    def __init__(self, setenv, *, purpose_revision=False, learned_revision=False):
+    def __init__(self, setenv, *, purpose_revision=False, learned_revision=False, long_boundary=None):
         self.purpose_revision = purpose_revision
         self.learned_revision = learned_revision
+        self.long_boundary = long_boundary
         setenv("PER_PULSE_AUTONOMOUS_FIXTURE_KEY", "explicit-synthetic-test-credential")
         self.requests = []
         self.lock = threading.Lock()
@@ -90,6 +92,60 @@ class AutonomousPracticeFixture:
             current = messages[max(0, boundary):]
             orientation = messages[boundary]["content"] if boundary >= 0 else ""
             tools = [message for message in current if message["role"] == "tool"]
+            # The initial SELF departure has a four-round local allowance.
+            # A native reflected Work is the ordinary longer-turn control.
+            # Put the actual handoff on round four in both paths.
+            if (self.long_boundary == "create" and not scope.context_id.startswith("work:")
+                    and (FIRST_DEPARTURE_ORIENTATION in orientation or
+                         (continuation_boundary > user_boundary
+                          and FIRST_DEPARTURE_ORIENTATION in material))):
+                results = [json.loads(row["content"]) for row in messages if row["role"] == "tool"]
+                assert all(row["status"] == "succeeded" for row in results), results
+                if continuation_boundary > user_boundary:
+                    assert len(results) >= 4
+                    prepared = results[3]["output"]
+                    assert prepared["status"] == "prepared"
+                    if not tools:
+                        return response(tool="work", call_id="boundary-check", arguments={"op": "list"})
+                    checked, = (row for row in json.loads(tools[0]["content"])["output"]["recent_requests"]
+                                if row["request_id"] == prepared["request_id"])
+                    assert checked["status"] == "cancelled" and checked["event_id"] is None
+                    assert checked["error_code"] == "source_did_not_settle"
+                    if len(tools) == 1:
+                        return response(tool="work", call_id="boundary-prepare-again", arguments={
+                            "op": "create", "title": PRACTICE_TITLE, "instruction": PRACTICE_INSTRUCTION})
+                    assert len(tools) == 2
+                    new = json.loads(tools[1]["content"])["output"]
+                    assert new["status"] == "prepared" and new["request_id"] != prepared["request_id"]
+                    return response(content="I prepared the practice Work after checking the prior delivery. [Synthetic fixture]")
+                if len(results) == 0:
+                    return response(tool="work", arguments={"op": "list"})
+                if len(results) == 1:
+                    return response(tool="work", arguments={"op": "search", "query": PRACTICE_TITLE})
+                if len(results) == 2:
+                    return response(tool="work", arguments={"op": "find", "query": "practice"})
+                if len(results) == 3:
+                    return response(tool="work", arguments={"op": "create", "title": PRACTICE_TITLE,
+                                                             "instruction": PRACTICE_INSTRUCTION})
+                assert len(results) == 4
+                return response(content="I prepared the practice Work. [Synthetic fixture]")
+            if self.long_boundary == "report" and scope.context_id.startswith("work:"):
+                results = [json.loads(row["content"]) for row in messages if row["role"] == "tool"]
+                assert all(row["status"] == "succeeded" for row in results), results
+                if len(results) == 0:
+                    return response(tool="mutate_file", arguments={
+                        "path": "practice.txt", "expected_digest": None, "content": PRACTICE_TEXT})
+                if len(results) == 1:
+                    return response(tool="read_file", arguments={
+                        "path": "practice.txt", "expected_digest": hashlib.sha256(PRACTICE_TEXT.encode()).hexdigest()})
+                assert results[1]["output"]["content"] == PRACTICE_TEXT
+                if len(results) == 2:
+                    return response(tool="work", arguments={"op": "list"})
+                if len(results) == 3:
+                    return response(tool="work", arguments={"op": "report", "kind": "result",
+                        "note": "The verified practice file is ready.", "artifact_path": "practice.txt"})
+                assert len(results) == 4
+                return response(content="The verified practice file is ready. [Synthetic fixture]")
             if self.purpose_revision:
                 if scope.context_id.startswith("work:"):
                     if self.learned_revision and orientation == SOURCE_TASK:
@@ -164,7 +220,8 @@ class AutonomousPracticeFixture:
                         "path": "practice.txt", "expected_digest": None, "content": PRACTICE_TEXT})
                 if len(tools) == 1:
                     return response(tool="work", arguments={"op": "report", "kind": "result",
-                        "note": "The practice is saved in practice.txt. [Synthetic model fixture]"})
+                        "note": "The practice is saved in practice.txt. [Synthetic model fixture]",
+                        **({"artifact_path": "practice.txt"} if self.long_boundary else {})})
                 return response(content="The practice is saved in practice.txt. [Synthetic model fixture]")
             if FIRST_DEPARTURE_ORIENTATION in orientation and not tools:
                 return response(tool="work", arguments={"op": "create", "title": PRACTICE_TITLE,
