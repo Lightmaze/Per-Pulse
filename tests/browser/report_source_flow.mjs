@@ -69,15 +69,19 @@ try {
   await wait(async () => (await fetch(base + '/api/health')).ok, 'native service');
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
     args: process.env.PLAYWRIGHT_CHROMIUM_ARGS ? JSON.parse(process.env.PLAYWRIGHT_CHROMIUM_ARGS) : undefined });
-  page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  page.on('pageerror', error => errors.push(error.message));
-  page.on('console', message => {
-    if (message.type() !== 'error') return;
-    if (restarting && message.text() === 'Failed to load resource: net::ERR_CONNECTION_REFUSED' &&
-        message.location().url.startsWith(base + '/')) restartNetworkErrors.push(message.location().url);
-    else errors.push(message.text());
+  // An explicit context supports multiple tabs with shared origin storage.
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  context.on('page', tab => {
+    tab.on('pageerror', error => errors.push(error.message));
+    tab.on('console', message => {
+      if (message.type() !== 'error') return;
+      if (restarting && message.text() === 'Failed to load resource: net::ERR_CONNECTION_REFUSED' &&
+          message.location().url.startsWith(base + '/')) restartNetworkErrors.push(message.location().url);
+      else errors.push(message.text());
+    });
   });
-  page.on('request', request => { if (!request.url().startsWith(base)) externalRequests.push(request.url()); });
+  context.on('request', request => { if (!request.url().startsWith(base)) externalRequests.push(request.url()); });
+  page = await context.newPage();
   await page.goto(base);
   await page.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Create a page', exact: true }).click();
@@ -159,6 +163,9 @@ try {
   checks.push('Home directly downloads exact original Work file bytes with native digest verification');
   assert.equal(projected.references.length, 0);
   const originalReportContent = projected.content;
+  // Closing the file preview changes layout. Establish the reading position
+  // with the actual source link visible before departing.
+  await sourceLink.scrollIntoViewIfNeeded();
   const homePosition = await page.locator('main').evaluate(node => node.scrollTop);
   const beforeRead = (await status()).requests;
   await sourceLink.click();
@@ -167,6 +174,29 @@ try {
   assert.equal(await sourceArticle.getByRole('button', { name: 'Save example', exact: true }).count(), 1);
   assert.equal(new URL(page.url()).hash, '#message-' + report.sourceResultMessageId);
   assert.equal(await workComposer.inputValue(), workDraft);
+  // A different tab may legitimately change Home's last reading position.
+  // Returning from this specific source must use this tab's departure entry.
+  const positionKey = await page.evaluate(() =>
+    `per-pulse.ui.v2.${encodeURIComponent(history.state.workspaceId)}.position.home`);
+  const otherTab = await context.newPage();
+  try {
+    await otherTab.goto(base);
+    await otherTab.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+    // Wait for this tab's initial reading restoration before moving it.
+    await wait(() => otherTab.evaluate(() => document.activeElement === document.querySelector('main h1')),
+      'second tab completes Home restoration');
+    const otherPosition = await otherTab.locator('main').evaluate((node, original) => {
+      node.scrollTop = original > 20 ? 0 : node.scrollHeight;
+      return node.scrollTop;
+    }, homePosition);
+    assert.ok(Math.abs(otherPosition - homePosition) > 10);
+    await otherTab.locator('.page-nav').getByRole('link', { name: title, exact: true }).click();
+    await otherTab.getByRole('heading', { name: title, exact: true }).waitFor();
+    const stored = await otherTab.evaluate(key => localStorage.getItem(key), positionKey);
+    assert.notEqual(stored, null, 'Home preference belongs to the same World');
+    assert.ok(Math.abs(Number(stored) - otherPosition) < 3, 'another tab saved its actual Home position');
+    assert.ok(Math.abs(Number(stored) - homePosition) > 10, 'another tab updated Home preference');
+  } finally { await otherTab.close(); }
   await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await homeComposer.waitFor();
   await wait(() => page.evaluate(id => document.activeElement?.id === 'message-' + id, report.eventId),
@@ -175,7 +205,7 @@ try {
   assert.ok(Math.abs(await page.locator('main').evaluate(node => node.scrollTop) - homePosition) < 3);
   assert.equal((await status()).requests, beforeRead);
   assert.equal((await view('home')).messages.find(row => row.id === report.eventId).content, originalReportContent);
-  checks.push('native admitted report opens the exact original Work result and returns to the same Home position with both drafts');
+  checks.push('native admitted report opens the exact original Work result and returns to the same Home position with both drafts despite another tab moving Home');
   checks.push('ordinary report-shaped text has no source badge; source reads create no references or model requests');
 
   // Retain the real prior Work response as an operator-selected example.
