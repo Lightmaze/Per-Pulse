@@ -173,6 +173,8 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS events_session_seq ON events(session_id, seq);
+CREATE INDEX IF NOT EXISTS events_session_item_progress
+    ON events(session_id, item_id, delta_seq, revision);
 CREATE INDEX IF NOT EXISTS events_action ON events(action_request_id, event_type);
 
 CREATE TABLE IF NOT EXISTS actions (
@@ -4670,12 +4672,18 @@ class HarnessStore:
             "UPDATE sessions SET cursor = ?, revision = revision + 1, updated_at = ? WHERE session_id = ?",
             (seq, now, draft.scope.session_id),
         )
-        count = int(
-            self._db.execute(
-                "SELECT COUNT(*) AS count FROM events WHERE session_id = ?",
-                (draft.scope.session_id,),
-            ).fetchone()["count"]
-        )
+        # Distinct sequence numbers in the retained range give an upper bound,
+        # not necessarily an exact count: the cursor can be ahead of the last
+        # retained event. Below the limit there is nothing to evict. Above it,
+        # use the actual row count to preserve the existing retention semantics.
+        count = seq - int(session["retained_from"]) + 1
+        if count > self.max_events_per_session:
+            count = int(
+                self._db.execute(
+                    "SELECT COUNT(*) AS count FROM events WHERE session_id = ?",
+                    (draft.scope.session_id,),
+                ).fetchone()["count"]
+            )
         if count > self.max_events_per_session:
             overflow = count - self.max_events_per_session
             self._db.execute(
