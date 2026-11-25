@@ -36,7 +36,47 @@ try {
   let page = await context.newPage();
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.goto(base);
+  // Delay the actual native bootstrap until the person has entered a Work.
+  // Do not substitute a synthetic bootstrap response or a timed sleep.
+  const startupCount = (await data('/api/bootstrap')).pages.filter(p => p.kind === 'work').length;
+  let releaseBootstrap, observeBootstrap;
+  const bootstrapGate = new Promise(r => { releaseBootstrap = r; });
+  const bootstrapRequested = new Promise(r => { observeBootstrap = r; });
+  await page.route('**/api/bootstrap', async route => {
+    observeBootstrap();
+    await bootstrapGate;
+    await route.continue();
+  });
+  const startupTitle = 'Work drafted during startup';
+  const startupInstruction = 'Prepare a concise practical source-aware plan.';
+  try {
+    await page.goto(base, { waitUntil: 'domcontentloaded' });
+    await bootstrapRequested;
+    await page.locator('.pages-label .icon-button').click();
+    const startupDialog = page.getByRole('dialog');
+    await startupDialog.locator('#new-page-title').fill(startupTitle);
+    await startupDialog.locator('#new-page-focus').fill(startupInstruction);
+    assert.equal(await startupDialog.locator('button[type="submit"]').isDisabled(), true);
+    assert.equal((await data('/api/bootstrap')).pages.filter(p => p.kind === 'work').length, startupCount);
+  } finally {
+    releaseBootstrap();
+  }
+  const startupDialog = page.getByRole('dialog');
+  await wait(async () => await startupDialog.isVisible()
+    && await startupDialog.locator('button[type="submit"]').isEnabled(), 'startup draft stays open after bootstrap');
+  assert.equal(await startupDialog.locator('#new-page-title').inputValue(), startupTitle);
+  assert.equal(await startupDialog.locator('#new-page-focus').inputValue(), startupInstruction);
+  await startupDialog.locator('button[type="submit"]').click();
+  await page.getByRole('heading', { name: startupTitle, exact: true }).waitFor();
+  const startupId = new URL(page.url()).pathname.split('/').pop();
+  const startupWork = await data('/api/pages/' + startupId);
+  assert.equal(startupWork.page.sourcePageId, 'home');
+  assert.ok(startupWork.messages.some(m => m.role === 'user' && m.content.includes(startupInstruction)));
+  assert.equal((await data('/api/bootstrap')).pages.filter(p => p.kind === 'work').length, startupCount + 1);
+  await page.unroute('**/api/bootstrap');
+  await page.locator('.main-nav a[href="/"]').click();
+  await page.getByRole('heading', { name: 'Home', exact: true }).waitFor();
+  await page.reload();
   assert.equal(await page.title(), 'Per Pulse');
   await page.getByRole('textbox', { name: /^Message / }).fill('Draft a synthetic customer notice.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -182,7 +222,7 @@ try {
   assert.notEqual(page.url().split('/').pop(), admitted.page.id);
 
   assert.deepEqual(errors.filter(error => !/net::ERR_FAILED|Failed to fetch/.test(error)), []);
-  console.log(JSON.stringify({ passed: true, checks: ['Home source author', 'separate request editor',
+  console.log(JSON.stringify({ passed: true, checks: ['startup Create preserves title and purpose through native bootstrap and creates exactly one Work', 'Home source author', 'separate request editor',
     'native user identity', 'rendered author', 'source anchor', 'reload', 'search attribution',
     'mobile overflow', 'lost HTTP create receipt after native admission',
     'closed tab and browser-context restart', 'interleaved second Work preserves original pending identity',
