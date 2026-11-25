@@ -27,31 +27,41 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
     release = threading.Event()
     lock = threading.Lock()
     background_requests = 0
+    reading_context = None
+    observed_requests = []
     original = {}
     target_outcomes = []
     count = int(os.environ.get("PER_PULSE_ACTIVE_WORK_TURNS", "12"))
     assert count >= 2
 
-    def factory(_scope):
+    def factory(scope):
         def respond(request):
-            nonlocal background_requests
+            nonlocal background_requests, reading_context
             messages = json.loads(request.content)["messages"]
             users = [i for i, item in enumerate(messages) if item["role"] == "user"]
-            if not users:
-                return MaterialFixture.response("Home report received.")
-            current = users[-1]
-            task = str(messages[current]["content"])
-            results = [json.loads(item["content"]) for item in messages[current + 1:]
-                       if item["role"] == "tool"]
-            if "ACTIVE_BACKGROUND_READING" in task:
-                with lock:
+            current = users[-1] if users else None
+            task = str(messages[current]["content"]) if current is not None else ""
+            # A content-free reentry need not repeat the original user task
+            # as its final prompt. Route the synthetic transport by the
+            # native context that actually made the initial reading request.
+            with lock:
+                observed_requests.append((scope.context_id, scope.turn_id))
+                if "ACTIVE_BACKGROUND_READING" in task and reading_context is None:
+                    reading_context = scope.context_id
+                reading = reading_context is not None and scope.context_id == reading_context
+                if reading:
                     background_requests += 1
                     ordinal = background_requests
+            if reading:
                 if ordinal == 2:
                     blocked.set()
                     if not release.wait(timeout=300):
                         return httpx.Response(504, text="Synthetic background timeout")
                 return MaterialFixture.response(f"BACKGROUND_DONE_{ordinal}")
+            if current is None:
+                return MaterialFixture.response("Home report received.")
+            results = [json.loads(item["content"]) for item in messages[current + 1:]
+                       if item["role"] == "tool"]
             if "ACTIVE_TARGET_DELIVER" in task:
                 plan = [
                     ("work", {"op": "inspect", "work_id": original["work"], "include_files": True}),
@@ -139,6 +149,7 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
         original.update(work=source, id=approved["id"], sha256=approved["sha256"])
         background = page(client, "Separate reading Work", "ACTIVE_BACKGROUND_READING")
         reply(client, background, "BACKGROUND_DONE_1")
+        assert background_requests == 1 and reading_context is not None
         held = client.patch(f"/api/pulse/contexts/{source}", json={"paused": True})
         assert held.status_code == 200, held.text
         # Let only the reading context enter background admission. Its
@@ -146,8 +157,15 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
         time.sleep(0.10)
         pause(client, False)
         try:
-            assert blocked.wait(timeout=12)
+            assert blocked.wait(timeout=12), (
+                f"Reading did not enter its background transport; requests={observed_requests!r}, "
+                f"activity={pulse_state(client)!r}"
+            )
             assert pulse_state(client)["budget"]["used"] == 1
+            admitted = runtime.causal_ledger.list_events(kind="spontaneous", limit=20)
+            assert len(admitted) == 1
+            assert admitted[0].center_id == runtime.world.get_task_front(background).center_id
+            assert admitted[0].status.value == "running"
             started = time.perf_counter()
             for index in range(count):
                 send(client, source, f"Review revision {index + 1}.")
@@ -175,6 +193,7 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
             assert response.content == b"# Delivered\nVerified evidence from the approved version.\n"
             assert not release.is_set()
             assert background_requests == 2
+            assert runtime.causal_ledger.get_event(admitted[0].id).status.value == "running"
             assert len(runtime.storage.list_engrams()) == 1
             assert runtime.world.get_task_front(destination).focal_engram_id == subject
             print(f"Active Pulse: {count} foreground follow-ups and sourced file delivered "
