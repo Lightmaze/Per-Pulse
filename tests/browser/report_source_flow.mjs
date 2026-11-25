@@ -159,6 +159,9 @@ try {
   checks.push('Home directly downloads exact original Work file bytes with native digest verification');
   assert.equal(projected.references.length, 0);
   const originalReportContent = projected.content;
+  // Closing the file preview changes layout. Establish the reading position
+  // with the actual source link visible before departing.
+  await sourceLink.scrollIntoViewIfNeeded();
   const homePosition = await page.locator('main').evaluate(node => node.scrollTop);
   const beforeRead = (await status()).requests;
   await sourceLink.click();
@@ -167,6 +170,24 @@ try {
   assert.equal(await sourceArticle.getByRole('button', { name: 'Save example', exact: true }).count(), 1);
   assert.equal(new URL(page.url()).hash, '#message-' + report.sourceResultMessageId);
   assert.equal(await workComposer.inputValue(), workDraft);
+  // A different tab may legitimately change Home's last reading position.
+  // Returning from this specific source must use this tab's departure entry.
+  const otherTab = await page.context().newPage();
+  try {
+    await otherTab.goto(base);
+    await otherTab.getByRole('textbox', { name: 'Message Home', exact: true }).waitFor();
+    const otherPosition = await otherTab.locator('main').evaluate((node, original) => {
+      node.scrollTop = original > 20 ? 0 : node.scrollHeight;
+      return node.scrollTop;
+    }, homePosition);
+    assert.ok(Math.abs(otherPosition - homePosition) > 10);
+    await otherTab.locator('.page-nav').getByRole('link', { name: title, exact: true }).click();
+    await otherTab.getByRole('heading', { name: title, exact: true }).waitFor();
+    const stored = await otherTab.evaluate(() => Object.keys(localStorage)
+      .filter(key => key.startsWith('per-pulse.ui.v2.') && key.endsWith('.position.home'))
+      .map(key => Number(localStorage.getItem(key))));
+    assert.ok(stored.some(position => Math.abs(position - homePosition) > 10), 'another tab updated Home preference');
+  } finally { await otherTab.close(); }
   await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
   await homeComposer.waitFor();
   await wait(() => page.evaluate(id => document.activeElement?.id === 'message-' + id, report.eventId),
@@ -175,7 +196,7 @@ try {
   assert.ok(Math.abs(await page.locator('main').evaluate(node => node.scrollTop) - homePosition) < 3);
   assert.equal((await status()).requests, beforeRead);
   assert.equal((await view('home')).messages.find(row => row.id === report.eventId).content, originalReportContent);
-  checks.push('native admitted report opens the exact original Work result and returns to the same Home position with both drafts');
+  checks.push('native admitted report opens the exact original Work result and returns to the same Home position with both drafts despite another tab moving Home');
   checks.push('ordinary report-shaped text has no source badge; source reads create no references or model requests');
 
   // Retain the real prior Work response as an operator-selected example.

@@ -106,6 +106,7 @@ export type NavigationState = {
   samePageReturn?: NavigationOrigin;
   targetMessageId?: string;
   restoreFocus?: NavigationOrigin;
+  scrollPosition?: number;
   canGoBack: boolean;
 };
 
@@ -128,6 +129,8 @@ export function readNavigationState(value: unknown, workspaceId: string | undefi
     samePageReturn: samePageReturn?.pageId === pageId ? samePageReturn : undefined,
     targetMessageId: 'targetMessageId' in value && typeof value.targetMessageId === 'string' ? value.targetMessageId : undefined,
     restoreFocus: restoreFocus?.pageId === pageId ? restoreFocus : undefined,
+    scrollPosition: 'scrollPosition' in value && typeof value.scrollPosition === 'number'
+      && Number.isFinite(value.scrollPosition) && value.scrollPosition >= 0 ? value.scrollPosition : undefined,
     canGoBack: Boolean(origin && origin.pageId !== pageId && 'canGoBack' in value && value.canGoBack === true),
   };
 }

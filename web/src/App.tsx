@@ -230,7 +230,7 @@ export default function App() {
         return;
       }
       if (target && !route.restoreFocus) target.scrollIntoView({ block: 'center' });
-      else if (main.current) main.current.scrollTop = readPosition(workspaceId, route.id);
+      else if (main.current) main.current.scrollTop = route.restorePosition ?? readPosition(workspaceId, route.id);
       const origin = route.restoreFocus;
       const originContainer = origin?.messageId ? document.getElementById(`message-${origin.messageId}`) : main.current;
       const originLink = origin?.referenceId ? originContainer?.querySelector<HTMLElement>(`[data-reference-id="${CSS.escape(origin.referenceId)}"]`) : null;
@@ -239,7 +239,7 @@ export default function App() {
       restored.current = key;
     });
     return () => cancelAnimationFrame(frame);
-  }, [view, loading, route.id, route.serial, route.targetMessageId, route.restoreFocus, workspaceId]);
+  }, [view, loading, route.id, route.serial, route.targetMessageId, route.restoreFocus, route.restorePosition, workspaceId]);
 
   useEffect(() => {
     const preservePosition = () => {
@@ -668,6 +668,10 @@ export default function App() {
       <main className="workspace-main" ref={main} onPointerDownCapture={recordInteraction}
         onFocusCapture={recordInteraction} onKeyDownCapture={recordInteraction} onWheelCapture={recordInteraction} onScroll={() => {
         if (!workspaceId) return;
+        const key = `${workspaceId}-${route.id}-${route.serial}`;
+        // A shorter cached or loading page can clamp the shared scroll box.
+        // Do not save that transient position over the destination preference.
+        if (restored.current !== key && interacted.current !== key) return;
         window.clearTimeout(scrollTimer.current);
         const id = route.id;
         const position = main.current?.scrollTop ?? 0;
