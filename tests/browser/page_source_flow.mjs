@@ -19,11 +19,22 @@ await new Promise(r => socket.close(r));
 const base = `http://127.0.0.1:${port}`;
 let log = '', browser;
 const errors = [];
-const server = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'),
-  [join(root, 'tests/browser/example_server.py'), '--data-dir', directory, '--port', String(port)],
-  { cwd: root, env: { ...process.env, PYTHONPATH: join(root, 'src') }, windowsHide: true });
-server.stdout.on('data', d => log += d);
-server.stderr.on('data', d => log += d);
+const startServer = dataDir => {
+  const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'),
+    [join(root, 'tests/browser/example_server.py'), '--data-dir', dataDir, '--port', String(port)],
+    { cwd: root, env: { ...process.env, PYTHONPATH: join(root, 'src') }, windowsHide: true });
+  child.stdout.on('data', d => log += d);
+  child.stderr.on('data', d => log += d);
+  return child;
+};
+const stopServer = async child => {
+  if (child.exitCode === null && child.signalCode === null) {
+    const stopped = new Promise(r => child.once('exit', r));
+    child.kill();
+    await stopped;
+  }
+};
+let server = startServer(directory);
 const wait = async (fn, label) => {
   for (let i = 0; i < 250; i++) { try { if (await fn()) return; } catch {} await new Promise(r => setTimeout(r, 100)); }
   throw new Error(`${label}\n${log}`);
@@ -73,6 +84,46 @@ try {
   assert.equal(startupWork.page.sourcePageId, 'home');
   assert.ok(startupWork.messages.some(m => m.role === 'user' && m.content.includes(startupInstruction)));
   assert.equal((await data('/api/bootstrap')).pages.filter(p => p.kind === 'work').length, startupCount + 1);
+  await page.unroute('**/api/bootstrap');
+  await page.locator('.main-nav a[href="/"]').click();
+  await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
+  // A real connection failure before identity is known must allow a person
+  // to keep editing and explicitly retry the same startup draft.
+  let failBootstrap, observeFailure;
+  const failureGate = new Promise(r => { failBootstrap = r; });
+  const failureRequested = new Promise(r => { observeFailure = r; });
+  let firstFailure = true;
+  await page.route('**/api/bootstrap', async route => {
+    if (!firstFailure) return route.continue();
+    firstFailure = false;
+    observeFailure();
+    await failureGate;
+    await route.abort('failed');
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await failureRequested;
+  const reconnectTitle = 'Work recovered after startup failure';
+  const reconnectInstruction = 'Finish the plan using the original user intent.';
+  try {
+    await page.locator('.pages-label .icon-button').click();
+    await page.locator('#new-page-title').fill(reconnectTitle);
+    await page.locator('#new-page-focus').fill(reconnectInstruction);
+  } finally {
+    failBootstrap();
+  }
+  const reconnectDialog = page.getByRole('dialog');
+  await reconnectDialog.getByRole('alert').waitFor();
+  assert.equal(await reconnectDialog.locator('button[type="submit"]').isDisabled(), true);
+  await reconnectDialog.getByRole('button', { name: 'Try again', exact: true }).click();
+  await wait(async () => await reconnectDialog.locator('button[type="submit"]').isEnabled(), 'startup retry reconnects');
+  assert.equal(await reconnectDialog.locator('#new-page-title').inputValue(), reconnectTitle);
+  assert.equal(await reconnectDialog.locator('#new-page-focus').inputValue(), reconnectInstruction);
+  await reconnectDialog.locator('button[type="submit"]').click();
+  await page.getByRole('heading', { name: reconnectTitle, exact: true }).waitFor();
+  const recovered = await data('/api/pages/' + new URL(page.url()).pathname.split('/').pop());
+  assert.equal(recovered.page.sourcePageId, 'home');
+  assert.ok(recovered.messages.some(m => m.role === 'user' && m.content.includes(reconnectInstruction)));
+  assert.equal((await data('/api/bootstrap')).pages.filter(p => p.kind === 'work').length, startupCount + 2);
   await page.unroute('**/api/bootstrap');
   await page.locator('.main-nav a[href="/"]').click();
   await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
@@ -221,8 +272,58 @@ try {
   assert.equal(await workCount(), priorCount + 3, 'intentional new Create gets a separate native Work');
   assert.notEqual(page.url().split('/').pop(), admitted.page.id);
 
-  assert.deepEqual(errors.filter(error => !/net::ERR_FAILED|Failed to fetch/.test(error)), []);
-  console.log(JSON.stringify({ passed: true, checks: ['startup Create preserves title and purpose through native bootstrap and creates exactly one Work', 'Home source author', 'separate request editor',
+  // Keep the real browser dialog open while a different native World takes
+  // over the same loopback address. No synthetic bootstrap or write response.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(base);
+  await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
+  const originalWorld = await data('/api/bootstrap');
+  await openNewWork();
+  const staleTitle = 'Original workspace confidential draft';
+  const stalePurpose = 'Complete this original workspace task only.';
+  await page.locator('#new-page-title').fill(staleTitle);
+  await page.locator('#new-page-focus').fill(stalePurpose);
+  const staleDialog = page.getByRole('dialog');
+  await wait(async () => await staleDialog.locator('button[type="submit"]').isEnabled(), 'old World create ready');
+  await stopServer(server);
+  const replacementDirectory = await mkdtemp(join(tmpdir(), 'per-pulse-source-replacement-'));
+  server = startServer(replacementDirectory);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'replacement native server ready');
+  const replacement = await data('/api/bootstrap');
+  assert.notEqual(replacement.workspaceId, originalWorld.workspaceId);
+  const replacementCount = replacement.pages.filter(p => p.kind === 'work').length;
+  const refusal = page.waitForResponse(response => response.url() === base + '/api/pages'
+    && response.request().method() === 'POST');
+  await staleDialog.locator('button[type="submit"]').click();
+  const rejected = await refusal;
+  assert.equal(rejected.status(), 409);
+  assert.equal((await rejected.json()).error.code, 'workspace_changed');
+  await staleDialog.getByRole('alert').waitFor();
+  assert.equal(await staleDialog.locator('#new-page-title').inputValue(), staleTitle);
+  assert.equal(await staleDialog.locator('#new-page-focus').inputValue(), stalePurpose);
+  assert.equal(await staleDialog.locator('button[type="submit"]').isDisabled(), true);
+  assert.equal(await workCount(), replacementCount, 'stale browser intent must not create a Work in the replacement World');
+  assert.ok(!(await data('/api/pages/home')).messages.some(m => (m.content ?? '').includes(stalePurpose)));
+  await staleDialog.getByRole('button', { name: 'Try again', exact: true }).click();
+  await staleDialog.waitFor({ state: 'hidden' });
+  await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
+  await openNewWork();
+  const freshTitle = 'New workspace deliberate task';
+  const freshPurpose = 'Prepare the new workspace plan.';
+  await page.locator('#new-page-title').fill(freshTitle);
+  await page.locator('#new-page-focus').fill(freshPurpose);
+  await page.getByRole('dialog').locator('button[type="submit"]').click();
+  await page.getByRole('heading', { name: freshTitle, exact: true }).waitFor();
+  const freshId = new URL(page.url()).pathname.split('/').pop();
+  await wait(async () => (await data('/api/pages/' + freshId)).messages.some(m => m.role === 'assistant' && m.status === 'settled'), 'new World Work completes');
+  const fresh = await data('/api/pages/' + freshId);
+  assert.equal(fresh.workspaceId, replacement.workspaceId);
+  assert.ok(fresh.messages.some(m => m.role === 'user' && m.content.includes(freshPurpose)));
+  assert.equal(await workCount(), replacementCount + 1);
+  assert.ok(!(await data('/api/bootstrap')).pages.some(p => p.title === staleTitle));
+
+  assert.deepEqual(errors.filter(error => !/net::ERR_FAILED|Failed to fetch|409 \(Conflict\)/.test(error)), []);
+  console.log(JSON.stringify({ passed: true, checks: ['startup Create preserves title and purpose through native bootstrap and creates exactly one Work', 'startup connection failure retains intent through explicit retry', 'stale Create cannot write into a replacement native World; explicit reconnect permits a fresh completed Work', 'Home source author', 'separate request editor',
     'native user identity', 'rendered author', 'source anchor', 'reload', 'search attribution',
     'mobile overflow', 'lost HTTP create receipt after native admission',
     'closed tab and browser-context restart', 'interleaved second Work preserves original pending identity',
@@ -231,5 +332,5 @@ try {
     'confirmed Create allows intentional new Work', 'no unexpected page errors'], base, directory }));
 } finally {
   await browser?.close();
-  if (server.exitCode === null) { const stopped = new Promise(r => server.once('exit', r)); server.kill(); await stopped; }
+  await stopServer(server);
 }

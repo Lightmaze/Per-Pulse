@@ -528,7 +528,18 @@ def create_app(
 
     @app.post("/api/pages", status_code=201)
     def create(body: NewPage, request: Request):
-        return pages(request).create_page(
+        service = pages(request)
+        world_id = request.headers.get("x-per-pulse-world")
+        instance_id = request.headers.get("x-per-pulse-service-instance")
+        # The browser's intent belongs to the observed workspace, not just
+        # the loopback port. Keep the headerless local API contract for callers
+        # that explicitly operate on the currently running service.
+        if (world_id is not None or instance_id is not None) and (
+            world_id != service.runtime.world_id or instance_id != service.service_instance_id
+        ):
+            raise PageError("workspace_changed",
+                            "The workspace changed. Reconnect before creating a Work.", 409)
+        return service.create_page(
             body.title, body.instruction, body.sourcePageId, body.sourceMessageId,
             source_excerpt=body.sourceExcerpt, source_experience_id=body.sourceExperienceId,
             source_artifact=body.sourceArtifact.model_dump() if body.sourceArtifact is not None else None,

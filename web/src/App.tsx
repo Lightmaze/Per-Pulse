@@ -42,6 +42,7 @@ export default function App() {
   const currentModal = useRef(modal);
   currentModal.current = modal;
   const [modalError, setModalError] = useState('');
+  const [createNeedsReconnect, setCreateNeedsReconnect] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sendingPages, setSendingPages] = useState<Record<string, boolean>>({});
   const pendingSends = useRef(new Set<string>());
@@ -83,7 +84,7 @@ export default function App() {
     workspace.navigate(id, origin, targetMessageId);
   }, [workspace.navigate, route.id, workspaceId]);
 
-  const openModal = (next: Modal) => { setModalError(''); setModal(next.kind === 'create' ? { ...next, requestId: crypto.randomUUID() } : next); setPulseOpen(false); setSidebarOpen(false); };
+  const openModal = (next: Modal) => { setModalError(''); setCreateNeedsReconnect(false); setModal(next.kind === 'create' ? { ...next, requestId: crypto.randomUUID() } : next); setPulseOpen(false); setSidebarOpen(false); };
   const closeModal = () => { if (!busy) { setModal(null); setModalError(''); } };
   const persistDraft = useCallback((pageId: string, next: Draft) => {
     if (!workspaceId) return;
@@ -346,8 +347,22 @@ export default function App() {
     }
   };
 
+  const retryCreateConnection = () => {
+    const original = currentModal.current;
+    setError('');
+    setModalError('');
+    refreshWorkspace().then(() => {
+      if (currentModal.current === original) setCreateNeedsReconnect(false);
+    }).catch(problem => {
+      if (currentModal.current === original) {
+        if (workspaceId) setModalError(errorText(problem));
+        else setError(errorText(problem));
+      }
+    });
+  };
+
   const createPage = async (title: string, instruction: string, sourceExcerpt?: string) => {
-    if (!bootstrap?.workspaceId || !bootstrap.serviceInstanceId) return;
+    if (!bootstrap?.workspaceId || !bootstrap.serviceInstanceId || createNeedsReconnect) return;
     const sourceId = route.id;
     const sourceSerial = route.serial;
     const sourceModal = modal;
@@ -387,7 +402,7 @@ export default function App() {
       } catch {
         // Storage-disabled browsers can still retry while this dialog remains open.
       }
-      const response = await api.createPage({ ...payload, requestId });
+      const response = await api.createPage({ ...payload, requestId }, bootstrap);
       try {
         const stored = JSON.parse(localStorage.getItem(pendingKey) ?? 'null');
         if (stored?.fingerprint === fingerprint && stored.requestId === requestId) localStorage.removeItem(pendingKey);
@@ -404,8 +419,10 @@ export default function App() {
         setToast(t('app.pageCreated'));
       }
     } catch (problem) {
-      if (stillHere()) setModalError(errorText(problem));
-      else if (sameService()) setToast(errorText(problem));
+      if (stillHere()) {
+        if (problem instanceof ApiError && problem.code === 'workspace_changed') setCreateNeedsReconnect(true);
+        setModalError(errorText(problem));
+      } else if (sameService()) setToast(errorText(problem));
     } finally {
       // Do not clear the busy state of a different dialog started since this
       // request, even when the old response arrives last.
@@ -731,7 +748,7 @@ export default function App() {
       navigate={navigate} onChanged={() => { void refreshWorkspace().catch(() => {}); }}
       onClose={() => setPulseOpen(false)} /> : null}
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
-    {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} sourceExcerpt={modal.sourceExcerpt} initialInstruction={modal.initialInstruction} fromExperience={modal.fromExperience} artifact={modal.artifact} ready={Boolean(workspaceId && bootstrap?.serviceInstanceId)} retryConnection={!workspaceId && error ? () => { setError(''); refreshWorkspace().catch(problem => setError(errorText(problem))); } : undefined} checkingConnection={isRefreshing} busy={busy} error={modalError || (!workspaceId ? error : '')} close={closeModal} create={createPage} /> : null}
+    {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} sourceExcerpt={modal.sourceExcerpt} initialInstruction={modal.initialInstruction} fromExperience={modal.fromExperience} artifact={modal.artifact} ready={Boolean(workspaceId && bootstrap?.serviceInstanceId && !createNeedsReconnect)} retryConnection={createNeedsReconnect || (!workspaceId && error) ? retryCreateConnection : undefined} checkingConnection={isRefreshing} busy={busy} error={modalError || (!workspaceId ? error : '')} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : modal.mode === 'artifact' ? pages.filter(page => page.kind === 'work' && page.id !== modal.artifact.pageId) : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.mode === 'artifact' ? undefined : modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} sourceText={messageBody(modal.message)} needsExactExcerpt={modal.needsExactExcerpt} materials={modal.message.materials} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'transfer' ? <TransferWorkDialog key={`${route.id}/${modal.message.id}`} excerpt={modal.excerpt}
