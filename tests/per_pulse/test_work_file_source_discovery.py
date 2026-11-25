@@ -91,6 +91,9 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
             result = _activate(first, sent["messageId"])
             assert "selected internal work is complete" in result.content
             durations.append(time.perf_counter() - started)
+            if (index + 1) % 20 == 0:
+                print(f"Native Work through follow-up {index + 1}: "
+                      f"last 20 median={statistics.median(durations[-20:]):.3f}s", flush=True)
         assert authority_reads
         sample = min(20, max(1, turn_count // 4))
         print(f"Native Work follow-ups: {turn_count}; "
@@ -106,6 +109,17 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         pulse=PulseSettings(enabled=False),
     )
     try:
+        # Re-enter the original long-lived Work before starting a different one.
+        # A fresh process must be able to validate its durable terminal history.
+        fixture.plan = []
+        authority_reads.clear()
+        started = time.perf_counter()
+        resumed = second.send(source_id, "Continue reviewing the original evidence after reopening.")
+        result = _activate(second, resumed["messageId"])
+        assert "selected internal work is complete" in result.content
+        assert authority_reads
+        print(f"Reopened original Work: {time.perf_counter() - started:.3f}s; "
+              f"authority batches={[len(batch) for _, batch, _ in authority_reads]}", flush=True)
         fixture.plan = [
             ("work", {"op": "inspect", "work_id": source_id, "include_files": True}),
             ("work", {"op": "inspect", "work_id": source_id, "include_files": True,
