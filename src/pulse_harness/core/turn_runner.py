@@ -1845,10 +1845,20 @@ class TurnRunner:
     def _validate_assistant_messages(
         self, scope: HarnessScope, messages: list[TranscriptMessage],
     ) -> dict[str, int]:
-        rounds = self.store.model_rounds_for_session(scope)
+        # Only new assistant messages need terminal authority decoded again.
+        # Narrow the durable lookup by original turn using the existing
+        # session/turn index; a cold reopen still validates every pending turn.
+        turn_ids = tuple(dict.fromkeys(message.scope.turn_id for message in messages))
+        rounds = [
+            record
+            for offset in range(0, len(turn_ids), 128)
+            for record in self.store.model_rounds_for_session(
+                scope, turn_ids=turn_ids[offset:offset + 128],
+            )
+        ]
         by_item = {
             round_record.assistant_item_id: round_record
-            for round_record in rounds
+            for round_record in sorted(rounds, key=lambda record: (record.created_at, record.round_id))
             if round_record.assistant_item_id
         }
         counts: dict[str, int] = {}

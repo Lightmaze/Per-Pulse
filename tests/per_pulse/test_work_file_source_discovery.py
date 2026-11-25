@@ -7,8 +7,13 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 """
 from __future__ import annotations
 
+import os
+import statistics
+import time
+
 from per_pulse.service import PageService, PulseSettings
 from pulse_harness.core import session_store
+from pulse_harness.core.turn_runner import TurnRunner
 from pulse_system.service.native_work import validate
 from test_internal_work_organization import WorkFixture, run_event
 
@@ -18,8 +23,41 @@ def _activate(pages, event_id):
 
 
 def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_path, monkeypatch):
-    """Select between similar finished files even when conversation text omits paths."""
+    """Select between similar finished files even after a long Work and restart.
+
+    Set PER_PULSE_LONG_WORK_TURNS=200 for the manual long-history timing run.
+    Timings include the actual native turn, not just the authority query.
+    """
+    turn_count = int(os.environ.get("PER_PULSE_LONG_WORK_TURNS", "12"))
+    assert turn_count >= 2
     fixture = WorkFixture(monkeypatch.setenv)
+    authority_reads = []
+    pending_turns = None
+    original_validate = TurnRunner._validate_assistant_messages
+    original_read = session_store.HarnessStore.model_rounds_for_session
+
+    def validate_pending(self, scope, messages):
+        nonlocal pending_turns
+        pending_turns = {message.scope.turn_id for message in messages}
+        try:
+            return original_validate(self, scope, messages)
+        finally:
+            pending_turns = None
+
+    def record_rounds(self, scope, *, limit=None, turn_ids=None):
+        kwargs = {"limit": limit}
+        if turn_ids is not None:
+            kwargs["turn_ids"] = turn_ids
+        rows = original_read(self, scope, **kwargs)
+        if pending_turns is not None:
+            authority_reads.append((set(pending_turns), turn_ids, len(rows)))
+            assert turn_ids is not None
+            assert set(turn_ids) <= pending_turns
+            assert all(row.scope.turn_id in turn_ids for row in rows)
+        return rows
+
+    monkeypatch.setattr(TurnRunner, "_validate_assistant_messages", validate_pending)
+    monkeypatch.setattr(session_store.HarnessStore, "model_rounds_for_session", record_rounds)
     source_id = None
     originals = None
     source_turn = None
@@ -45,6 +83,23 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         assert (tmp_path / "workspace" / "source-approved.md").read_text() == (
             "# Evidence\nVerified original source.\n"
         )
+        fixture.plan = []
+        durations = []
+        for index in range(turn_count):
+            started = time.perf_counter()
+            sent = first.send(source_id, f"Review the evidence again. Revision {index + 1}.")
+            result = _activate(first, sent["messageId"])
+            assert "selected internal work is complete" in result.content
+            durations.append(time.perf_counter() - started)
+            if (index + 1) % 20 == 0:
+                print(f"Native Work through follow-up {index + 1}: "
+                      f"last 20 median={statistics.median(durations[-20:]):.3f}s", flush=True)
+        assert authority_reads
+        sample = min(20, max(1, turn_count // 4))
+        print(f"Native Work follow-ups: {turn_count}; "
+              f"first {sample} median={statistics.median(durations[:sample]):.3f}s; "
+              f"last {sample} median={statistics.median(durations[-sample:]):.3f}s; "
+              f"total={sum(durations):.3f}s; explicit synthetic HTTP.")
     finally:
         first.runtime.close()
 
@@ -54,6 +109,17 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         pulse=PulseSettings(enabled=False),
     )
     try:
+        # Re-enter the original long-lived Work before starting a different one.
+        # A fresh process must be able to validate its durable terminal history.
+        fixture.plan = []
+        authority_reads.clear()
+        started = time.perf_counter()
+        resumed = second.send(source_id, "Continue reviewing the original evidence after reopening.")
+        result = _activate(second, resumed["messageId"])
+        assert "selected internal work is complete" in result.content
+        assert authority_reads
+        print(f"Reopened original Work: {time.perf_counter() - started:.3f}s; "
+              f"authority batches={[len(batch) for _, batch, _ in authority_reads]}", flush=True)
         fixture.plan = [
             ("work", {"op": "inspect", "work_id": source_id, "include_files": True}),
             ("work", {"op": "inspect", "work_id": source_id, "include_files": True,

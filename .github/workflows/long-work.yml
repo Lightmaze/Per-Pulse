@@ -1,0 +1,39 @@
+name: Long native Work
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'harness/**'
+    paths:
+      - 'src/pulse_harness/core/**'
+      - 'tests/per_pulse/test_work_file_source_discovery.py'
+      - '.github/workflows/long-work.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  long-work:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and install the native service
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+          python -m pip install -e '.[dev]'
+      - name: Complete a 200-follow-up Work, reopen it, and deliver a sourced file
+        env:
+          PER_PULSE_LONG_WORK_TURNS: '200'
+        run: |
+          python -m pytest -s -q tests/per_pulse/test_work_file_source_discovery.py::test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart
