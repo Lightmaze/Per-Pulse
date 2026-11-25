@@ -785,7 +785,8 @@ class PageService:
             return "queued"
         return "idle"
 
-    def _summary(self, page_id: str, rows: list[dict] | None = None) -> dict:
+    def _summary(self, page_id: str, rows: list[dict] | None = None, *,
+                 execution: dict | None = None) -> dict:
         front = self._front(page_id)
         rows = self._rows(page_id) if rows is None else rows
         origin = self._state["origins"].get(page_id, {})
@@ -793,7 +794,8 @@ class PageService:
         updated = front.updated_at.isoformat() if front else created
         if rows:
             updated = max(updated, rows[-1]["timestamp"])
-        execution = self.execution.snapshot(page_id)
+        if execution is None:
+            execution = self.execution.snapshot(page_id)
         status = self._status(rows)
         if execution["pendingActions"]:
             status = "needs_attention"
@@ -1029,23 +1031,29 @@ class PageService:
                 earlier_source_id = source_message_id
             refs = [dict(r) for r in self._state["references"] if r["sourcePageId"] == page_id]
             messages = self._messages(page_id, rows, refs)
-            crumbs, seen, cursor = [], set(), page_id
+            # The displayed status and execution controls must describe the
+            # same observation. Breadcrumbs need only the ancestor titles and
+            # origin links, not their transcripts, actions or recovery state.
+            execution = self.execution.snapshot(page_id)
+            summary = self._summary(page_id, summary_rows, execution=execution)
+            crumbs = [{"id": page_id, "title": summary["title"]}]
+            seen, cursor = {page_id}, summary["sourcePageId"]
             while cursor and cursor not in seen:
                 seen.add(cursor)
-                summary = self._summary(cursor, summary_rows if cursor == page_id else None)
-                crumbs.append({"id": cursor, "title": summary["title"]})
-                cursor = summary["sourcePageId"]
+                front = self._front(cursor)
+                crumbs.append({"id": cursor, "title": front.title if front else "Home"})
+                cursor = self._state["origins"].get(cursor, {}).get("pageId")
             if page_id != "home" and "home" not in seen:
                 crumbs.append({"id": "home", "title": "Home"})
             return {
                 "workspaceId": self.runtime.world_id,
                 "serviceInstanceId": self.service_instance_id,
-                "page": self._summary(page_id, summary_rows), "messages": messages,
+                "page": summary, "messages": messages,
                 "sourceExperience": self.learning.source_status(page_id),
                 "references": refs,
                 "backlinks": [dict(r) for r in self._state["references"] if r["targetPageId"] == page_id],
                 "breadcrumbs": list(reversed(crumbs)), "provider": self.provider,
-                "execution": self.execution.snapshot(page_id),
+                "execution": execution,
                 "artifacts": artifacts["artifacts"], "artifactsTruncated": artifacts["truncated"],
                 "artifactsNextCursor": artifacts["nextCursor"],
                 "hasMore": has_more,
