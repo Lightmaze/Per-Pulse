@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from pulse_harness.core import HarnessScope, HarnessStore
+from pulse_harness.core import HarnessScope, HarnessStore, TurnStatus
 from pulse_harness.core.errors import StoreUnavailable
 
 
@@ -113,5 +113,57 @@ def test_event_index_upgrades_existing_store_and_retention_preserves_transcript(
                 "PRAGMA index_info(events_session_item_progress)"
             )]
         assert columns == ["session_id", "item_id", "delta_seq", "revision"]
+    finally:
+        store.close()
+
+
+def test_unsettled_turns_survive_recent_history_and_additive_index_upgrade(tmp_path):
+    path = tmp_path / "kernel.db"
+    original = _scope("old-open")
+    blocked = _scope("old-blocked")
+    foreign = HarnessScope("world", "subject", "other-session", 0, "owner",
+                           context_id="other-work", turn_id="foreign-open")
+    store = HarnessStore(path)
+    try:
+        store.create_session(original)
+        store.create_turn(original, "Unresolved work")
+        store.create_turn(blocked, "Blocked work")
+        store.set_turn_status(blocked, TurnStatus.BLOCKED)
+        for index in range(140):
+            scope = _scope(f"completed-{index:03d}")
+            store.create_turn(scope, "Later work")
+            store.set_turn_status(scope, TurnStatus.CANCELLED)
+        store.create_session(foreign)
+        store.create_turn(foreign, "Separate Work")
+        assert all(turn.status is TurnStatus.CANCELLED
+                   for turn in store.turns_for_session(original, limit=128))
+        assert {turn.scope for turn in store.unsettled_turns_for_session(original)} == {
+            original, blocked,
+        }
+    finally:
+        store.close()
+
+    # Existing stores gain the two indexes on normal open without rewriting
+    # turns or changing the recent-history contract.
+    with sqlite3.connect(path) as old:
+        old.execute("DROP INDEX turns_session_recent")
+        old.execute("DROP INDEX turns_session_unsettled")
+
+    store = HarnessStore(path)
+    try:
+        assert {turn.scope for turn in store.unsettled_turns_for_session(original)} == {
+            original, blocked,
+        }
+        assert [turn.scope for turn in store.unsettled_turns_for_session(foreign)] == [foreign]
+        assert len(store.turns_for_session(original)) == 142
+        store.set_turn_status(original, TurnStatus.CANCELLED)
+        assert [turn.scope for turn in store.unsettled_turns_for_session(original)] == [blocked]
+        store.set_turn_status(blocked, TurnStatus.CANCELLED)
+        assert store.unsettled_turns_for_session(original) == ()
+        assert len(store.turns_for_session(original, limit=1)) == 1
+        with sqlite3.connect(path) as db:
+            indexes = {row[1]: row[4] for row in db.execute("PRAGMA index_list(turns)")}
+        assert indexes["turns_session_recent"] == 0
+        assert indexes["turns_session_unsettled"] == 1
     finally:
         store.close()
