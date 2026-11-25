@@ -221,7 +221,7 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
             }
             output, = client.get(f"/api/pages/{destination}/artifacts").json()["artifacts"]
             home = eventually(lambda: view(client, "home"), lambda state: any(
-                item.get("reportedArtifact", {}).get("artifactId") == output["id"]
+                (item.get("reportedArtifact") or {}).get("artifactId") == output["id"]
                 for item in state["messages"] if item.get("reportedArtifact")), timeout=12)
             report = next(item for item in home["messages"] if item.get("reportedArtifact"))
             assert report["inputArtifact"]["artifactId"] == approved["id"]
@@ -297,10 +297,10 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
                        for item in follow_on_outcomes[0]["output"]["completed_files"])
             follow_on, = client.get(f"/api/pages/{third}/artifacts").json()["artifacts"]
             home = eventually(lambda: view(client, "home"), lambda state: any(
-                item.get("reportedArtifact", {}).get("artifactId") == follow_on["id"]
+                (item.get("reportedArtifact") or {}).get("artifactId") == follow_on["id"]
                 for item in state["messages"] if item.get("reportedArtifact")), timeout=12)
             report = next(item for item in home["messages"]
-                          if item.get("reportedArtifact", {}).get("artifactId") == follow_on["id"])
+                          if (item.get("reportedArtifact") or {}).get("artifactId") == follow_on["id"])
             assert report["inputArtifact"]["artifactId"] == output["id"]
             assert report["sourcePageId"] == third
             assert view(client, third)["page"]["sourceMessageId"] == destination_message
@@ -343,7 +343,7 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
         assert undone.status_code == 200, undone.text
         home = view(client, "home")
         report = next(item for item in home["messages"]
-                      if item.get("reportedArtifact", {}).get("artifactId") == follow_on["id"])
+                      if (item.get("reportedArtifact") or {}).get("artifactId") == follow_on["id"])
         assert report["reportedArtifact"]["undone"] is True
         assert report["inputArtifact"]["undone"] is False
         assert client.get(f"/api/pages/{destination}/artifacts/{output['id']}/download").content == (
