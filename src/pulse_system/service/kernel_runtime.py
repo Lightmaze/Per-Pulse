@@ -1194,9 +1194,8 @@ class KernelHarnessRuntime:
             # cancellable. A turn blocked only by a model error, with no action
             # left in doubt, is cancelled by the next message instead of
             # leaving the page unable to answer anything.
-            for previous in self.kernel.store.turns_for_session(scope.session_scope(), limit=128):
-                if previous.scope.turn_id != scope.turn_id and previous.status not in {
-                    TurnStatus.SUCCEEDED, TurnStatus.FAILED, TurnStatus.CANCELLED}:
+            for previous in self.kernel.store.unsettled_turns_for_session(scope.session_scope()):
+                if previous.scope.turn_id != scope.turn_id:
                     if self.can_supersede(previous):
                         runtime.runner.abort(previous.scope, reason="superseded_by_new_message")
                         continue

@@ -71,6 +71,15 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
     assert turn_count >= 2
     fixture = WorkFixture(monkeypatch.setenv)
     authority_reads = []
+    admission_reads = []
+    original_unsettled = session_store.HarnessStore.unsettled_turns_for_session
+
+    def record_unsettled(self, scope):
+        rows = original_unsettled(self, scope)
+        admission_reads.append(len(rows))
+        return rows
+
+    monkeypatch.setattr(session_store.HarnessStore, "unsettled_turns_for_session", record_unsettled)
     pending_turns = None
     original_validate = TurnRunner._validate_assistant_messages
     original_read = session_store.HarnessStore.model_rounds_for_session
@@ -152,6 +161,10 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
                 print(f"Native Work through follow-up {index + 1}: "
                       f"last 20 median={statistics.median(durations[-20:]):.3f}s", flush=True)
         assert authority_reads
+        # The real foreground admission path must not load completed turns
+        # simply to decide whether the next Work message can run.
+        assert len(admission_reads) >= turn_count
+        assert not any(admission_reads)
         if profiles is not None:
             import pstats
             for label, profile in zip(("first", "last"), profiles):

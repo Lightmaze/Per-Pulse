@@ -113,6 +113,15 @@ CREATE TABLE IF NOT EXISTS turns (
     PRIMARY KEY(session_id, turn_id)
 );
 
+-- Keep the latest-turn observer bounded and admission independent of
+-- completed history. The partial index includes BLOCKED turns because
+-- their effects may still require recovery.
+CREATE INDEX IF NOT EXISTS turns_session_recent
+    ON turns(session_id, created_at DESC, turn_id DESC);
+CREATE INDEX IF NOT EXISTS turns_session_unsettled
+    ON turns(session_id, created_at DESC, turn_id DESC)
+    WHERE status NOT IN ('succeeded', 'failed', 'cancelled');
+
 CREATE TABLE IF NOT EXISTS transcript_messages (
     message_id TEXT PRIMARY KEY,
     item_id TEXT NOT NULL,
@@ -1767,6 +1776,25 @@ class HarnessStore:
             # the SQL keyset remains newest-first so the latest turns survive
             # bounded retention.
             return tuple(self._turn_from_row(row) for row in reversed(rows))
+
+    def unsettled_turns_for_session(self, scope: HarnessScope) -> tuple[HarnessTurn, ...]:
+        """Read every turn that may require recovery before new admission.
+
+        Unlike the recent history observer, this authority read has no
+        history window: a completed turn cannot hide an unresolved one.
+        The partial index excludes completed turns before loading rows.
+        """
+        with self._lock:
+            self._require_open()
+            self._assert_session_scope(scope.session_scope())
+            self._validate_database_locked()
+            rows = self._db.execute(
+                "SELECT * FROM turns WHERE session_id = ? "
+                "AND status NOT IN ('succeeded', 'failed', 'cancelled') "
+                "ORDER BY created_at ASC, turn_id ASC",
+                (scope.session_id,),
+            ).fetchall()
+            return tuple(self._turn_from_row(row) for row in rows)
 
     def set_session_status(
         self,
