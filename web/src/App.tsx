@@ -240,7 +240,8 @@ export default function App() {
         return;
       }
       if (target && !route.restoreFocus) target.scrollIntoView({ block: 'center' });
-      else if (main.current) main.current.scrollTop = route.restorePosition ?? readPosition(workspaceId, route.id);
+      else if (main.current) main.current.scrollTop = route.restorePosition?.workspaceId === workspaceId
+        ? route.restorePosition.value : readPosition(workspaceId, route.id);
       const origin = route.restoreFocus;
       const originContainer = origin?.messageId ? document.getElementById(`message-${origin.messageId}`) : main.current;
       const originLink = origin?.referenceId ? originContainer?.querySelector<HTMLElement>(`[data-reference-id="${CSS.escape(origin.referenceId)}"]`) : null;

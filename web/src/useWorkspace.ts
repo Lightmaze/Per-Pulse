@@ -4,7 +4,7 @@ import { messageFromLocation, pageFromLocation, pageHref, readNavigationState, s
 import { mergeWorkspaceSnapshot, pageBelongsToWorkspace } from './workspaceSnapshot';
 import type { Bootstrap, NavigationOrigin, PageView } from './types';
 
-type Route = { id: string; serial: number; origin?: NavigationOrigin; samePageReturn?: NavigationOrigin; targetMessageId?: string; restoreFocus?: NavigationOrigin; restorePosition?: number; canGoBack: boolean };
+type Route = { id: string; serial: number; origin?: NavigationOrigin; samePageReturn?: NavigationOrigin; targetMessageId?: string; restoreFocus?: NavigationOrigin; restorePosition?: { workspaceId: string; value: number }; canGoBack: boolean };
 export function useWorkspace() {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
   const bootstrapRef = useRef<Bootstrap | null>(null);
@@ -132,7 +132,11 @@ export function useWorkspace() {
       if (workspaceId) savePosition(workspaceId, routeRef.current.id, document.querySelector('.workspace-main')?.scrollTop ?? 0);
       const id = pageFromLocation();
       const saved = readNavigationState(history.state, workspaceId, id);
-      setRoute(previous => ({ id, serial: previous.serial + 1, origin: saved?.origin, samePageReturn: saved?.samePageReturn, targetMessageId: messageFromLocation() ?? saved?.targetMessageId, restoreFocus: saved?.restoreFocus, restorePosition: saved?.scrollPosition, canGoBack: saved?.canGoBack ?? false }));
+      // A history entry describes the World in which the reading detour began.
+      // Keep its identity with the transient return coordinate across reconnects.
+      const restorePosition = saved?.scrollPosition === undefined ? undefined
+        : { workspaceId: saved.workspaceId, value: saved.scrollPosition };
+      setRoute(previous => ({ id, serial: previous.serial + 1, origin: saved?.origin, samePageReturn: saved?.samePageReturn, targetMessageId: messageFromLocation() ?? saved?.targetMessageId, restoreFocus: saved?.restoreFocus, restorePosition, canGoBack: saved?.canGoBack ?? false }));
       setError('');
     };
     window.addEventListener('popstate', onPop);
@@ -151,7 +155,9 @@ export function useWorkspace() {
   useEffect(() => {
     if (!bootstrap?.workspaceId) return;
     const saved = readNavigationState(history.state, bootstrap.workspaceId, routeRef.current.id);
-    setRoute(previous => ({ ...previous, origin: saved?.origin, samePageReturn: saved?.samePageReturn, targetMessageId: messageFromLocation() ?? saved?.targetMessageId, restoreFocus: saved?.restoreFocus, canGoBack: saved?.canGoBack ?? false }));
+    setRoute(previous => ({ ...previous, origin: saved?.origin, samePageReturn: saved?.samePageReturn, targetMessageId: messageFromLocation() ?? saved?.targetMessageId, restoreFocus: saved?.restoreFocus,
+      restorePosition: previous.restorePosition?.workspaceId === bootstrap.workspaceId ? previous.restorePosition : undefined,
+      canGoBack: saved?.canGoBack ?? false }));
   }, [bootstrap?.workspaceId]);
 
   useEffect(() => {
