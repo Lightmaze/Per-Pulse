@@ -1887,18 +1887,27 @@ class HarnessStore:
         scope: HarnessScope,
         *,
         limit: int | None = None,
+        turn_ids: tuple[str, ...] | None = None,
     ) -> tuple[ModelRoundRecord, ...]:
+        """Read durable rounds, optionally restricted to a batch of original turns.
+
+        Historical turns can belong to an earlier lease epoch. The current
+        session authorizes this read; the original turn IDs only narrow it.
+        """
         if limit is not None and limit < 1:
             raise ValueError("model round limit must be positive")
+        if turn_ids is not None and not 1 <= len(turn_ids) <= 128:
+            raise ValueError("model round turn batch must contain 1 to 128 IDs")
         with self._lock:
             self._require_open()
             self._assert_session_scope(scope.session_scope())
             self._validate_database_locked()
-            query = (
-                "SELECT * FROM model_rounds WHERE session_id = ? "
-                "ORDER BY created_at DESC, round_id DESC"
-            )
+            query = "SELECT * FROM model_rounds WHERE session_id = ?"
             parameters: list[object] = [scope.session_id]
+            if turn_ids is not None:
+                query += " AND turn_id IN (" + ", ".join("?" for _ in turn_ids) + ")"
+                parameters.extend(turn_ids)
+            query += " ORDER BY created_at DESC, round_id DESC"
             if limit is not None:
                 query += " LIMIT ?"
                 parameters.append(limit)
