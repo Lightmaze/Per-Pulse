@@ -206,7 +206,16 @@ export default function App() {
     document.title = view?.page.kind === 'work' ? `${view.page.title} · Per Pulse` : 'Per Pulse';
   }, [view?.page.kind, view?.page.title]);
 
-  useEffect(() => {
+  const dialogScope = useRef({ pageId: route.id, serial: route.serial, workspaceId, serviceId: bootstrap?.serviceInstanceId });
+  useLayoutEffect(() => {
+    const previous = dialogScope.current;
+    dialogScope.current = { pageId: route.id, serial: route.serial, workspaceId, serviceId: bootstrap?.serviceInstanceId };
+    // A plain Create can be opened and edited while the first workspace
+    // observation is pending. Bind it to that first identity without discarding
+    // its fields. Actual navigation or a known service/World change still closes it.
+    if (previous.pageId === route.id && previous.serial === route.serial
+        && !previous.workspaceId && workspaceId && bootstrap?.serviceInstanceId
+        && currentModal.current?.kind === 'create') return;
     // Browser Back can leave a create request in flight. Dismiss only its
     // dialog; the native Work creation and original source keep running.
     if (currentModal.current?.kind === 'create') setBusy(false);
@@ -338,6 +347,7 @@ export default function App() {
   };
 
   const createPage = async (title: string, instruction: string, sourceExcerpt?: string) => {
+    if (!bootstrap?.workspaceId || !bootstrap.serviceInstanceId) return;
     const sourceId = route.id;
     const sourceSerial = route.serial;
     const sourceModal = modal;
@@ -721,7 +731,7 @@ export default function App() {
       navigate={navigate} onChanged={() => { void refreshWorkspace().catch(() => {}); }}
       onClose={() => setPulseOpen(false)} /> : null}
     {toast ? <div className="toast" role="status"><Icon name="check" size={17} />{toast}</div> : null}
-    {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} sourceExcerpt={modal.sourceExcerpt} initialInstruction={modal.initialInstruction} fromExperience={modal.fromExperience} artifact={modal.artifact} busy={busy} error={modalError} close={closeModal} create={createPage} /> : null}
+    {modal?.kind === 'create' ? <CreatePageDialog initial={modal.message} sourceExcerpt={modal.sourceExcerpt} initialInstruction={modal.initialInstruction} fromExperience={modal.fromExperience} artifact={modal.artifact} ready={Boolean(workspaceId && bootstrap?.serviceInstanceId)} retryConnection={!workspaceId && error ? () => { setError(''); refreshWorkspace().catch(problem => setError(errorText(problem))); } : undefined} checkingConnection={isRefreshing} busy={busy} error={modalError || (!workspaceId ? error : '')} close={closeModal} create={createPage} /> : null}
     {modal?.kind === 'picker' ? <PagePickerDialog pages={modal.mode === 'search' ? pages : modal.mode === 'artifact' ? pages.filter(page => page.kind === 'work' && page.id !== modal.artifact.pageId) : pages.filter(page => page.id !== route.id)} mode={modal.mode} busy={busy} error={modalError} close={closeModal} select={selectPage} create={() => openModal({ kind: 'create', message: modal.mode === 'artifact' ? undefined : modal.message })} /> : null}
     {modal?.kind === 'return' ? <ReturnDialog initial={modal.content} sourceText={messageBody(modal.message)} needsExactExcerpt={modal.needsExactExcerpt} materials={modal.message.materials} sourceTitle={view?.page.title} busy={busy} error={modalError} close={closeModal} send={bringHome} /> : null}
     {modal?.kind === 'transfer' ? <TransferWorkDialog key={`${route.id}/${modal.message.id}`} excerpt={modal.excerpt}

@@ -23,7 +23,7 @@ export type Modal =
   | { kind: 'materials'; materialId?: string; pageId?: string }
   | { kind: 'rename' };
 
-export function CreatePageDialog({ initial, sourceExcerpt, initialInstruction, fromExperience, artifact, busy, error, close, create }: { initial?: Message; sourceExcerpt?: string; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
+export function CreatePageDialog({ initial, sourceExcerpt, initialInstruction, fromExperience, artifact, ready, retryConnection, checkingConnection, busy, error, close, create }: { initial?: Message; sourceExcerpt?: string; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact; ready: boolean; retryConnection?: () => void; checkingConnection: boolean; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
   const { t } = useLanguage();
   const [title, setTitle] = useState('');
   const source = initialPageSource(initial, t('source.defaultRequest'));
@@ -39,7 +39,7 @@ export function CreatePageDialog({ initial, sourceExcerpt, initialInstruction, f
     </> : null}
     {initial?.materials?.length ? <p className="lesson-note">{t('materials.newPageSource')}</p> : null}
     {artifact ? <p className="lesson-note">{t('library.artifactToNewWorkHint', { path: artifact.path })}</p> : null}
-    <form onSubmit={event => { event.preventDefault(); if (title.trim() && instruction.trim() && !busy) create(title.trim(), instruction.trim(), initial ? excerpt : undefined); }}>
+    <form onSubmit={event => { event.preventDefault(); if (ready && title.trim() && instruction.trim() && !busy) create(title.trim(), instruction.trim(), initial ? excerpt : undefined); }}>
       <label className="field-label" htmlFor="new-page-title">{t('dialogs.pageName')}</label>
       <input id="new-page-title" autoFocus value={title} onChange={event => setTitle(event.target.value)} placeholder={t('dialogs.namePlaceholder')} maxLength={160} required />
       {initial ? <>
@@ -49,8 +49,10 @@ export function CreatePageDialog({ initial, sourceExcerpt, initialInstruction, f
       </> : null}
       <label className="field-label" htmlFor="new-page-focus">{t(initial ? 'source.request' : 'dialogs.focusLabel')}</label>
       <textarea id="new-page-focus" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder={t('dialogs.focusPlaceholder')} rows={5} required />
+      {!ready && !error ? <p className="lesson-note" role="status">{t('app.openingConversation')}</p> : null}
+      {!ready && retryConnection ? <button type="button" className="text-button" disabled={checkingConnection} onClick={retryConnection}>{t('app.retry')}</button> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button type="submit" className="primary-button" disabled={busy || !title.trim() || !instruction.trim() || Boolean(initial && !excerpt.trim())}>{busy ? t('dialogs.creating') : t('dialogs.createPage')}</button></div>
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={close}>{t('dialogs.cancel')}</button><button type="submit" className="primary-button" disabled={!ready || busy || !title.trim() || !instruction.trim() || Boolean(initial && !excerpt.trim())}>{busy ? t('dialogs.creating') : t('dialogs.createPage')}</button></div>
     </form>
   </Dialog>;
 }
