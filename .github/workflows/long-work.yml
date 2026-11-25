@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -32,6 +34,19 @@ jobs:
           npm --prefix web ci
           npm --prefix web run build
           python -m pip install -e '.[dev]'
+      - name: Measure the parent commit on the same runner
+        env:
+          PER_PULSE_LONG_WORK_TURNS: '200'
+        run: |
+          baseline="$RUNNER_TEMP/per-pulse-parent"
+          git worktree add --detach "$baseline" HEAD^
+          trap 'git worktree remove --force "$baseline"' EXIT
+          (
+            cd "$baseline"
+            echo "Baseline source: $(git rev-parse HEAD)"
+            PYTHONPATH="$baseline/src" python -c 'import per_pulse.service; print(per_pulse.service.__file__)'
+            PYTHONPATH="$baseline/src" python -m pytest -s -q tests/per_pulse/test_work_file_source_discovery.py::test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart
+          )
       - name: Complete a 200-follow-up Work, reopen it, and deliver a sourced file
         env:
           PER_PULSE_LONG_WORK_TURNS: '200'

@@ -22,6 +22,45 @@ def _activate(pages, event_id):
     return run_event(pages.runtime, pages.runtime.causal_ledger.get_event(event_id))
 
 
+def _check_nested_work_view(pages, monkeypatch, source_id, source_message_id, target_id):
+    # Capture the actual reads during a user's navigation into the nested
+    # Work. Source-specific reads are legitimate; full ancestor projections
+    # just to display a breadcrumb are not.
+    history_reads = []
+    execution_reads = []
+    read_rows = pages._rows
+    snapshot = pages.execution.snapshot
+
+    def record_rows(page_id, **kwargs):
+        if not kwargs:
+            history_reads.append(page_id)
+        return read_rows(page_id, **kwargs)
+
+    def record_execution(page_id):
+        execution_reads.append(page_id)
+        return snapshot(page_id)
+
+    with monkeypatch.context() as observed:
+        observed.setattr(pages, "_rows", record_rows)
+        observed.setattr(pages.execution, "snapshot", record_execution)
+        view = pages.view(target_id)
+    assert history_reads == [target_id]
+    assert execution_reads == [target_id]
+    assert view["breadcrumbs"] == [
+        {"id": "home", "title": "Home"},
+        {"id": source_id, "title": "Prior evidence Work"},
+        {"id": target_id, "title": "Follow-on delivered Work"},
+    ]
+    assert view["page"]["sourcePageId"] == source_id
+    assert view["page"]["sourceMessageId"] == source_message_id
+    assert view["page"]["status"] == "idle"
+    assert not view["execution"]["pendingActions"]
+    original = pages.view(source_id, source_message_id=source_message_id)
+    assert any(row["id"] == source_message_id for row in original["messages"])
+    assert any(ref["targetPageId"] == target_id and ref["sourceMessageId"] == source_message_id
+               for ref in original["references"])
+
+
 def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_path, monkeypatch):
     """Select between similar finished files even after a long Work and restart.
 
@@ -75,7 +114,8 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         ]
         created = first.create_page("Prior evidence Work", "Write two versions of the research.")
         source_id = created["page"]["id"]
-        _activate(first, created["initialMessageId"])
+        source_message_id = created["initialMessageId"]
+        _activate(first, source_message_id)
         assert [result["status"] for result in fixture.outcomes] == ["succeeded", "succeeded"]
         originals = {item["path"]: item for item in first.artifacts.snapshot(source_id)["artifacts"]}
         source_turn = next(iter(originals.values()))["turnId"]
@@ -163,6 +203,7 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
             "Follow-on delivered Work",
             "Find which of the earlier Work's two finished files is approved. "
             "Read the original and deliver the derived file to Home.",
+            source_page_id=source_id, source_message_id=source_message_id,
         )
         target_id = created["page"]["id"]
         # Real model/tool rounds may finish within one timestamp millisecond.
@@ -215,6 +256,7 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
             "undone": False,
         }
         assert "Verified input read from earlier Work" in home["content"]
+        _check_nested_work_view(second, monkeypatch, source_id, source_message_id, target_id)
     finally:
         second.runtime.close()
 
@@ -229,6 +271,7 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         )
         assert third.artifacts.download(source_id, originals["source-approved.md"]["id"])[
             "content"] == b"# Evidence\nVerified original source.\n"
+        _check_nested_work_view(third, monkeypatch, source_id, source_message_id, target_id)
         third.artifacts.undo(target_id, target_artifact["id"])
         final = next(row for row in third.view("home")["messages"]
                      if row["id"] == reports[0]["event_id"])
