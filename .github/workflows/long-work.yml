@@ -8,6 +8,7 @@ on:
     paths:
       - 'src/pulse_harness/core/**'
       - 'tests/per_pulse/test_work_file_source_discovery.py'
+      - 'tests/per_pulse/test_active_pulse_sourced_delivery.py'
       - '.github/workflows/long-work.yml'
 
 permissions:
@@ -58,3 +59,9 @@ jobs:
           PER_PULSE_LONG_WORK_PROFILE: '1'
         run: |
           python -m pytest -s -q tests/per_pulse/test_work_file_source_discovery.py::test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart
+
+      - name: Deliver a sourced file during a live background Pulse
+        env:
+          PER_PULSE_ACTIVE_WORK_TURNS: '200'
+        run: |
+          python -m pytest -s -q tests/per_pulse/test_active_pulse_sourced_delivery.py
