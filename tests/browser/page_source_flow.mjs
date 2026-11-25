@@ -278,6 +278,44 @@ try {
   await page.goto(base);
   await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
   const originalWorld = await data('/api/bootstrap');
+  const homeComposer = tab => tab.getByRole('textbox', { name: /^Message / });
+  const scrollTop = tab => tab.locator('.workspace-main').evaluate(node => node.scrollTop);
+  const scrollTo = (tab, position) => tab.locator('.workspace-main').evaluate((node, top) => {
+    node.scrollTop = top;
+  }, position);
+  const positionKey = world => 'per-pulse.ui.v2.' + encodeURIComponent(world) + '.position.home';
+  const storedPosition = (tab, world) => tab.evaluate(key => Number(localStorage.getItem(key)), positionKey(world));
+  const addReadingHistory = async (tab, marker) => {
+    const historyText = Array.from({ length: 80 }, (_, i) =>
+      marker + ' — reading paragraph ' + (i + 1) + '. Review the source before preparing a result.').join('\n\n');
+    await homeComposer(tab).fill(historyText);
+    await tab.getByRole('button', { name: 'Send message', exact: true }).click();
+    let userMessage;
+    await wait(async () => {
+      const messages = (await data('/api/pages/home')).messages;
+      const index = messages.findIndex(m => m.role === 'user' && m.content === historyText);
+      if (index < 0) return false;
+      userMessage = messages[index];
+      return messages.slice(index + 1).some(m => m.role === 'assistant' && m.status === 'settled');
+    }, marker + ' settled native reading history');
+    await tab.locator(`[data-message-id="${userMessage.id}"]`).waitFor();
+    return userMessage.id;
+  };
+  // The old tab has a genuine browser Back return coordinate, not merely a
+  // per-World localStorage preference. The replacement has its own long Home.
+  const originalReadingId = await addReadingHistory(page, 'Original World reading material');
+  const originalDraft = 'Unsent original World note';
+  await homeComposer(page).fill(originalDraft);
+  const originalPosition = 640;
+  await scrollTo(page, originalPosition);
+  await wait(async () => Math.abs(await scrollTop(page) - originalPosition) < 3, 'original reading coordinate');
+  await page.locator(`.page-nav a[href="/page/${target}"]`).click();
+  await page.getByRole('heading', { name: 'Source attribution check', exact: true }).waitFor();
+  await page.goBack();
+  await page.locator(`[data-message-id="${originalReadingId}"]`).waitFor();
+  await wait(async () => Math.abs(await scrollTop(page) - originalPosition) < 3, 'browser Back restores original reading coordinate');
+  assert.equal(await page.evaluate(() => history.state.scrollPosition), originalPosition);
+  assert.equal(await homeComposer(page).inputValue(), originalDraft);
   await openNewWork();
   const staleTitle = 'Original workspace confidential draft';
   const stalePurpose = 'Complete this original workspace task only.';
@@ -292,6 +330,22 @@ try {
   const replacement = await data('/api/bootstrap');
   assert.notEqual(replacement.workspaceId, originalWorld.workspaceId);
   const replacementCount = replacement.pages.filter(p => p.kind === 'work').length;
+  // A different tab has already been working in the replacement World.
+  // Its native history, draft and actual scroll preference must win over
+  // the old tab's transient browser Back position when it reconnects.
+  const replacementReader = await context.newPage();
+  await replacementReader.setViewportSize({ width: 1280, height: 900 });
+  await replacementReader.goto(base);
+  const replacementReadingId = await addReadingHistory(replacementReader, 'Replacement World reading material');
+  const replacementDraft = 'Unsent replacement World note';
+  await homeComposer(replacementReader).fill(replacementDraft);
+  const replacementPosition = 160;
+  await scrollTo(replacementReader, replacementPosition);
+  await wait(async () => Math.abs(await scrollTop(replacementReader) - replacementPosition) < 3
+    && Math.abs(await storedPosition(replacementReader, replacement.workspaceId) - replacementPosition) < 3,
+    'replacement World has its own persisted reading position');
+  await replacementReader.close();
+  await page.bringToFront();
   const refusal = page.waitForResponse(response => response.url() === base + '/api/pages'
     && response.request().method() === 'POST');
   await staleDialog.locator('button[type="submit"]').click();
@@ -306,7 +360,13 @@ try {
   assert.ok(!(await data('/api/pages/home')).messages.some(m => (m.content ?? '').includes(stalePurpose)));
   await staleDialog.getByRole('button', { name: 'Try again', exact: true }).click();
   await staleDialog.waitFor({ state: 'hidden' });
-  await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
+  await page.locator(`[data-message-id="${replacementReadingId}"]`).waitFor();
+  assert.equal(await page.locator(`[data-message-id="${originalReadingId}"]`).count(), 0);
+  assert.equal(await homeComposer(page).inputValue(), replacementDraft);
+  await wait(async () => Math.abs(await scrollTop(page) - replacementPosition) < 3,
+    'explicit reconnect restores replacement reading position rather than stale browser Back coordinate');
+  assert.equal(await page.evaluate(() => history.state.scrollPosition), originalPosition,
+    'old browser history remains intact but cannot steer a different World');
   await openNewWork();
   const freshTitle = 'New workspace deliberate task';
   const freshPurpose = 'Prepare the new workspace plan.';
@@ -321,9 +381,20 @@ try {
   assert.ok(fresh.messages.some(m => m.role === 'user' && m.content.includes(freshPurpose)));
   assert.equal(await workCount(), replacementCount + 1);
   assert.ok(!(await data('/api/bootstrap')).pages.some(p => p.title === staleTitle));
+  await page.locator('.main-nav a[href="/"]').click();
+  await page.locator(`[data-message-id="${replacementReadingId}"]`).waitFor();
+  assert.equal(await homeComposer(page).inputValue(), replacementDraft);
+  await stopServer(server);
+  server = startServer(directory);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'original World restarted');
+  assert.equal((await data('/api/bootstrap')).workspaceId, originalWorld.workspaceId);
+  await page.goto(base);
+  await page.locator(`[data-message-id="${originalReadingId}"]`).waitFor();
+  assert.equal(await homeComposer(page).inputValue(), originalDraft);
+  assert.equal(await page.locator(`[data-message-id="${replacementReadingId}"]`).count(), 0);
 
   assert.deepEqual(errors.filter(error => !/net::ERR_FAILED|Failed to fetch|409 \(Conflict\)/.test(error)), []);
-  console.log(JSON.stringify({ passed: true, checks: ['startup Create preserves title and purpose through native bootstrap and creates exactly one Work', 'startup connection failure retains intent through explicit retry', 'stale Create cannot write into a replacement native World; explicit reconnect permits a fresh completed Work', 'Home source author', 'separate request editor',
+  console.log(JSON.stringify({ passed: true, checks: ['startup Create preserves title and purpose through native bootstrap and creates exactly one Work', 'startup connection failure retains intent through explicit retry', 'stale Create cannot write into a replacement native World; explicit reconnect permits a fresh completed Work', 'browser Back reading coordinate cannot override a different native World; both unsent drafts survive reconnect and restart', 'Home source author', 'separate request editor',
     'native user identity', 'rendered author', 'source anchor', 'reload', 'search attribution',
     'mobile overflow', 'lost HTTP create receipt after native admission',
     'closed tab and browser-context restart', 'interleaved second Work preserves original pending identity',
