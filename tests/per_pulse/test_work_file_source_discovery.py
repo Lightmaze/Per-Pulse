@@ -85,17 +85,42 @@ def test_prior_work_file_receipts_drive_a_real_follow_on_file_after_restart(tmp_
         )
         fixture.plan = []
         durations = []
+        profiles = None
+        if os.environ.get("PER_PULSE_LONG_WORK_PROFILE") == "1":
+            import cProfile
+            profiles = (cProfile.Profile(), cProfile.Profile())
+        sample = min(20, max(1, turn_count // 4))
         for index in range(turn_count):
+            profile = None
+            if profiles is not None:
+                if index < sample:
+                    profile = profiles[0]
+                elif index >= turn_count - sample:
+                    profile = profiles[1]
             started = time.perf_counter()
-            sent = first.send(source_id, f"Review the evidence again. Revision {index + 1}.")
-            result = _activate(first, sent["messageId"])
+            if profile is not None:
+                profile.enable()
+            try:
+                sent = first.send(source_id, f"Review the evidence again. Revision {index + 1}.")
+                result = _activate(first, sent["messageId"])
+            finally:
+                if profile is not None:
+                    profile.disable()
             assert "selected internal work is complete" in result.content
             durations.append(time.perf_counter() - started)
             if (index + 1) % 20 == 0:
                 print(f"Native Work through follow-up {index + 1}: "
                       f"last 20 median={statistics.median(durations[-20:]):.3f}s", flush=True)
         assert authority_reads
-        sample = min(20, max(1, turn_count // 4))
+        if profiles is not None:
+            import pstats
+            for label, profile in zip(("first", "last"), profiles):
+                stats = pstats.Stats(profile).strip_dirs()
+                print(f"Profile: {label} {sample} complete follow-ups "
+                      "(caller thread; cumulative entries can overlap)", flush=True)
+                stats.sort_stats("cumulative").print_stats(30)
+                stats.print_stats(r"session_store\.py|turn_runner\.py|context_window\.py", 40)
+                stats.sort_stats("tottime").print_stats(30)
         print(f"Native Work follow-ups: {turn_count}; "
               f"first {sample} median={statistics.median(durations[:sample]):.3f}s; "
               f"last {sample} median={statistics.median(durations[-sample:]):.3f}s; "
