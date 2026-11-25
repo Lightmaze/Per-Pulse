@@ -75,7 +75,7 @@ try {
   assert.equal((await data('/api/bootstrap')).pages.filter(p => p.kind === 'work').length, startupCount + 1);
   await page.unroute('**/api/bootstrap');
   await page.locator('.main-nav a[href="/"]').click();
-  await page.getByRole('heading', { name: 'Home', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'A place to keep going.', exact: true }).waitFor();
   await page.reload();
   assert.equal(await page.title(), 'Per Pulse');
   await page.getByRole('textbox', { name: /^Message / }).fill('Draft a synthetic customer notice.');
