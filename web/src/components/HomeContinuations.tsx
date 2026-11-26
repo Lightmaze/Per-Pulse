@@ -143,16 +143,19 @@ export function HomeContinuations({ pages, navigate, workspaceId, serviceInstanc
     && olderHistory.serviceInstanceId === serviceInstanceId ? olderHistory : null;
   const knownWorks = new Map((freshPages ?? []).filter(page => page.kind === 'work')
     .map(page => [page.id, page]));
-  const recentEventIds = new Set(pulse?.recentActivations.map(event => event.eventId) ?? []);
+  const visibleEventIds = new Set(items.map(({ event }) => event.eventId));
   const olderResults = (history?.results ?? []).filter(
-    // Unlike the quiet recent preview, explicit history browsing must include
-    // already-viewed results: visited is not deleted or invalid evidence.
-    result => !recentEventIds.has(result.eventId) && knownWorks.has(result.pageId),
+    // Only remove cards actually displayed above. A visited result or another
+    // result from the same Work can still be inside the recent activity window
+    // without being visible in the quiet preview.
+    result => !visibleEventIds.has(result.eventId) && knownWorks.has(result.pageId),
   );
-  // Keep Home quiet until the native recent-20 window actually fills.
-  // A single finished result is already directly visible without a history search.
+  // Even one finished result needs a way back after its quiet card is read.
+  // Fetch saved results only on request, and also offer history when the
+  // activity window is full (older results may no longer be in that window).
   const canBrowseHistory = Boolean(freshPages && pulse
-    && (pulse.recentActivations.length >= 20 || history));
+    && (pulse.recentActivations.length >= 20 || history
+      || homeContinuations(pulse, freshPages, 1).length));
   const readOlder = async () => {
     if (historyReading.current || !freshPages || !pulse || history?.nextBeforeSeq === null) return;
     historyReading.current = true;

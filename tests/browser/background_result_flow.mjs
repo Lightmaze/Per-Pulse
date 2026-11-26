@@ -127,6 +127,12 @@ try {
     'native fresh Work list replaces the temporary review projection');
   checks.push('A Pulse-only outage keeps current Work review navigable without exposing unverified background results.');
 
+  // The archive and quiet preview must not duplicate the same visible card.
+  await page.getByRole('button', { name: 'Browse saved results', exact: true }).click();
+  await page.getByText('No more saved results to show.', { exact: true }).waitFor();
+  assert.equal(await page.locator('#home-local-results .home-continuation-open').count(), 1);
+  assert.equal(await page.locator('ol[aria-label="Saved results"] .home-continuation-open').count(), 0);
+
   if (screenshots) await page.screenshot({ path: join(screenshots, 'background-result-home.png') });
   await page.locator('.home-continuation-source').click();
   await wait(() => new URL(page.url()).hash === '#message-' + activation.sourceEventId, 'exact original source');
@@ -196,9 +202,31 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), homeDraft);
   assert.equal(await page.locator('.home-continuation-open').count(), 0);
   checks.push('Activity opens the same answer in English and Chinese; visiting it does not resurrect an older Home item.');
+
+  // A read receipt only removes the quiet card. Reopen the exact native answer
+  // from Home even while the recent window contains just this activation.
+  assert.equal((await get('/api/pulse')).recentActivations.length, 1);
+  await page.getByRole('button', { name: '浏览已保存的结果', exact: true }).click();
+  const savedResult = page.locator('ol[aria-label="已保存的结果"] .home-continuation-open');
+  await savedResult.waitFor();
+  assert.equal(await savedResult.count(), 1);
+  assert.equal(await page.locator('#home-local-results .home-continuation-open').count(), 0);
+  await savedResult.click();
+  await wait(() => new URL(page.url()).hash === '#message-' + activation.resultMessageId, 'reopen read result from Home');
+  await page.locator('#message-' + activation.resultMessageId).waitFor();
+  assert.equal(await page.locator('.composer textarea').inputValue(), workDraft);
+  assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
+  checks.push('A read background answer remains explicitly browsable before the recent window fills, without a duplicate quiet card or new message.');
+
   await stop(server); server = start(true);
   await wait(async () => (await fetch(base + '/api/health')).ok, 'reopen same World');
-  await page.goto(base + '/page/' + work + '#message-' + activation.resultMessageId);
+  await page.goto(base);
+  assert.equal(await page.locator('.composer textarea').inputValue(), homeDraft);
+  await page.getByRole('button', { name: '浏览已保存的结果', exact: true }).click();
+  await savedResult.waitFor();
+  assert.equal(await savedResult.count(), 1);
+  await savedResult.click();
+  await wait(() => new URL(page.url()).hash === '#message-' + activation.resultMessageId, 'reopen saved result after restart');
   await page.locator('#message-' + activation.resultMessageId).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), workDraft);
   const reopened = await get('/api/pulse');
@@ -206,7 +234,7 @@ try {
   assert.equal(reopened.recentActivations[0].resultMessageId, activation.resultMessageId);
   assert.equal(reopened.budget.used, 1);
   assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
-  checks.push('Restart with Pulse disabled preserves the exact result, draft and single prior admission without new autonomous turns.');
+  checks.push('Restart with Pulse disabled permits Home to reopen the saved exact result and preserves both drafts and the single prior admission without new autonomous turns.');
 
   if (!await page.getByRole('button', { name: '设置', exact: true }).isVisible()) {
     await page.getByRole('button', { name: '展开或收起导航', exact: true }).click();
@@ -299,7 +327,7 @@ try {
   });
   await page.goto(base);
   await page.getByRole('button', { name: '浏览已保存的结果', exact: true }).click();
-  const olderResult = page.locator('ol[aria-label="较早完成的工作"] .home-continuation-open');
+  const olderResult = page.locator('ol[aria-label="已保存的结果"] .home-continuation-open');
   await olderResult.waitFor();
   assert.equal(await olderResult.count(), 1);
   assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
