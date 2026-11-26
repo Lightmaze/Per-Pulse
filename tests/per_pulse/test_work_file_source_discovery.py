@@ -519,3 +519,96 @@ def test_prepared_report_replacement_requires_the_latest_action_and_delivers_onc
         assert restored.artifacts.download(work_id, artifact_id)["content"] == final.encode()
     finally:
         restored.runtime.close()
+
+
+def test_long_work_keeps_its_original_input_through_delivery(tmp_path, monkeypatch):
+    """A real version-pinned input stays usable after unrelated actions and reopening."""
+    fixture = WorkFixture(monkeypatch.setenv)
+
+    def open_world():
+        return PageService(
+            tmp_path, model_factory=fixture.factory, posture=False,
+            allow_workspace_actions=True, auto_apply_edits=True,
+            pulse=PulseSettings(enabled=False),
+        )
+
+    first = open_world()
+    try:
+        fixture.plan = [("mutate_file", {
+            "path": "long-input.md", "expected_digest": None,
+            "content": "Verified source: north entrance.\n",
+        }), ("mutate_file", {
+            "path": "other-input.md", "expected_digest": None,
+            "content": "Unrelated material.\n",
+        })]
+        source = first.create_page("Source Work", "Save the approved source and unrelated material.")
+        source_id = source["page"]["id"]
+        _activate(first, source["initialMessageId"])
+        originals = {row["path"]: row for row in first.artifacts.snapshot(source_id)["artifacts"]}
+        original = originals["long-input.md"]
+        other = originals["other-input.md"]
+
+        fixture.plan = [("read_file", {
+            "path": "long-input.md", "expected_digest": original["sha256"],
+        })]
+        target = first.create_page("Long follow-on Work", "Read the approved source before working.")
+        target_id = target["page"]["id"]
+        _activate(first, target["initialMessageId"])
+        assert "north entrance" in fixture.outcomes[0]["output"]["content"]
+        # Exercise the native actions, not fake rows or a reduced test limit.
+        # All later calls are successful reads of a different version/path.
+        for index in range(33):
+            fixture.plan = [("read_file", {
+                "path": "other-input.md", "expected_digest": other["sha256"],
+            }) for _ in range(8)]
+            sent = first.send(target_id, f"Review the unrelated material, batch {index + 1}.")
+            _activate(first, sent["messageId"])
+            assert len(fixture.outcomes) == 8
+            assert all(row["status"] == "succeeded" for row in fixture.outcomes)
+            fixture.requests.clear()
+    finally:
+        first.runtime.close()
+
+    second = open_world()
+    try:
+        fixture.plan = [
+            ("mutate_file", {"path": "long-delivery.md", "expected_digest": None,
+                             "content": "Use the verified north entrance.\n"}),
+            ("work", {"op": "report", "kind": "result", "note": "Completed the sourced file.",
+                      "artifact_path": "long-delivery.md", "input_file_work_id": source_id,
+                      "input_file_artifact_id": original["id"]}),
+        ]
+        sent = second.send(target_id, "Deliver the result based on the approved original source.")
+        _activate(second, sent["messageId"])
+        assert [row["status"] for row in fixture.outcomes] == ["succeeded", "succeeded"], fixture.outcomes
+        second.runtime._native_work.drain()
+        reports = [row for row in second.runtime.storage.native_work_requests(limit=32)
+                   if row["arguments"]["op"] == "report"]
+        assert len(reports) == 1 and reports[0]["status"] == "delivered"
+        report = reports[0]
+        result, = second.artifacts.snapshot(target_id)["artifacts"]
+        assert second.artifacts.download(target_id, result["id"])["content"] == (
+            b"Use the verified north entrance.\n"
+        )
+        home = next(row for row in second.view("home")["messages"] if row["id"] == report["event_id"])
+        assert home["inputArtifact"]["artifactId"] == original["id"]
+        assert home["reportedArtifact"]["artifactId"] == result["id"]
+    finally:
+        second.runtime.close()
+
+    third = open_world()
+    try:
+        assert third.artifacts.download(source_id, original["id"])["content"] == (
+            b"Verified source: north entrance.\n"
+        )
+        assert third.artifacts.download(target_id, result["id"])["content"] == (
+            b"Use the verified north entrance.\n"
+        )
+        home = next(row for row in third.view("home")["messages"] if row["id"] == report["event_id"])
+        assert home["inputArtifact"]["artifactId"] == original["id"]
+        third.artifacts.undo(target_id, result["id"])
+        home = next(row for row in third.view("home")["messages"] if row["id"] == report["event_id"])
+        assert home["reportedArtifact"]["undone"] is True
+        assert home["inputArtifact"]["undone"] is False
+    finally:
+        third.runtime.close()

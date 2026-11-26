@@ -6863,8 +6863,14 @@ class HarnessStore:
         status: ActionStatus | None = None,
         limit: int | None = None,
         before: tuple[str, str] | None = None,
+        tool_name: str | None = None,
+        argument_matches: Mapping[str, str] | None = None,
     ) -> tuple[ActionRecord, ...]:
-        """Read ordered actions; an optional (updated_at, id) keyset reads older rows."""
+        """Read ordered actions, optionally matching exact tool argument strings.
+
+        Apply filters before the history limit, so unrelated later actions do
+        not hide a durable source receipt. The keyset reads older matches.
+        """
 
         if limit is not None and limit < 1:
             raise ValueError("action limit must be positive")
@@ -6873,6 +6879,11 @@ class HarnessStore:
             or any(not isinstance(value, str) or not value for value in before)
         ):
             raise ValueError("invalid action history cursor")
+        if argument_matches is not None and any(
+            not isinstance(key, str) or re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", key) is None
+            or not isinstance(value, str) for key, value in argument_matches.items()
+        ):
+            raise ValueError("action argument matches require simple keys and string values")
         with self._lock:
             self._require_open()
             self._assert_session_scope(scope.session_scope())
@@ -6884,6 +6895,12 @@ class HarnessStore:
             if status is not None:
                 query += " AND status = ?"
                 parameters.append(status.value)
+            if tool_name is not None:
+                query += " AND tool_name = ?"
+                parameters.append(tool_name)
+            for key, value in (argument_matches or {}).items():
+                query += " AND json_extract(arguments_json, ?) = ?"
+                parameters.extend((f"$.{key}", value))
             if before is not None:
                 query += " AND (updated_at < ? OR (updated_at = ? AND action_request_id < ?))"
                 parameters.extend((before[0], before[0], before[1]))

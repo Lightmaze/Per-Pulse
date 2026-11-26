@@ -287,7 +287,8 @@ class NativeWork:
         raise ScopeConflict('no successful file action for that path belongs to this Work')
 
     def _verified_input_file(self, scope: HarnessScope, work_id: str, artifact_id: str,
-                             *, output_artifact_id: str | None = None) -> dict:
+                             *, output_artifact_id: str | None = None,
+                             read_action_id: str | None = None) -> dict:
         """Attribute a read of an exact prior Work file through original Kernel actions.
 
         The producing action proves ownership/version. A successful read_file in the
@@ -359,20 +360,44 @@ class NativeWork:
             return read_seq is not None and output_seq is not None and read_seq < output_seq
 
         # Only an actual successful version-pinned read in this Work is
-        # attributable. A report cannot turn an unread pathname into lineage.
-        reads = store.actions_for_session(scope, status=ActionStatus.SUCCEEDED, limit=256)
-        for read in reversed(reads):
+        # attributable. Match the original path/version in the native action
+        # store before limiting history; later unrelated work cannot hide it.
+        def verified(read) -> bool:
             result = read.result if isinstance(read.result, Mapping) else {}
             output = result.get('output')
-            if (read.tool_name == 'read_file' and read.result_delivered
+            return (read.tool_name == 'read_file' and read.status is ActionStatus.SUCCEEDED
+                    and read.result_delivered
                     and read.arguments.get('path') == source['path']
                     and read.arguments.get('expected_digest') == source['sha256']
                     and isinstance(output, Mapping)
                     and output.get('path') == source['path']
                     and output.get('digest') == source['sha256']
-                    and read_precedes_output(read)):
-                return {**source, 'work_id': work_id,
-                        'read_action_id': read.action_request_id}
+                    and read_precedes_output(read))
+
+        def receipt(read) -> dict:
+            return {**source, 'work_id': work_id,
+                    'read_action_id': read.action_request_id}
+
+        if read_action_id is not None:
+            # Delivery revalidates the exact observation selected during
+            # preparation, rather than substituting a later matching read.
+            read_scope = store.action_scope_for_session(scope, read_action_id)
+            read = store.get_action(read_scope, read_action_id)
+            if verified(read):
+                return receipt(read)
+        else:
+            before = None
+            while True:
+                reads = store.actions_for_session(
+                    scope, status=ActionStatus.SUCCEEDED, limit=64, before=before,
+                    tool_name='read_file',
+                    argument_matches={'path': source['path'], 'expected_digest': source['sha256']})
+                for read in reversed(reads):
+                    if verified(read):
+                        return receipt(read)
+                if len(reads) < 64:
+                    break
+                before = (reads[0].updated_at, reads[0].action_request_id)
         raise ScopeConflict('read the original file with its expected digest before attributing it')
 
     def _owned_file_history(self, subject: str, front,
@@ -816,7 +841,8 @@ class NativeWork:
                     if report and 'input_file_source' in rec:
                         checked_input = self._verified_input_file(
                             scope, a['input_file_work_id'], a['input_file_artifact_id'],
-                            output_artifact_id=(rec.get('artifact_source') or {}).get('artifact_id'))
+                            output_artifact_id=(rec.get('artifact_source') or {}).get('artifact_id'),
+                            read_action_id=rec['input_file_source']['read_action_id'])
                         if checked_input != rec['input_file_source']:
                             raise ScopeConflict('reported input file receipt changed before delivery')
                     if report and 'contributions' in a:
