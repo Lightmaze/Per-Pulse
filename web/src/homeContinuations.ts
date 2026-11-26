@@ -54,7 +54,10 @@ export function homeContinuations(
     if (event.status !== 'settled' || !['propagation', 'spontaneous'].includes(event.kind)) continue;
     const page = event.pageId && known.get(event.pageId);
     if (!page || displayed.has(page.id)) continue;
-    const target = activationMessageTarget(event, validIds, 'receiver');
+    // A propagated input is not the completed Work answer. Match the archive.
+    const target = typeof event.resultMessageId === 'string' && event.resultMessageId
+      ? { pageId: page.id, messageId: event.resultMessageId }
+      : activationMessageTarget(event, validIds, 'receiver');
     if (!target?.messageId) continue; // Never fabricate a World message link.
     displayed.add(page.id);
     // Opening the latest event should not resurrect an older event from the
