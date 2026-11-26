@@ -567,13 +567,22 @@ def test_long_work_keeps_its_original_input_through_delivery(tmp_path, monkeypat
         assert [row["status"] for row in fixture.outcomes] == ["succeeded"] * 3
         assert "north entrance" in fixture.outcomes[0]["output"]["content"]
         early_result, = first.artifacts.snapshot(target_id)["artifacts"]
-        read_id = fixture.outcomes[0]["action_request_id"]
-        late_id = fixture.outcomes[2]["action_request_id"]
+        # Provider-facing tool results intentionally omit Kernel action IDs.
+        # Resolve the two actual observations in the durable session instead.
         store = first.runtime.kernel_service.store
-        scope = first.execution._scope(target_id)
-        def action(action_id):
-            return store.get_action(store.action_scope_for_session(scope, action_id), action_id)
-        read, written, late = action(read_id), action(early_result["id"]), action(late_id)
+        scope = first.execution._scope(target_id).session_scope()
+        read, = store.actions_for_session(
+            scope, tool_name="read_file",
+            argument_matches={"path": original["path"], "expected_digest": original["sha256"]},
+        )
+        late, = store.actions_for_session(
+            scope, tool_name="read_file",
+            argument_matches={"path": other["path"], "expected_digest": other["sha256"]},
+        )
+        read_id, late_id = read.action_request_id, late.action_request_id
+        written_id = early_result["id"]
+        written = store.get_action(store.action_scope_for_session(scope, written_id), written_id)
+        assert read.result_delivered and late.result_delivered
         assert read.terminal_at == written.created_at == late.terminal_at
         # Exercise both former history ceilings with native actions, not fake
         # rows or a reduced limit. The input and completed output precede
@@ -588,8 +597,11 @@ def test_long_work_keeps_its_original_input_through_delivery(tmp_path, monkeypat
             assert all(row["status"] == "succeeded" for row in fixture.outcomes)
             fixture.requests.clear()
         page = store.replay(scope, after_seq=0, limit=store.max_events_per_session)
-        assert not any(event.action_request_id in {read_id, early_result["id"], late_id}
+        assert page.gap
+        assert not any(event.action_request_id in {read_id, written_id, late_id}
                        for event in page.events)
+        assert store.delivered_result_precedes_model_call(read, written)
+        assert not store.delivered_result_precedes_model_call(late, written)
     finally:
         first.runtime.close()
 
