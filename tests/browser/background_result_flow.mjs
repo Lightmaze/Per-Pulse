@@ -22,10 +22,10 @@ await new Promise(done => socket.close(done));
 const base = `http://127.0.0.1:${port}`;
 let serverLog = '', browser, page, server;
 const errors = [], checks = [];
-const start = (disablePulse = false) => {
+const start = (disablePulse = false, spontaneous = true, dataDir = directory) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
-    join(root, 'tests/browser/attention_server.py'), '--data-dir', directory,
-    '--port', String(port), '--spontaneous', '--posture', ...(disablePulse ? ['--no-pulse'] : []),
+    join(root, 'tests/browser/attention_server.py'), '--data-dir', dataDir,
+    '--port', String(port), ...(spontaneous ? ['--spontaneous'] : []), '--posture', ...(disablePulse ? ['--no-pulse'] : []),
   ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', value => { serverLog += value; });
   child.stderr.on('data', value => { serverLog += value; });
@@ -336,6 +336,76 @@ try {
     'paged earlier result returns to its native message');
   assert.equal(await page.locator('.composer textarea').inputValue(), workDraft);
   checks.push('Chinese Home reopens a durable original answer after a synthetic later-activity window evicts it from the recent preview.');
+
+  // Independently exercise real propagation with a fresh isolated test World.
+  await page.close();
+  await stop(server);
+  const propagationDir = join(directory, 'propagation');
+  server = start(false, false, propagationDir);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'native propagation World');
+  const post = async (path, body, status, method = 'POST') => {
+    const response = await fetch(base + path, {
+      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    assert.equal(response.status, status);
+    return response.json();
+  };
+  await post('/api/pulse/weekly-usage', { enabled: true, weeklyLimit: 100 }, 200, 'PATCH');
+  const createWork = async title => {
+    const id = (await post('/api/pages', { title, instruction: 'Begin this local Work.' }, 201)).page.id;
+    await wait(async () => (await get('/api/pages/' + id)).messages.some(
+      message => message.role === 'assistant'), 'initial Work answer');
+    return id;
+  };
+  const sender = await createWork('Propagation source');
+  const receiver = await createWork('Receiving propagation');
+  await post('/api/pulse/connections', { sourcePageId: sender, targetPageId: receiver, weight: 0.9 }, 201);
+  await post('/api/pages/' + sender + '/messages', { content: 'A new observation.' }, 202);
+  let propagated;
+  await wait(async () => {
+    propagated = (await get('/api/pulse')).recentActivations.find(item =>
+      item.kind === 'propagation' && item.pageId === receiver);
+    return propagated?.status === 'settled' && propagated.resultMessageId;
+  }, 'settled native propagation answer');
+  assert.equal(propagated.messageId, propagated.eventId);
+  assert.notEqual(propagated.resultMessageId, propagated.messageId);
+  const received = (await get('/api/pages/' + receiver)).messages;
+  assert.equal(received.find(message => message.id === propagated.messageId).role, 'system');
+  assert.equal(received.find(message => message.id === propagated.resultMessageId).role, 'assistant');
+  page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(base);
+  const propagationDraft = 'Keep this draft while reading the propagated result.';
+  await page.locator('.composer textarea').fill(propagationDraft);
+  const receivingCard = page.locator('#home-local-results li').filter({ hasText: 'Receiving propagation' });
+  await receivingCard.locator('.home-continuation-source').click();
+  await wait(() => new URL(page.url()).hash === '#message-' + propagated.sourceMessageId, 'original propagation source');
+  assert.equal(new URL(page.url()).pathname, '/page/' + sender);
+  await page.locator('.return-to-thread').click();
+  await receivingCard.locator('.home-continuation-open').click();
+  await wait(() => new URL(page.url()).hash === '#message-' + propagated.resultMessageId, 'completed propagation answer');
+  await page.locator('#message-' + propagated.resultMessageId).waitFor();
+  const receiverDraft = 'Continue with this answer.';
+  await page.locator('.composer textarea').fill(receiverDraft);
+  await page.locator('.return-to-thread').click();
+  assert.equal(await page.locator('.composer textarea').inputValue(), propagationDraft);
+  await page.getByRole('button', { name: 'Browse saved results', exact: true }).click();
+  const savedPropagation = page.locator('ol[aria-label="Saved results"] li').filter({ hasText: 'Receiving propagation' });
+  await savedPropagation.locator('.home-continuation-open').click();
+  await wait(() => new URL(page.url()).hash === '#message-' + propagated.resultMessageId, 'same saved propagation answer');
+  assert.equal(await page.locator('.composer textarea').inputValue(), receiverDraft);
+  assert.deepEqual((await get('/api/pages/' + receiver)).messages, received);
+  await stop(server); server = start(true, false, propagationDir);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'restart propagated World');
+  await page.goto(base);
+  assert.equal(await page.locator('.composer textarea').inputValue(), propagationDraft);
+  await page.getByRole('button', { name: 'Browse saved results', exact: true }).click();
+  await savedPropagation.locator('.home-continuation-open').click();
+  await wait(() => new URL(page.url()).hash === '#message-' + propagated.resultMessageId, 'saved propagation after restart');
+  assert.equal(await page.locator('.composer textarea').inputValue(), receiverDraft);
+  assert.deepEqual((await get('/api/pages/' + receiver)).messages, received);
+  assert.equal((await get('/api/pulse')).budget.used, 1);
+  checks.push('Native propagation opens the completed answer, not the incoming system message; source, drafts, saved answer and budget survive restart.');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));

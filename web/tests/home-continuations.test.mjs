@@ -26,6 +26,14 @@ test('A spontaneous answer has its own verified message identity', () => {
   })), pages), []);
 });
 
+test('Home opens a completed propagated answer rather than its incoming system message', () => {
+  const pulse = state(event('incoming', 'receiver', { resultMessageId: 'completed-answer' }));
+  const [row] = homeContinuations(pulse, pages);
+  assert.deepEqual(row.receiver, { pageId: 'receiver', messageId: 'completed-answer' });
+  assert.deepEqual(row.source, { pageId: 'source', messageId: 'original-incoming' });
+  assert.deepEqual(homeContinuations(pulse, pages, 3, new Set(['incoming'])), []);
+});
+
 test('Home projects settled original Work messages, latest one per context', () => {
   const rows = homeContinuations(state(
     event('new-receiver', 'receiver'),
