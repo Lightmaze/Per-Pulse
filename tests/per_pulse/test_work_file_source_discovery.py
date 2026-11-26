@@ -593,7 +593,9 @@ def test_long_work_keeps_its_original_input_through_delivery(tmp_path, monkeypat
                    if row["arguments"]["op"] == "report"]
         assert len(reports) == 1 and reports[0]["status"] == "delivered"
         report = reports[0]
-        result, = second.artifacts.snapshot(target_id)["artifacts"]
+        snapshot = second.artifacts.snapshot(target_id)
+        result, = snapshot["artifacts"]
+        assert snapshot["nextCursor"] is None and not snapshot["truncated"]
         assert result["id"] == early_result["id"]
         assert report["artifact_source"]["artifact_id"] == early_result["id"]
         assert second.artifacts.download(target_id, result["id"])["content"] == (
