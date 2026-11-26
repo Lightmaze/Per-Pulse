@@ -5642,6 +5642,53 @@ class HarnessStore:
             self._assert_action_scope(row, scope)
             return self._action_from_row(row)
 
+    def delivered_result_precedes_model_call(self, read: ActionRecord, output: ActionRecord) -> bool:
+        """Prove order from durable tool and assistant transcript items.
+
+        The bounded event stream can lose both action events. A delivered
+        result before the exact model call that requested another action is
+        still positive ordering evidence; an absent item proves nothing.
+        """
+        if read.scope.session_id != output.scope.session_id:
+            return False
+        with self._lock:
+            self._require_open()
+            self._validate_database_locked()
+            read_row = self._action_row(read.action_request_id)
+            output_row = self._action_row(output.action_request_id)
+            self._assert_action_scope(read_row, read.scope)
+            self._assert_action_scope(output_row, output.scope)
+            if not bool(read_row["result_delivered"]):
+                return False
+            result = self._db.execute(
+                "SELECT * FROM transcript_messages WHERE session_id = ? AND turn_id = ? "
+                "AND role = 'tool' AND item_id = ?",
+                (read.scope.session_id, read.scope.turn_id,
+                 "tool-result:" + read.action_request_id),
+            ).fetchone()
+            if result is None:
+                return False
+            self._assert_turn_row_scope(result, read.scope)
+            # The original completed model round identifies the requested
+            # output; a later mention of its path or opaque ID is insufficient.
+            candidates = self._db.execute(
+                "SELECT t.* FROM model_rounds r JOIN transcript_messages t "
+                "ON r.session_id = t.session_id AND r.assistant_item_id = t.item_id "
+                "WHERE r.session_id = ? AND r.turn_id = ? AND r.status = ? "
+                "AND r.tool_call_count > 0 AND t.transcript_seq > ?",
+                (output.scope.session_id, output.scope.turn_id,
+                 ModelRoundStatus.COMPLETED.value, result["transcript_seq"]),
+            ).fetchall()
+            for candidate in candidates:
+                self._assert_turn_row_scope(candidate, output.scope)
+                for call in json.loads(candidate["content"])["tool_calls"]:
+                    if (call["action_request_id"] == output.action_request_id
+                            and call["name"] == output_row["tool_name"]
+                            and output.action_request_id
+                            == f"{output.scope.digest}:{call['tool_call_id']}"):
+                        return True
+            return False
+
     def action_arguments_match_model_call(self, scope: HarnessScope, action_request_id: str) -> bool:
         """Whether saved arguments exactly match their completed original model call.
 

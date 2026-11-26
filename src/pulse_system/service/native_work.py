@@ -342,14 +342,17 @@ class NativeWork:
             # never the opaque IDs or a permissive <= comparison.
             if read.scope.session_id != output_action.scope.session_id:
                 return False
-            page = store.replay(scope, after_seq=0, limit=store.max_events_per_session)
+            page = store.replay(read.scope.session_scope(), after_seq=0,
+                                limit=store.max_events_per_session)
             read_seq = next((event.seq for event in page.events
                              if event.action_request_id == read.action_request_id
                              and event.event_type == 'action.terminal'), None)
             output_seq = next((event.seq for event in page.events
                                if event.action_request_id == output_action.action_request_id
                                and event.event_type == 'action.requested'), None)
-            return read_seq is not None and output_seq is not None and read_seq < output_seq
+            if read_seq is not None and output_seq is not None:
+                return read_seq < output_seq
+            return store.delivered_result_precedes_model_call(read, output_action)
 
         # Only an actual successful version-pinned read in this Work is
         # attributable. Match the original path/version in the native action
