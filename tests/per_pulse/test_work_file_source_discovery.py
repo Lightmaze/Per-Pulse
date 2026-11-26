@@ -550,19 +550,31 @@ def test_long_work_keeps_its_original_input_through_delivery(tmp_path, monkeypat
 
         fixture.plan = [("read_file", {
             "path": "long-input.md", "expected_digest": original["sha256"],
-        })]
-        target = first.create_page("Long follow-on Work", "Read the approved source before working.")
-        target_id = target["page"]["id"]
-        _activate(first, target["initialMessageId"])
-        assert "north entrance" in fixture.outcomes[0]["output"]["content"]
-        fixture.plan = [("mutate_file", {
+        }), ("mutate_file", {
             "path": "long-delivery.md", "expected_digest": None,
             "content": "Use the verified north entrance.\n",
+        }), ("read_file", {
+            "path": "other-input.md", "expected_digest": other["sha256"],
         })]
-        sent = first.send(target_id, "Write the result from the approved source.")
-        _activate(first, sent["messageId"])
-        assert fixture.outcomes[0]["status"] == "succeeded"
+        target = first.create_page("Long follow-on Work", "Read the source, write the result, then inspect other material.")
+        target_id = target["page"]["id"]
+        # Equal wall-clock values must not erase the real order of three
+        # separate model-selected actions. Only the Kernel clock is fixed.
+        instant = session_store.utc_now()
+        with monkeypatch.context() as clock:
+            clock.setattr(session_store, "utc_now", lambda: instant)
+            _activate(first, target["initialMessageId"])
+        assert [row["status"] for row in fixture.outcomes] == ["succeeded"] * 3
+        assert "north entrance" in fixture.outcomes[0]["output"]["content"]
         early_result, = first.artifacts.snapshot(target_id)["artifacts"]
+        read_id = fixture.outcomes[0]["action_request_id"]
+        late_id = fixture.outcomes[2]["action_request_id"]
+        store = first.runtime.kernel_service.store
+        scope = first.execution._scope(target_id)
+        def action(action_id):
+            return store.get_action(store.action_scope_for_session(scope, action_id), action_id)
+        read, written, late = action(read_id), action(early_result["id"]), action(late_id)
+        assert read.terminal_at == written.created_at == late.terminal_at
         # Exercise both former history ceilings with native actions, not fake
         # rows or a reduced limit. The input and completed output precede
         # 1,032 unrelated successful reads.
@@ -575,19 +587,27 @@ def test_long_work_keeps_its_original_input_through_delivery(tmp_path, monkeypat
             assert len(fixture.outcomes) == 8
             assert all(row["status"] == "succeeded" for row in fixture.outcomes)
             fixture.requests.clear()
+        page = store.replay(scope, after_seq=0, limit=store.max_events_per_session)
+        assert not any(event.action_request_id in {read_id, early_result["id"], late_id}
+                       for event in page.events)
     finally:
         first.runtime.close()
 
     second = open_world()
     try:
         fixture.plan = [
+            ("work", {"op": "report", "kind": "result", "note": "Incorrect late source.",
+                      "artifact_path": "long-delivery.md", "input_file_work_id": source_id,
+                      "input_file_artifact_id": other["id"]}),
             ("work", {"op": "report", "kind": "result", "note": "Completed the sourced file.",
                       "artifact_path": "long-delivery.md", "input_file_work_id": source_id,
                       "input_file_artifact_id": original["id"]}),
         ]
         sent = second.send(target_id, "Deliver the existing result without rewriting it.")
         _activate(second, sent["messageId"])
-        assert [row["status"] for row in fixture.outcomes] == ["succeeded"], fixture.outcomes
+        assert len(fixture.outcomes) == 2
+        assert fixture.outcomes[0]["status"] != "succeeded"
+        assert fixture.outcomes[1]["status"] == "succeeded", fixture.outcomes
         second.runtime._native_work.drain()
         reports = [row for row in second.runtime.storage.native_work_requests(limit=32)
                    if row["arguments"]["op"] == "report"]
