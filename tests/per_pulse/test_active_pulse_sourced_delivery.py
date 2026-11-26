@@ -25,12 +25,16 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
     monkeypatch.setenv("PER_PULSE_ACTIVE_WORK_FIXTURE_KEY", "explicit-synthetic-credential")
     blocked = threading.Event()
     release = threading.Event()
+    second_blocked = threading.Event()
+    second_release = threading.Event()
     lock = threading.Lock()
     background_requests = 0
     reading_context = None
     observed_requests = []
     original = {}
     target_outcomes = []
+    follow_on_outcomes = []
+    follow_on_source = {}
     count = int(os.environ.get("PER_PULSE_ACTIVE_WORK_TURNS", "12"))
     assert count >= 2
 
@@ -57,12 +61,32 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
                     blocked.set()
                     if not release.wait(timeout=300):
                         return httpx.Response(504, text="Synthetic background timeout")
+                if ordinal == 3:
+                    second_blocked.set()
+                    if not second_release.wait(timeout=300):
+                        return httpx.Response(504, text="Synthetic second background timeout")
                 return MaterialFixture.response(f"BACKGROUND_DONE_{ordinal}")
             if current is None:
                 return MaterialFixture.response("Home report received.")
             results = [json.loads(item["content"]) for item in messages[current + 1:]
                        if item["role"] == "tool"]
-            if "ACTIVE_TARGET_DELIVER" in task:
+            if "ACTIVE_SECOND_DELIVER" in task:
+                source_text = results[1]["output"]["content"] if len(results) >= 2 else ""
+                plan = [
+                    ("work", {"op": "inspect", "work_id": follow_on_source["work"], "include_files": True}),
+                    ("read_file", {"path": "active-delivered.md",
+                                   "expected_digest": follow_on_source["sha256"]}),
+                    ("mutate_file", {"path": "active-follow-on.md", "expected_digest": None,
+                                     "content": "# Follow-on\n" + source_text}),
+                    ("work", {"op": "report", "kind": "result", "note": "Completed follow-on delivery.",
+                              "artifact_path": "active-follow-on.md",
+                              "input_file_work_id": follow_on_source["work"],
+                              "input_file_artifact_id": follow_on_source["id"]}),
+                ]
+                if len(results) == len(plan):
+                    follow_on_outcomes.extend(results)
+                    return MaterialFixture.response("SECOND_TARGET_DONE")
+            elif "ACTIVE_TARGET_DELIVER" in task:
                 plan = [
                     ("work", {"op": "inspect", "work_id": original["work"], "include_files": True}),
                     ("read_file", {"path": "active-approved.md", "expected_digest": original["sha256"]}),
@@ -99,7 +123,7 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
 
     settings = PulseSettings(
         enabled=True, spontaneous_rate=1, check_interval_seconds=0.02,
-        refractory_seconds=0.05, max_background_pulses_per_hour=1,
+        refractory_seconds=0.05, max_background_pulses_per_hour=2,
         max_propagation_depth=0,
     )
     options = dict(pulse=settings, model_factory=factory, posture=False,
@@ -131,11 +155,27 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
         response = client.patch("/api/pulse", json={"paused": paused})
         assert response.status_code == 200, response.text
 
+    def hold(client, work):
+        response = client.patch(f"/api/pulse/contexts/{work}", json={"paused": True})
+        assert response.status_code == 200, response.text
+
+    def prepare_work(client, title, source, message):
+        created = client.post("/api/pages", json={
+            "title": title, "instruction": "Prepare this Work for a sourced deliverable.",
+            "sourcePageId": source, "sourceMessageId": message,
+        })
+        assert created.status_code == 201, created.text
+        work = created.json()["page"]["id"]
+        reply(client, work, "FOREGROUND_DONE: Prepare this Work")
+        hold(client, work)
+        return work
+
     with client_for(tmp_path, **options) as client:
         runtime = client.app.state.pages.runtime
         subject = runtime.continuity_engram_id
         world = runtime.world_id
         pause(client, True)
+        hold(client, "home")
         created = client.post("/api/pages", json={
             "title": "Evidence versions", "instruction": "ACTIVE_SOURCE_CREATE",
         })
@@ -150,8 +190,10 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
         background = page(client, "Separate reading Work", "ACTIVE_BACKGROUND_READING")
         reply(client, background, "BACKGROUND_DONE_1")
         assert background_requests == 1 and reading_context is not None
-        held = client.patch(f"/api/pulse/contexts/{source}", json={"paused": True})
-        assert held.status_code == 200, held.text
+        hold(client, source)
+        # Hold only background activity in these Works; foreground input
+        # remains available. Prepare before resuming to avoid admission races.
+        destination = prepare_work(client, "Sourced deliverable", source, source_message)
         # Let only the reading context enter background admission. Its
         # provider remains blocked throughout the foreground file delivery.
         time.sleep(0.10)
@@ -169,12 +211,9 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
             started = time.perf_counter()
             for index in range(count):
                 send(client, source, f"Review revision {index + 1}.")
-            target = client.post("/api/pages", json={
-                "title": "Sourced deliverable", "instruction": "ACTIVE_TARGET_DELIVER",
-                "sourcePageId": source, "sourceMessageId": source_message,
-            })
-            assert target.status_code == 201, target.text
-            destination = target.json()["page"]["id"]
+            sent = client.post(f"/api/pages/{destination}/messages",
+                               json={"content": "ACTIVE_TARGET_DELIVER"})
+            assert sent.status_code == 202, sent.text
             reply(client, destination, "TARGET_DONE")
             assert [item["status"] for item in target_outcomes] == ["succeeded"] * 4
             assert {item["path"] for item in target_outcomes[0]["output"]["completed_files"]} == {
@@ -182,12 +221,16 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
             }
             output, = client.get(f"/api/pages/{destination}/artifacts").json()["artifacts"]
             home = eventually(lambda: view(client, "home"), lambda state: any(
-                item.get("reportedArtifact", {}).get("artifactId") == output["id"]
+                (item.get("reportedArtifact") or {}).get("artifactId") == output["id"]
                 for item in state["messages"] if item.get("reportedArtifact")), timeout=12)
             report = next(item for item in home["messages"] if item.get("reportedArtifact"))
             assert report["inputArtifact"]["artifactId"] == approved["id"]
             assert report["sourcePageId"] == destination
-            assert view(client, destination)["page"]["sourceMessageId"] == source_message
+            destination_view = view(client, destination)
+            assert destination_view["page"]["sourceMessageId"] == source_message
+            destination_message = next(item["id"] for item in destination_view["messages"]
+                                       if item["role"] == "assistant" and item["content"] == "TARGET_DONE")
+            follow_on_source.update(work=destination, id=output["id"], sha256=output["sha256"])
             response = client.get(f"/api/pages/{destination}/artifacts/{output['id']}/download")
             assert response.status_code == 200
             assert response.content == b"# Delivered\nVerified evidence from the approved version.\n"
@@ -215,7 +258,7 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
         runtime = client.app.state.pages.runtime
         assert (runtime.world_id, runtime.continuity_engram_id) == (world, subject)
         state = pulse_state(client)
-        assert state["paused"] and state["budget"]["remaining"] == 0
+        assert state["paused"] and state["budget"]["remaining"] == 1
         assert weekly(client)["consumed"] == saved_usage["consumed"]
         assert weekly(client)["enabled"] == saved_usage["enabled"]
         assert weekly(client)["weekly_limit"] == saved_usage["weekly_limit"]
@@ -224,15 +267,85 @@ def test_long_foreground_delivery_during_an_active_background_pulse(tmp_path, mo
             b"# Delivered\nVerified evidence from the approved version.\n")
         assert client.get(f"/api/pages/{source}/artifacts/{approved['id']}/download").content == b"Approved evidence.\n"
         send(client, destination, "Continue after cold restart while paused.")
-        pause(client, False)
-        send(client, destination, "Continue after resume with exhausted background allowance.")
-        time.sleep(0.15)
+        third = prepare_work(client, "Follow-on from prior delivery", destination, destination_message)
         assert background_requests == 2
+        assert {item.id for item in runtime.causal_ledger.list_events(kind="spontaneous", limit=20)} == {impulse_id}
+        pause(client, False)
+        try:
+            assert second_blocked.wait(timeout=12), (
+                f"Reading did not reenter after restart; requests={observed_requests!r}, "
+                f"activity={pulse_state(client)!r}"
+            )
+            events = runtime.causal_ledger.list_events(kind="spontaneous", limit=20)
+            assert len(events) == 2
+            second = next(item for item in events if item.id != impulse_id)
+            assert second.status.value == "running"
+            assert second.center_id == runtime.world.get_task_front(background).center_id
+            parent = runtime.causal_ledger.get_event(second.parent_event_id)
+            assert parent.kind.value == "assistant_result"
+            assert parent.parent_event_id == impulse_id
+            assert parent.engram_id == second.engram_id == subject
+            assert pulse_state(client)["budget"]["remaining"] == 0
+            started = time.perf_counter()
+            for index in range(min(count, 12)):
+                send(client, third, f"Continue follow-on revision {index + 1}.")
+            sent = client.post(f"/api/pages/{third}/messages", json={"content": "ACTIVE_SECOND_DELIVER"})
+            assert sent.status_code == 202, sent.text
+            reply(client, third, "SECOND_TARGET_DONE")
+            assert [item["status"] for item in follow_on_outcomes] == ["succeeded"] * 4
+            assert any(item["path"] == "active-delivered.md"
+                       for item in follow_on_outcomes[0]["output"]["completed_files"])
+            follow_on, = client.get(f"/api/pages/{third}/artifacts").json()["artifacts"]
+            home = eventually(lambda: view(client, "home"), lambda state: any(
+                (item.get("reportedArtifact") or {}).get("artifactId") == follow_on["id"]
+                for item in state["messages"] if item.get("reportedArtifact")), timeout=12)
+            report = next(item for item in home["messages"]
+                          if (item.get("reportedArtifact") or {}).get("artifactId") == follow_on["id"])
+            assert report["inputArtifact"]["artifactId"] == output["id"]
+            assert report["sourcePageId"] == third
+            assert view(client, third)["page"]["sourceMessageId"] == destination_message
+            assert client.get(f"/api/pages/{third}/artifacts/{follow_on['id']}/download").content == (
+                b"# Follow-on\n# Delivered\nVerified evidence from the approved version.\n")
+            assert not second_release.is_set()
+            assert background_requests == 3
+            assert runtime.causal_ledger.get_event(second.id).status.value == "running"
+            assert len(runtime.storage.list_engrams()) == 1
+            assert runtime.world.get_task_front(third).focal_engram_id == subject
+            print(f"Second Pulse: follow-on file delivered in {time.perf_counter() - started:.3f}s "
+                  "before background release, after cold restart.", flush=True)
+            pause(client, True)
+        finally:
+            second_release.set()
+        reply(client, background, "BACKGROUND_DONE_3")
+        eventually(lambda: runtime.causal_ledger.get_event(second.id),
+                   lambda row: row.status.value == "settled")
+        final_usage = weekly(client)
+        assert final_usage["consumed"] >= saved_usage["consumed"]
+
+    with TestClient(create_app(tmp_path, **options), base_url="http://localhost") as client:
+        runtime = client.app.state.pages.runtime
+        assert (runtime.world_id, runtime.continuity_engram_id) == (world, subject)
+        assert pulse_state(client)["paused"]
         assert pulse_state(client)["budget"]["remaining"] == 0
-        assert [item.id for item in runtime.causal_ledger.list_events(kind="spontaneous", limit=20)] == [impulse_id]
-        undone = client.post(f"/api/pages/{destination}/artifacts/{output['id']}/undo", json={})
+        assert weekly(client)["consumed"] == final_usage["consumed"]
+        assert weekly(client)["weekly_limit"] == saved_usage["weekly_limit"]
+        pause(client, False)
+        send(client, third, "Continue with exhausted background allowance.")
+        time.sleep(0.15)
+        assert background_requests == 3
+        assert pulse_state(client)["budget"]["remaining"] == 0
+        events = runtime.causal_ledger.list_events(kind="spontaneous", limit=20)
+        assert {item.id for item in events} == {impulse_id, second.id}
+        assert all(item.status.value == "settled" for item in events)
+        assert client.get(f"/api/pages/{third}/artifacts/{follow_on['id']}/download").content == (
+            b"# Follow-on\n# Delivered\nVerified evidence from the approved version.\n")
+        undone = client.post(f"/api/pages/{third}/artifacts/{follow_on['id']}/undo", json={})
         assert undone.status_code == 200, undone.text
         home = view(client, "home")
-        report = next(item for item in home["messages"] if item.get("reportedArtifact"))
+        report = next(item for item in home["messages"]
+                      if (item.get("reportedArtifact") or {}).get("artifactId") == follow_on["id"])
         assert report["reportedArtifact"]["undone"] is True
         assert report["inputArtifact"]["undone"] is False
+        assert client.get(f"/api/pages/{destination}/artifacts/{output['id']}/download").content == (
+            b"# Delivered\nVerified evidence from the approved version.\n")
+        assert client.get(f"/api/pages/{source}/artifacts/{approved['id']}/download").content == b"Approved evidence.\n"
