@@ -9,7 +9,7 @@ import { useLanguage } from './i18n';
 import { useWorkspace } from './useWorkspace';
 import { getPageActivity } from './status';
 import { EMPTY_DRAFT, readCurrentDraft, readDraft, readPosition, saveDraft, savePosition } from './storage';
-import type { Artifact, Draft, Message, NavigationOrigin, PageSummary } from './types';
+import type { Artifact, Draft, NavigationOrigin, PageSummary } from './types';
 import { Icon } from './components/Icon';
 import { Sidebar } from './components/Sidebar';
 import { SessionLink, type Navigate } from './components/SessionLink';

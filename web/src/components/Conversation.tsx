@@ -52,7 +52,14 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
         {activity ? <span className={`message-status tone-${activity.tone}`} title={t(activity.detailKey, activity.detailParams)}>{t(activity.labelKey)}</span> : null}
         <div className="message-actions">
           <CopyButton text={message.content} label={t('conversation.copyMessage')} />
-          <button onClick={() => {
+          <button onMouseDown={event => {
+            // Keep the highlighted passage through the button's focus change.
+            const selected = window.getSelection();
+            const node = event.currentTarget.closest('article');
+            if (selected && !selected.isCollapsed && node?.contains(selected.anchorNode) && node.contains(selected.focusNode)) {
+              event.preventDefault();
+            }
+          }} onClick={() => {
             const selected = window.getSelection();
             const node = document.getElementById(`message-${message.id}`);
             const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString() : '';

@@ -422,6 +422,10 @@ try {
   const adoptedArticle = page.locator('#message-' + adoption.id);
   const chosen = 'The local turn completed.';
   assert.ok(adoption.content.includes(chosen));
+  const newPage = adoptedArticle.getByRole('button', { name: 'New page', exact: true });
+  await newPage.click();
+  assert.ok((await page.getByRole('dialog').locator('#new-page-source').inputValue()).includes('Synthetic fixture response.'));
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
   await adoptedArticle.locator('.message-content p').first().evaluate((node, chosen) => {
     const text = node.firstChild;
     const start = text.textContent.indexOf(chosen);
@@ -431,8 +435,10 @@ try {
     const selection = window.getSelection();
     selection.removeAllRanges(); selection.addRange(range);
   }, chosen);
-  // A DOM click preserves the same selection that the product reads.
-  await adoptedArticle.getByRole('button', { name: 'New page', exact: true }).evaluate(button => button.click());
+  assert.equal(await page.evaluate(() => window.getSelection().toString()), chosen);
+  // Use a trusted browser click, including the mouse-down focus transition.
+  // A synthetic element.click() would miss selection loss in the real UI.
+  await newPage.click();
   const create = page.getByRole('dialog');
   assert.equal(await create.locator('#new-page-source').inputValue(), chosen);
   await create.getByRole('textbox', { name: 'Page name', exact: true }).fill('Adopted Pulse observation');
