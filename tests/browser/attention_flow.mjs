@@ -202,7 +202,8 @@ try {
     const current = (await (await fetch(base + '/api/pulse')).json()).recentActivations;
     propagated = current.find(item => item.pageId === localReceiver && item.sourcePageId === localSource
       && item.status === 'settled' && item.messageId === item.eventId
-      && item.sourceMessageId === item.sourceEventId);
+      && item.sourceMessageId === item.sourceEventId && item.resultMessageId
+      && item.resultMessageId !== item.messageId);
     return Boolean(propagated);
   }, 'native causal result with both original message anchors', 20000);
   assert.notEqual(propagated.eventId, propagated.sourceEventId);
@@ -223,13 +224,14 @@ try {
 
   await continued.getByRole('button', { name: '返回 Actual receiving Work', exact: true }).click();
   await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
-    '#message-' + propagated.messageId, 'Home card original receiving event');
-  const receivingMessage = page.locator('#message-' + propagated.messageId);
+    '#message-' + propagated.resultMessageId, 'Home card completed receiving answer');
+  const receivingMessage = page.locator('#message-' + propagated.resultMessageId);
   await receivingMessage.waitFor();
   const nativeReceiver = (await (await fetch(base + '/api/pages/' + localReceiver +
-    '?sourceMessageId=' + encodeURIComponent(propagated.messageId))).json())
-    .messages.find(message => message.id === propagated.messageId);
-  assert.ok(nativeReceiver?.content, 'only a real, saved receiving message can be returned');
+    '?sourceMessageId=' + encodeURIComponent(propagated.resultMessageId))).json())
+    .messages.find(message => message.id === propagated.resultMessageId);
+  assert.equal(nativeReceiver?.role, 'assistant', 'the adopted result is the completed assistant answer');
+  assert.ok(nativeReceiver.content, 'only a real, saved receiving answer can be returned');
   const resultDraft = 'I am still writing in the receiving Work after choosing its Pulse result.';
   await page.locator('.composer textarea').fill(resultDraft);
   // The observer's "settled" count alone does not complete the user's work.
@@ -244,15 +246,15 @@ try {
   await wait(async () => {
     const snapshot = await (await fetch(base + '/api/pages/home')).json();
     const matches = snapshot.messages.filter(message => message.sourcePageId === localReceiver &&
-      message.sourceMessageId === propagated.messageId);
+      message.sourceMessageId === propagated.resultMessageId);
     attributedHomeResult = matches.length === 1 ? matches[0] : null;
     return Boolean(attributedHomeResult);
   }, 'exact native Work message is attributed in persistent Home');
   assert.ok(attributedHomeResult.content.includes(nativeReceiver.content));
   await page.locator('#message-' + attributedHomeResult.id + ' .source-line a.session-link').click();
   await wait(async () => decodeURIComponent(new URL(page.url()).hash) ===
-    '#message-' + propagated.messageId, 'Home adoption opens original Pulse Work message');
-  await page.locator('#message-' + propagated.messageId).waitFor();
+    '#message-' + propagated.resultMessageId, 'Home adoption opens original Pulse Work message');
+  await page.locator('#message-' + propagated.resultMessageId).waitFor();
   assert.equal(await page.locator('.composer textarea').inputValue(), resultDraft);
   await page.locator('.return-to-thread').click();
   await wait(async () => new URL(page.url()).pathname === '/', 'Home return after adopted Work');
