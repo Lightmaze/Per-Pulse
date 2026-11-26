@@ -267,8 +267,11 @@ try {
   checks.push('A late file read cannot reopen the dialog or change another Work draft');
 
   // A native reference can finish on the server while its response is held.
-  // Dismissing that dialog must not steal focus or attach to the next Work.
+  // Dismissing that dialog must not steal focus or attach to either draft.
   await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Another reading', exact: true }).click();
+  await page.getByRole('heading', { name: 'Another reading', exact: true }).waitFor();
+  const canceledDraft = 'A new question, not yet sent.';
+  await composer.fill(canceledDraft);
   await open();
   await page.locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();
   await page.locator('.material-list button').filter({ hasText: storedName }).click();
@@ -280,17 +283,22 @@ try {
   await page.route(attachPattern, async route => {
     try {
       const response = await route.fetch();
-      observeAttach(response.status());
+      observeAttach({ status: response.status(), body: await response.json() });
       await attachGate;
       await route.fulfill({ response }).catch(() => {});
     } finally { completeAttach(); }
   });
   try {
     await page.getByRole('button', { name: 'Add to draft', exact: true }).click();
-    assert.equal(await attachObserved, 200);
+    const confirmed = await attachObserved;
+    // The native reference endpoint returns 201 even for an idempotent reuse.
+    assert.equal(confirmed.status, 201);
+    assert.equal(confirmed.body.repeated, true);
+    assert.deepEqual(confirmed.body.material, reused);
     await page.keyboard.press('Escape');
     await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'detached' });
     await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Field notes', exact: true }).click();
+    await page.getByRole('heading', { name: 'Field notes', exact: true }).waitFor();
     await composer.waitFor();
     await page.getByRole('button', { name: 'Materials', exact: true }).focus();
   } finally {
@@ -302,7 +310,16 @@ try {
   assert.equal(await composer.inputValue(), 'This draft must stay in the first Work.');
   assert.equal(await page.locator('.composer-materials li').count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Materials', exact: true }).evaluate(el => document.activeElement === el), true);
-  checks.push('Late confirmed reference does not change another Work draft or steal its focus');
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Another reading', exact: true }).click();
+  await page.getByRole('heading', { name: 'Another reading', exact: true }).waitFor();
+  assert.equal(await composer.inputValue(), canceledDraft);
+  assert.equal(await page.locator('.composer-materials li').count(), 0);
+  assert.deepEqual((await fetch(base + '/api/pages/' + secondId + '/materials').then(r => r.json())).materials, [reused]);
+  assert.equal((await files()).length, 1);
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Field notes', exact: true }).click();
+  await page.getByRole('heading', { name: 'Field notes', exact: true }).waitFor();
+  assert.equal(await composer.inputValue(), 'This draft must stay in the first Work.');
+  checks.push('Late confirmed reference retains the native source but does not attach to either draft or steal focus');
 
   const oldIdentity = await fetch(base + '/api/bootstrap').then(r => r.json());
   await stop(server);
