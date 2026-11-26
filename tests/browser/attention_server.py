@@ -20,6 +20,7 @@ from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapte
 def handler(request):
     messages = json.loads(request.content)["messages"]
     tool_arguments = None
+    tool_name = "attention"
     material = json.dumps(messages)
     if "WORK_MATERIAL_JSON" in material:
         content = "PASS"
@@ -30,7 +31,24 @@ def handler(request):
                         if message["role"] == "user")
         prompt = json.dumps(messages[last_user]["content"])
         has_result = any(message["role"] == "tool" for message in messages[last_user + 1:])
-        if not has_result and "RETAIN_ATTENTION_GOAL" in prompt:
+        task = messages[last_user]["content"]
+        delivery_request = "\n\nMy request for this page:\nWrite the adopted observation to a Markdown file and report it Home."
+        if isinstance(task, str) and task.startswith("Selected source for this page") and task.endswith(delivery_request):
+            packet = json.loads(task.split("PAGE_SOURCE_JSON\n", 1)[1].removesuffix(delivery_request))
+            assert packet["excerpt"] == "The local turn completed."
+            results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
+            assert all(row["status"] == "succeeded" for row in results), results
+            if not results:
+                tool_name = "mutate_file"
+                tool_arguments = {"path": "pulse-observation.md", "expected_digest": None,
+                                  "content": "# Adopted observation\n\n" + packet["excerpt"] + "\n"}
+            elif len(results) == 1:
+                tool_name = "work"
+                tool_arguments = {"op": "report", "kind": "result", "note": "Completed the adopted observation.",
+                                  "artifact_path": "pulse-observation.md"}
+            else:
+                assert len(results) == 2
+        elif not has_result and "RETAIN_ATTENTION_GOAL" in prompt:
             tool_arguments = {
                 "op": "hold",
                 "note": "Check that a visitor can actually try the experience.",
@@ -41,8 +59,8 @@ def handler(request):
         content = "Synthetic fixture response. The local turn completed."
     if tool_arguments is not None:
         delta = {"tool_calls": [{
-            "index": 0, "id": "fixture-attention", "type": "function",
-            "function": {"name": "attention", "arguments": json.dumps(tool_arguments)},
+            "index": 0, "id": "fixture-" + tool_name, "type": "function",
+            "function": {"name": tool_name, "arguments": json.dumps(tool_arguments)},
         }]}
         reason = "tool_calls"
     else:
@@ -75,6 +93,8 @@ if __name__ == "__main__":
                         help="Reopen a persisted World without new autonomous activity.")
     parser.add_argument("--posture", action="store_true",
                         help="Enable the native experience journal for explicit browser capture.")
+    parser.add_argument("--deliverables", action="store_true",
+                        help="Allow native file actions in the isolated adoption journey.")
     args = parser.parse_args()
     os.environ["PER_PULSE_ATTENTION_BROWSER_KEY"] = "explicit-synthetic-browser-credential"
     uvicorn.run(
@@ -84,6 +104,7 @@ if __name__ == "__main__":
             check_interval_seconds=0.01, refractory_seconds=.05 if args.spontaneous else 0,
             max_background_provider_tokens_per_hour=128,
             background_provider_token_reservation=64,
-        ), posture=True if args.posture else None, model_factory=factory),
+        ), posture=True if args.posture else None, model_factory=factory,
+            **({"allow_workspace_actions": True, "auto_apply_edits": True} if args.deliverables else {})),
         host="127.0.0.1", port=args.port, log_level="warning",
     )

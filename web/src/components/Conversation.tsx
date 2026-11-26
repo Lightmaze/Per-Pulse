@@ -14,7 +14,7 @@ import { readTransferPresentation } from '../transferPresentation';
 import { useLiveReply } from '../liveReply';
 
 export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
-  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
+  view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message, excerpt?: string, needsExactExcerpt?: boolean) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
   onSaveExample?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void;
   onMaterial?: (materialId: string, pageId: string) => void;
 }) {
@@ -52,7 +52,13 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
         {activity ? <span className={`message-status tone-${activity.tone}`} title={t(activity.detailKey, activity.detailParams)}>{t(activity.labelKey)}</span> : null}
         <div className="message-actions">
           <CopyButton text={message.content} label={t('conversation.copyMessage')} />
-          <button onClick={() => onCreate(message)} title={t("conversation.newPageTitle")}><Icon name="plus" size={14} />{t("conversation.newPage")}</button>
+          <button onClick={() => {
+            const selected = window.getSelection();
+            const node = document.getElementById(`message-${message.id}`);
+            const text = selected && node?.contains(selected.anchorNode) && node.contains(selected.focusNode) ? selected.toString() : '';
+            const { excerpt, needsExactExcerpt } = initialWorkHandoffExcerpt(messageBody(message), text);
+            onCreate(message, excerpt, needsExactExcerpt);
+          }} title={t("conversation.newPageTitle")}><Icon name="plus" size={14} />{t("conversation.newPage")}</button>
           <button onClick={() => onReference(message)} title={t("conversation.linkPageTitle")}><Icon name="link" size={14} />{t("conversation.linkPage")}</button>
           {onSaveExample && message.role === 'assistant' && message.status === 'settled' ? <button onClick={() => {
             const selected = window.getSelection();
