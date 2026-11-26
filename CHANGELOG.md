@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.1.0a39
+
+- Let delivery review revise a prepared Work report before Home receives it (#366).
+- Keep the latest user purpose in the expert working view and task-relevant experience selection, including long instructions (#367, #368).
+- Resume held autonomous work from its original durable receipt without replacing the user's purpose; preserve first Work handoffs across local round boundaries (#369–371).
+- Return to the original reading position and retain Work creation drafts through startup, while binding drafts and pending creation intent to the observed World (#372–375).
+- Reduce growing native history validation, event append, page projection and foreground admission costs; retain access to older unsettled turns (#376–380).
+- Exercise two consecutive native Pulse activations with foreground sourced file deliveries, pause, durable budget and cold restarts (#381, #382).
+- Continue typing immediately after attaching files or inserting page references, preserving the draft and caret and keeping delayed acknowledgements in their original Work (#383).
+
 ## 0.1.0a38
 
 - Keep historical Work file results responsive in long-lived Worlds with a native SQLite action index that also opens existing databases (#362).

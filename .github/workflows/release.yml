@@ -152,6 +152,19 @@ jobs:
           "$installed_python" -m pip check
           "$installed_python" tests/release/installed_wheel_smoke.py
           echo "PER_PULSE_INSTALLED_PYTHON=$installed_python" >> "$GITHUB_ENV"
+      - name: Continue a World created by the published a38 wheel
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous="$RUNNER_TEMP/per-pulse-previous"
+          mkdir -p "$previous"
+          gh release download v0.1.0a38 --repo "$GITHUB_REPOSITORY" --pattern 'per_pulse-0.1.0a38-py3-none-any.whl' --dir "$previous"
+          echo "494f4c864816d3b50995a4fb0f33a2f4860539754bccd0db9c1a380387ea2617  $previous/per_pulse-0.1.0a38-py3-none-any.whl" | sha256sum -c -
+          python -m venv "$previous/venv"
+          "$previous/venv/bin/python" -m pip install --disable-pip-version-check "$previous/"*.whl
+          "$previous/venv/bin/python" tests/release/installed_upgrade.py seed "$previous"
+          "$PER_PULSE_INSTALLED_PYTHON" tests/release/installed_upgrade.py resume "$previous"
       - uses: actions/setup-node@v4
         if: runner.os == 'Linux'
         with:
@@ -165,6 +178,9 @@ jobs:
           node "$RUNNER_TEMP/browser-tools/node_modules/playwright/cli.js" install chromium
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" node tests/browser/installed_first_run.mjs
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" node tests/browser/image_materials_flow.mjs
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" \
+            PER_PULSE_PYTHON="$PER_PULSE_INSTALLED_PYTHON" \
+            node tests/browser/materials_flow.mjs
           # Run the full sourced-correction -> next Work -> approved file ->
           # Home return -> restart path against the isolated wheel, not the
           # editable checkout. Only the HTTP model response is a fixture.
