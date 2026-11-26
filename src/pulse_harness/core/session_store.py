@@ -6865,8 +6865,9 @@ class HarnessStore:
         before: tuple[str, str] | None = None,
         tool_name: str | None = None,
         argument_matches: Mapping[str, str] | None = None,
+        output_matches: Mapping[str, str] | None = None,
     ) -> tuple[ActionRecord, ...]:
-        """Read ordered actions, optionally matching exact tool argument strings.
+        """Read ordered actions matching exact argument or result-output strings.
 
         Apply filters before the history limit, so unrelated later actions do
         not hide a durable source receipt. The keyset reads older matches.
@@ -6879,11 +6880,12 @@ class HarnessStore:
             or any(not isinstance(value, str) or not value for value in before)
         ):
             raise ValueError("invalid action history cursor")
-        if argument_matches is not None and any(
-            not isinstance(key, str) or re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", key) is None
-            or not isinstance(value, str) for key, value in argument_matches.items()
-        ):
-            raise ValueError("action argument matches require simple keys and string values")
+        for matches in (argument_matches, output_matches):
+            if matches is not None and any(
+                not isinstance(key, str) or re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", key) is None
+                or not isinstance(value, str) for key, value in matches.items()
+            ):
+                raise ValueError("action matches require simple keys and string values")
         with self._lock:
             self._require_open()
             self._assert_session_scope(scope.session_scope())
@@ -6901,6 +6903,16 @@ class HarnessStore:
             for key, value in (argument_matches or {}).items():
                 query += " AND json_extract(arguments_json, ?) = ?"
                 parameters.extend((f"$.{key}", value))
+            # Historical receipts may carry the output directly or in the
+            # standard output envelope. Match the native result, not the
+            # requested path, which may differ from the resolved path.
+            for key, value in (output_matches or {}).items():
+                query += (
+                    " AND (CASE WHEN json_type(result_json, '$.output') IS NULL "
+                    "THEN json_extract(result_json, ?) "
+                    "ELSE json_extract(result_json, ?) END) = ?"
+                )
+                parameters.extend((f"$.{key}", f"$.output.{key}", value))
             if before is not None:
                 query += " AND (updated_at < ? OR (updated_at = ? AND action_request_id < ?))"
                 parameters.extend((before[0], before[0], before[1]))

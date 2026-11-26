@@ -253,37 +253,29 @@ class NativeWork:
         except CausalTransitionError as error:
             raise ScopeConflict('reported artifact history is unavailable') from error
         store = r.kernel_service.store
-        scanned = 0
         for subject in lineage:
             session = (scope if subject == scope.engram_id
                        else r.harness.scope_for(subject, scope.context_id))
             before = None
-            while scanned < 1024:
-                size = min(64, 1024 - scanned)
+            while True:
                 try:
                     actions = store.actions_for_session(
-                        session, status=ActionStatus.SUCCEEDED, limit=size, before=before)
+                        session, status=ActionStatus.SUCCEEDED, limit=64, before=before,
+                        tool_name='mutate_file', output_matches={'path': path})
                 except ScopeConflict as error:
                     if str(error).startswith('unknown session:'):
                         break
                     raise
-                if not actions:
-                    break
                 for action in reversed(actions):
-                    scanned += 1
-                    if action.tool_name != 'mutate_file':
-                        continue
                     try:
                         source = self._artifact_source(action)
                     except ScopeConflict:
                         continue
                     if source['path'] == path:
                         return source
-                before = (actions[0].updated_at, actions[0].action_request_id)
-                if len(actions) < size:
+                if len(actions) < 64:
                     break
-        if scanned >= 1024:
-            raise ScopeConflict('file path is outside the recent Work action history; use its artifact ID')
+                before = (actions[0].updated_at, actions[0].action_request_id)
         raise ScopeConflict('no successful file action for that path belongs to this Work')
 
     def _verified_input_file(self, scope: HarnessScope, work_id: str, artifact_id: str,

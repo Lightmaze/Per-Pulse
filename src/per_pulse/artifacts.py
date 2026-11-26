@@ -189,7 +189,7 @@ class PageArtifacts:
 
         The cursor is an observation position, never a file or action authority.
         The current page's committed lineage is checked on every continuation.
-        Successful non-file actions still consume the per-request scan bound.
+        Only successful file mutations consume the per-request scan bound.
         """
         scope = self.execution._scope(page_id)
         try:
@@ -212,6 +212,7 @@ class PageArtifacts:
                 try:
                     actions = list(reversed(store.actions_for_session(
                         scopes[index], status=ActionStatus.SUCCEEDED,
+                        tool_name="mutate_file",
                         limit=remaining + 1, before=before if index == start else None,
                     )))
                 except ScopeConflict as error:
@@ -232,7 +233,7 @@ class PageArtifacts:
                             truncated = True
                         if len(items) >= MAX_ARTIFACTS:
                             # Every shown result is original durable action evidence.
-                            # There may still be older non-file rows, or older
+                            # There may still be older file receipts or older
                             # committed generations.
                             more = position + 1 < len(actions) or index + 1 < len(scopes)
                             next_cursor = anchor if more else None

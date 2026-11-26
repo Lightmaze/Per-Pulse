@@ -522,7 +522,7 @@ def test_prepared_report_replacement_requires_the_latest_action_and_delivers_onc
 
 
 def test_long_work_keeps_its_original_input_through_delivery(tmp_path, monkeypatch):
-    """A real version-pinned input stays usable after unrelated actions and reopening."""
+    """Both the original input and the completed output survive long Work history."""
     fixture = WorkFixture(monkeypatch.setenv)
 
     def open_world():
@@ -555,9 +555,18 @@ def test_long_work_keeps_its_original_input_through_delivery(tmp_path, monkeypat
         target_id = target["page"]["id"]
         _activate(first, target["initialMessageId"])
         assert "north entrance" in fixture.outcomes[0]["output"]["content"]
-        # Exercise the native actions, not fake rows or a reduced test limit.
-        # All later calls are successful reads of a different version/path.
-        for index in range(33):
+        fixture.plan = [("mutate_file", {
+            "path": "long-delivery.md", "expected_digest": None,
+            "content": "Use the verified north entrance.\n",
+        })]
+        sent = first.send(target_id, "Write the result from the approved source.")
+        _activate(first, sent["messageId"])
+        assert fixture.outcomes[0]["status"] == "succeeded"
+        early_result, = first.artifacts.snapshot(target_id)["artifacts"]
+        # Exercise both former history ceilings with native actions, not fake
+        # rows or a reduced limit. The input and completed output precede
+        # 1,032 unrelated successful reads.
+        for index in range(129):
             fixture.plan = [("read_file", {
                 "path": "other-input.md", "expected_digest": other["sha256"],
             }) for _ in range(8)]
@@ -572,21 +581,23 @@ def test_long_work_keeps_its_original_input_through_delivery(tmp_path, monkeypat
     second = open_world()
     try:
         fixture.plan = [
-            ("mutate_file", {"path": "long-delivery.md", "expected_digest": None,
-                             "content": "Use the verified north entrance.\n"}),
             ("work", {"op": "report", "kind": "result", "note": "Completed the sourced file.",
                       "artifact_path": "long-delivery.md", "input_file_work_id": source_id,
                       "input_file_artifact_id": original["id"]}),
         ]
-        sent = second.send(target_id, "Deliver the result based on the approved original source.")
+        sent = second.send(target_id, "Deliver the existing result without rewriting it.")
         _activate(second, sent["messageId"])
-        assert [row["status"] for row in fixture.outcomes] == ["succeeded", "succeeded"], fixture.outcomes
+        assert [row["status"] for row in fixture.outcomes] == ["succeeded"], fixture.outcomes
         second.runtime._native_work.drain()
         reports = [row for row in second.runtime.storage.native_work_requests(limit=32)
                    if row["arguments"]["op"] == "report"]
         assert len(reports) == 1 and reports[0]["status"] == "delivered"
         report = reports[0]
-        result, = second.artifacts.snapshot(target_id)["artifacts"]
+        snapshot = second.artifacts.snapshot(target_id)
+        result, = snapshot["artifacts"]
+        assert snapshot["nextCursor"] is None and not snapshot["truncated"]
+        assert result["id"] == early_result["id"]
+        assert report["artifact_source"]["artifact_id"] == early_result["id"]
         assert second.artifacts.download(target_id, result["id"])["content"] == (
             b"Use the verified north entrance.\n"
         )
