@@ -141,7 +141,7 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
             const id = crypto.randomUUID().replaceAll('-', '');
             const result = checked(await api.uploadMaterial(pageId, identity, id, file, signal));
             if (!current()) return;
-            if (!add(result.material, true)) { setError(t('materials.selectionFull')); break; }
+            if (!add(result.material, attached + 1 < files.length)) { setError(t('materials.selectionFull')); break; }
             attached++;
             setNotice(t('library.batchAttached', { count: attached, total: files.length }));
           }
@@ -151,7 +151,6 @@ export function MaterialsDialog({ identity, pageId, selectedIds, close, add }: {
             // the beginning of a partially completed batch.
             setSelected([]);
             if (input.current) input.current.value = '';
-            if (attached === files.length) close();
           }
         }
       }, true);

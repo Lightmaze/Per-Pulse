@@ -61,6 +61,10 @@ export default function App() {
   const interacted = useRef('');
   const scrollTimer = useRef<number | undefined>(undefined);
   const composerSelection = useRef({ start: 0, end: 0 });
+  const composerFocus = useRef<{
+    sourceModal: Modal; pageId: string; serial: number; workspaceId: string;
+    serviceId: string; selection?: number;
+  } | null>(null);
   const workspaceId = bootstrap?.workspaceId;
   const latestBootstrap = useRef(bootstrap);
   latestBootstrap.current = bootstrap;
@@ -86,6 +90,20 @@ export default function App() {
 
   const openModal = (next: Modal) => { setModalError(''); setCreateNeedsReconnect(false); setModal(next.kind === 'create' ? { ...next, requestId: crypto.randomUUID() } : next); setPulseOpen(false); setSidebarOpen(false); };
   const closeModal = () => { if (!busy) { setModal(null); setModalError(''); } };
+  const composerDialogIsCurrent = () => Boolean(modal && workspaceId && bootstrap?.serviceInstanceId
+    && currentModal.current === modal && currentPage.current === route.id
+    && currentRouteSerial.current === route.serial
+    && latestBootstrap.current?.workspaceId === workspaceId
+    && latestBootstrap.current?.serviceInstanceId === bootstrap.serviceInstanceId);
+  const finishComposerDialog = (selection?: number) => {
+    if (!modal || !workspaceId || !bootstrap || !composerDialogIsCurrent()) return;
+    composerFocus.current = {
+      sourceModal: modal, pageId: route.id, serial: route.serial, workspaceId,
+      serviceId: bootstrap.serviceInstanceId, selection,
+    };
+    recordInteraction();
+    setModal(null);
+  };
   const persistDraft = useCallback((pageId: string, next: Draft) => {
     if (!workspaceId) return;
     const saved = saveDraft(workspaceId, pageId, next);
@@ -220,8 +238,26 @@ export default function App() {
     // Browser Back can leave a create request in flight. Dismiss only its
     // dialog; the native Work creation and original source keep running.
     if (currentModal.current?.kind === 'create') setBusy(false);
-    setModal(previous => previous?.kind === 'create' || previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' || previous?.kind === 'save-example' || previous?.kind === 'transfer' ? null : previous);
+    setModal(previous => previous?.kind === 'create' || previous?.kind === 'history' || previous?.kind === 'message-search' || previous?.kind === 'materials' || previous?.kind === 'save-example' || previous?.kind === 'transfer' || (previous?.kind === 'picker' && previous.mode === 'compose') ? null : previous);
   }, [route.id, route.serial, workspaceId, bootstrap?.serviceInstanceId]);
+
+  useLayoutEffect(() => {
+    const pending = composerFocus.current;
+    if (!pending) return;
+    const sameScope = pending.pageId === route.id && pending.serial === route.serial
+      && pending.workspaceId === workspaceId && pending.serviceId === bootstrap?.serviceInstanceId;
+    if (sameScope && modal === pending.sourceModal) return;
+    composerFocus.current = null;
+    // A successful insert resumes writing only after the native dialog's
+    // layout cleanup has closed it. Ordinary dismissal restores its trigger.
+    if (!sameScope || modal || pulseOpen || view?.page.id !== route.id) return;
+    const element = input.current;
+    if (!element) return;
+    element.focus();
+    if (pending.selection !== undefined) {
+      element.setSelectionRange(pending.selection, pending.selection);
+    }
+  }, [modal, route.id, route.serial, workspaceId, bootstrap?.serviceInstanceId, pulseOpen, view?.page.id]);
 
   useEffect(() => () => window.clearTimeout(scrollTimer.current), [route.id]);
 
@@ -503,13 +539,13 @@ export default function App() {
       return;
     }
     if (modal.mode === 'compose') {
+      if (!composerDialogIsCurrent()) return;
       const { start, end } = composerSelection.current;
       const before = draft.text.slice(0, start);
       const after = draft.text.slice(end);
       const insertion = `${before && !/\s$/.test(before) ? ' ' : ''}${page.title}${after && !/^\s/.test(after) ? ' ' : ''}`;
       changeDraft({ ...draft, text: before + insertion + after, references: [...draft.references.filter(reference => reference.targetPageId !== page.id), { targetPageId: page.id, label: page.title }] });
-      setModal(null);
-      requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(before.length + insertion.length, before.length + insertion.length); });
+      finishComposerDialog(before.length + insertion.length);
       return;
     }
     setBusy(true); setModalError('');
@@ -765,17 +801,14 @@ export default function App() {
     {modal?.kind === 'message-search' ? <MessageSearchDialog key={`${workspaceId}/${route.id}`} pageId={route.id} close={closeModal} navigate={navigate} /> : null}
     {modal?.kind === 'materials' && modal.materialId && bootstrap && workspaceId ? <MaterialDialog key={`${workspaceId}/${bootstrap.serviceInstanceId}`} identity={bootstrap} pageId={modal.pageId ?? route.id} materialId={modal.materialId} close={closeModal} browse={() => openModal({ kind: 'materials' })} pages={pages} navigate={navigate} /> : null}
     {modal?.kind === 'materials' && !modal.materialId && bootstrap && workspaceId ? <MaterialsDialog key={`${workspaceId}/${bootstrap.serviceInstanceId}/${route.id}/${route.serial}`} pageId={route.id} identity={bootstrap} selectedIds={draft.materials?.map(item => item.id) ?? []} close={closeModal} add={(material, keepOpen = false) => {
-      if (material.pageId !== route.id) return false;
+      if (!composerDialogIsCurrent() || material.pageId !== route.id) return false;
       const current = draftsRef.current[draftKey] ?? readDraft(workspaceId, route.id);
       const materials = current.materials ?? [];
       if (!materials.some(item => item.id === material.id)) {
         if (materials.length >= 5) return false;
         changeDraft({ ...current, materials: [...materials, { id: material.id, name: material.name }] });
       }
-      if (!keepOpen) {
-        setModal(null);
-        requestAnimationFrame(() => input.current?.focus());
-      }
+      if (!keepOpen) finishComposerDialog();
       return true;
     }} /> : null}
   </div>;

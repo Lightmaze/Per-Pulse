@@ -139,10 +139,18 @@ try {
   await close();
   await rm(longFolder, { recursive: true, force: true });
   checks.push('Directory continuation survives a new file, retains the previous listing and opens a later original source');
-  await page.locator('.composer textarea').fill('Keep my question and its page link.');
+  const composer = page.locator('.composer textarea');
+  await composer.fill('Keep my question and its page link.');
+  await composer.evaluate(el => el.setSelectionRange('Keep my '.length, 'Keep my question'.length));
   await page.getByRole('button', { name: 'Link a page', exact: true }).click();
   await page.getByRole('option', { name: /^Home\b/ }).click();
-  const before = await page.locator('.composer textarea').inputValue();
+  await wait(async () => composer.evaluate(el => document.activeElement === el), 'composer receives focus after page link');
+  assert.equal(await composer.inputValue(), 'Keep my Home and its page link.');
+  assert.equal(await composer.evaluate(el => el.selectionStart), 'Keep my Home'.length);
+  assert.equal(await composer.evaluate(el => el.selectionEnd), 'Keep my Home'.length);
+  await page.keyboard.type(' follow-up');
+  const before = await composer.inputValue();
+  assert.equal(before, 'Keep my Home follow-up and its page link.');
   const source = '# Field notes\n\nA useful source stays available in the next Work.\n\n<script>window.materialExecuted = true</script>\n';
   const filename = 'A deliberately long field-note title about sources and continued work ' + 'long-name-'.repeat(8) + '.md';
   await open();
@@ -165,12 +173,17 @@ try {
   await page.getByRole('button', { name: `Remove ${filename} from this message`, exact: true }).waitFor();
   assert.equal(await page.locator('.reference-count').innerText(), '1');
   await wait(async () => page.locator('.composer textarea').evaluate(el => document.activeElement === el), 'composer receives focus after native attachment');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Continue with the source.');
+  const continued = before + ' Continue with the source.';
+  assert.equal(await composer.inputValue(), continued);
   await page.reload();
   await page.locator('.composer textarea').waitFor();
   await page.getByRole('button', { name: `Remove ${filename} from this message`, exact: true }).waitFor();
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await wait(async () => (await fetch(base + '/api/pages/' + firstId).then(r => r.json())).messages.some(m => m.content.includes(path)), 'native saved source reference');
   const first = await fetch(base + '/api/pages/' + firstId).then(r => r.json());
+  assert.ok(first.messages.at(-1).content.includes(continued), 'Keyboard continuation reaches the explicitly sent native message');
   assert.equal(first.messages.at(-1).references[0].targetPageId, 'home');
   assert.equal(first.messages.at(-1).role, 'user');
   assert.equal(first.messages.at(-1).materials[0].sha256, createHash('sha256').update(source).digest('hex'));
@@ -187,7 +200,7 @@ try {
   await page.getByRole('button', { name: 'Add to draft', exact: true }).click();
   assert.ok((await page.locator('.composer textarea').inputValue()).startsWith('A different question about the same source.'));
   assert.equal((await files()).length, 1, 'The second Work reuses the file without uploading again');
-  assert.equal(await page.getByText('Keep my question and its page link.', { exact: true }).count(), 0);
+  assert.equal(await page.getByText(continued, { exact: true }).count(), 0);
   const reused = (await fetch(base + '/api/pages/' + secondId + '/materials').then(r => r.json())).materials[0];
   const sourceReceipt = first.messages.at(-1).materials[0];
   assert.equal(reused.originPageId, firstId);
@@ -252,6 +265,44 @@ try {
   assert.equal(await page.getByRole('dialog').count(), 0);
   assert.equal(await page.locator('.composer textarea').inputValue(), 'This draft must stay in the first Work.');
   checks.push('A late file read cannot reopen the dialog or change another Work draft');
+
+  // A native reference can finish on the server while its response is held.
+  // Dismissing that dialog must not steal focus or attach to the next Work.
+  await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Another reading', exact: true }).click();
+  await open();
+  await page.locator('.material-list').getByRole('button', { name: 'uploads/', exact: true }).click();
+  await page.locator('.material-list button').filter({ hasText: storedName }).click();
+  const attachPattern = '**/api/pages/' + secondId + '/materials/reference';
+  let releaseAttach, observeAttach, completeAttach;
+  const attachGate = new Promise(done => { releaseAttach = done; });
+  const attachObserved = new Promise(done => { observeAttach = done; });
+  const attachCompleted = new Promise(done => { completeAttach = done; });
+  await page.route(attachPattern, async route => {
+    try {
+      const response = await route.fetch();
+      observeAttach(response.status());
+      await attachGate;
+      await route.fulfill({ response }).catch(() => {});
+    } finally { completeAttach(); }
+  });
+  try {
+    await page.getByRole('button', { name: 'Add to draft', exact: true }).click();
+    assert.equal(await attachObserved, 200);
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'detached' });
+    await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Field notes', exact: true }).click();
+    await composer.waitFor();
+    await page.getByRole('button', { name: 'Materials', exact: true }).focus();
+  } finally {
+    releaseAttach();
+  }
+  await attachCompleted;
+  await page.unroute(attachPattern);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await composer.inputValue(), 'This draft must stay in the first Work.');
+  assert.equal(await page.locator('.composer-materials li').count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Materials', exact: true }).evaluate(el => document.activeElement === el), true);
+  checks.push('Late confirmed reference does not change another Work draft or steal its focus');
 
   const oldIdentity = await fetch(base + '/api/bootstrap').then(r => r.json());
   await stop(server);
@@ -342,13 +393,13 @@ try {
   // Native receipts join one unsent Work; they never invoke a model.
   await page.getByLabel('Workspace navigation').getByRole('link', { name: 'Home', exact: true }).click();
   const batchId = await create('Batch sources');
-  const batchText = 'Compare these three authored source files.';
+  const batchText = 'Compare these three authored source files. Include the last source.';
   const batchFiles = [
     { name: 'Field A.md', mimeType: 'text/markdown', buffer: Buffer.from('A: original note\n') },
     { name: 'Field B.csv', mimeType: 'text/csv', buffer: Buffer.from('item,value\nB,2\n') },
     { name: 'Field C.json', mimeType: 'application/json', buffer: Buffer.from('{"case":"C"}\n') },
   ];
-  await page.locator('.composer textarea').fill(batchText);
+  await composer.fill('Compare these three authored source files.');
   await open();
   const fileCountBeforeBatch = (await files()).length;
   await page.getByLabel('Choose a file', { exact: true }).setInputFiles(batchFiles);
@@ -379,7 +430,10 @@ try {
     'all three picker files attached', 45000);
   await page.getByRole('dialog', { name: 'Materials', exact: true }).waitFor({ state: 'detached' });
   await page.unroute(uploadPattern, holdSecondUpload);
-  assert.equal(await page.locator('.composer textarea').inputValue(), batchText);
+  await wait(async () => composer.evaluate(el => document.activeElement === el), 'composer receives focus after complete batch');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Include the last source.');
+  assert.equal(await composer.inputValue(), batchText);
   await page.reload();
   for (const file of batchFiles) {
     await page.getByRole('button', { name: 'Inspect ' + file.name + ' before sending' }).waitFor();
