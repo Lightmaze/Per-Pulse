@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
+import sys
 
 import httpx
 import uvicorn
@@ -96,6 +98,15 @@ if __name__ == "__main__":
     parser.add_argument("--deliverables", action="store_true",
                         help="Allow native file actions in the isolated adoption journey.")
     args = parser.parse_args()
+    if os.environ.get('PER_PULSE_INSTALLED_WHEEL') == '1':
+        import per_pulse.app
+        import pulse_system
+        import pulse_harness
+        prefix = Path(sys.prefix).resolve()
+        assert sys.prefix != sys.base_prefix, 'Use an isolated wheel installation'
+        for module in (per_pulse.app, pulse_system, pulse_harness):
+            assert Path(module.__file__).resolve().is_relative_to(prefix), module.__file__
+        assert (Path(per_pulse.app.__file__).parent / 'static' / 'index.html').is_file()
     os.environ["PER_PULSE_ATTENTION_BROWSER_KEY"] = "explicit-synthetic-browser-credential"
     uvicorn.run(
         create_app(args.data_dir, pulse=PulseSettings(

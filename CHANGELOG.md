@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0a40
+
+- Keep earlier Work file receipts and their input-read order verifiable through long histories and event retention; recover completed files by path without repeating the write (#385–387).
+- Reopen saved Pulse answers after reading them, including after stopping Pulse and restarting. Open the completed propagated answer separately from its incoming source (#388, #389).
+- Carry a highlighted passage from an adopted Pulse answer into a new independent Work, then deliver its file to Home with original source navigation (#390).
+
 ## 0.1.0a39
 
 - Let delivery review revise a prepared Work report before Home receives it (#366).

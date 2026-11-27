@@ -152,15 +152,15 @@ jobs:
           "$installed_python" -m pip check
           "$installed_python" tests/release/installed_wheel_smoke.py
           echo "PER_PULSE_INSTALLED_PYTHON=$installed_python" >> "$GITHUB_ENV"
-      - name: Continue a World created by the published a38 wheel
+      - name: Continue a World created by the published a39 wheel
         if: runner.os == 'Linux'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           previous="$RUNNER_TEMP/per-pulse-previous"
           mkdir -p "$previous"
-          gh release download v0.1.0a38 --repo "$GITHUB_REPOSITORY" --pattern 'per_pulse-0.1.0a38-py3-none-any.whl' --dir "$previous"
-          echo "494f4c864816d3b50995a4fb0f33a2f4860539754bccd0db9c1a380387ea2617  $previous/per_pulse-0.1.0a38-py3-none-any.whl" | sha256sum -c -
+          gh release download v0.1.0a39 --repo "$GITHUB_REPOSITORY" --pattern 'per_pulse-0.1.0a39-py3-none-any.whl' --dir "$previous"
+          echo "f679c662c1f6fa9b7947fabbd6f0ddf2c363044bf9a4f865fae5971fd586a1e0  $previous/per_pulse-0.1.0a39-py3-none-any.whl" | sha256sum -c -
           python -m venv "$previous/venv"
           "$previous/venv/bin/python" -m pip install --disable-pip-version-check "$previous/"*.whl
           "$previous/venv/bin/python" tests/release/installed_upgrade.py seed "$previous"
@@ -199,6 +199,12 @@ jobs:
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" \
             PER_PULSE_PYTHON="$PER_PULSE_INSTALLED_PYTHON" \
             node tests/browser/documents_flow.mjs
+          # Exercise saved Pulse answers, passage adoption and real file
+          # delivery from the isolated release wheel, including cold restart.
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" \
+            PER_PULSE_PYTHON="$PER_PULSE_INSTALLED_PYTHON" \
+            PER_PULSE_INSTALLED_WHEEL=1 \
+            node tests/browser/background_result_flow.mjs
           "$PER_PULSE_INSTALLED_PYTHON" -m pip install 'pytest>=8,<10'
           PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright" node tests/browser/web_read_flow.mjs
 

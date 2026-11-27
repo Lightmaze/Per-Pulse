@@ -23,15 +23,15 @@ def main() -> None:
     installed_version = version("per-pulse")
     assert sys.prefix != sys.base_prefix, "Use the isolated installed wheel"
     if args.phase == "seed":
-        assert installed_version == "0.1.0a38", installed_version
+        assert installed_version == "0.1.0a39", installed_version
         assert not root.exists() and not receipt.exists()
         expected = run_workspace(root, example=False, fake_provider=False, exercise=True)
         assert (root / "world.db").is_file()
         run_workspace(root, example=False, fake_provider=False, expected=expected)
         receipt.write_text(json.dumps(expected), encoding="utf-8")
-        print("Published a38: created and restarted sourced Home/Work history.")
+        print("Published a39: created and restarted sourced Home/Work history.")
     else:
-        assert installed_version != "0.1.0a38", installed_version
+        assert installed_version == "0.1.0a40", installed_version
         assert (root / "world.db").is_file()
         expected = json.loads(receipt.read_text(encoding="utf-8"))
         run_workspace(root, example=False, fake_provider=False, expected=expected)
