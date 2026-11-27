@@ -32,6 +32,13 @@ DECISION_TASKS = {
     "请为花园灌溉编写决策简报。": ("rain", "rain-zh", None),
 }
 
+CORRECTION_NOTE = "For offline battery work, verify the timestamp of stored readings before use."
+CORRECTION_ADVICE = "Check the timestamp of stored readings before relying on the historical answer."
+CORRECTION_TASKS = {
+    "Prepare a Markdown decision brief for 电池 under offline constraints in decision-revised.md.": "revised",
+    "Prepare a Markdown decision brief for 电池 under offline constraints in decision-withdrawn.md.": "withdrawn",
+}
+
 
 def handler(request):
     messages = json.loads(request.content)["messages"]
@@ -40,6 +47,25 @@ def handler(request):
     material = json.dumps(messages)
     if "WORK_MATERIAL_JSON" in material:
         content = "PASS"
+        packet = next((json.loads(row["content"].split("WORK_MATERIAL_JSON\n", 1)[1])
+                       for row in messages if isinstance(row.get("content"), str)
+                       and "WORK_MATERIAL_JSON\n" in row["content"]), None)
+        if packet and "candidate_response" not in packet:
+            task = next((row["content"] for row in reversed(packet["current_work"]["messages"])
+                         if row["role"] == "user"), "")
+            if task in CORRECTION_TASKS:
+                matching = [episode for episode in packet.get("posture_experiences", {}).get("episodes", [])
+                            if episode.get("title") == "Offline battery reading procedure"]
+                if CORRECTION_TASKS[task] == "revised":
+                    assert len(matching) == 1, matching
+                    lesson = matching[0]
+                    assert lesson["revision"] == 2 and lesson["note"] == CORRECTION_NOTE, lesson
+                    assert lesson["excerpt"] == DECISION_ANSWERS["offline"], lesson
+                    assert not lesson["encounter_available"] and "encounter" not in lesson, lesson
+                    assert lesson["feedback"] == [{"verdict": "revised", "revision": 1}], lesson
+                    content = CORRECTION_ADVICE
+                else:
+                    assert not matching, matching
     elif "UNTRUSTED_REVIEW_DATA_JSON" in material:
         content = '{"mode":"none"}'
     else:
@@ -142,6 +168,8 @@ def handler(request):
             else:
                 mode = task.split(" under ", 1)[1].split()[0]
                 filename, condition = mode, mode.capitalize()
+            if task in CORRECTION_TASKS:
+                filename = CORRECTION_TASKS[task]
             expected = DECISION_ANSWERS.get(mode)
             path = "decision-" + filename + ".md"
             results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
@@ -179,8 +207,15 @@ def handler(request):
                 hit = hits[0]
                 if len(results) == 1:
                     tool_name = "mutate_file"
-                    tool_arguments = {"path": path, "expected_digest": None,
-                                      "content": "# Decision brief\n\n" + hit["source_excerpt"] + "\n"}
+                    text = "# Decision brief\n\n" + hit["source_excerpt"] + "\n"
+                    if task in CORRECTION_TASKS:
+                        contributed = any(isinstance(row.get("content"), str)
+                                          and "POSTURE_WORK_CONTRIBUTION" in row["content"]
+                                          and CORRECTION_ADVICE in row["content"] for row in messages)
+                        assert contributed == (filename == "revised"), messages
+                        if contributed:
+                            text += "\n" + CORRECTION_ADVICE + "\n"
+                    tool_arguments = {"path": path, "expected_digest": None, "content": text}
                 elif len(results) == 2:
                     tool_name = "work"
                     tool_arguments = {"op": "report", "kind": "result", "note": "Prepared the decision brief.",
