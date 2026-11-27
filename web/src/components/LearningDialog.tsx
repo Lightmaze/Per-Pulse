@@ -244,6 +244,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
         <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button>
         <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('not_useful').catch(() => {})}>{t('learning.noBenefit')}</button>
         <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t('learning.hurt')}</button>
+        {experience.canEdit && experience.active ? <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('withdrawn').catch(() => {})}>{t('learning.withdraw')}</button> : null}
       </div>
     </div> : null}
   </article>;
