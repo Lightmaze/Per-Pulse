@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -22,10 +22,10 @@ await new Promise(done => socket.close(done));
 const base = `http://127.0.0.1:${port}`;
 let serverLog = '', browser, page, server;
 const errors = [], checks = [];
-const start = (disablePulse = false, spontaneous = true, dataDir = directory) => {
+const start = (disablePulse = false, spontaneous = true, dataDir = directory, deliverables = false) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
     join(root, 'tests/browser/attention_server.py'), '--data-dir', dataDir,
-    '--port', String(port), ...(spontaneous ? ['--spontaneous'] : []), '--posture', ...(disablePulse ? ['--no-pulse'] : []),
+    '--port', String(port), ...(spontaneous ? ['--spontaneous'] : []), '--posture', ...(disablePulse ? ['--no-pulse'] : []), ...(deliverables ? ['--deliverables'] : []),
   ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', value => { serverLog += value; });
   child.stderr.on('data', value => { serverLog += value; });
@@ -395,7 +395,7 @@ try {
   await wait(() => new URL(page.url()).hash === '#message-' + propagated.resultMessageId, 'same saved propagation answer');
   assert.equal(await page.locator('.composer textarea').inputValue(), receiverDraft);
   assert.deepEqual((await get('/api/pages/' + receiver)).messages, received);
-  await stop(server); server = start(true, false, propagationDir);
+  await stop(server); server = start(true, false, propagationDir, true);
   await wait(async () => (await fetch(base + '/api/health')).ok, 'restart propagated World');
   await page.goto(base);
   assert.equal(await page.locator('.composer textarea').inputValue(), propagationDraft);
@@ -406,6 +406,79 @@ try {
   assert.deepEqual((await get('/api/pages/' + receiver)).messages, received);
   assert.equal((await get('/api/pulse')).budget.used, 1);
   checks.push('Native propagation opens the completed answer, not the incoming system message; source, drafts, saved answer and budget survive restart.');
+
+  // Adopt the saved answer into Home, then use only the selected passage
+  // in a new independent Work that produces an actual downloadable file.
+  const originalAnswer = page.locator('#message-' + propagated.resultMessageId);
+  await originalAnswer.getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Bring to Home', exact: true }).click();
+  await wait(() => new URL(page.url()).pathname === '/', 'adopt saved Pulse answer');
+  let adoption;
+  await wait(async () => {
+    adoption = (await get('/api/pages/home')).messages.find(row =>
+      row.sourcePageId === receiver && row.sourceMessageId === propagated.resultMessageId);
+    return adoption;
+  }, 'persistent Home adoption of completed answer');
+  const adoptedArticle = page.locator('#message-' + adoption.id);
+  const chosen = 'The local turn completed.';
+  assert.ok(adoption.content.includes(chosen));
+  const newPage = adoptedArticle.getByRole('button', { name: 'New page', exact: true });
+  await newPage.click();
+  assert.ok((await page.getByRole('dialog').locator('#new-page-source').inputValue()).includes('Synthetic fixture response.'));
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  await adoptedArticle.locator('.message-content p').first().evaluate((node, chosen) => {
+    const text = node.firstChild;
+    const start = text.textContent.indexOf(chosen);
+    if (start < 0) throw new Error('Selected passage missing from rendered Home adoption');
+    const range = document.createRange();
+    range.setStart(text, start); range.setEnd(text, start + chosen.length);
+    const selection = window.getSelection();
+    selection.removeAllRanges(); selection.addRange(range);
+  }, chosen);
+  assert.equal(await page.evaluate(() => window.getSelection().toString()), chosen);
+  // Use a trusted browser click, including the mouse-down focus transition.
+  // A synthetic element.click() would miss selection loss in the real UI.
+  await newPage.click();
+  const create = page.getByRole('dialog');
+  assert.equal(await create.locator('#new-page-source').inputValue(), chosen);
+  await create.getByRole('textbox', { name: 'Page name', exact: true }).fill('Adopted Pulse observation');
+  await create.getByRole('textbox', { name: 'Your request', exact: true })
+    .fill('Write the adopted observation to a Markdown file and report it Home.');
+  await create.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Adopted Pulse observation', exact: true }).waitFor();
+  const later = decodeURIComponent(new URL(page.url()).pathname.split('/').pop());
+  let delivery;
+  await wait(async () => {
+    const snapshot = await get('/api/pages/' + later);
+    const source = snapshot.messages.find(row => row.pageSource);
+    if (!source || snapshot.page.status !== 'idle') return false;
+    assert.equal(source.pageSource.excerpt, chosen);
+    assert.equal(source.sourcePageId, 'home');
+    assert.equal(source.sourceMessageId, adoption.id);
+    delivery = (await get('/api/pages/home')).messages.find(row =>
+      row.sourcePageId === later && row.reportedArtifact?.path === 'pulse-observation.md');
+    return delivery;
+  }, 'native derived Work file reported Home', 30000);
+  await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
+  const delivered = page.locator('#message-' + delivery.id);
+  await delivered.getByRole('button', { name: 'Open verified file' }).click();
+  await delivered.getByText(chosen, { exact: true }).waitFor();
+  const downloadEvent = page.waitForEvent('download');
+  await delivered.getByRole('button', { name: 'Download file', exact: true }).click();
+  const bytes = await readFile(await (await downloadEvent).path());
+  assert.equal(bytes.toString('utf8'), '# Adopted observation\n\n' + chosen + '\n');
+  await stop(server); server = start(true, false, propagationDir, true);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'restart derived Work');
+  await page.goto(base);
+  await delivered.getByRole('button', { name: 'Open verified file' }).click();
+  const again = page.waitForEvent('download');
+  await delivered.getByRole('button', { name: 'Download file', exact: true }).click();
+  assert.deepEqual(await readFile(await (await again).path()), bytes);
+  await adoptedArticle.locator('.source-line a.session-link').click();
+  await wait(() => new URL(page.url()).hash === '#message-' + propagated.resultMessageId, 'original Pulse answer remains reachable');
+  assert.equal(await page.locator('.composer textarea').inputValue(), receiverDraft);
+  assert.equal((await get('/api/pulse')).budget.used, 1);
+  checks.push('A saved Pulse answer is adopted Home, only the chosen passage enters a later Work, and its actual delivered file and original source survive a cold restart.');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));

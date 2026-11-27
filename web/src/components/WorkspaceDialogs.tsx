@@ -10,7 +10,7 @@ import { providerSetupCommand, type ProviderMode, type ProviderShell } from '../
 import { CopyButton } from './CopyButton';
 
 export type Modal =
-  | { kind: 'create'; message?: Message; sourceExcerpt?: string; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact; requestId?: string }
+  | { kind: 'create'; message?: Message; sourceExcerpt?: string; needsExactExcerpt?: boolean; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact; requestId?: string }
   | { kind: 'picker'; mode: 'search' | 'compose' | 'reference'; message?: Message }
   | { kind: 'picker'; mode: 'artifact'; artifact: Artifact }
   | { kind: 'return'; message: Message; content: string; needsExactExcerpt?: boolean; requestId: string }
@@ -23,7 +23,7 @@ export type Modal =
   | { kind: 'materials'; materialId?: string; pageId?: string }
   | { kind: 'rename' };
 
-export function CreatePageDialog({ initial, sourceExcerpt, initialInstruction, fromExperience, artifact, ready, retryConnection, checkingConnection, busy, error, close, create }: { initial?: Message; sourceExcerpt?: string; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact; ready: boolean; retryConnection?: () => void; checkingConnection: boolean; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
+export function CreatePageDialog({ initial, sourceExcerpt, needsExactExcerpt = false, initialInstruction, fromExperience, artifact, ready, retryConnection, checkingConnection, busy, error, close, create }: { initial?: Message; sourceExcerpt?: string; needsExactExcerpt?: boolean; initialInstruction?: string; fromExperience?: { id: string; title: string; excerpt: string }; artifact?: Artifact; ready: boolean; retryConnection?: () => void; checkingConnection: boolean; busy: boolean; error: string; close: () => void; create: (title: string, instruction: string, sourceExcerpt?: string) => void }) {
   const { t } = useLanguage();
   const [title, setTitle] = useState('');
   const source = initialPageSource(initial, t('source.defaultRequest'));
@@ -39,12 +39,19 @@ export function CreatePageDialog({ initial, sourceExcerpt, initialInstruction, f
     </> : null}
     {initial?.materials?.length ? <p className="lesson-note">{t('materials.newPageSource')}</p> : null}
     {artifact ? <p className="lesson-note">{t('library.artifactToNewWorkHint', { path: artifact.path })}</p> : null}
-    <form onSubmit={event => { event.preventDefault(); if (ready && title.trim() && instruction.trim() && !busy) create(title.trim(), instruction.trim(), initial ? excerpt : undefined); }}>
+    <form onSubmit={event => { event.preventDefault(); if (ready && title.trim() && instruction.trim() && (!initial || excerpt.trim()) && !busy) create(title.trim(), instruction.trim(), initial ? excerpt : undefined); }}>
       <label className="field-label" htmlFor="new-page-title">{t('dialogs.pageName')}</label>
       <input id="new-page-title" autoFocus value={title} onChange={event => setTitle(event.target.value)} placeholder={t('dialogs.namePlaceholder')} maxLength={160} required />
       {initial ? <>
         <label className="field-label" htmlFor="new-page-source">{t(source.excerpt.includes(excerpt) ? 'source.excerpt' : 'source.edited')} · {initial.role === 'assistant' ? 'Per Pulse' : t(initial.role === 'user' ? 'conversation.you' : 'conversation.workspace')}</label>
         <textarea id="new-page-source" value={excerpt} onChange={event => setExcerpt(event.target.value)} rows={4} required />
+        {needsExactExcerpt ? <>
+          <p className="lesson-note" role="status">{t('source.selectionMismatch')}</p>
+          <details><summary>{t('dialogs.returnRawSource')}</summary>
+            <textarea aria-label={t('dialogs.returnRawSource')} readOnly value={source.excerpt} rows={4} />
+          </details>
+          <button className="text-button" type="button" onClick={() => setExcerpt(source.excerpt)}>{t('dialogs.returnFullResult')}</button>
+        </> : null}
         <p className="lesson-note">{t('source.separation')}</p>
       </> : null}
       <label className="field-label" htmlFor="new-page-focus">{t(initial ? 'source.request' : 'dialogs.focusLabel')}</label>
