@@ -490,11 +490,19 @@ try {
     instruction: 'Prepare a Markdown brief from the earlier completed background observation.',
   }, 201)).page.id;
   let independentDelivery;
-  await wait(async () => {
-    independentDelivery = (await get('/api/pages/home')).messages.find(row =>
-      row.sourcePageId === independent && row.reportedArtifact?.path === 'background-brief.md');
-    return independentDelivery;
-  }, 'independent Work discovers and uses completed Pulse answer', 30000);
+  try {
+    await wait(async () => {
+      independentDelivery = (await get('/api/pages/home')).messages.find(row =>
+        row.sourcePageId === independent && row.reportedArtifact?.path === 'background-brief.md');
+      return independentDelivery;
+    }, 'independent Work discovers and uses completed Pulse answer', 30000);
+  } catch (error) {
+    // This isolated synthetic World is safe to print. Keep the failed Work's
+    // native status and tool/message evidence instead of only a Home timeout.
+    console.error('Independent Work snapshot:', JSON.stringify(
+      await get('/api/pages/' + independent).catch(() => null)));
+    throw error;
+  }
   assert.ok(independentDelivery.content.includes('Verified earlier Work excerpt'));
   assert.ok(independentDelivery.content.includes('Receiving propagation'));
   assert.ok(independentDelivery.content.includes(received.find(row => row.id === propagated.resultMessageId).content));

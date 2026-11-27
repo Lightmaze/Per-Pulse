@@ -83,8 +83,11 @@ def handler(request):
             tool_arguments = {"op": "release"}
         content = "Synthetic fixture response. The local turn completed."
     if tool_arguments is not None:
+        # One turn can call the same tool more than once (find, then report).
+        # Provider call IDs must be unique within that turn, including later rounds.
+        round_index = sum(row["role"] == "tool" for row in messages[last_user + 1:])
         delta = {"tool_calls": [{
-            "index": 0, "id": "fixture-" + tool_name, "type": "function",
+            "index": 0, "id": f"fixture-{round_index}-{tool_name}", "type": "function",
             "function": {"name": tool_name, "arguments": json.dumps(tool_arguments)},
         }]}
         reason = "tool_calls"
