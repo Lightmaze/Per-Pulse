@@ -503,6 +503,29 @@ class _PostureReviewer:
         return ResponseReview(context=advice.context, receipt=advice.receipt)
 
 
+def result_posture_offers(store, scope, experience_id):
+    """Read pre-action offers from the exact turn, not proof of use or benefit."""
+    revisions = set()
+    for message in TranscriptStore(store).messages(scope):
+        if message.role != "system" or not message.item_id.startswith(TURN_ADVICE_PREFIX):
+            continue
+        envelope = decode_advice(message.content)
+        receipt = envelope["receipt"]
+        fork = receipt.get("fork")
+        if (envelope["scope_digest"] != scope.digest
+                or receipt.get("plugin") != "expert_computation"
+                or receipt.get("mode") != "semantic"
+                or receipt.get("checkpoint") != "before_action"
+                or not isinstance(fork, dict) or fork.get("source_scope_digest") != scope.digest
+                or fork.get("status") != TurnStatus.SUCCEEDED.value):
+            continue
+        for ref in receipt.get("offered_posture_revisions", []):
+            if (isinstance(ref, dict) and ref.get("id") == experience_id
+                    and type(ref.get("revision")) is int and ref["revision"] > 0):
+                revisions.add(ref["revision"])
+    return sorted(revisions)
+
+
 def recorded_expert_usage(store, scope, *, trace=None):
     """Meter source-bound fork attempts, without granting learning credit.
 

@@ -347,10 +347,18 @@ class PostureMemory:
         return self._journal.revise(experience_id, expected_revision, update)
 
     def record_feedback(self, experience_id: str, *, expected_revision: int,
-                        verdict: str, evidence: str, source: dict | None = None) -> dict:
+                        verdict: str, evidence: str, source: dict | None = None,
+                        result_only: bool = False) -> dict:
         if not isinstance(verdict, str) or verdict not in _VERDICTS:
             raise ValueError("invalid posture feedback verdict")
         _text(evidence, "feedback evidence", 6000)
+        if type(result_only) is not bool:
+            raise ValueError("invalid result-only flag")
+        if result_only:
+            if (verdict == "withdrawn" or not isinstance(source, dict)
+                    or source.get("kind") != "operator_report" or not source.get("result_message_id")):
+                raise ValueError("result-only feedback requires a linked result and cannot withdraw guidance")
+            source = {**source, "report_scope": "result_only"}
         if source is not None:
             source = _source(source)
         def update(record):
@@ -361,7 +369,7 @@ class PostureMemory:
                 "source": source or {"kind": "operator_report"},
                 "created_at": record["updated_at"],
             })
-            if verdict in {"harmful", "withdrawn"}:
+            if not result_only and verdict in {"harmful", "withdrawn"}:
                 record["active"] = False
         self.guard()
         return self._journal.revise(experience_id, expected_revision, update)
@@ -422,7 +430,10 @@ class PostureMemory:
             if "revision_source" in record:
                 item["revision_source"] = deepcopy(record["revision_source"])
         else:
-            item["feedback"] = [{"verdict": entry["verdict"], "revision": entry["revision"]}
+            item["feedback"] = [{"verdict": entry["verdict"], "revision": entry["revision"],
+                                 **({"report_scope": "result_only",
+                                     "result_offered_revisions": entry["source"].get("result_offered_revisions", [])}
+                                    if entry.get("source", {}).get("report_scope") == "result_only" else {})}
                                 for entry in record["feedback"][-4:]]
             if "revision_source" in record:
                 item["revision_source"] = {key: record["revision_source"][key]

@@ -374,7 +374,8 @@ class PageLearning:
                 # Native result anchors were verified when the report was
                 # accepted. Only fields used to open this Work's own result
                 # are projected, not the source turn or full result digest.
-                for key in ("result_message_id", "result_evidence_class", "result_execution_regime"):
+                for key in ("result_message_id", "result_evidence_class", "result_execution_regime",
+                            "report_scope", "result_offered_revisions"):
                     if key in origin:
                         report_source[key] = origin[key]
                 own_reports.append({
@@ -525,7 +526,7 @@ class PageLearning:
                 raise self._invalid(error) from error
             return {"experience": self._public(updated, record["context_id"], page_id)}
 
-    def feedback(self, page_id, experience_id, revision, verdict, evidence, *, result_message_id=None):
+    def feedback(self, page_id, experience_id, revision, verdict, evidence, *, result_message_id=None, result_only=False):
         """Let a receiving Work report an outcome of shared guidance.
 
         Editing and sharing remain source-Work-only. A recipient can only rate
@@ -557,13 +558,14 @@ class PageLearning:
                 try:
                     source.update(capture_result_anchor(
                         self.pages.runtime, self._subject(page_id), context_id, result_message_id,
+                        experience_id=experience_id if result_only else None,
                     ))
                 except ScopeConflict as error:
                     raise PageError("invalid_experience_source", str(error), 422) from error
             try:
                 updated = memory.record_feedback(
                     experience_id, expected_revision=revision, verdict=verdict, evidence=evidence,
-                    source=source,
+                    source=source, result_only=result_only,
                 )
             except (ValueError, RedactionRequired) as error:
                 raise self._invalid(error) from error

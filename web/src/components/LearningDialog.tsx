@@ -49,7 +49,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   experience: PostureExperience; pageId: string; busy: boolean; hidden: boolean;
   results: Message[];
   revise: (experience: PostureExperience, changes: LessonRevision, evidence?: string) => Promise<void>;
-  feedback: (experience: PostureExperience, verdict: LessonVerdict, evidence: string, resultMessageId?: string) => Promise<void>;
+  feedback: (experience: PostureExperience, verdict: LessonVerdict, evidence: string, resultMessageId?: string, resultOnly?: boolean) => Promise<void>;
   navigate: Navigate;
   continueWebWork: (selected: { id: string; title: string; excerpt: string }) => void;
 }) {
@@ -60,6 +60,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackRevision, setFeedbackRevision] = useState(experience.revision);
   const [resultMessageId, setResultMessageId] = useState('');
+  const [resultOnly, setResultOnly] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineRevision, setRefineRevision] = useState(experience.revision);
   const [lessonDraft, setLessonDraft] = useState(lesson?.lesson ?? '');
@@ -115,8 +116,8 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   };
   const submit = async (verdict: LessonVerdict) => {
     if (feedbackStale) return;
-    await feedback({ ...experience, revision: feedbackRevision }, verdict, evidence.trim(), resultMessageId || undefined);
-    setEvidence(''); setResultMessageId(''); setFeedbackOpen(false);
+    await feedback({ ...experience, revision: feedbackRevision }, verdict, evidence.trim(), resultMessageId || undefined, resultOnly);
+    setEvidence(''); setResultMessageId(''); setResultOnly(false); setFeedbackOpen(false);
   };
   return <article hidden={hidden} className={`lesson ${experience.active ? '' : 'lesson-paused'}`}>
     <div className="lesson-heading"><h3>{experience.title}</h3><span>{t(experience.active ? 'learning.active' : 'learning.paused')} · v{experience.revision}</span></div>
@@ -175,6 +176,8 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
         {resultPage ? <> · <button type="button" className="text-button" onClick={() => navigate(resultPage, resultPage !== pageId ? { pageId } : undefined, entry.source!.result_message_id)}>{t('learning.reportedResult')}</button>
           {['TEST_DOUBLE', 'EXPLICIT_MOCK'].includes(entry.source?.result_evidence_class ?? '') ? <> · {t('learning.resultFixture')}</> : null}
           {entry.source?.result_execution_regime === 'replay' ? <> · {t('replay.result')}</> : null}
+          {entry.source?.report_scope === 'result_only' ? <> · {t('learning.resultOnlyRecorded')}</> : null}
+          {entry.source?.result_offered_revisions?.length ? <> · {t('learning.resultOfferedVersions', { versions: entry.source.result_offered_revisions.map(version => `v${version}`).join(', ') })}</> : null}
         </> : reportedPage ? <> · <button type="button" className="text-button" onClick={() => navigate(reportedPage, { pageId })}>{t('learning.reportedWork')}</button></> : null}
       </p>{entry.evidenceSource ? <ExperienceSourceLink source={entry.evidenceSource} pageId={pageId} navigate={navigate} /> : null}</div>;
     })}</details> : null}
@@ -246,16 +249,17 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       <label className="field-label" htmlFor={`feedback-${experience.id}`}>{t('learning.changed')}</label>
       <textarea id={`feedback-${experience.id}`} rows={3} value={evidence} maxLength={1500} disabled={busy} onChange={event => setEvidence(event.target.value)} placeholder={t('learning.feedbackPlaceholder')} />
       <label className="field-label" htmlFor={`feedback-result-${experience.id}`}>{t('learning.selectResult')}</label>
-      <select id={`feedback-result-${experience.id}`} value={resultMessageId} disabled={busy} aria-describedby={`feedback-result-help-${experience.id}`} onChange={event => setResultMessageId(event.target.value)}>
+      <select id={`feedback-result-${experience.id}`} value={resultMessageId} disabled={busy} aria-describedby={`feedback-result-help-${experience.id}`} onChange={event => { setResultMessageId(event.target.value); if (!event.target.value) setResultOnly(false); }}>
         <option value="">{t('learning.noResult')}</option>
         {results.map((message, index) => <option key={message.id} value={message.id}>{index + 1}. {message.content.replace(/\s+/g, ' ').slice(0, 120)}</option>)}
       </select>
       <p className="lesson-note" id={`feedback-result-help-${experience.id}`}>{t('learning.resultHelp')}</p>
+      {resultMessageId ? <label className="field-label"><input type="checkbox" checked={resultOnly} disabled={busy} onChange={event => setResultOnly(event.target.checked)} /> {t('learning.resultOnly')}</label> : null}
       <div className="lesson-actions">
         <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button>
         <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('not_useful').catch(() => {})}>{t('learning.noBenefit')}</button>
-        <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t('learning.hurt')}</button>
-        {experience.canEdit && experience.active ? <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('withdrawn').catch(() => {})}>{t('learning.withdraw')}</button> : null}
+        <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t(resultOnly ? 'learning.hurtResultOnly' : 'learning.hurt')}</button>
+        {experience.canEdit && experience.active && !resultOnly ? <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('withdrawn').catch(() => {})}>{t('learning.withdraw')}</button> : null}
       </div>
     </div> : null}
   </article>;
@@ -322,6 +326,6 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate, c
         discard unsent reports and refinements when the search changes. */}
     {(view?.experiences ?? []).map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} busy={busy || refreshing} hidden={!visibleIds.has(experience.id)} navigate={navigate} continueWebWork={continueWebWork}
       revise={(item, changes, evidence) => update(() => api.reviseExperience(pageId, item, changes, evidence))}
-      feedback={(item, verdict, evidence, resultMessageId) => update(() => api.experienceFeedback(pageId, item, verdict, evidence, resultMessageId))} />)}
+      feedback={(item, verdict, evidence, resultMessageId, resultOnly) => update(() => api.experienceFeedback(pageId, item, verdict, evidence, resultMessageId, resultOnly))} />)}
   </Dialog>;
 }

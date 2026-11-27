@@ -344,20 +344,34 @@ def _settled_result(runtime, subject_id: str, context_id: str, event_id: str):
     return original, prior_turn
 
 
-def capture_result_anchor(runtime, subject_id: str, context_id: str, result_message_id: str) -> dict:
+def capture_result_anchor(runtime, subject_id: str, context_id: str, result_message_id: str,
+                          *, experience_id: str | None = None) -> dict:
     """Bind an operator report to an existing result without copying its text.
 
     This proves the result's provenance, not lesson exposure or causal benefit.
     The caller must separately authorize access to the lesson being reported.
     """
     result, turn = _settled_result(runtime, subject_id, context_id, result_message_id)
-    return {
+    source = {
         "result_message_id": result.id,
         "result_turn_id": turn.id,
         "result_content_sha256": hashlib.sha256(result.content.encode("utf-8")).hexdigest(),
         "result_evidence_class": str(result.metadata.get("evidence_class", "UNKNOWN")),
         "result_execution_regime": _result_regime(runtime, result)["execution_regime"],
     }
+    if experience_id is not None and runtime.kernel_service is not None:
+        from .expert_computation import result_posture_offers
+        from pulse_harness.core import TurnStatus
+
+        scope = runtime.harness.scope_for(result.engram_id, context_id).for_turn(turn.id)
+        store = runtime.kernel_service.store
+        try:
+            if store.get_turn(scope).status is TurnStatus.SUCCEEDED:
+                source["result_offered_revisions"] = result_posture_offers(store, scope, experience_id)
+        except ScopeConflict:
+            # Older results may predate native Kernel receipts.
+            pass
+    return source
 
 
 def _result_regime(runtime, original):

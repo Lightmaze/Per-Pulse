@@ -734,6 +734,37 @@ try {
       assert.equal(refined.feedback.at(-2).source.result_message_id, revisedResultId);
       assert.equal(refined.note, outcomeNote);
       await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+      // A later assessment of the old delivered file must not pause the
+      // already refined guidance. The receipt identifies the earlier offer.
+      await page.getByRole('navigation', { name: 'Pages', exact: true })
+        .getByRole('link', { name: /^Decision brief: revised/ }).click();
+      await wait(() => new URL(page.url()).pathname === '/page/' + revisedWorkId, 'late assessment of receiving Work');
+      assert.equal(await receiverComposer.inputValue(), receiverDraft);
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+      await lesson.getByText('In use · v4', { exact: true }).waitFor();
+      await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
+      const lateReport = 'The old brief would permit reliance on a reading without a timestamp.';
+      await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(lateReport);
+      await picker.selectOption(revisedResultId);
+      await lesson.getByRole('checkbox', { name: 'Record this result only (keep current guidance unchanged)', exact: true }).check();
+      await lesson.getByRole('button', { name: 'It hurt · record only', exact: true }).click();
+      await lesson.getByText('In use · v5', { exact: true }).waitFor();
+      const historical = (await experiences(battery)).find(row => row.id === correctedExample.id);
+      assert.equal(historical.active, true);
+      assert.equal(historical.revision, 5);
+      assert.equal(historical.note, outcomeNote);
+      assert.deepEqual(historical.source, correctedExample.source);
+      const report = historical.feedback.at(-1);
+      assert.equal(report.revision, 4);
+      assert.equal(report.verdict, 'harmful');
+      assert.equal(report.source.report_scope, 'result_only');
+      assert.equal(report.source.result_message_id, revisedResultId);
+      assert.deepEqual(report.source.result_offered_revisions, [2]);
+      await lesson.getByText('Later feedback (2)', { exact: true }).click();
+      await lesson.getByText('Historical result only', { exact: false }).waitFor();
+      await lesson.getByText('Experience versions offered before action: v2', { exact: false }).waitFor();
+      await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     } else if (filename === 'withdrawn') {
       // Reopen the source from the actual Activity list and withdraw with a
       // distinct attributed reason, rather than silently pausing the example.
@@ -744,21 +775,21 @@ try {
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
       const lesson = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: 'Offline battery reading procedure', exact: true }) });
-      await lesson.getByText('In use · v4', { exact: true }).waitFor();
+      await lesson.getByText('In use · v5', { exact: true }).waitFor();
       await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
       const withdraw = lesson.getByRole('button', { name: 'Withdraw from use', exact: true });
       assert.equal(await withdraw.isDisabled(), true);
       const reason = 'Withdraw this reusable procedure until a new operating check is available.';
       await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(reason);
       await withdraw.click();
-      await lesson.getByText('Paused · v5', { exact: true }).waitFor();
+      await lesson.getByText('Paused · v6', { exact: true }).waitFor();
       const retired = (await experiences(battery)).find(row => row.id === correctedExample.id);
       assert.equal(retired.active, false);
-      assert.equal(retired.revision, 5);
+      assert.equal(retired.revision, 6);
       assert.deepEqual(retired.source, correctedExample.source);
       assert.equal(retired.feedback.at(-1).verdict, 'withdrawn');
       assert.equal(retired.feedback.at(-1).evidence, reason);
-      await lesson.getByText('Later feedback (4)', { exact: true }).click();
+      await lesson.getByText('Later feedback (5)', { exact: true }).click();
       await lesson.getByText(reason, { exact: false }).waitFor();
       await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     }
@@ -818,7 +849,7 @@ try {
     if (['revised', 'outcome', 'withdrawn'].includes(filename)) {
       const eligible = (await experiences(id)).find(row => row.id === correctedExample.id);
       assert.equal(Boolean(eligible), filename !== 'withdrawn');
-      if (eligible) assert.equal(eligible.revision, filename === 'revised' ? 2 : 4);
+      if (eligible) assert.equal(eligible.revision, filename === 'revised' ? 2 : 5);
     }
     decisionOutputs.push({ id: delivery.id, bytes });
   }
