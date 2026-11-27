@@ -50,6 +50,29 @@ def handler(request):
                                   "artifact_path": "pulse-observation.md"}
             else:
                 assert len(results) == 2
+        elif "Prepare a Markdown brief from the earlier completed background observation." in prompt:
+            results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
+            assert all(row["status"] == "succeeded" for row in results), results
+            if not results:
+                tool_name = "work"
+                tool_arguments = {"op": "find", "query": "The local turn completed.",
+                                  "pulse_results_only": True}
+            else:
+                hits = results[0]["output"]["matches"]
+                assert len(hits) == 1 and hits[0]["role"] == "assistant", hits
+                hit = hits[0]
+                assert hit["pulse_event_id"] != hit["source_event_id"]
+                if len(results) == 1:
+                    tool_name = "mutate_file"
+                    tool_arguments = {"path": "background-brief.md", "expected_digest": None,
+                                      "content": "# Background brief\n\n" + hit["source_excerpt"] + "\n"}
+                elif len(results) == 2:
+                    tool_name = "work"
+                    tool_arguments = {"op": "report", "kind": "result", "note": "Used the completed background observation.",
+                                      "artifact_path": "background-brief.md",
+                                      **{key: hit[key] for key in ("source_work_id", "source_event_id", "source_excerpt")}}
+                else:
+                    assert len(results) == 3
         elif not has_result and "RETAIN_ATTENTION_GOAL" in prompt:
             tool_arguments = {
                 "op": "hold",

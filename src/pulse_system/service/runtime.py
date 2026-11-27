@@ -9519,6 +9519,7 @@ class RuntimeService(_RuntimeShutdownCoordinator):
         before_seq: int | None = None,
         content_query: str | None = None,
         owned_work_messages: bool = False,
+        pulse_results_only: bool = False,
     ) -> list[dict[str, Any]]:
         clauses = [
             "world_id = ?",
@@ -9559,6 +9560,38 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 'AND owned_front.focal_engram_id = ?)'
             )
             params.append(engram_id)
+        if pulse_results_only:
+            # Filter before applying the history cursor/limit. A propagation
+            # input can repeat the very same passage as a completed answer.
+            # Join the original settled activation and its exact native turn,
+            # rather than treating a later assistant message as its result.
+            clauses.append(
+                "causal_events.kind = 'assistant_result' "
+                "AND causal_events.source = 'self' "
+                "AND causal_events.status = 'settled' "
+                "AND causal_events.content <> '' "
+                "AND COALESCE(json_extract(causal_events.metadata, "
+                "'$.execution_regime'), '') <> 'replay' "
+                "AND EXISTS (SELECT 1 FROM causal_events activation "
+                "JOIN harness_turns completed ON completed.rowid = ("
+                "SELECT latest.rowid FROM harness_turns latest "
+                "WHERE latest.event_id = activation.id "
+                "AND latest.engram_id = activation.engram_id "
+                "ORDER BY latest.rowid DESC LIMIT 1) "
+                "WHERE activation.id = causal_events.parent_event_id "
+                "AND activation.world_id = causal_events.world_id "
+                "AND activation.engram_id = causal_events.engram_id "
+                "AND activation.center_id IS causal_events.center_id "
+                "AND activation.causal_id = causal_events.causal_id "
+                "AND activation.kind IN ('spontaneous', 'propagation') "
+                "AND activation.status = 'settled' "
+                "AND completed.world_id = activation.world_id "
+                "AND completed.state = 'settled' "
+                "AND completed.prompt_accepted = 1 "
+                "AND completed.error_code IS NULL "
+                "AND completed.execution_context = 'work:' || activation.center_id "
+                "AND completed.result_event_id = causal_events.id)"
+            )
         if session_admitted:
             # A fresh root is visible on the causal timeline immediately, but
             # is not conversation until begin_turn has projected its message.

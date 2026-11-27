@@ -32,6 +32,11 @@ def test_spontaneous_answer_is_linked_without_inventing_an_activation_message(co
     assert activation.get('resultMessageId') == result
     runtime = client.app.state.pages.runtime
     assert runtime.causal_ledger.get_event(result).parent_event_id == activation['eventId']
+    hits = runtime._causal_message_projection(
+        engram_id=runtime.continuity_engram_id, owned_work_messages=True,
+        session_admitted=True, pulse_results_only=True, content_query='A_FIXTURE_OUTPUT',
+    )
+    assert [hit['event_id'] for hit in hits] == [result]
     before = len(fixture.requests)
     anchored = client.get(f'/api/pages/{work}', params={'sourceMessageId': result}).json()
     assert any(message['id'] == result for message in anchored['messages'])
@@ -138,3 +143,7 @@ def test_background_link_rejects_mismatched_native_evidence(completed_background
     assert current['eventId'] == activation['eventId']
     assert current['messageId'] is None
     assert client.get('/api/pulse/results').json()['results'] == []
+    assert runtime._causal_message_projection(
+        engram_id=runtime.continuity_engram_id, owned_work_messages=True,
+        session_admitted=True, pulse_results_only=True, content_query='A_FIXTURE_OUTPUT',
+    ) == []
