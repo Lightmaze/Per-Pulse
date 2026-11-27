@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import threading
+from collections import Counter
 from typing import Any, Mapping
 
 from pulse_harness.core.contracts import ToolCall, ToolDescriptor, TurnStatus, ActionStatus
@@ -158,6 +159,50 @@ def _history_message_excerpt(message: Mapping[str, Any], query: str | None,
     }
 
 
+_PULSE_TERMS = re.compile(r'[a-zA-Z0-9]+|[\u3400-\u9fff]+')
+
+
+def _pulse_condition_spans(text: str):
+    """Yield lexical condition features with original character coordinates."""
+    for match in _PULSE_TERMS.finditer(text):
+        word = match.group()
+        if word.isascii():
+            if len(word) >= 4:
+                yield word.casefold(), match.start(), match.end()
+        else:
+            # Adjacent Han characters provide word-like clues without a
+            # language model, segmentation dependency or stored index.
+            for index in range(len(word) - 1):
+                yield word[index:index + 2], match.start() + index, match.start() + index + 2
+
+
+def _pulse_answer_cue(content: str, task_terms: set[str]) -> tuple[int, str]:
+    """Rank and quote the same bounded, exact passage from an old answer."""
+    limit = 120
+    spans = [(term, start, end) for term, start, end in _pulse_condition_spans(content)
+             if term in task_terms and end - start <= limit]
+    counts: Counter[str] = Counter()
+    left = 0
+    best = 0
+    offset = 0
+    for term, start, end in spans:
+        counts[term] += 1
+        while end - spans[left][1] > limit:
+            previous = spans[left][0]
+            counts[previous] -= 1
+            if not counts[previous]:
+                del counts[previous]
+            left += 1
+        if len(counts) > best:
+            best = len(counts)
+            first = spans[left][1]
+            # Keep a little leading context without losing the matched span.
+            offset = max(0, first - min(20, limit - (end - first)))
+    if len(content) <= limit:
+        offset = 0
+    return best, content[offset:offset + limit].strip()
+
+
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
                                     ensure_ascii=False, allow_nan=False).encode()).hexdigest()
@@ -191,6 +236,7 @@ class NativeWork:
         cue = ' '.join(event.content.casefold().split())
         matched = []
         cue_words = set(re.findall(r'[a-z0-9]+', cue))
+        cue_terms = {term for term, _, _ in _pulse_condition_spans(event.content)}
         for front in r.world.list_task_fronts(focal_engram_id=scope.engram_id):
             topic = ' '.join(front.title.casefold().split())
             # Short two-character Han titles are ordinary topics in Chinese.
@@ -233,17 +279,17 @@ class NativeWork:
             rows = r._causal_message_projection(center_id=front.center_id,
                 engram_id=scope.engram_id, owned_work_messages=True, session_admitted=True,
                 pulse_results_only=True, before_seq=anchor[0]['seq'], limit=3)
-            topic_words = set(re.findall(r'[a-z0-9]+', front.title.casefold()))
-            task_words = {word for word in cue_words - topic_words if len(word) >= 4}
+            topic_terms = {term for term, _, _ in _pulse_condition_spans(front.title)}
+            task_terms = cue_terms - topic_terms
             seen = set()
             for index, row in enumerate(reversed(rows)):
                 content = row['content'].strip()
-                query = content[:120].strip()
-                if not query or content in seen:
+                if not content or content in seen:
                     continue
                 seen.add(content)
-                answer_words = set(re.findall(r'[a-z0-9]+', content.casefold()))
-                overlap = len(task_words & answer_words)
+                overlap, query = _pulse_answer_cue(content, task_terms)
+                if not query:
+                    continue
                 if index and not overlap:
                     continue
                 candidate = {'work_title': front.title, 'source_work_id': front.id,

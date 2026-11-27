@@ -19,6 +19,20 @@ from per_pulse.service import PulseSettings
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
 
 
+# Both actual settled answers share a preamble longer than the discovery
+# excerpt. The distinguishing operating condition is in the later passage.
+DECISION_PREAMBLE = "Calibration record retained. " * 6
+DECISION_ANSWERS = {
+    "offline": DECISION_PREAMBLE + "Offline battery operation: use stored readings. 离线运行时使用已保存的读数。",
+    "mains": DECISION_PREAMBLE + "Mains battery operation: use outlet checks. 市电运行时检查插座。",
+}
+DECISION_TASKS = {
+    "请为电池离线运行编写决策简报。": ("offline", "offline-zh", "离线运行"),
+    "请为电池市电运行编写决策简报。": ("mains", "mains-zh", "市电运行"),
+    "请为花园灌溉编写决策简报。": ("rain", "rain-zh", None),
+}
+
+
 def handler(request):
     messages = json.loads(request.content)["messages"]
     tool_arguments = None
@@ -121,11 +135,15 @@ def handler(request):
                                   "artifact_path": path}
             else:
                 assert len(results) == 2
-        elif isinstance(task, str) and task.startswith("Prepare a Markdown decision brief for "):
-            mode = task.split(" under ", 1)[1].split()[0]
-            expected = {"offline": "Offline battery operation: use stored readings.",
-                        "mains": "Mains battery operation: use outlet checks."}.get(mode)
-            path = "decision-" + mode + ".md"
+        elif isinstance(task, str) and (task.startswith("Prepare a Markdown decision brief for ")
+                                       or task in DECISION_TASKS):
+            if task in DECISION_TASKS:
+                mode, filename, condition = DECISION_TASKS[task]
+            else:
+                mode = task.split(" under ", 1)[1].split()[0]
+                filename, condition = mode, mode.capitalize()
+            expected = DECISION_ANSWERS.get(mode)
+            path = "decision-" + filename + ".md"
             results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
             assert all(row["status"] == "succeeded" for row in results), results
             candidates = []
@@ -139,10 +157,13 @@ def handler(request):
                     candidates.extend(packet["candidates"])
             if not results:
                 if expected:
-                    assert candidates and candidates[0]["query"] == expected, candidates
+                    assert candidates and condition in candidates[0]["query"], candidates
+                    assert candidates[0]["query"] in expected, candidates
+                    assert candidates[0]["query"] not in DECISION_ANSWERS[
+                        "mains" if mode == "offline" else "offline"], candidates
                     assert candidates[0]["work_title"] == "电池", candidates
                     if mode == "offline":
-                        assert len(candidates) == 2 and candidates[1]["query"].startswith("Mains battery"), candidates
+                        assert len(candidates) == 2, candidates
                         assert candidates[0]["source_event_id"] != candidates[1]["source_event_id"], candidates
                     tool_name = "work"
                     tool_arguments = {"op": "find", "pulse_results_only": True, "query": candidates[0]["query"]}
@@ -188,10 +209,10 @@ def handler(request):
             if message["role"] != "user":
                 continue
             if message.get("content") == "Set the test operating mode to offline.":
-                content = "Offline battery operation: use stored readings."
+                content = DECISION_ANSWERS["offline"]
                 break
             if message.get("content") == "Set the test operating mode to mains.":
-                content = "Mains battery operation: use outlet checks."
+                content = DECISION_ANSWERS["mains"]
                 break
     if tool_arguments is not None:
         # One turn can call the same tool more than once (find, then report).

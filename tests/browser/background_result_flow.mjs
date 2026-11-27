@@ -583,13 +583,19 @@ try {
   await post('/api/pulse/weekly-usage', { enabled: true, weeklyLimit: 100 }, 200, 'PATCH');
   const battery = await createWork('电池', 'Set the test operating mode to offline.');
   const answers = {};
+  const preamble = 'Calibration record retained. '.repeat(6);
+  const expectedAnswers = {
+    offline: preamble + 'Offline battery operation: use stored readings. 离线运行时使用已保存的读数。',
+    mains: preamble + 'Mains battery operation: use outlet checks. 市电运行时检查插座。',
+  };
+  assert.equal(expectedAnswers.offline.slice(0, 120), expectedAnswers.mains.slice(0, 120));
   for (const mode of ['offline', 'mains']) {
     if (mode === 'mains') {
       await post('/api/pages/' + battery + '/messages', { content: 'Set the test operating mode to mains.' }, 202);
       await wait(async () => {
         const snapshot = await get('/api/pages/' + battery);
         return snapshot.page.status === 'idle' && snapshot.messages.some(row =>
-          row.role === 'assistant' && row.content === 'Mains battery operation: use outlet checks.');
+          row.role === 'assistant' && row.content === expectedAnswers.mains);
       }, 'receiver mode changed');
     }
     const source = await createWork('Independent ' + mode + ' observation');
@@ -604,8 +610,7 @@ try {
     }, 'settled ' + mode + ' battery answer');
     const answer = (await get('/api/pages/' + battery)).messages.find(row => row.id === activation.resultMessageId);
     assert.equal(answer.role, 'assistant');
-    assert.equal(answer.content, mode === 'offline' ? 'Offline battery operation: use stored readings.'
-      : 'Mains battery operation: use outlet checks.');
+    assert.equal(answer.content, expectedAnswers[mode]);
     answers[mode] = answer;
   }
   assert.notEqual(answers.offline.id, answers.mains.id);
@@ -616,18 +621,25 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(base);
   const decisionOutputs = [];
-  for (const [topic, mode] of [['电池', 'offline'], ['电池', 'mains'], ['garden irrigation', 'rain']]) {
+  const decisionCases = [
+    ['offline', 'offline', 'Prepare a Markdown decision brief for 电池 under offline constraints.'],
+    ['mains', 'mains', 'Prepare a Markdown decision brief for 电池 under mains constraints.'],
+    ['rain', 'rain', 'Prepare a Markdown decision brief for garden irrigation under rain constraints.'],
+    ['offline', 'offline-zh', '请为电池离线运行编写决策简报。'],
+    ['mains', 'mains-zh', '请为电池市电运行编写决策简报。'],
+    ['rain', 'rain-zh', '请为花园灌溉编写决策简报。'],
+  ];
+  for (const [mode, filename, instruction] of decisionCases) {
     const id = (await post('/api/pages', {
-      title: 'Decision brief: ' + mode,
-      instruction: 'Prepare a Markdown decision brief for ' + topic + ' under ' + mode + ' constraints.',
+      title: 'Decision brief: ' + filename, instruction,
     }, 201)).page.id;
-    const path = 'decision-' + mode + '.md';
+    const path = 'decision-' + filename + '.md';
     let delivery;
     await wait(async () => {
       delivery = (await get('/api/pages/home')).messages.find(row =>
         row.sourcePageId === id && row.reportedArtifact?.path === path);
       return delivery;
-    }, 'competing result decision brief: ' + mode, 30000);
+    }, 'competing result decision brief: ' + filename, 30000);
     assert.equal(delivery.content.includes('Verified earlier Work excerpt'), Boolean(answers[mode]));
     if (answers[mode]) {
       assert.ok(delivery.content.includes(answers[mode].id));
@@ -654,7 +666,7 @@ try {
     assert.deepEqual(await readFile(await (await download).path()), output.bytes);
   }
   assert.equal((await get('/api/pulse')).budget.used, 2);
-  checks.push('A short Chinese Work title activates competing real settled answers after restart: offline selects the older answer, mains selects the newer answer, and an unrelated task makes a fresh file; exact source event IDs, all three file bytes and Pulse allowance survive.');
+  checks.push('English and fully Chinese ordinary tasks distinguish two settled answers with identical 120-character prefixes after restart: offline selects the older answer, mains selects the newer answer, and unrelated tasks make fresh files; exact source event IDs, all six file bytes and Pulse allowance survive.');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
