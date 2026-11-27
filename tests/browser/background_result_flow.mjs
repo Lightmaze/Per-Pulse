@@ -631,10 +631,14 @@ try {
   ];
   decisionCases.push(
     ['offline', 'revised', 'Prepare a Markdown decision brief for 电池 under offline constraints in decision-revised.md.'],
+    ['offline', 'outcome', 'Prepare a Markdown decision brief for 电池 under offline constraints in decision-outcome.md.'],
     ['offline', 'withdrawn', 'Prepare a Markdown decision brief for 电池 under offline constraints in decision-withdrawn.md.'],
   );
   const correctionAdvice = 'Check the timestamp of stored readings before relying on the historical answer.';
-  let correctedExample;
+  const outcomeAdvice = 'If the stored reading has no timestamp, obtain a fresh reading before relying on it.';
+  const outcomeNote = 'For offline battery work, verify the timestamp of stored readings before use. If it is missing, obtain a fresh reading.';
+  const reportedOutcome = 'The delivered brief checks the timestamp but does not say what to do when it is missing.';
+  let correctedExample, revisedWorkId, revisedResultId;
   for (const [mode, filename, instruction] of decisionCases) {
     if (filename === 'revised') {
       // Follow the actual Activity entry into its receiving Work. The local
@@ -671,6 +675,65 @@ try {
       await lesson.getByRole('button', { name: 'Go to original result', exact: true }).click();
       await wait(() => new URL(page.url()).hash === '#message-' + answers.offline.id, 'saved original Pulse answer');
       await page.getByRole('dialog', { name: 'Lessons and examples', exact: true }).waitFor({ state: 'hidden' });
+    } else if (filename === 'outcome') {
+      // Report the limitation of the actual delivered file from its receiving
+      // Work. The operator anchors the report to that Work's settled reply.
+      await page.getByRole('navigation', { name: 'Pages', exact: true })
+        .getByRole('link', { name: /^Decision brief: revised/ }).click();
+      await wait(() => new URL(page.url()).pathname === '/page/' + revisedWorkId, 'receiving Work');
+      const receiverComposer = page.getByRole('textbox', { name: 'Message Decision brief: revised', exact: true });
+      const receiverDraft = 'Keep this draft while reviewing the missing fallback.';
+      await receiverComposer.fill(receiverDraft);
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+      const lesson = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: 'Offline battery reading procedure', exact: true }) });
+      await lesson.getByText('In use · v2', { exact: true }).waitFor();
+      await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
+      await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(reportedOutcome);
+      const picker = lesson.getByRole('combobox', { name: 'Link a result from this page (optional)', exact: true });
+      await picker.selectOption(revisedResultId);
+      await lesson.getByRole('button', { name: 'No clear benefit', exact: true }).click();
+      await lesson.getByText('In use · v3', { exact: true }).waitFor();
+      const receiving = (await experiences(revisedWorkId)).find(row => row.id === correctedExample.id);
+      assert.equal(receiving.canEdit, false);
+      assert.equal(receiving.feedback.length, 1);
+      assert.equal(receiving.feedback[0].source.result_message_id, revisedResultId);
+      assert.equal(receiving.feedback[0].source.page_id, revisedWorkId);
+      assert.equal(receiving.feedback[0].evidence, reportedOutcome);
+      await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+      // The source owner can inspect the linked actual result and return.
+      await page.getByRole('button', { name: 'Activity', exact: true }).click();
+      const activity = page.locator('.pulse-activity-list li').filter({ hasText: 'Independent offline observation' });
+      await activity.getByRole('button', { name: '电池 · Open local message', exact: true }).click();
+      await wait(() => new URL(page.url()).pathname === '/page/' + battery, 'source after receiving feedback');
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+      await lesson.getByText('In use · v3', { exact: true }).waitFor();
+      const owner = (await experiences(battery)).find(row => row.id === correctedExample.id);
+      assert.equal(owner.feedback.at(-1).source.relation, 'shared_recipient');
+      assert.equal(owner.feedback.at(-1).source.result_message_id, revisedResultId);
+      assert.equal(owner.feedback.at(-1).revision, 2);
+      assert.deepEqual(owner.source, correctedExample.source);
+      await lesson.getByText('Later feedback (2)', { exact: true }).click();
+      await lesson.getByText(reportedOutcome, { exact: false }).waitFor();
+      await lesson.getByRole('button', { name: 'View reported result', exact: true }).click();
+      await wait(() => new URL(page.url()).pathname === '/page/' + revisedWorkId && new URL(page.url()).hash === '#message-' + encodeURIComponent(revisedResultId), 'exact receiving outcome');
+      await page.locator('#message-' + revisedResultId).waitFor();
+      assert.equal(await receiverComposer.inputValue(), receiverDraft);
+      await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+      await wait(() => new URL(page.url()).pathname === '/page/' + battery, 'return to original procedure');
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+      await lesson.getByRole('button', { name: 'Edit example note', exact: true }).click();
+      await lesson.getByRole('textbox', { name: 'What should we notice? (optional)', exact: true }).fill(outcomeNote);
+      await lesson.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).fill(reportedOutcome);
+      await lesson.getByRole('button', { name: 'Save refinement', exact: true }).click();
+      await lesson.getByText('In use · v4', { exact: true }).waitFor();
+      const refined = (await experiences(battery)).find(row => row.id === correctedExample.id);
+      assert.deepEqual(refined.source, correctedExample.source);
+      assert.equal(refined.feedback.at(-2).source.result_message_id, revisedResultId);
+      assert.equal(refined.note, outcomeNote);
+      await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     } else if (filename === 'withdrawn') {
       // Reopen the source from the actual Activity list and withdraw with a
       // distinct attributed reason, rather than silently pausing the example.
@@ -681,25 +744,25 @@ try {
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
       const lesson = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: 'Offline battery reading procedure', exact: true }) });
-      await lesson.getByText('In use · v2', { exact: true }).waitFor();
+      await lesson.getByText('In use · v4', { exact: true }).waitFor();
       await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
       const withdraw = lesson.getByRole('button', { name: 'Withdraw from use', exact: true });
       assert.equal(await withdraw.isDisabled(), true);
       const reason = 'Withdraw this reusable procedure until a new operating check is available.';
       await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(reason);
       await withdraw.click();
-      await lesson.getByText('Paused · v3', { exact: true }).waitFor();
+      await lesson.getByText('Paused · v5', { exact: true }).waitFor();
       const retired = (await experiences(battery)).find(row => row.id === correctedExample.id);
       assert.equal(retired.active, false);
-      assert.equal(retired.revision, 3);
+      assert.equal(retired.revision, 5);
       assert.deepEqual(retired.source, correctedExample.source);
       assert.equal(retired.feedback.at(-1).verdict, 'withdrawn');
       assert.equal(retired.feedback.at(-1).evidence, reason);
-      await lesson.getByText('Later feedback (2)', { exact: true }).click();
+      await lesson.getByText('Later feedback (4)', { exact: true }).click();
       await lesson.getByText(reason, { exact: false }).waitFor();
       await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     }
-    if (filename === 'revised' || filename === 'withdrawn') {
+    if (['revised', 'outcome', 'withdrawn'].includes(filename)) {
       await stop(server); server = start(true, false, decisionDir, true);
       await wait(async () => (await fetch(base + '/api/health')).ok, 'reopen after experience ' + filename);
       await page.goto(base);
@@ -708,7 +771,7 @@ try {
       assert.equal((await get('/api/pulse')).budget.used, 2);
     }
     let id;
-    if (filename === 'revised' || filename === 'withdrawn') {
+    if (['revised', 'outcome', 'withdrawn'].includes(filename)) {
       await page.getByRole('button', { name: 'Create a page', exact: true }).click();
       await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Decision brief: ' + filename);
       await page.getByRole('textbox', { name: 'Where should we begin?', exact: true }).fill(instruction);
@@ -733,7 +796,15 @@ try {
       assert.ok(delivery.content.includes(answers[mode].content));
       assert.ok(!delivery.content.includes(answers[mode === 'offline' ? 'mains' : 'offline'].content));
     }
-    if (filename === 'revised' || filename === 'withdrawn') {
+    if (filename === 'revised') {
+      revisedWorkId = id;
+      await wait(async () => {
+        const snapshot = await get('/api/pages/' + id);
+        revisedResultId = snapshot.messages.find(row => row.role === 'assistant' && row.status === 'settled')?.id;
+        return snapshot.page.status === 'idle' && revisedResultId;
+      }, 'settled receiving result for delivered file');
+    }
+    if (['revised', 'outcome', 'withdrawn'].includes(filename)) {
       await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
     }
     const card = page.locator('#message-' + delivery.id);
@@ -743,11 +814,11 @@ try {
     const bytes = await readFile(await (await download).path());
     assert.equal(bytes.toString('utf8'), '# Decision brief\n\n' +
       (answers[mode]?.content ?? 'Check the current evidence.') + '\n' +
-      (filename === 'revised' ? '\n' + correctionAdvice + '\n' : ''));
-    if (filename === 'revised' || filename === 'withdrawn') {
+      (filename === 'revised' ? '\n' + correctionAdvice + '\n' : filename === 'outcome' ? '\n' + outcomeAdvice + '\n' : ''));
+    if (['revised', 'outcome', 'withdrawn'].includes(filename)) {
       const eligible = (await experiences(id)).find(row => row.id === correctedExample.id);
-      assert.equal(Boolean(eligible), filename === 'revised');
-      if (eligible) assert.equal(eligible.revision, 2);
+      assert.equal(Boolean(eligible), filename !== 'withdrawn');
+      if (eligible) assert.equal(eligible.revision, filename === 'revised' ? 2 : 4);
     }
     decisionOutputs.push({ id: delivery.id, bytes });
   }
@@ -764,7 +835,7 @@ try {
   assert.equal((await get('/api/pulse')).budget.used, 2);
   checks.push('English and fully Chinese ordinary tasks distinguish two settled answers with identical 120-character prefixes after restart: offline selects the older answer, mains selects the newer answer, and unrelated tasks make fresh files; exact source event IDs, all six file bytes and Pulse allowance survive.');
 
-  checks.push('A person opens the original propagation Work from Activity, saves and refines the exact settled Pulse example through rendered controls, and creates a later ordinary Work whose file reflects the real Posture contribution. An attributed withdrawal through the source experience UI excludes it from a fresh Work, while the original answer, all delivered files and allowance remain intact through restart.');
+  checks.push('A person reports a limitation of a delivered file from its receiving Work, attaches the actual settled result, follows that exact report from the source procedure and returns without losing the receiving draft. The refined source yields a different later file before withdrawal; original answers, all nine delivered files and allowance survive restart.');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
