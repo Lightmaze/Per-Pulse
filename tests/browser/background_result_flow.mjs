@@ -482,6 +482,48 @@ try {
   assert.equal((await get('/api/pulse')).budget.used, 1);
   checks.push('A saved Pulse answer is adopted Home, only the chosen passage enters a later Work, and its actual delivered file and original source survive a cold restart.');
 
+  // No selected source or prior Work ID is handed to this ordinary later
+  // Work. The explicit fixture chooses the native find tool and derives its
+  // file and report source from the actual returned historical answer.
+  const independent = (await post('/api/pages', {
+    title: 'Independent background brief',
+    instruction: 'Prepare a Markdown brief from the earlier completed background observation.',
+  }, 201)).page.id;
+  let independentDelivery;
+  try {
+    await wait(async () => {
+      independentDelivery = (await get('/api/pages/home')).messages.find(row =>
+        row.sourcePageId === independent && row.reportedArtifact?.path === 'background-brief.md');
+      return independentDelivery;
+    }, 'independent Work discovers and uses completed Pulse answer', 30000);
+  } catch (error) {
+    // This isolated synthetic World is safe to print. Keep the failed Work's
+    // native status and tool/message evidence instead of only a Home timeout.
+    console.error('Independent Work snapshot:', JSON.stringify(
+      await get('/api/pages/' + independent).catch(() => null)));
+    throw error;
+  }
+  assert.ok(independentDelivery.content.includes('Verified earlier Work excerpt'));
+  assert.ok(independentDelivery.content.includes('Receiving propagation'));
+  assert.ok(independentDelivery.content.includes(received.find(row => row.id === propagated.resultMessageId).content));
+  await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
+  const independentCard = page.locator('#message-' + independentDelivery.id);
+  await independentCard.getByRole('button', { name: 'Open verified file' }).click();
+  const briefDownload = page.waitForEvent('download');
+  await independentCard.getByRole('button', { name: 'Download file', exact: true }).click();
+  const briefBytes = await readFile(await (await briefDownload).path());
+  assert.equal(briefBytes.toString('utf8'), '# Background brief\n\n' +
+    received.find(row => row.id === propagated.resultMessageId).content + '\n');
+  await stop(server); server = start(true, false, propagationDir, true);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'restart independent brief');
+  await page.goto(base);
+  await independentCard.getByRole('button', { name: 'Open verified file' }).click();
+  const reopenedBrief = page.waitForEvent('download');
+  await independentCard.getByRole('button', { name: 'Download file', exact: true }).click();
+  assert.deepEqual(await readFile(await (await reopenedBrief).path()), briefBytes);
+  assert.equal((await get('/api/pulse')).budget.used, 1);
+  checks.push('An ordinary later Work finds a completed Pulse answer without a selected source, reports its verified excerpt with an actual file, and retains both after restart.');
+
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
 } catch (error) {

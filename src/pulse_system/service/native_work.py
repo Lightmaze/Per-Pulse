@@ -35,6 +35,7 @@ SCHEMA = {'type': 'object', 'properties': {
     'before_seq': {'type': 'integer', 'minimum': 1},
     'query': {'type': 'string', 'maxLength': 160},
     'include_files': {'type': 'boolean'},
+    'pulse_results_only': {'type': 'boolean'},
     'file_before_action_id': {'type': 'string', 'maxLength': 256},
     'title': {'type': 'string', 'maxLength': 160},
     'instruction': {'type': 'string', 'maxLength': 8192},
@@ -53,7 +54,7 @@ _FIELDS = {'list': set(), 'search': {'query'}, 'find': {'query'}, 'inspect': {'w
 _HISTORY_SOURCE_FIELDS = frozenset({'source_work_id', 'source_event_id', 'source_excerpt'})
 _INPUT_FILE_FIELDS = frozenset({'input_file_work_id', 'input_file_artifact_id'})
 _OPTIONAL_FIELDS = {'list': {'after_work_id'}, 'search': {'after_work_id'},
-                    'inspect': {'before_seq', 'query', 'include_files', 'file_before_action_id'}, 'find': {'before_seq'},
+                    'inspect': {'before_seq', 'query', 'include_files', 'file_before_action_id'}, 'find': {'before_seq', 'pulse_results_only'},
                     'report': {'contributions', 'artifact_id', 'artifact_path', 'replace_report_action_id'} | _HISTORY_SOURCE_FIELDS | _INPUT_FILE_FIELDS,
                     'create': _HISTORY_SOURCE_FIELDS, 'send': _HISTORY_SOURCE_FIELDS}
 
@@ -62,8 +63,8 @@ def descriptor() -> ToolDescriptor:
     return ToolDescriptor(NAME,
         'Home: create(title, instruction) starts a Work. '
         'Home/Work: list(after_work_id?) or search(query, after_work_id?) finds '
-        'owned Works; next_after_work_id pages. find(query, before_seq?) searches '
-        'Work messages; next_before_seq pages. '
+        'owned Works; next_after_work_id pages. find(query, before_seq?, pulse_results_only?) '
+        'searches Work messages or completed Pulse answers; next_before_seq pages. '
         'inspect(work_id, query?, before_seq?, include_files?) reads 12 messages '
         'and optional file receipts (path, SHA-256, action ID; next_file_before_action_id). '
         'Home: send(work_id, instruction) queues a follow-up. '
@@ -105,9 +106,9 @@ def validate(arguments: Mapping[str, Any]) -> dict[str, Any]:
     for key, value in values.items():
         if key == 'contributions':
             continue
-        if key == 'include_files':
+        if key in {'include_files', 'pulse_results_only'}:
             if type(value) is not bool:
-                raise ValueError('invalid include_files')
+                raise ValueError(f'invalid {key}')
             continue
         if key == 'before_seq':
             if type(value) is not int or value < 1:
@@ -621,6 +622,7 @@ class NativeWork:
                     engram_id=subject, owned_work_messages=True,
                     session_admitted=True, content_query=query,
                     before_seq=a.get('before_seq'), limit=13,
+                    pulse_results_only=a.get('pulse_results_only', False),
                 )
                 more = len(rows) > 12
                 selected = rows[-12:]
@@ -640,12 +642,15 @@ class NativeWork:
                         'source_event_id': message['event_id'],
                         'source_excerpt': excerpt['content'],
                         'role': excerpt['role'], 'seq': excerpt['seq'],
+                        **({'pulse_event_id': message['parent_event_id']}
+                           if a.get('pulse_results_only') else {}),
                         'content_original_chars': excerpt['content_original_chars'],
                         'content_excerpt_start': excerpt['content_excerpt_start'],
                         'content_excerpt_end': excerpt['content_excerpt_end'],
                         'content_truncated': excerpt['content_truncated'],
                     })
                 output = {'matches': matches, 'searched_field': 'message_content',
+                    'pulse_results_only': a.get('pulse_results_only', False),
                     'scope': 'current_subject_only', 'more_matches': more,
                     'next_before_seq': selected[0]['seq'] if more else None,
                     'search_complete': not more,
