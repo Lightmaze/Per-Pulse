@@ -28,7 +28,7 @@ const start = (disablePulse = false, spontaneous = true, dataDir = directory, de
     ...(installedWheel ? ['-I'] : []),
     join(root, 'tests/browser/attention_server.py'), '--data-dir', dataDir,
     '--port', String(port), ...(spontaneous ? ['--spontaneous'] : []), '--posture', ...(disablePulse ? ['--no-pulse'] : []), ...(deliverables ? ['--deliverables'] : []),
-  ], { cwd: installedWheel ? dataDir : root, stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { cwd: installedWheel ? directory : root, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', value => { serverLog += value; });
   child.stderr.on('data', value => { serverLog += value; });
   return child;

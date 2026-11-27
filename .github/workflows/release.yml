@@ -160,7 +160,7 @@ jobs:
           previous="$RUNNER_TEMP/per-pulse-previous"
           mkdir -p "$previous"
           gh release download v0.1.0a39 --repo "$GITHUB_REPOSITORY" --pattern 'per_pulse-0.1.0a39-py3-none-any.whl' --dir "$previous"
-          echo "494f4c864816d3b50995a4fb0f33a2f4860539754bccd0db9c1a390387ea2617  $previous/per_pulse-0.1.0a39-py3-none-any.whl" | sha256sum -c -
+          echo "f679c662c1f6fa9b7947fabbd6f0ddf2c363044bf9a4f865fae5971fd586a1e0  $previous/per_pulse-0.1.0a39-py3-none-any.whl" | sha256sum -c -
           python -m venv "$previous/venv"
           "$previous/venv/bin/python" -m pip install --disable-pip-version-check "$previous/"*.whl
           "$previous/venv/bin/python" tests/release/installed_upgrade.py seed "$previous"
