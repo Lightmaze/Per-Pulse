@@ -544,6 +544,14 @@ try {
   await page.getByRole('button', { name: 'Refresh experience', exact: true }).click();
   await lesson.getByText('In use · v12', { exact: true }).waitFor();
   assert.equal(await reportField.inputValue(), conflictDraft);
+  await lesson.getByRole('alert').getByText('You started this report on v11; the experience is now v12.', { exact: false }).waitFor();
+  assert.equal(await lesson.getByRole('button', { name: 'It helped', exact: true }).isDisabled(), true);
+  assert.equal(await lesson.getByRole('button', { name: 'It hurt · pause', exact: true }).isDisabled(), true);
+  await changeInterfaceLanguage('zh-CN');
+  await lesson.getByRole('alert').getByText('你开始记录反馈时使用的是 v11，当前经验已更新至 v12。', { exact: false }).waitFor();
+  assert.equal(await lesson.getByRole('textbox', { name: '结果发生了什么变化？', exact: true }).inputValue(), conflictDraft);
+  await changeInterfaceLanguage('en');
+  await lesson.getByRole('button', { name: 'Report on the current version', exact: true }).click();
   await lesson.getByRole('button', { name: 'It helped', exact: true }).click();
   await lesson.getByText('In use · v13', { exact: true }).waitFor();
   await lesson.getByText('Later feedback (2)', { exact: true }).waitFor();

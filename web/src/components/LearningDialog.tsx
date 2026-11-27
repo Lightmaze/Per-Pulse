@@ -58,6 +58,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   const lesson = experience.representation === 'example' ? undefined : experience;
   const [evidence, setEvidence] = useState('');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackRevision, setFeedbackRevision] = useState(experience.revision);
   const [resultMessageId, setResultMessageId] = useState('');
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineRevision, setRefineRevision] = useState(experience.revision);
@@ -107,8 +108,14 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   // Inspect the original Work without losing the receiving Work's place or draft.
   // Same-page source links need no new return origin.
   const sourceOrigin = experience.sourcePageId && experience.sourcePageId !== pageId ? { pageId } : undefined;
+  const feedbackStale = feedbackRevision !== experience.revision;
+  const toggleFeedback = () => {
+    if (!feedbackOpen && !evidence.trim() && !resultMessageId) setFeedbackRevision(experience.revision);
+    setFeedbackOpen(value => !value);
+  };
   const submit = async (verdict: LessonVerdict) => {
-    await feedback(experience, verdict, evidence.trim(), resultMessageId || undefined);
+    if (feedbackStale) return;
+    await feedback({ ...experience, revision: feedbackRevision }, verdict, evidence.trim(), resultMessageId || undefined);
     setEvidence(''); setResultMessageId(''); setFeedbackOpen(false);
   };
   return <article hidden={hidden} className={`lesson ${experience.active ? '' : 'lesson-paused'}`}>
@@ -193,7 +200,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
         {t('learning.continueWebWork')}
       </button>
     </div> : null}
-    {experience.canReport ? <div className="lesson-actions"><button type="button" className="text-button" disabled={busy} onClick={() => setFeedbackOpen(value => !value)}>{t('learning.giveFeedback')}</button></div> : null}
+    {experience.canReport ? <div className="lesson-actions"><button type="button" className="text-button" disabled={busy} onClick={toggleFeedback}>{t('learning.giveFeedback')}</button></div> : null}
     {refineOpen && experience.canEdit ? <div className="lesson-feedback">
       <p className="lesson-note">{t(example ? 'learning.refineExampleHelp' : 'learning.refineHelp')}</p>
       {refinementStale ? <div className="form-error" role="alert">
@@ -232,6 +239,10 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
     {experience.scope === 'subject' && experience.canEdit ? <p className="lesson-note">{t(example ? 'learning.exampleSharingNote' : 'learning.sharingNote')}</p> : null}
     {feedbackOpen && experience.canReport ? <div className="lesson-feedback">
       {!experience.canEdit ? <p className="lesson-note">{t('learning.receivingFeedbackNote')}</p> : null}
+      {feedbackStale ? <div className="form-error" role="alert">
+        <p>{t('learning.feedbackStale', { from: feedbackRevision, to: experience.revision })}</p>
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => setFeedbackRevision(experience.revision)}>{t('learning.reviewFeedbackRevision')}</button>
+      </div> : null}
       <label className="field-label" htmlFor={`feedback-${experience.id}`}>{t('learning.changed')}</label>
       <textarea id={`feedback-${experience.id}`} rows={3} value={evidence} maxLength={1500} disabled={busy} onChange={event => setEvidence(event.target.value)} placeholder={t('learning.feedbackPlaceholder')} />
       <label className="field-label" htmlFor={`feedback-result-${experience.id}`}>{t('learning.selectResult')}</label>
@@ -241,10 +252,10 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       </select>
       <p className="lesson-note" id={`feedback-result-help-${experience.id}`}>{t('learning.resultHelp')}</p>
       <div className="lesson-actions">
-        <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button>
-        <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('not_useful').catch(() => {})}>{t('learning.noBenefit')}</button>
-        <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t('learning.hurt')}</button>
-        {experience.canEdit && experience.active ? <button className="secondary-button" disabled={busy || !evidence.trim()} onClick={() => void submit('withdrawn').catch(() => {})}>{t('learning.withdraw')}</button> : null}
+        <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button>
+        <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('not_useful').catch(() => {})}>{t('learning.noBenefit')}</button>
+        <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t('learning.hurt')}</button>
+        {experience.canEdit && experience.active ? <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('withdrawn').catch(() => {})}>{t('learning.withdraw')}</button> : null}
       </div>
     </div> : null}
   </article>;

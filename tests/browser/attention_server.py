@@ -34,8 +34,11 @@ DECISION_TASKS = {
 
 CORRECTION_NOTE = "For offline battery work, verify the timestamp of stored readings before use."
 CORRECTION_ADVICE = "Check the timestamp of stored readings before relying on the historical answer."
+OUTCOME_NOTE = "For offline battery work, verify the timestamp of stored readings before use. If it is missing, obtain a fresh reading."
+OUTCOME_ADVICE = "If the stored reading has no timestamp, obtain a fresh reading before relying on it."
 CORRECTION_TASKS = {
     "Prepare a Markdown decision brief for 电池 under offline constraints in decision-revised.md.": "revised",
+    "Prepare a Markdown decision brief for 电池 under offline constraints in decision-outcome.md.": "outcome",
     "Prepare a Markdown decision brief for 电池 under offline constraints in decision-withdrawn.md.": "withdrawn",
 }
 
@@ -64,6 +67,16 @@ def handler(request):
                     assert not lesson["encounter_available"] and "encounter" not in lesson, lesson
                     assert lesson["feedback"] == [{"verdict": "revised", "revision": 1}], lesson
                     content = CORRECTION_ADVICE
+                elif CORRECTION_TASKS[task] == "outcome":
+                    assert len(matching) == 1, matching
+                    lesson = matching[0]
+                    assert lesson["revision"] == 4 and lesson["note"] == OUTCOME_NOTE, lesson
+                    assert lesson["excerpt"] == DECISION_ANSWERS["offline"], lesson
+                    assert not lesson["encounter_available"] and "encounter" not in lesson, lesson
+                    assert lesson["feedback"] == [{"verdict": "revised", "revision": 1},
+                                                  {"verdict": "not_useful", "revision": 2},
+                                                  {"verdict": "revised", "revision": 3}], lesson
+                    content = OUTCOME_ADVICE
                 else:
                     assert not matching, matching
     elif "UNTRUSTED_REVIEW_DATA_JSON" in material:
@@ -209,12 +222,13 @@ def handler(request):
                     tool_name = "mutate_file"
                     text = "# Decision brief\n\n" + hit["source_excerpt"] + "\n"
                     if task in CORRECTION_TASKS:
+                        advice = OUTCOME_ADVICE if filename == "outcome" else CORRECTION_ADVICE
                         contributed = any(isinstance(row.get("content"), str)
                                           and "POSTURE_WORK_CONTRIBUTION" in row["content"]
-                                          and CORRECTION_ADVICE in row["content"] for row in messages)
-                        assert contributed == (filename == "revised"), messages
+                                          and advice in row["content"] for row in messages)
+                        assert contributed == (filename in {"revised", "outcome"}), messages
                         if contributed:
-                            text += "\n" + CORRECTION_ADVICE + "\n"
+                            text += "\n" + advice + "\n"
                     tool_arguments = {"path": path, "expected_digest": None, "content": text}
                 elif len(results) == 2:
                     tool_name = "work"
