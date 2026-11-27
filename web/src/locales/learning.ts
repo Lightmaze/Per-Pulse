@@ -134,6 +134,7 @@ export const learningEnglish = {
   'learning.helped': "It helped",
   'learning.noBenefit': "No clear benefit",
   'learning.hurt': "It hurt · pause",
+  'learning.withdraw': "Withdraw from use",
 } as const;
 export const learningChinese: Record<keyof typeof learningEnglish, string> = {
   'learning.pulseRefinement': "Pulse 已修订这条解释。",
@@ -270,4 +271,5 @@ export const learningChinese: Record<keyof typeof learningEnglish, string> = {
   'learning.helped': "确实有帮助",
   'learning.noBenefit': "没有明显帮助",
   'learning.hurt': "造成了负面结果 · 暂停",
+  'learning.withdraw': "撤回使用",
 };

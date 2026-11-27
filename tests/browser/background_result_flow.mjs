@@ -637,33 +637,67 @@ try {
   let correctedExample;
   for (const [mode, filename, instruction] of decisionCases) {
     if (filename === 'revised') {
-      // The operator retains a real settled Pulse answer, then corrects its
-      // reusable interpretation. The original answer is never rewritten.
-      const saved = (await post('/api/pages/' + battery + '/posture/examples', {
-        sourceMessageId: answers.offline.id, excerpt: answers.offline.content,
-        title: 'Offline battery reading procedure',
-        note: 'For offline battery work, use stored readings.',
-      }, 201)).experience;
+      // Follow the actual Activity entry into its receiving Work. The local
+      // propagation message and the settled answer are distinct source rows.
+      await page.getByRole('button', { name: 'Activity', exact: true }).click();
+      const activity = page.locator('.pulse-activity-list li').filter({ hasText: 'Independent offline observation' });
+      await activity.getByRole('button', { name: '电池 · Open local message', exact: true }).click();
+      await wait(() => new URL(page.url()).pathname === '/page/' + battery, 'offline propagation Work');
+      const original = page.locator('#message-' + answers.offline.id);
+      await original.waitFor();
+      await original.getByRole('button', { name: 'Save example', exact: true }).click();
+      const save = page.getByRole('dialog', { name: 'Save example', exact: true });
+      assert.equal(await save.getByRole('textbox', { name: 'Original passage', exact: true }).inputValue(), answers.offline.content);
+      await save.getByRole('textbox', { name: 'Example name', exact: true }).fill('Offline battery reading procedure');
+      await save.getByRole('textbox', { name: 'What should we notice? (optional)', exact: true }).fill('For offline battery work, use stored readings.');
+      await save.getByRole('button', { name: 'Save example', exact: true }).click();
+      const lesson = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: 'Offline battery reading procedure', exact: true }) });
+      await lesson.getByText('In use · v1', { exact: true }).waitFor();
+      const saved = (await experiences(battery)).find(row => row.title === 'Offline battery reading procedure');
       assert.equal(saved.scope, 'subject');
       assert.equal(saved.revision, 1);
-      correctedExample = (await post('/api/pages/' + battery + '/posture/experiences/' + saved.id, {
-        expectedRevision: saved.revision,
-        changes: { note: 'For offline battery work, verify the timestamp of stored readings before use.' },
-        evidence: 'The stored readings in this example could be out of date.',
-      }, 200, 'PATCH')).experience;
+      assert.deepEqual(saved.sourceAnchor, { resultMessageId: answers.offline.id });
+      await lesson.getByRole('button', { name: 'Edit example note', exact: true }).click();
+      await lesson.getByRole('textbox', { name: 'What should we notice? (optional)', exact: true }).fill('For offline battery work, verify the timestamp of stored readings before use.');
+      await lesson.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true }).fill('The stored readings in this example could be out of date.');
+      await lesson.getByRole('button', { name: 'Save refinement', exact: true }).click();
+      await lesson.getByText('In use · v2', { exact: true }).waitFor();
+      correctedExample = (await experiences(battery)).find(row => row.id === saved.id);
       assert.equal(correctedExample.revision, 2);
       assert.deepEqual(correctedExample.source, saved.source);
       assert.deepEqual(correctedExample.encounter, saved.encounter);
       assert.equal(correctedExample.feedback.at(-1).source.kind, 'operator_described_refinement');
+      await lesson.getByText('Source experience', { exact: true }).click();
+      await lesson.getByRole('button', { name: 'Go to original result', exact: true }).click();
+      await wait(() => new URL(page.url()).hash === '#message-' + answers.offline.id, 'saved original Pulse answer');
+      await page.getByRole('dialog', { name: 'Lessons and examples', exact: true }).waitFor({ state: 'hidden' });
     } else if (filename === 'withdrawn') {
-      const retired = (await post('/api/pages/' + battery + '/posture/experiences/' +
-        correctedExample.id + '/feedback', {
-        expectedRevision: correctedExample.revision, verdict: 'withdrawn',
-        evidence: 'Withdraw this reusable procedure until a new operating check is available.',
-      }, 200)).experience;
+      // Reopen the source from the actual Activity list and withdraw with a
+      // distinct attributed reason, rather than silently pausing the example.
+      await page.getByRole('button', { name: 'Activity', exact: true }).click();
+      const activity = page.locator('.pulse-activity-list li').filter({ hasText: 'Independent offline observation' });
+      await activity.getByRole('button', { name: '电池 · Open local message', exact: true }).click();
+      await wait(() => new URL(page.url()).pathname === '/page/' + battery, 'return to source Work');
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+      const lesson = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: 'Offline battery reading procedure', exact: true }) });
+      await lesson.getByText('In use · v2', { exact: true }).waitFor();
+      await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
+      const withdraw = lesson.getByRole('button', { name: 'Withdraw from use', exact: true });
+      assert.equal(await withdraw.isDisabled(), true);
+      const reason = 'Withdraw this reusable procedure until a new operating check is available.';
+      await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(reason);
+      await withdraw.click();
+      await lesson.getByText('Paused · v3', { exact: true }).waitFor();
+      const retired = (await experiences(battery)).find(row => row.id === correctedExample.id);
       assert.equal(retired.active, false);
       assert.equal(retired.revision, 3);
       assert.deepEqual(retired.source, correctedExample.source);
+      assert.equal(retired.feedback.at(-1).verdict, 'withdrawn');
+      assert.equal(retired.feedback.at(-1).evidence, reason);
+      await lesson.getByText('Later feedback (2)', { exact: true }).click();
+      await lesson.getByText(reason, { exact: false }).waitFor();
+      await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     }
     if (filename === 'revised' || filename === 'withdrawn') {
       await stop(server); server = start(true, false, decisionDir, true);
@@ -673,9 +707,19 @@ try {
         row.id === answers.offline.id).content, answers.offline.content);
       assert.equal((await get('/api/pulse')).budget.used, 2);
     }
-    const id = (await post('/api/pages', {
-      title: 'Decision brief: ' + filename, instruction,
-    }, 201)).page.id;
+    let id;
+    if (filename === 'revised' || filename === 'withdrawn') {
+      await page.getByRole('button', { name: 'Create a page', exact: true }).click();
+      await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Decision brief: ' + filename);
+      await page.getByRole('textbox', { name: 'Where should we begin?', exact: true }).fill(instruction);
+      await page.getByRole('button', { name: 'Create page', exact: true }).click();
+      await page.getByRole('heading', { name: 'Decision brief: ' + filename, exact: true }).waitFor();
+      id = decodeURIComponent(new URL(page.url()).pathname.split('/').pop());
+    } else {
+      id = (await post('/api/pages', {
+        title: 'Decision brief: ' + filename, instruction,
+      }, 201)).page.id;
+    }
     const path = 'decision-' + filename + '.md';
     let delivery;
     await wait(async () => {
@@ -688,6 +732,9 @@ try {
       assert.ok(delivery.content.includes(answers[mode].id));
       assert.ok(delivery.content.includes(answers[mode].content));
       assert.ok(!delivery.content.includes(answers[mode === 'offline' ? 'mains' : 'offline'].content));
+    }
+    if (filename === 'revised' || filename === 'withdrawn') {
+      await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
     }
     const card = page.locator('#message-' + delivery.id);
     await card.getByRole('button', { name: 'Open verified file' }).click();
@@ -717,7 +764,7 @@ try {
   assert.equal((await get('/api/pulse')).budget.used, 2);
   checks.push('English and fully Chinese ordinary tasks distinguish two settled answers with identical 120-character prefixes after restart: offline selects the older answer, mains selects the newer answer, and unrelated tasks make fresh files; exact source event IDs, all six file bytes and Pulse allowance survive.');
 
-  checks.push('An operator correction to an exact settled Pulse example changes a later ordinary offline decision file through the real Posture contribution; withdrawal excludes that contribution from a fresh Work, while the original answer, all delivered files and allowance remain intact through restart.');
+  checks.push('A person opens the original propagation Work from Activity, saves and refines the exact settled Pulse example through rendered controls, and creates a later ordinary Work whose file reflects the real Posture contribution. An attributed withdrawal through the source experience UI excludes it from a fresh Work, while the original answer, all delivered files and allowance remain intact through restart.');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));

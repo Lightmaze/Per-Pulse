@@ -226,7 +226,7 @@ export type Bootstrap = {
 };
 
 export type LessonCondition = string | { all: LessonCondition[] } | { any: LessonCondition[] } | { not: LessonCondition };
-export type LessonVerdict = 'useful' | 'not_useful' | 'harmful';
+export type LessonVerdict = 'useful' | 'not_useful' | 'harmful' | 'withdrawn';
 export type LessonShift = { understanding: string; candidates: string; delivery: string };
 export type ExperienceMessageSource = {
   pageId: string; messageId: string; materials: Material[]; materialSuffixLength: number;
