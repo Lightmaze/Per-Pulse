@@ -9565,6 +9565,8 @@ class RuntimeService(_RuntimeShutdownCoordinator):
             # input can repeat the very same passage as a completed answer.
             # Join the original settled activation and its exact native turn,
             # rather than treating a later assistant message as its result.
+            # A turn inherits World ownership through its causal event and
+            # Engram (the ledger's get_turn_for_world contract).
             clauses.append(
                 "causal_events.kind = 'assistant_result' "
                 "AND causal_events.source = 'self' "
@@ -9585,7 +9587,6 @@ class RuntimeService(_RuntimeShutdownCoordinator):
                 "AND activation.causal_id = causal_events.causal_id "
                 "AND activation.kind IN ('spontaneous', 'propagation') "
                 "AND activation.status = 'settled' "
-                "AND completed.world_id = activation.world_id "
                 "AND completed.state = 'settled' "
                 "AND completed.prompt_accepted = 1 "
                 "AND completed.error_code IS NULL "

@@ -46,6 +46,17 @@ def test_spontaneous_answer_is_linked_without_inventing_an_activation_message(co
     observed = client.get('/api/pulse/observation').json()['pulse']['recentActivations'][0]
     assert observed['resultMessageId'] == result, 'Do not substitute the latest Work message.'
     assert observed['sourceMessageId'] == activation['sourceEventId']
+    # A later matching foreground reply must not consume the result page.
+    latest = runtime._causal_message_projection(
+        engram_id=runtime.continuity_engram_id, owned_work_messages=True,
+        session_admitted=True, pulse_results_only=True, content_query='A_FIXTURE_OUTPUT', limit=1,
+    )
+    assert [hit['event_id'] for hit in latest] == [result]
+    assert runtime._causal_message_projection(
+        engram_id=runtime.continuity_engram_id, owned_work_messages=True,
+        session_admitted=True, pulse_results_only=True, content_query='A_FIXTURE_OUTPUT',
+        before_seq=latest[0]['seq'], limit=1,
+    ) == []
 
 
 def test_saved_background_results_are_pageable_from_the_original_work(completed_background):
@@ -111,6 +122,12 @@ def test_background_result_link_survives_disconnected_reopen(tmp_path, monkeypat
         history = client.get('/api/pulse/results').json()['results']
         assert len(history) == 1 and history[0]['resultMessageId'] == result
         assert view(client, work)['messages'] == finished['messages']
+        runtime = client.app.state.pages.runtime
+        hits = runtime._causal_message_projection(
+            engram_id=runtime.continuity_engram_id, owned_work_messages=True,
+            session_admitted=True, pulse_results_only=True, content_query='A_FIXTURE_OUTPUT',
+        )
+        assert [hit['event_id'] for hit in hits] == [result]
         assert len(fixture.requests) == count
 
 
