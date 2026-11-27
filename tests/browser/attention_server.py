@@ -73,6 +73,54 @@ def handler(request):
                                       **{key: hit[key] for key in ("source_work_id", "source_event_id", "source_excerpt")}}
                 else:
                     assert len(results) == 3
+        elif isinstance(task, str) and task.startswith("Prepare a Markdown status brief for "):
+            topic = task.removeprefix("Prepare a Markdown status brief for ").removesuffix(".")
+            results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
+            assert all(row["status"] == "succeeded" for row in results), results
+            candidates = []
+            for message in messages[last_user + 1:]:
+                try:
+                    packet = json.loads(message.get("content", ""))
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(packet, dict) and packet.get("kind") == "pulse.related-work-results.v1":
+                    assert message["role"] == "assistant"
+                    candidates.extend(packet["candidates"])
+            related = topic == "receiving propagation"
+            path = "status-" + topic.replace(" ", "-") + ".md"
+            if not results:
+                if related:
+                    assert len(candidates) == 1 and candidates[0]["work_title"] == "Receiving propagation", candidates
+                    tool_name = "work"
+                    tool_arguments = {"op": "find", "pulse_results_only": True, "query": candidates[0]["query"]}
+                else:
+                    assert candidates == [], candidates
+                    tool_name = "mutate_file"
+                    tool_arguments = {"path": path, "expected_digest": None,
+                                      "content": "# Status brief\n\nVerify the current state before drawing conclusions.\n"}
+            elif related:
+                assert not candidates, "The discovery cue belongs only to the first decision."
+                hits = results[0]["output"]["matches"]
+                assert len(hits) == 1 and hits[0]["work_title"] == "Receiving propagation", hits
+                hit = hits[0]
+                if len(results) == 1:
+                    tool_name = "mutate_file"
+                    tool_arguments = {"path": path, "expected_digest": None,
+                                      "content": "# Status brief\n\n" + hit["source_excerpt"] + "\n"}
+                elif len(results) == 2:
+                    tool_name = "work"
+                    tool_arguments = {"op": "report", "kind": "result", "note": "Prepared the status brief.",
+                                      "artifact_path": path,
+                                      **{key: hit[key] for key in ("source_work_id", "source_event_id", "source_excerpt")}}
+                else:
+                    assert len(results) == 3
+            elif len(results) == 1:
+                assert not candidates
+                tool_name = "work"
+                tool_arguments = {"op": "report", "kind": "result", "note": "Prepared a fresh status brief.",
+                                  "artifact_path": path}
+            else:
+                assert len(results) == 2
         elif not has_result and "RETAIN_ATTENTION_GOAL" in prompt:
             tool_arguments = {
                 "op": "hold",
