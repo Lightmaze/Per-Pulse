@@ -42,7 +42,9 @@ Kernel implementation.
   existing experience editor for later Works; return to the original observation
   through its source Work.
 - Let pages continue: background pulses within an hourly budget, or type
-  `/tick 3` to give a page three more steps.
+  `/tick 3` to give a page three more steps. Reopen saved Pulse answers from
+  Home after reading them, follow the original propagation source, or select
+  a passage and start a new Work that turns it into a deliverable.
 - Start autonomous practice from Activity with a weekly request allowance. Work and
   its sources persist through pauses, budget holds and restarts. Pausing keeps
   the latest saved weekly allowance, even when another browser view changed it.
@@ -78,13 +80,13 @@ your messages as queued input. It never substitutes a scripted reply for a model
 ## Install the local alpha
 
 Requires Python 3.12 or later. Download
-[`per_pulse-0.1.0a39-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a39)
+[`per_pulse-0.1.0a40-py3-none-any.whl`](https://github.com/Lightmaze/Per-Pulse/releases/tag/v0.1.0a40)
 from the release, then install it in a virtual environment:
 
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install ./per_pulse-0.1.0a39-py3-none-any.whl
+python -m pip install ./per_pulse-0.1.0a40-py3-none-any.whl
 per-pulse --example
 ```
 

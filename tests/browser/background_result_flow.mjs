@@ -22,11 +22,13 @@ await new Promise(done => socket.close(done));
 const base = `http://127.0.0.1:${port}`;
 let serverLog = '', browser, page, server;
 const errors = [], checks = [];
+const installedWheel = process.env.PER_PULSE_INSTALLED_WHEEL === '1';
 const start = (disablePulse = false, spontaneous = true, dataDir = directory, deliverables = false) => {
   const child = spawn(process.env.PER_PULSE_PYTHON || join(root, '.venv/bin/python'), [
+    ...(installedWheel ? ['-I'] : []),
     join(root, 'tests/browser/attention_server.py'), '--data-dir', dataDir,
     '--port', String(port), ...(spontaneous ? ['--spontaneous'] : []), '--posture', ...(disablePulse ? ['--no-pulse'] : []), ...(deliverables ? ['--deliverables'] : []),
-  ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { cwd: installedWheel ? dataDir : root, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', value => { serverLog += value; });
   child.stderr.on('data', value => { serverLog += value; });
   return child;
