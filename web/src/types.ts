@@ -256,6 +256,7 @@ type ExperienceBase = {
     kind?: string; page_id?: string; relation?: string;
     result_message_id?: string; result_evidence_class?: string;
     result_execution_regime?: 'ordinary' | 'replay';
+    report_scope?: 'result_only'; result_offered_revisions?: number[];
   } }[];
 };
 export type PostureLesson = ExperienceBase & {

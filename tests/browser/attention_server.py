@@ -70,12 +70,14 @@ def handler(request):
                 elif CORRECTION_TASKS[task] == "outcome":
                     assert len(matching) == 1, matching
                     lesson = matching[0]
-                    assert lesson["revision"] == 4 and lesson["note"] == OUTCOME_NOTE, lesson
+                    assert lesson["revision"] == 5 and lesson["note"] == OUTCOME_NOTE, lesson
                     assert lesson["excerpt"] == DECISION_ANSWERS["offline"], lesson
                     assert not lesson["encounter_available"] and "encounter" not in lesson, lesson
                     assert lesson["feedback"] == [{"verdict": "revised", "revision": 1},
                                                   {"verdict": "not_useful", "revision": 2},
-                                                  {"verdict": "revised", "revision": 3}], lesson
+                                                  {"verdict": "revised", "revision": 3},
+                                                  {"verdict": "harmful", "revision": 4, "report_scope": "result_only",
+                                                   "result_offered_revisions": [2]}], lesson
                     content = OUTCOME_ADVICE
                 else:
                     assert not matching, matching

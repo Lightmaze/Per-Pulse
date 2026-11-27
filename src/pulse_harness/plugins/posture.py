@@ -26,6 +26,9 @@ principle, planning a review, or quoting the lesson is not a changed
 artifact or action. Keep the original encounter distinct from its abstraction,
 respect later counterevidence, and do not elevate synthetic fixtures or model
 summaries into observed external feedback. Transfer only the visible material.
+A result-only report evaluates the linked historical result, not current guidance;
+its revision is the submission revision. Offered revisions identify material
+available to the earlier computation, not proof of use or causation.
 
 A record with representation "example" preserves an exact selected passage,
 not an extracted rule. It can stand alone without lesson/condition/shift fields.
