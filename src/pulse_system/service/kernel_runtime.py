@@ -208,10 +208,14 @@ class _WorldWorkspace(CommandWorkspaceToolProvider):
         notices = (self._notice.model_context_messages(scope, max_tokens)
                    if self._notice is not None else ())
         habitat = self._bound_habitat()
-        if habitat is None:
-            return notices
         remaining = max(0, max_tokens - sum(estimate_tokens(item) for item in notices))
-        return (*notices, *habitat.model_context_messages(scope, remaining))
+        context = (*notices, *(habitat.model_context_messages(scope, remaining) if habitat is not None else ()))
+        remaining = max(0, max_tokens - sum(estimate_tokens(item) for item in context))
+        # Let the first decision notice a relevant earlier answer. Subsequent
+        # rounds use the normal durable tool results, not repeated discovery.
+        if self._work is not None and scope.turn_id and self.store.next_model_round_index(scope) == 0:
+            context = (*context, *self._work.related_pulse_context(scope, remaining))
+        return context
 
     def model_round_limit_for_scope(self, scope, configured):
         entry = native_replay.mode(self.store, scope)

@@ -524,6 +524,48 @@ try {
   assert.equal((await get('/api/pulse')).budget.used, 1);
   checks.push('An ordinary later Work finds a completed Pulse answer without a selected source, reports its verified excerpt with an actual file, and retains both after restart.');
 
+  // A normal task names a subject, not an earlier observation or Work ID.
+  // The fixture must encounter an attributed cue in the actual first model
+  // request before choosing find; two comparison tasks must work without one.
+  const statusOutputs = [];
+  for (const topic of ['receiving propagation', 'propagation source', 'garden irrigation']) {
+    const statusWork = (await post('/api/pages', {
+      title: 'Status brief: ' + topic,
+      instruction: 'Prepare a Markdown status brief for ' + topic + '.',
+    }, 201)).page.id;
+    const path = 'status-' + topic.replaceAll(' ', '-') + '.md';
+    let statusDelivery;
+    await wait(async () => {
+      statusDelivery = (await get('/api/pages/home')).messages.find(row =>
+        row.sourcePageId === statusWork && row.reportedArtifact?.path === path);
+      return statusDelivery;
+    }, 'ordinary status brief: ' + topic, 30000);
+    const related = topic === 'receiving propagation';
+    assert.equal(statusDelivery.content.includes('Verified earlier Work excerpt'), related);
+    if (related) assert.ok(statusDelivery.content.includes('Receiving propagation'));
+    const card = page.locator('#message-' + statusDelivery.id);
+    await card.getByRole('button', { name: 'Open verified file' }).click();
+    const statusDownload = page.waitForEvent('download');
+    await card.getByRole('button', { name: 'Download file', exact: true }).click();
+    const bytes = await readFile(await (await statusDownload).path());
+    assert.equal(bytes.toString('utf8'), '# Status brief\n\n' +
+      (related ? received.find(row => row.id === propagated.resultMessageId).content
+        : 'Verify the current state before drawing conclusions.') + '\n');
+    statusOutputs.push({ id: statusDelivery.id, bytes });
+  }
+  await stop(server); server = start(true, false, propagationDir, true);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'restart status briefs');
+  await page.goto(base);
+  for (const output of statusOutputs) {
+    const card = page.locator('#message-' + output.id);
+    await card.getByRole('button', { name: 'Open verified file' }).click();
+    const download = page.waitForEvent('download');
+    await card.getByRole('button', { name: 'Download file', exact: true }).click();
+    assert.deepEqual(await readFile(await (await download).path()), output.bytes);
+  }
+  assert.equal((await get('/api/pulse')).budget.used, 1);
+  checks.push('A normal topic request encounters a completed Pulse result before choosing a tool, while an owned Work without a result and an unrelated topic create different unsourced files; all three delivered files survive restart.');
+
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
 } catch (error) {
