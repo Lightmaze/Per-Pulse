@@ -629,7 +629,50 @@ try {
     ['mains', 'mains-zh', '请为电池市电运行编写决策简报。'],
     ['rain', 'rain-zh', '请为花园灌溉编写决策简报。'],
   ];
+  decisionCases.push(
+    ['offline', 'revised', 'Prepare a Markdown decision brief for 电池 under offline constraints in decision-revised.md.'],
+    ['offline', 'withdrawn', 'Prepare a Markdown decision brief for 电池 under offline constraints in decision-withdrawn.md.'],
+  );
+  const correctionAdvice = 'Check the timestamp of stored readings before relying on the historical answer.';
+  let correctedExample;
   for (const [mode, filename, instruction] of decisionCases) {
+    if (filename === 'revised') {
+      // The operator retains a real settled Pulse answer, then corrects its
+      // reusable interpretation. The original answer is never rewritten.
+      const saved = (await post('/api/pages/' + battery + '/posture/examples', {
+        sourceMessageId: answers.offline.id, excerpt: answers.offline.content,
+        title: 'Offline battery reading procedure',
+        note: 'For offline battery work, use stored readings.',
+      }, 201)).experience;
+      assert.equal(saved.scope, 'subject');
+      assert.equal(saved.revision, 1);
+      correctedExample = (await post('/api/pages/' + battery + '/posture/experiences/' + saved.id, {
+        expectedRevision: saved.revision,
+        changes: { note: 'For offline battery work, verify the timestamp of stored readings before use.' },
+        evidence: 'The stored readings in this example could be out of date.',
+      }, 200, 'PATCH')).experience;
+      assert.equal(correctedExample.revision, 2);
+      assert.deepEqual(correctedExample.source, saved.source);
+      assert.deepEqual(correctedExample.encounter, saved.encounter);
+      assert.equal(correctedExample.feedback.at(-1).source.kind, 'operator_described_refinement');
+    } else if (filename === 'withdrawn') {
+      const retired = (await post('/api/pages/' + battery + '/posture/experiences/' +
+        correctedExample.id + '/feedback', {
+        expectedRevision: correctedExample.revision, verdict: 'withdrawn',
+        evidence: 'Withdraw this reusable procedure until a new operating check is available.',
+      }, 200)).experience;
+      assert.equal(retired.active, false);
+      assert.equal(retired.revision, 3);
+      assert.deepEqual(retired.source, correctedExample.source);
+    }
+    if (filename === 'revised' || filename === 'withdrawn') {
+      await stop(server); server = start(true, false, decisionDir, true);
+      await wait(async () => (await fetch(base + '/api/health')).ok, 'reopen after experience ' + filename);
+      await page.goto(base);
+      assert.equal((await get('/api/pages/' + battery)).messages.find(row =>
+        row.id === answers.offline.id).content, answers.offline.content);
+      assert.equal((await get('/api/pulse')).budget.used, 2);
+    }
     const id = (await post('/api/pages', {
       title: 'Decision brief: ' + filename, instruction,
     }, 201)).page.id;
@@ -652,7 +695,13 @@ try {
     await card.getByRole('button', { name: 'Download file', exact: true }).click();
     const bytes = await readFile(await (await download).path());
     assert.equal(bytes.toString('utf8'), '# Decision brief\n\n' +
-      (answers[mode]?.content ?? 'Check the current evidence.') + '\n');
+      (answers[mode]?.content ?? 'Check the current evidence.') + '\n' +
+      (filename === 'revised' ? '\n' + correctionAdvice + '\n' : ''));
+    if (filename === 'revised' || filename === 'withdrawn') {
+      const eligible = (await experiences(id)).find(row => row.id === correctedExample.id);
+      assert.equal(Boolean(eligible), filename === 'revised');
+      if (eligible) assert.equal(eligible.revision, 2);
+    }
     decisionOutputs.push({ id: delivery.id, bytes });
   }
   await stop(server); server = start(true, false, decisionDir, true);
@@ -667,6 +716,8 @@ try {
   }
   assert.equal((await get('/api/pulse')).budget.used, 2);
   checks.push('English and fully Chinese ordinary tasks distinguish two settled answers with identical 120-character prefixes after restart: offline selects the older answer, mains selects the newer answer, and unrelated tasks make fresh files; exact source event IDs, all six file bytes and Pulse allowance survive.');
+
+  checks.push('An operator correction to an exact settled Pulse example changes a later ordinary offline decision file through the real Posture contribution; withdrawal excludes that contribution from a fresh Work, while the original answer, all delivered files and allowance remain intact through restart.');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
