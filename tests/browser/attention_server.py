@@ -86,7 +86,7 @@ def handler(request):
                 if isinstance(packet, dict) and packet.get("kind") == "pulse.related-work-results.v1":
                     assert message["role"] == "assistant"
                     candidates.extend(packet["candidates"])
-            related = topic == "receiving propagation"
+            related = topic in {"receiving propagation", "propagation while receiving"}
             path = "status-" + topic.replace(" ", "-") + ".md"
             if not results:
                 if related:
