@@ -193,7 +193,10 @@ class NativeWork:
         cue_words = set(re.findall(r'[a-z0-9]+', cue))
         for front in r.world.list_task_fronts(focal_engram_id=scope.engram_id):
             topic = ' '.join(front.title.casefold().split())
-            if front.center_id == event.center_id or len(topic) < 4:
+            # Short two-character Han titles are ordinary topics in Chinese.
+            # Keep the existing minimum for short alphabetic titles.
+            if (front.center_id == event.center_id or
+                    (len(topic) < 4 and len(re.findall(r'[\u3400-\u9fff]', topic)) < 2)):
                 continue
             # Whole English words avoid matching a short title inside a word.
             # Titles in scripts without word spaces retain literal matching.
@@ -219,22 +222,36 @@ class NativeWork:
         payload = {'kind': 'pulse.related-work-results.v1', 'candidates': []}
         data = {'role': 'assistant', 'item_id': 'auxiliary-context:pulse-result-data', 'content': ''}
         budget = min(384, max_tokens)
-        # Prefer exact titles, but do not let newer unfinished Works consume
-        # the three-result allowance. Bound causal lookups separately.
-        for _, front in sorted(matched,
-                               key=lambda item: (item[0], item[1].created_at, item[1].id),
-                               reverse=True)[:12]:
+        # Check a bounded recent history for each matching Work. The latest
+        # answer is a useful fallback, but an older answer mentioning actual
+        # task words beyond the title can be a better lead for this decision.
+        # This is lexical ordering of evidence, not a determination of truth.
+        ranked = []
+        for exact, front in sorted(matched,
+                                   key=lambda item: (item[0], item[1].created_at, item[1].id),
+                                   reverse=True)[:12]:
             rows = r._causal_message_projection(center_id=front.center_id,
                 engram_id=scope.engram_id, owned_work_messages=True, session_admitted=True,
-                pulse_results_only=True, before_seq=anchor[0]['seq'], limit=1)
-            if not rows:
-                continue
-            row = rows[0]
-            query = row['content'].strip()[:120].strip()
-            if not query:
-                continue
-            candidate = {'work_title': front.title, 'source_work_id': front.id,
-                         'source_event_id': row['event_id'], 'query': query}
+                pulse_results_only=True, before_seq=anchor[0]['seq'], limit=3)
+            topic_words = set(re.findall(r'[a-z0-9]+', front.title.casefold()))
+            task_words = {word for word in cue_words - topic_words if len(word) >= 4}
+            seen = set()
+            for index, row in enumerate(reversed(rows)):
+                content = row['content'].strip()
+                query = content[:120].strip()
+                if not query or content in seen:
+                    continue
+                seen.add(content)
+                answer_words = set(re.findall(r'[a-z0-9]+', content.casefold()))
+                overlap = len(task_words & answer_words)
+                if index and not overlap:
+                    continue
+                candidate = {'work_title': front.title, 'source_work_id': front.id,
+                             'source_event_id': row['event_id'], 'query': query}
+                ranked.append(((overlap, exact, front.created_at, row['seq']), candidate))
+        # Leave choice with the model, preserving a newer fallback alongside
+        # a more relevant older result whenever the context allowance permits.
+        for _, candidate in sorted(ranked, key=lambda item: item[0], reverse=True):
             payload['candidates'].append(candidate)
             data['content'] = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
             if estimate_tokens(policy) + estimate_tokens(data) > budget:

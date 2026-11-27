@@ -121,6 +121,58 @@ def handler(request):
                                   "artifact_path": path}
             else:
                 assert len(results) == 2
+        elif isinstance(task, str) and task.startswith("Prepare a Markdown decision brief for "):
+            mode = task.split(" under ", 1)[1].split()[0]
+            expected = {"offline": "Offline battery operation: use stored readings.",
+                        "mains": "Mains battery operation: use outlet checks."}.get(mode)
+            path = "decision-" + mode + ".md"
+            results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
+            assert all(row["status"] == "succeeded" for row in results), results
+            candidates = []
+            for message in messages[last_user + 1:]:
+                try:
+                    packet = json.loads(message.get("content", ""))
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(packet, dict) and packet.get("kind") == "pulse.related-work-results.v1":
+                    assert message["role"] == "assistant"
+                    candidates.extend(packet["candidates"])
+            if not results:
+                if expected:
+                    assert candidates and candidates[0]["query"] == expected, candidates
+                    assert candidates[0]["work_title"] == "电池", candidates
+                    if mode == "offline":
+                        assert len(candidates) == 2 and candidates[1]["query"].startswith("Mains battery"), candidates
+                        assert candidates[0]["source_event_id"] != candidates[1]["source_event_id"], candidates
+                    tool_name = "work"
+                    tool_arguments = {"op": "find", "pulse_results_only": True, "query": candidates[0]["query"]}
+                else:
+                    assert not candidates, candidates
+                    tool_name = "mutate_file"
+                    tool_arguments = {"path": path, "expected_digest": None,
+                                      "content": "# Decision brief\n\nCheck the current evidence.\n"}
+            elif expected:
+                assert not candidates
+                hits = results[0]["output"]["matches"]
+                assert len(hits) == 1 and hits[0]["source_excerpt"] == expected, hits
+                hit = hits[0]
+                if len(results) == 1:
+                    tool_name = "mutate_file"
+                    tool_arguments = {"path": path, "expected_digest": None,
+                                      "content": "# Decision brief\n\n" + hit["source_excerpt"] + "\n"}
+                elif len(results) == 2:
+                    tool_name = "work"
+                    tool_arguments = {"op": "report", "kind": "result", "note": "Prepared the decision brief.",
+                                      "artifact_path": path,
+                                      **{key: hit[key] for key in ("source_work_id", "source_event_id", "source_excerpt")}}
+                else:
+                    assert len(results) == 3
+            elif len(results) == 1:
+                tool_name = "work"
+                tool_arguments = {"op": "report", "kind": "result", "note": "Prepared a fresh decision brief.",
+                                  "artifact_path": path}
+            else:
+                assert len(results) == 2
         elif not has_result and "RETAIN_ATTENTION_GOAL" in prompt:
             tool_arguments = {
                 "op": "hold",
@@ -130,6 +182,17 @@ def handler(request):
         elif not has_result and "RELEASE_LOCAL_THOUGHT" in prompt:
             tool_arguments = {"op": "release"}
         content = "Synthetic fixture response. The local turn completed."
+        # The receiver's latest explicit operating mode supplies a different
+        # settled answer on each real propagation. No stored event is forged.
+        for message in reversed(messages):
+            if message["role"] != "user":
+                continue
+            if message.get("content") == "Set the test operating mode to offline.":
+                content = "Offline battery operation: use stored readings."
+                break
+            if message.get("content") == "Set the test operating mode to mains.":
+                content = "Mains battery operation: use outlet checks."
+                break
     if tool_arguments is not None:
         # One turn can call the same tool more than once (find, then report).
         # Provider call IDs must be unique within that turn, including later rounds.

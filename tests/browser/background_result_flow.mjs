@@ -353,8 +353,8 @@ try {
     return response.json();
   };
   await post('/api/pulse/weekly-usage', { enabled: true, weeklyLimit: 100 }, 200, 'PATCH');
-  const createWork = async title => {
-    const id = (await post('/api/pages', { title, instruction: 'Begin this local Work.' }, 201)).page.id;
+  const createWork = async (title, instruction = 'Begin this local Work.') => {
+    const id = (await post('/api/pages', { title, instruction }, 201)).page.id;
     await wait(async () => (await get('/api/pages/' + id)).messages.some(
       message => message.role === 'assistant'), 'initial Work answer');
     return id;
@@ -572,6 +572,89 @@ try {
   }
   assert.equal((await get('/api/pulse')).budget.used, 1);
   checks.push('A normal topic request encounters a completed Pulse result before choosing a tool; a reordered topic finds the older answer despite three newer unfinished matching Works. An owned Work without a result, a one-word overlap and an unrelated topic create fresh unsourced files; all five delivered files survive restart.');
+
+  // Competing results from the same Work, not a fabricated history. A
+  // separate isolated test World gets exactly two genuine propagation turns.
+  await page.close();
+  await stop(server);
+  const decisionDir = join(directory, 'competing-results');
+  server = start(false, false, decisionDir, true);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'competing results World');
+  await post('/api/pulse/weekly-usage', { enabled: true, weeklyLimit: 100 }, 200, 'PATCH');
+  const battery = await createWork('电池', 'Set the test operating mode to offline.');
+  const answers = {};
+  for (const mode of ['offline', 'mains']) {
+    if (mode === 'mains') {
+      await post('/api/pages/' + battery + '/messages', { content: 'Set the test operating mode to mains.' }, 202);
+      await wait(async () => {
+        const snapshot = await get('/api/pages/' + battery);
+        return snapshot.page.status === 'idle' && snapshot.messages.some(row =>
+          row.role === 'assistant' && row.content === 'Mains battery operation: use outlet checks.');
+      }, 'receiver mode changed');
+    }
+    const source = await createWork('Independent ' + mode + ' observation');
+    await post('/api/pulse/connections', { sourcePageId: source, targetPageId: battery, weight: 0.9 }, 201);
+    await post('/api/pages/' + source + '/messages', { content: 'A new ' + mode + ' observation.' }, 202);
+    let activation;
+    await wait(async () => {
+      activation = (await get('/api/pulse')).recentActivations.find(item =>
+        item.kind === 'propagation' && item.pageId === battery &&
+        item.resultMessageId && item.resultMessageId !== answers.offline?.id);
+      return activation?.status === 'settled';
+    }, 'settled ' + mode + ' battery answer');
+    const answer = (await get('/api/pages/' + battery)).messages.find(row => row.id === activation.resultMessageId);
+    assert.equal(answer.role, 'assistant');
+    assert.equal(answer.content, mode === 'offline' ? 'Offline battery operation: use stored readings.'
+      : 'Mains battery operation: use outlet checks.');
+    answers[mode] = answer;
+  }
+  assert.notEqual(answers.offline.id, answers.mains.id);
+  assert.equal((await get('/api/pulse')).budget.used, 2);
+  await stop(server); server = start(true, false, decisionDir, true);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'reopen competing results World');
+  page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(base);
+  const decisionOutputs = [];
+  for (const [topic, mode] of [['电池', 'offline'], ['电池', 'mains'], ['garden irrigation', 'rain']]) {
+    const id = (await post('/api/pages', {
+      title: 'Decision brief: ' + mode,
+      instruction: 'Prepare a Markdown decision brief for ' + topic + ' under ' + mode + ' constraints.',
+    }, 201)).page.id;
+    const path = 'decision-' + mode + '.md';
+    let delivery;
+    await wait(async () => {
+      delivery = (await get('/api/pages/home')).messages.find(row =>
+        row.sourcePageId === id && row.reportedArtifact?.path === path);
+      return delivery;
+    }, 'competing result decision brief: ' + mode, 30000);
+    assert.equal(delivery.content.includes('Verified earlier Work excerpt'), Boolean(answers[mode]));
+    if (answers[mode]) {
+      assert.ok(delivery.content.includes(answers[mode].id));
+      assert.ok(delivery.content.includes(answers[mode].content));
+      assert.ok(!delivery.content.includes(answers[mode === 'offline' ? 'mains' : 'offline'].content));
+    }
+    const card = page.locator('#message-' + delivery.id);
+    await card.getByRole('button', { name: 'Open verified file' }).click();
+    const download = page.waitForEvent('download');
+    await card.getByRole('button', { name: 'Download file', exact: true }).click();
+    const bytes = await readFile(await (await download).path());
+    assert.equal(bytes.toString('utf8'), '# Decision brief\n\n' +
+      (answers[mode]?.content ?? 'Check the current evidence.') + '\n');
+    decisionOutputs.push({ id: delivery.id, bytes });
+  }
+  await stop(server); server = start(true, false, decisionDir, true);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'restart decision briefs');
+  await page.goto(base);
+  for (const output of decisionOutputs) {
+    const card = page.locator('#message-' + output.id);
+    await card.getByRole('button', { name: 'Open verified file' }).click();
+    const download = page.waitForEvent('download');
+    await card.getByRole('button', { name: 'Download file', exact: true }).click();
+    assert.deepEqual(await readFile(await (await download).path()), output.bytes);
+  }
+  assert.equal((await get('/api/pulse')).budget.used, 2);
+  checks.push('A short Chinese Work title activates competing real settled answers after restart: offline selects the older answer, mains selects the newer answer, and an unrelated task makes a fresh file; exact source event IDs, all three file bytes and Pulse allowance survive.');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
