@@ -172,7 +172,7 @@ class NativeWork:
     def related_pulse_context(self, scope: HarnessScope, max_tokens: int):
         """Offer a small topic cue before the first ordinary Work decision.
 
-        Match a named topic in the actual task to an owned Work title, then
+        Match a topic in the actual task to an owned Work title, then
         use the same settled-result projection as work.find. The cue is not a
         new transcript, a finding about relevance, or a request to act.
         """
@@ -190,15 +190,21 @@ class NativeWork:
             return ()
         cue = ' '.join(event.content.casefold().split())
         matched = []
+        cue_words = set(re.findall(r'[a-z0-9]+', cue))
         for front in r.world.list_task_fronts(focal_engram_id=scope.engram_id):
             topic = ' '.join(front.title.casefold().split())
             if front.center_id == event.center_id or len(topic) < 4:
                 continue
             # Whole English words avoid matching a short title inside a word.
             # Titles in scripts without word spaces retain literal matching.
-            if (re.search(r'(?<!\w)' + re.escape(topic) + r'(?!\w)', cue)
-                    if topic.isascii() else topic in cue):
-                matched.append(front)
+            exact = bool(re.search(r'(?<!\w)' + re.escape(topic) + r'(?!\w)', cue)
+                         if topic.isascii() else topic in cue)
+            # The same distinct title words can occur in a different order or
+            # with intervening words in an ordinary task. A single shared word
+            # is not enough for this fallback.
+            words = set(re.findall(r'[a-z0-9]+', topic)) if topic.isascii() else set()
+            if exact or (len(words) >= 2 and words <= cue_words):
+                matched.append((exact, front))
         if not matched:
             return ()
         anchor = r._causal_message_projection(center_id=event.center_id,
@@ -213,7 +219,11 @@ class NativeWork:
         payload = {'kind': 'pulse.related-work-results.v1', 'candidates': []}
         data = {'role': 'assistant', 'item_id': 'auxiliary-context:pulse-result-data', 'content': ''}
         budget = min(384, max_tokens)
-        for front in sorted(matched, key=lambda item: (item.created_at, item.id), reverse=True)[:3]:
+        # Prefer exact titles, but do not let newer unfinished Works consume
+        # the three-result allowance. Bound causal lookups separately.
+        for _, front in sorted(matched,
+                               key=lambda item: (item[0], item[1].created_at, item[1].id),
+                               reverse=True)[:12]:
             rows = r._causal_message_projection(center_id=front.center_id,
                 engram_id=scope.engram_id, owned_work_messages=True, session_admitted=True,
                 pulse_results_only=True, before_seq=anchor[0]['seq'], limit=1)
@@ -230,6 +240,8 @@ class NativeWork:
             if estimate_tokens(policy) + estimate_tokens(data) > budget:
                 payload['candidates'].pop()
                 data['content'] = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+                continue
+            if len(payload['candidates']) == 3:
                 break
         return (policy, data) if payload['candidates'] else ()
 

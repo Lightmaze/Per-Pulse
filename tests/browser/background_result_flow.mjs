@@ -527,8 +527,15 @@ try {
   // A normal task names a subject, not an earlier observation or Work ID.
   // The fixture must encounter an attributed cue in the actual first model
   // request before choosing find; two comparison tasks must work without one.
+  // Three newer matching Works have ordinary answers, but no settled Pulse
+  // answer. They must not displace the older completed result when the user
+  // describes its subject in a different word order.
+  for (const title of ['Propagation while receiving', 'While receiving', 'Propagation']) {
+    await createWork(title);
+  }
   const statusOutputs = [];
-  for (const topic of ['receiving propagation', 'propagation source', 'garden irrigation']) {
+  for (const topic of ['receiving propagation', 'propagation while receiving',
+    'propagation source', 'propagation monitoring', 'garden irrigation']) {
     const statusWork = (await post('/api/pages', {
       title: 'Status brief: ' + topic,
       instruction: 'Prepare a Markdown status brief for ' + topic + '.',
@@ -540,7 +547,7 @@ try {
         row.sourcePageId === statusWork && row.reportedArtifact?.path === path);
       return statusDelivery;
     }, 'ordinary status brief: ' + topic, 30000);
-    const related = topic === 'receiving propagation';
+    const related = ['receiving propagation', 'propagation while receiving'].includes(topic);
     assert.equal(statusDelivery.content.includes('Verified earlier Work excerpt'), related);
     if (related) assert.ok(statusDelivery.content.includes('Receiving propagation'));
     const card = page.locator('#message-' + statusDelivery.id);
@@ -564,7 +571,7 @@ try {
     assert.deepEqual(await readFile(await (await download).path()), output.bytes);
   }
   assert.equal((await get('/api/pulse')).budget.used, 1);
-  checks.push('A normal topic request encounters a completed Pulse result before choosing a tool, while an owned Work without a result and an unrelated topic create different unsourced files; all three delivered files survive restart.');
+  checks.push('A normal topic request encounters a completed Pulse result before choosing a tool; a reordered topic finds the older answer despite three newer unfinished matching Works. An owned Work without a result, a one-word overlap and an unrelated topic create fresh unsourced files; all five delivered files survive restart.');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
