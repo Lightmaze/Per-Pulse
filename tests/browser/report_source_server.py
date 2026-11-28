@@ -16,6 +16,7 @@ import uvicorn
 from per_pulse.app import create_app
 from per_pulse.service import PulseSettings
 from pulse_harness.adapters.chat_http import ChatHTTPConfig, ChatHTTPModelAdapter
+from pulse_harness.core.context_window import OMITTED_NOTE
 
 NOTE = "A selected source finding. [Explicit synthetic HTTP fixture]"
 FILE_TEXT = "# Report deliverable\n\nThis is the completed Work file.\n"
@@ -58,7 +59,10 @@ def factory(scope):
         if packet is not None:
             work = json.loads(packet)
             answer = "PASS"
-            if work.get("candidate_response") == DRAFT_RESULT:
+            if work.get("candidate_response") == REVISION_RESULT:
+                assert any(row["item_id"] == "context-window:omitted"
+                           for row in work["current_work"]["messages"])
+            elif work.get("candidate_response") == DRAFT_RESULT:
                 assert EXAMPLE_NOTE in json.dumps(work["posture_experiences"])
                 answer = REVIEW_FIX
             elif work.get("native_model_round") == 1 and "candidate_response" not in work:
@@ -70,6 +74,7 @@ def factory(scope):
                     assert any(VERIFIED_LINE in row["content"] for row in visible if row["role"] == "tool")
                     answer = COMPARE_ADVICE
                 elif current_task.startswith(REVISION_PREFIX) and current_task.endswith(REVISION_END):
+                    assert any(row["item_id"] == "context-window:omitted" for row in visible)
                     if REVISION_NOTE in json.dumps(work["posture_experiences"]):
                         assert any(REVISION_LINE in row["content"] for row in visible if row["role"] == "tool")
                         answer = REVISION_ADVICE
@@ -104,6 +109,8 @@ def factory(scope):
                 # Only the admitted pre-action contribution changes the
                 # synthetic executor's actual source choice.
                 if revision:
+                    assert any(isinstance(row.get("content"), str)
+                               and row["content"].startswith(OMITTED_NOTE) for row in messages)
                     selected = results[2] if REVISION_ADVICE in json.dumps(messages) else results[0]
                     path, heading = "comparison-plan.md", "# Planning hypothesis"
                 else:
@@ -227,6 +234,9 @@ if __name__ == "__main__":
     parser.add_argument("--offline", action="store_true")
     args = parser.parse_args()
     os.environ["PER_PULSE_REPORT_SOURCE_KEY"] = "explicit-synthetic-browser-credential"
+    # Use the ordinary configurable native window, large enough for the active
+    # four-file comparison but smaller than the accumulated settled history.
+    os.environ["P_PULSE_CONTEXT_TOKENS"] = "24576"
     app = create_app(args.data_dir, model_factory=None if args.offline else factory,
                      posture=True, pulse=PulseSettings(enabled=False),
                      allow_workspace_actions=True, auto_apply_edits=True)
