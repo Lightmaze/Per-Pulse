@@ -381,6 +381,83 @@ try {
   assert.equal((await get('/api/pulse')).budget.used, 1);
   checks.push('A saved spontaneous reply starts an independent Work, produces a native file reported Home, preserves its evidence class and exact source revision, and spends no extra Pulse admission.');
 
+  // The original Work continues after the source owner changes the example.
+  // Its first draft deliberately misses the change; the delivery expert must
+  // receive the live source and make the next native file action possible.
+  const opening = selectedView.messages.find(row => row.content.includes('RESULT_EXPERIENCE_JSON'));
+  await page.goto(base + '/page/' + work);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+  await retainedReply.getByRole('button', { name: 'Edit example note', exact: true }).click();
+  await retainedReply.getByRole('textbox', { name: 'What should we notice? (optional)', exact: true })
+    .fill('Verify the current observation before using the saved reply.');
+  await retainedReply.getByRole('textbox', { name: 'What prompted this change? (optional)', exact: true })
+    .fill('The saved reply is historical and may be out of date.');
+  await retainedReply.getByRole('button', { name: 'Save refinement', exact: true }).click();
+  await retainedReply.getByText('In use · v2', { exact: true }).waitFor();
+  const revisedReply = (await experiences(work)).find(row => row.id === savedExample.id);
+  assert.equal(revisedReply.revision, 2);
+  assert.deepEqual(revisedReply.source, savedExample.source);
+  await stop(server); server = start(true, true, directory, true);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'reopen the revised reply World');
+
+  const followUp = async (task, path, result, expected) => {
+    await page.goto(base + '/page/' + savedWork);
+    await page.getByRole('textbox', { name: 'Message Saved reply follow-up', exact: true }).fill(task);
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    let delivered;
+    await wait(async () => {
+      delivered = (await get('/api/pages/home')).messages.find(row =>
+        row.sourcePageId === savedWork && row.reportedArtifact?.path === path);
+      const view = await get('/api/pages/' + savedWork);
+      return delivered && view.messages.some(row =>
+        row.role === 'assistant' && row.content === result && row.status === 'settled');
+    }, 'settled follow-up file ' + path, 30000);
+    const view = await get('/api/pages/' + savedWork);
+    assert.equal(view.messages.find(row => row.id === opening.id).content, opening.content);
+    await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
+    const card = page.locator('#message-' + delivered.id);
+    await card.getByRole('button', { name: 'Open verified file' }).click();
+    const pending = page.waitForEvent('download');
+    await card.getByRole('button', { name: 'Download file', exact: true }).click();
+    assert.equal((await readFile(await (await pending).path())).toString('utf8'), expected);
+    return delivered;
+  };
+  const revisedDelivery = await followUp(
+    'Prepare the follow-up file using the current saved reply guidance.',
+    'saved-reply-revised.md', 'The follow-up file is ready.',
+    '# Follow-up\n\nUse the revised note: verify the current observation before relying on the historical reply.\n');
+  assert.equal((await get('/api/pages/' + savedWork)).sourceExperience.status, 'revised');
+
+  await page.goto(base + '/page/' + work);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+  await retainedReply.getByRole('button', { name: 'Give feedback', exact: true }).click();
+  await retainedReply.getByRole('textbox', { name: 'What changed in the result?', exact: true })
+    .fill('Withdraw the example until a fresh observation is available.');
+  await retainedReply.getByRole('button', { name: 'Withdraw from use', exact: true }).click();
+  await retainedReply.getByText('Paused · v3', { exact: true }).waitFor();
+  const withdrawnReply = (await experiences(work)).find(row => row.id === savedExample.id);
+  assert.equal(withdrawnReply.active, false);
+  assert.equal(withdrawnReply.revision, 3);
+  await stop(server); server = start(true, true, directory, true);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'reopen the withdrawn reply World');
+  await followUp(
+    'Prepare a fresh follow-up file after checking whether the saved reply is still usable.',
+    'saved-reply-fresh.md', 'The fresh follow-up file is ready.',
+    '# Follow-up\n\nObtain fresh evidence.\n');
+  assert.equal((await get('/api/pages/' + savedWork)).sourceExperience.status, 'withdrawn');
+  // Withdrawal changes later work, never the earlier delivered bytes.
+  const revisedCard = page.locator('#message-' + revisedDelivery.id);
+  await revisedCard.getByRole('button', { name: 'Open verified file' }).click();
+  const revisedDownload = page.waitForEvent('download');
+  await revisedCard.getByRole('button', { name: 'Download file', exact: true }).click();
+  assert.equal((await readFile(await (await revisedDownload).path())).toString('utf8'),
+    '# Follow-up\n\nUse the revised note: verify the current observation before relying on the historical reply.\n');
+  assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
+  assert.equal((await get('/api/pulse')).budget.used, 1);
+  checks.push('A saved Pulse reply is revised and withdrawn in its source Work across restarts; the delivery expert changes the receiving Work’s actual file, and withdrawal permits a fresh file without changing prior bytes or Pulse allowance.');
+
   // Independently exercise real propagation with a fresh isolated test World.
   await page.close();
   await stop(server);

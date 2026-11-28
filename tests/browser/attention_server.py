@@ -43,6 +43,20 @@ CORRECTION_TASKS = {
 }
 
 
+SAVED_REPLY_REVISED_TASK = "Prepare the follow-up file using the current saved reply guidance."
+SAVED_REPLY_WITHDRAWN_TASK = "Prepare a fresh follow-up file after checking whether the saved reply is still usable."
+SAVED_REPLY_NOTE = "Verify the current observation before using the saved reply."
+SAVED_REPLY_DRAFT = "I will use the old saved reply as the follow-up."
+SAVED_REPLY_REVIEW = "Use the revised note: verify the current observation before relying on the historical reply."
+SAVED_REPLY_FINAL = "The follow-up file is ready."
+SAVED_REPLY_FRESH = "The fresh follow-up file is ready."
+
+
+def selected_status(text):
+    return json.JSONDecoder().raw_decode(
+        text.split("SELECTED_SOURCE_STATUS_JSON\n", 1)[1])[0]
+
+
 def handler(request):
     messages = json.loads(request.content)["messages"]
     tool_arguments = None
@@ -53,7 +67,17 @@ def handler(request):
         packet = next((json.loads(row["content"].split("WORK_MATERIAL_JSON\n", 1)[1])
                        for row in messages if isinstance(row.get("content"), str)
                        and "WORK_MATERIAL_JSON\n" in row["content"]), None)
-        if packet and "candidate_response" not in packet:
+        if packet and packet.get("candidate_response") == SAVED_REPLY_DRAFT:
+            selected = packet["current_selected_source"]
+            assert selected["evidence"] == "native_world_verified_selected_source", selected
+            source = selected_status(selected["content"])
+            assert source["status"] == "revised", source
+            assert source["selectedRevision"] == 1 and source["currentRevision"] == 2, source
+            assert source["currentSelection"]["note"] == SAVED_REPLY_NOTE, source
+            assert source["currentSelection"]["provider_evidence_class"] == "TEST_DOUBLE", source
+            assert "encounter" not in source["currentSelection"], source
+            content = SAVED_REPLY_REVIEW
+        elif packet and "candidate_response" not in packet:
             task = next((row["content"] for row in reversed(packet["current_work"]["messages"])
                          if row["role"] == "user"), "")
             if task in CORRECTION_TASKS:
@@ -126,6 +150,38 @@ def handler(request):
                                   "artifact_path": "saved-reply.md"}
             else:
                 assert len(results) == 2
+        elif task in {SAVED_REPLY_REVISED_TASK, SAVED_REPLY_WITHDRAWN_TASK}:
+            # The first draft intentionally misses the revision. Only a real
+            # delivery contribution may lead to the revised file action.
+            revised = task == SAVED_REPLY_REVISED_TASK
+            results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
+            assert all(row["status"] == "succeeded" for row in results), results
+            current = next(row["content"] for row in reversed(messages)
+                           if isinstance(row.get("content"), str)
+                           and "SELECTED_SOURCE_STATUS_JSON\n" in row["content"])
+            source = selected_status(current)
+            assert source["selectedRevision"] == 1, source
+            assert source["currentRevision"] == (2 if revised else 3), source
+            assert source["status"] == ("revised" if revised else "withdrawn"), source
+            if not revised:
+                assert "currentSelection" not in source, source
+            contribution = any(
+                isinstance(row.get("content"), str)
+                and "POSTURE_WORK_CONTRIBUTION" in row["content"]
+                and SAVED_REPLY_REVIEW in row["content"]
+                for row in messages[last_user + 1:])
+            path = "saved-reply-revised.md" if revised else "saved-reply-fresh.md"
+            if not results and (contribution or not revised):
+                tool_name = "mutate_file"
+                tool_arguments = {"path": path, "expected_digest": None,
+                                  "content": "# Follow-up\n\n" + (
+                                      SAVED_REPLY_REVIEW if revised else "Obtain fresh evidence.") + "\n"}
+            elif len(results) == 1:
+                tool_name = "work"
+                tool_arguments = {"op": "report", "kind": "result", "note": "Completed the follow-up.",
+                                  "artifact_path": path}
+            elif results:
+                assert len(results) == 2, results
         elif "Prepare a Markdown brief from the earlier completed background observation." in prompt:
             results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
             assert all(row["status"] == "succeeded" for row in results), results
@@ -286,6 +342,10 @@ def handler(request):
             if message.get("content") == "Set the test operating mode to mains.":
                 content = DECISION_ANSWERS["mains"]
                 break
+        if task == SAVED_REPLY_REVISED_TASK and tool_arguments is None:
+            content = SAVED_REPLY_FINAL if results else SAVED_REPLY_DRAFT
+        elif task == SAVED_REPLY_WITHDRAWN_TASK and tool_arguments is None:
+            content = SAVED_REPLY_FRESH
     if tool_arguments is not None:
         # One turn can call the same tool more than once (find, then report).
         # Provider call IDs must be unique within that turn, including later rounds.

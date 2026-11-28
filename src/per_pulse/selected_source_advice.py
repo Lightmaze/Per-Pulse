@@ -162,8 +162,7 @@ def source_context(source: dict | None, *, include_current: bool = False) -> str
         )
     if status == "current" and include_current:
         guidance += (
-            " Earlier Work messages were omitted to fit the model context. "
-            "The selected source is refreshed from the same native journal; "
+            " The selected source is refreshed from the same native journal; "
             "apply it only where relevant to the current user's task."
         )
     return (
@@ -266,7 +265,8 @@ class SelectedSourceTurnAdvisor:
 
 
 def install_selected_source_advisor(kernel: Any,
-                                   read_source: Callable[[Any], dict | None]) -> None:
+                                   read_source: Callable[[Any], dict | None],
+                                   *, expert: Any = None) -> None:
     """Compose with native advice; keep the original Kernel provider/runner."""
     previous_factory = kernel._turn_advisor_factory
 
@@ -275,3 +275,8 @@ def install_selected_source_advisor(kernel: Any,
         return SelectedSourceTurnAdvisor(store, read_source, previous)
 
     kernel._turn_advisor_factory = factory
+    if expert is not None:
+        # Delivery uses a separately bounded view that omits native advice.
+        # Give it the same live World source, even if the main history fits.
+        expert.bind_selected_source_material(
+            lambda scope: source_context(read_source(scope), include_current=True))

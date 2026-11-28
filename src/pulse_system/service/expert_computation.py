@@ -129,6 +129,7 @@ class ExpertRuntime:
         self.expert_active = expert_active
         self.store = ExpertStore(path)
         self.guard, self.trace = guard, None
+        self.selected_source_material = None
         try:
             if self.mode == "semantic":
                 trace_path = ":memory:" if str(path) == ":memory:" else str(path) + ".trace"
@@ -147,6 +148,12 @@ class ExpertRuntime:
 
     def posture_reviewer(self, main_store, model, scope):
         return _PostureReviewer(self, main_store, model)
+
+    def bind_selected_source_material(self, reader):
+        """Bind the product's native source projection before any Work runs."""
+        if not callable(reader):
+            raise TypeError("selected source reader must be callable")
+        self.selected_source_material = reader
 
     def posture_materials(self, scope, *, task_terms=()):
         if self.posture_memory is None:
@@ -431,19 +438,42 @@ class _PostureReviewer:
     def __init__(self, runtime, main_store, model):
         self.runtime, self.main_store, self.model = runtime, main_store, model
 
+    def _source_material(self, scope):
+        reader = self.runtime.selected_source_material
+        return reader(scope) if reader is not None else None
+
+    @staticmethod
+    def _changed_source(advice, latest, reason):
+        # Retain the paid fork receipt. A changed source requests an ordinary
+        # continuation with current evidence, never a replay of an effect.
+        return ResponseReview(context=latest, receipt={
+            **advice.receipt, "status": "suppressed_before_admission",
+            "reason": reason,
+        })
+
+    def _checked_review(self, scope, original, advice):
+        latest = self._source_material(scope)
+        if latest != original:
+            return self._changed_source(advice, latest, "selected_source_changed_during_review")
+        return ResponseReview(context=advice.context, receipt=advice.receipt)
+
     def review(self, request, response_text, *, round_id, cancel_event):
         self.runtime.guard()
         if cancel_event.is_set():
             raise CancellationRequested("posture review cancelled")
         identity = request.scope.digest + ":posture-review:" + fingerprint(round_id)
         helper = _Advisor(self.runtime, self.main_store, self.model)
+        source_material = self._source_material(request.scope)
+        source_digest = fingerprint(source_material) if source_material is not None else None
         try:
             saved = self.runtime.store.decision(identity)
         except ValueError:
             saved = None
         if saved is not None:
             advice = self.runtime.current_advice(request.scope, helper._advice(saved))
-            return ResponseReview(context=advice.context, receipt=advice.receipt)
+            if (saved.get("computation") or {}).get("selected_source_digest") != source_digest:
+                return self._changed_source(advice, source_material, "selected_source_changed_before_admission")
+            return self._checked_review(request.scope, source_material, advice)
         # The final candidate needs the same task-matched Work A lessons that
         # informed the pre-action decision. A cue-free recent shortlist can
         # evict an older, relevant lesson before the deliverable is reviewed.
@@ -464,6 +494,7 @@ class _PostureReviewer:
         try:
             prompt = make_work_prompt(view, materials, model_round=source["native_model_round"],
                                       posture_packet=posture_packet, review_candidate=response_text,
+                                      selected_source_material=source_material,
                                       byte_budget=self.runtime.trace.max_payload_bytes)
         except WorkMaterialBudgetExceeded:
             return ResponseReview(receipt=self.runtime.material_budget_receipt(posture_packet, checkpoint="delivery"))
@@ -482,6 +513,7 @@ class _PostureReviewer:
         computation = {
             "prompt_digest": fingerprint(prompt), "fork": receipt,
             "method": "constructive_work.v1", "checkpoint": "delivery",
+            "selected_source_digest": source_digest,
             "offered_posture_revisions": posture_packet["offered_posture_revisions"],
             "omitted_posture_revisions": posture_packet["omitted_posture_revisions"],
             "posture_applicability": "model_interpreted_not_certified",
@@ -497,10 +529,10 @@ class _PostureReviewer:
             advice = self.runtime.current_advice(request.scope, TurnAdvice(context=context, receipt={
                 "plugin": "expert_computation", "mode": "semantic", "decision_id": identity,
                 "status": "journal_write_failed", **computation}))
-            return ResponseReview(context=advice.context, receipt=advice.receipt)
+            return self._checked_review(request.scope, source_material, advice)
         self.runtime.guard()
         advice = self.runtime.current_advice(request.scope, helper._advice(decision))
-        return ResponseReview(context=advice.context, receipt=advice.receipt)
+        return self._checked_review(request.scope, source_material, advice)
 
 
 def result_posture_offers(store, scope, experience_id):

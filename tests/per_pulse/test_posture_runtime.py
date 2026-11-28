@@ -20,7 +20,7 @@ from pulse_harness.core.response_review import CombinedResponseReviewer, RESPONS
 from pulse_harness.core.turn_advice import TURN_ADVICE_PREFIX, decode_advice
 from pulse_harness.plugins.posture import pack_posture_materials
 from pulse_harness.plugins.expert_work import make_work_prompt, WorkMaterialBudgetExceeded
-from per_pulse.selected_source_advice import SelectedSourceTurnAdvisor
+from per_pulse.selected_source_advice import SelectedSourceTurnAdvisor, source_context
 from pulse_system.service.expert_computation import ExpertRuntime, recorded_expert_usage
 from pulse_system.service.posture import PostureMemory, posture_enabled
 from pulse_system.substrate.storage import Storage
@@ -364,8 +364,10 @@ def test_long_work_b_action_reaches_native_preaction_fork_and_main_model(tmp_pat
     assert len(decisions) == 2
 
 
-def test_revised_work_source_reaches_preaction_fork_and_main_decision(tmp_path, monkeypatch):
-    """One native turn carries the same verified revision to both decisions."""
+@pytest.mark.parametrize("withdraw_during_review", [False, True])
+def test_revised_work_source_reaches_preaction_fork_and_main_decision(
+        tmp_path, monkeypatch, withdraw_during_review):
+    """A native turn carries the selected revision to action and delivery."""
     requests = []
     storage = Storage(tmp_path / "world.db")
     memory = PostureMemory(storage, "world")
@@ -386,10 +388,21 @@ def test_revised_work_source_reaches_preaction_fork_and_main_decision(tmp_path, 
             "counterexamples": ["A new artifact with no predecessor."],
         },
     }
+    def read_source(request_scope):
+        if withdraw_during_review and any(
+                "candidate_response" in json.dumps(row["messages"])
+                for row in requests):
+            return {"id": source["id"], "revision": 1, "currentRevision": 3,
+                    "status": "withdrawn"}
+        return source
+
+    expert.bind_selected_source_material(
+        lambda request_scope: source_context(read_source(request_scope), include_current=True))
     advisor = SelectedSourceTurnAdvisor(
-        store, lambda request_scope: source, expert.advisor(store, model, scope))
+        store, read_source, expert.advisor(store, model, scope))
     runner = TurnRunner(store, model_adapter=model, tool_provider=NoTools(),
-                        turn_advisor=advisor)
+                        turn_advisor=advisor,
+                        response_reviewer=expert.posture_reviewer(store, model, scope))
     try:
         outcome = runner.run(scope, prompt="Make the actual Work B file deliverable.")
         assert outcome.status is TurnStatus.SUCCEEDED
@@ -410,11 +423,32 @@ def test_revised_work_source_reaches_preaction_fork_and_main_decision(tmp_path, 
         main = next(r for r in requests if
                     "WORK_MATERIAL_JSON" not in json.dumps(r["messages"]))
         assert "REVISED_SOURCE_CHOICE" in json.dumps(main["messages"])
-        assert len([r for r in requests if
-                    "WORK_MATERIAL_JSON" in json.dumps(r["messages"])]) == 1
+        forks = [r for r in requests if "WORK_MATERIAL_JSON" in json.dumps(r["messages"])]
+        assert len(forks) == 2
+        delivery_text = next(item["content"] for item in forks[1]["messages"]
+                             if "WORK_MATERIAL_JSON" in item.get("content", ""))
+        delivery = json.loads(delivery_text.split("WORK_MATERIAL_JSON\n", 1)[1])
+        assert delivery["current_selected_source"] == current
+        assert "candidate_response" in delivery
+        assert all("REVISED_SOURCE_CHOICE" not in row["content"]
+                   for row in delivery["current_work"]["messages"])
         transcript = list(TranscriptStore(store).messages(scope))
         assert not any("REVISED_SOURCE_CHOICE" in m.content and m.role == "user"
                        for m in transcript)
+        review = next(decode_review_envelope(m.content) for m in transcript
+                      if m.item_id.startswith(RESPONSE_REVIEW_PREFIX))
+        if withdraw_during_review:
+            assert review["receipt"]["reason"] == "selected_source_changed_during_review"
+            assert review["receipt"]["status"] == "suppressed_before_admission"
+            assert "withdrawn" in review["context"]
+            assert "REVISED_SOURCE_CHOICE" not in review["context"]
+            assert len(requests) == 4  # two forks, original and continuation
+            assert "withdrawn" in json.dumps(requests[-1]["messages"])
+        else:
+            assert review["context"] is None
+            assert len(requests) == 3
+        usage, accounted = recorded_expert_usage(store, scope, trace=expert.trace)
+        assert accounted and usage["provider_requests"] == 2
     finally:
         runner.close()
         expert.close()
