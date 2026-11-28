@@ -218,7 +218,10 @@ class PageService:
         # Reuse the native TurnAdvisor seam, never a second model loop.
         # Bind before running a session so each new turn snapshots its language.
         install_language_advisor(self.runtime.kernel_service, self._response_language)
-        install_selected_source_advisor(self.runtime.kernel_service, self.learning.decision_source)
+        install_selected_source_advisor(
+            self.runtime.kernel_service, self.learning.decision_source,
+            expert=self.runtime.harness.expert,
+        )
         if example and not self._state.get("exampleSeeded"):
             self._seed_example()
 
