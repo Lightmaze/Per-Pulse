@@ -69,7 +69,9 @@ def _bounded_current_selection(selected: dict[str, Any]) -> dict[str, Any]:
     if len(json.dumps(selected, ensure_ascii=False)) <= MAX_SELECTED_JSON_CHARS:
         return selected
     result = {key: selected[key] for key in
-              ("id", "revision", "title", "source_kind") if key in selected}
+              ("id", "revision", "title", "source_kind", "record_type",
+               "provider_evidence_class", "selector_evidence_class", "execution_regime")
+              if key in selected}
     result["detailsOmitted"] = True
     result["readCurrentWith"] = {
         "tool": "posture", "op": "get", "experience_id": selected["id"],

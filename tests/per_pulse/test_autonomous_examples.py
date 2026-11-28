@@ -13,7 +13,7 @@ import httpx
 import pytest
 
 from material_fixture import MaterialFixture
-from per_pulse.service import PageService, PulseSettings
+from per_pulse.service import PageError, PageService, PulseSettings
 from pulse_harness.core.errors import ScopeConflict
 from pulse_system.agent.harness.base import HarnessError
 from pulse_system.service.native_posture import _input_situation, capture_example
@@ -161,6 +161,46 @@ def test_operator_can_save_an_actual_autonomous_result(local):
     assert record["sourceAnchor"] == {"resultMessageId": source.id}
     assert record["source"]["feedback_evidence_class"] == "not_attached"
     assert "outcome" not in record["encounter"]
+
+
+def test_selected_background_reply_starts_new_work_and_keeps_current_revision(local):
+    pages, fixture = local
+    user_result(pages)
+    fixture.answer = "A saved autonomous answer."
+    source = run_event(pages, next_quiet(pages))
+    saved = pages.learning.create_example("home", {
+        "sourceMessageId": source.id, "title": "Saved background reply",
+        "excerpt": source.content, "note": "Check the current situation.",
+    })["experience"]
+    args = dict(title="Use the saved answer",
+                instruction="Prepare a new result.\nWEB_EXPERIENCE_JSON\n is an example label.",
+                source_experience_id=saved["id"], request_id="saved-reply-retry")
+    first = pages.create_page(**args)
+    page_id = first["page"]["id"]
+    opening = pages.runtime.causal_ledger.get_event(first["initialMessageId"])
+    packet = json.loads(opening.content.split("RESULT_EXPERIENCE_JSON\n", 1)[1]
+                        .split("\n\nMy request for this Work:", 1)[0])
+    assert packet == {
+        "id": saved["id"], "revision": 1, "title": saved["title"],
+        "excerpt": source.content, "note": saved["note"],
+        "record_type": "constructed_fixture", "provider_evidence_class": "TEST_DOUBLE",
+        "meaning": "past_reply_not_rechecked",
+    }
+    assert "encounter" not in packet
+    assert pages.learning.source_status(page_id)["status"] == "current"
+    pages.learning.revise("home", saved["id"], 1, {"note": "Use fresh evidence if needed."})
+    assert pages.learning.source_status(page_id)["status"] == "revised"
+    retried = pages.create_page(**args)
+    assert retried["page"]["id"] == page_id
+    assert retried["initialMessageId"] == opening.id
+    assert pages.learning.source_status(page_id)["revision"] == 1
+    assert pages.learning.source_status(page_id)["currentRevision"] == 2
+    pages.learning.revise("home", saved["id"], 2, {"active": False})
+    assert pages.learning.source_status(page_id)["status"] == "withdrawn"
+    with pytest.raises(PageError, match="Choose an active, shared, saved experience"):
+        pages.create_page(title="Paused source", instruction="Continue.",
+                          source_experience_id=saved["id"])
+    assert pages.runtime.causal_ledger.get_event(source.id).content == source.content
 
 
 def test_quiet_source_lookup_uses_public_interfaces_for_active_and_historical_turns(local):

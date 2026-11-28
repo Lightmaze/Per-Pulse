@@ -105,6 +105,12 @@ function Experience({ experience, pageId, results, focusedResultId, busy, hidden
     setRefineEvidence('');
     setRefineOpen(false);
   };
+  const selectedReply = example && experience.source?.capture_kind === 'operator_selected_example'
+    && ((experience.record_type === 'observed_episode'
+        && ['native_result_example', 'native_user_followup'].includes(experience.source?.kind ?? ''))
+      || (experience.record_type === 'constructed_fixture'
+        && experience.source?.kind === 'synthetic_runtime_observation'
+        && ['TEST_DOUBLE', 'EXPLICIT_MOCK'].includes(experience.source?.provider_evidence_class ?? '')));
   const originalId = experience.sourceAnchor?.resultMessageId ?? experience.source?.source_message_id;
   const correctionId = experience.sourceAnchor?.feedbackMessageId ?? experience.source?.feedback_message_id;
   // Inspect the original Work without losing the receiving Work's place or draft.
@@ -191,6 +197,7 @@ function Experience({ experience, pageId, results, focusedResultId, busy, hidden
       && experience.sourcePageId === pageId
       && ((lesson && (experience.source?.capture_kind === 'operator_selected_correction'
           || experience.source?.interpretation === 'model_proposed_lesson_from_user_followup'))
+        || selectedReply
         || (example && (experience.record_type === 'observed_episode'
           || (experience.record_type === 'constructed_fixture'
               && (experience.sourceKind === 'reading' || experience.sourceKind === 'command')

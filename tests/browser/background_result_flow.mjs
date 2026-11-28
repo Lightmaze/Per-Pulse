@@ -339,6 +339,48 @@ try {
   assert.equal(await page.locator('.composer textarea').inputValue(), workDraft);
   checks.push('Chinese Home reopens a durable original answer after a synthetic later-activity window evicts it from the recent preview.');
 
+  // Start a new ordinary Work directly from the retained background reply.
+  // Restart the same World with normal native file actions enabled. A fresh
+  // browser context uses English and does not carry presentation fixtures.
+  await page.close();
+  await stop(server);
+  server = start(true, true, directory, true);
+  await wait(async () => (await fetch(base + '/api/health')).ok, 'reopen saved reply for file work');
+  page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(base + '/page/' + work);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+  const retainedReply = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: savedExample.title, exact: true }) });
+  await retainedReply.getByRole('button', { name: 'Start a Work from this saved experience', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Saved reply follow-up');
+  await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
+    .fill('Write a Markdown file from this saved reply and report it Home.');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await page.getByRole('heading', { name: 'Saved reply follow-up', exact: true }).waitFor();
+  const savedWork = decodeURIComponent(new URL(page.url()).pathname.split('/').pop());
+  let savedDelivery;
+  await wait(async () => {
+    savedDelivery = (await get('/api/pages/home')).messages.find(row =>
+      row.sourcePageId === savedWork && row.reportedArtifact?.path === 'saved-reply.md');
+    return savedDelivery;
+  }, 'deliver a file from a saved background reply');
+  const selectedView = await get('/api/pages/' + savedWork);
+  assert.equal(selectedView.sourceExperience.id, savedExample.id);
+  assert.equal(selectedView.sourceExperience.revision, savedExample.revision);
+  assert.equal(selectedView.sourceExperience.status, 'current');
+  assert.ok(selectedView.messages.some(row => row.content.includes('RESULT_EXPERIENCE_JSON')));
+  await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
+  const savedCard = page.locator('#message-' + savedDelivery.id);
+  await savedCard.getByRole('button', { name: 'Open verified file' }).click();
+  const savedDownload = page.waitForEvent('download');
+  await savedCard.getByRole('button', { name: 'Download file', exact: true }).click();
+  assert.equal((await readFile(await (await savedDownload).path())).toString('utf8'),
+    '# Saved reply\n\n' + backgroundResult.content + '\n');
+  assert.deepEqual((await get('/api/pages/' + work)).messages, originalMessages);
+  assert.equal((await get('/api/pulse')).budget.used, 1);
+  checks.push('A saved spontaneous reply starts an independent Work, produces a native file reported Home, preserves its evidence class and exact source revision, and spends no extra Pulse admission.');
+
   // Independently exercise real propagation with a fresh isolated test World.
   await page.close();
   await stop(server);
