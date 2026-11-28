@@ -684,13 +684,32 @@ try {
       const receiverComposer = page.getByRole('textbox', { name: 'Message Decision brief: revised', exact: true });
       const receiverDraft = 'Keep this draft while reviewing the missing fallback.';
       await receiverComposer.fill(receiverDraft);
+      const aged = await post('/__attention/age-result/' + encodeURIComponent(revisedResultId), {}, 200);
+      assert.equal(aged.inserted, 520);
+      const recent = await get('/api/pages/' + revisedWorkId);
+      assert.equal(recent.messages.length, 500);
+      assert.equal(recent.hasMore, true);
+      assert.ok(!recent.messages.some(row => row.id === revisedResultId));
+      const anchored = await get('/api/pages/' + revisedWorkId + '?sourceMessageId=' + encodeURIComponent(revisedResultId));
+      assert.equal(anchored.earlierSourceMessageId, revisedResultId);
+      assert.equal(anchored.messages[0].id, revisedResultId);
+      assert.equal(anchored.messages[0].status, 'settled');
       await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
       const originalDelivery = page.locator('#message-' + revisedDeliveryId);
-      const anchorRead = page.waitForResponse(response => {
-        const url = new URL(response.url());
-        return url.pathname === '/api/pages/' + revisedWorkId && url.searchParams.get('sourceMessageId') === revisedResultId && response.ok();
-      });
+      const isFocusedRead = url => url.pathname === '/api/pages/' + revisedWorkId
+        && url.searchParams.get('sourceMessageId') === revisedResultId;
+      const failFocusedRead = () => page.route(isFocusedRead, route => route.fulfill({
+        status: 503, contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'network_error', message: 'Deliberate original result read outage.' } }),
+      }), { times: 1 });
+      const dialog = page.getByRole('dialog', { name: 'Lessons and examples', exact: true });
+      const refreshExperience = dialog.getByRole('button', { name: 'Refresh experience', exact: true });
+      const retryHint = dialog.getByText('Refresh experience to verify the original result before sending feedback. Your draft is kept.', { exact: true });
+      await failFocusedRead();
       await originalDelivery.getByRole('button', { name: 'Give experience feedback on this result', exact: true }).click();
+      await retryHint.waitFor();
+      const anchorRead = page.waitForResponse(response => isFocusedRead(new URL(response.url())) && response.ok());
+      await refreshExperience.click();
       await anchorRead;
       const lesson = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: 'Offline battery reading procedure', exact: true }) });
       await lesson.getByText('In use · v2', { exact: true }).waitFor();
@@ -699,7 +718,23 @@ try {
       const picker = lesson.getByRole('combobox', { name: 'Link a result from this page (optional)', exact: true });
       assert.equal(await picker.inputValue(), revisedResultId);
       assert.equal(await picker.isDisabled(), true);
-      await lesson.getByRole('button', { name: 'No clear benefit', exact: true }).click();
+      // A failed recheck must leave this exact historical result and typed
+      // feedback in place, but the stale editor must not submit a revision.
+      await failFocusedRead();
+      await refreshExperience.click();
+      await retryHint.waitFor();
+      const submitOutcome = lesson.getByRole('button', { name: 'No clear benefit', exact: true });
+      assert.equal(await submitOutcome.isDisabled(), true);
+      assert.equal(await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).inputValue(), reportedOutcome);
+      assert.equal(await picker.inputValue(), revisedResultId);
+      assert.equal((await experiences(revisedWorkId)).find(row => row.id === correctedExample.id).revision, 2);
+      const recoveredRead = page.waitForResponse(response => isFocusedRead(new URL(response.url())) && response.ok());
+      await refreshExperience.click();
+      await recoveredRead;
+      await wait(async () => await submitOutcome.isEnabled(), 'historical result feedback recovers');
+      assert.equal(await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).inputValue(), reportedOutcome);
+      assert.equal(await picker.inputValue(), revisedResultId);
+      await submitOutcome.click();
       await lesson.getByText('In use · v3', { exact: true }).waitFor();
       const receiving = (await experiences(revisedWorkId)).find(row => row.id === correctedExample.id);
       assert.equal(receiving.canEdit, false);
@@ -745,9 +780,10 @@ try {
       await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
       // A later assessment of the old delivered file must not pause the
       // already refined guidance. The receipt identifies the earlier offer.
-      await page.getByRole('navigation', { name: 'Pages', exact: true })
-        .getByRole('link', { name: /^Decision brief: revised/ }).click();
-      await wait(() => new URL(page.url()).pathname === '/page/' + revisedWorkId, 'late assessment of receiving Work');
+      await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
+      await originalDelivery.locator('.source-line').getByRole('link', { name: /^Decision brief: revised/ }).click();
+      await wait(() => new URL(page.url()).pathname === '/page/' + revisedWorkId
+        && new URL(page.url()).hash === '#message-' + encodeURIComponent(revisedResultId), 'late assessment of exact older receiving result');
       assert.equal(await receiverComposer.inputValue(), receiverDraft);
       await page.locator('#message-' + revisedResultId).getByRole('button', { name: 'Give experience feedback on this result', exact: true }).click();
       await lesson.getByText('In use · v4', { exact: true }).waitFor();
@@ -877,7 +913,7 @@ try {
   assert.equal((await get('/api/pulse')).budget.used, 2);
   checks.push('English and fully Chinese ordinary tasks distinguish two settled answers with identical 120-character prefixes after restart: offline selects the older answer, mains selects the newer answer, and unrelated tasks make fresh files; exact source event IDs, all six file bytes and Pulse allowance survive.');
 
-  checks.push('A person reports a limitation of a delivered file from its receiving Work, attaches the actual settled result, follows that exact report from the source procedure and returns without losing the receiving draft. The refined source yields a different later file before withdrawal; original answers, all nine delivered files and allowance survive restart.');
+  checks.push('A Home file links the actual settled Work result beyond the 500-message window (520 explicit authored native history rows). Initial and repeated source-read failures recover without losing the report or changing its revision; the exact old result and both Work paths remain available. The refined source yields a different later file before withdrawal; original answers, all nine delivered files and allowance survive restart.');
 
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ checks, errors, viewports: ['1280x900', '390x844'], modelEvidence: 'explicit_synthetic_transport_only' }, null, 2));
