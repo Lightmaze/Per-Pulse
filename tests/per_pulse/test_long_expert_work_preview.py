@@ -147,3 +147,23 @@ def test_long_chinese_revision_keeps_late_task_objects():
     terms = _task_terms(_request("背景材料。" * 1800 + "请改为互操作性验证和原型测试。"))
     assert "互操作" in "".join(terms)
     assert len(terms) <= 6
+
+
+def test_fitted_history_and_auxiliary_context_keep_request_order_without_inventing_sequences():
+    from pulse_harness.core.context_window import fit_context
+
+    original = _request("Opening task.", "Earlier correction. " * 500, "Continue the current task.")
+    saved = tuple({**row, "message_id": row["item_id"]} for row in original.messages)
+    fitted = fit_context(saved, 500)
+    assert fitted[0]["item_id"] == "context-window:omitted"
+    assert "transcript_seq" not in fitted[0]
+    auxiliary = {"role": "system", "content": "Native auxiliary context.",
+                 "item_id": "auxiliary-context:example"}
+    request = ModelRequest(original.scope, (*fitted, auxiliary), (), 3)
+    view, source = working_view(request)
+    assert [row["item_id"] for row in view["messages"]] == [
+        row["item_id"] for row in request.messages
+    ]
+    assert source["transcript_cursor"] == 3
+    assert source["visible_items"] == [row["item_id"] for row in request.messages]
+    assert "transcript_seq" not in auxiliary

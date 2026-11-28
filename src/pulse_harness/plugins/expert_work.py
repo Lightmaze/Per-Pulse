@@ -102,7 +102,10 @@ def working_view(request, *, byte_budget: int = 24000) -> tuple[dict, dict]:
         size = len(canonical(record).encode())
         if used + size > byte_budget:
             continue
-        selected.append((message["transcript_seq"], record))
+        # Context fitting and native auxiliary context can add projected
+        # messages without a durable transcript sequence. Keep their actual
+        # request order; they are context, not new transcript events.
+        selected.append((index, record))
         used += size
     selected.sort(key=lambda pair: pair[0])
     view = {"messages": [record for _, record in selected],
@@ -110,7 +113,8 @@ def working_view(request, *, byte_budget: int = 24000) -> tuple[dict, dict]:
             "content_bound_bytes_per_message": 5000,
             "latest_tool_results": clip(canonical(request.as_dict()["tool_results"]), 6000)}
     source = {"scope": request.scope.as_dict(),
-              "transcript_cursor": max((m["transcript_seq"] for m in messages), default=0),
+              "transcript_cursor": max((m["transcript_seq"] for m in messages
+                                        if type(m.get("transcript_seq")) is int), default=0),
               "visible_items": [record["item_id"] for _, record in selected],
               "history_view": "origin_and_recent_with_explicit_bounds"}
     return view, source
