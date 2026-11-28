@@ -10,6 +10,7 @@ Copyright 2026 Lightmaze Contributors. Licensed under Apache-2.0.
 from __future__ import annotations
 
 import importlib.util
+from importlib.metadata import version
 import json
 import os
 from pathlib import Path
@@ -98,6 +99,10 @@ def run_workspace(root: Path, *, example: bool, fake_provider: bool,
                     time.sleep(0.2)
             assert health == {"status": "ok", "providerConfigured": False}, health
             bootstrap = json_response(port, "/api/bootstrap")
+            assert bootstrap["version"] == version("per-pulse"), (
+                "Running API version differs from installed distribution", bootstrap["version"],
+                version("per-pulse"),
+            )
             assert bootstrap["example"] is example, bootstrap
             assert bootstrap["homeId"] == "home"
             assert isinstance(bootstrap["workspaceId"], str) and bootstrap["workspaceId"]
