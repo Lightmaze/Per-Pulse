@@ -44,6 +44,7 @@ REVISION_LINE = "Provisional candidate 2: interoperability proposal for testing.
 REVISION_RESULT = "Completed the revised planning file."
 requests = []
 file_actions = {}
+revision_checkpoints = set()
 lock = threading.Lock()
 
 
@@ -62,6 +63,9 @@ def factory(scope):
             if work.get("candidate_response") == REVISION_RESULT:
                 assert any(row["item_id"] == "context-window:omitted"
                            for row in work["current_work"]["messages"])
+                assert REVISION_NOTE in json.dumps(work["posture_experiences"])
+                with lock:
+                    revision_checkpoints.add("delivery")
             elif work.get("candidate_response") == DRAFT_RESULT:
                 assert EXAMPLE_NOTE in json.dumps(work["posture_experiences"])
                 answer = REVIEW_FIX
@@ -78,6 +82,8 @@ def factory(scope):
                     if REVISION_NOTE in json.dumps(work["posture_experiences"]):
                         assert any(REVISION_LINE in row["content"] for row in visible if row["role"] == "tool")
                         answer = REVISION_ADVICE
+                        with lock:
+                            revision_checkpoints.add("before_action")
             payload = {"choices": [{"index": 0, "delta": {"content": answer},
                                    "finish_reason": "stop"}]}
             return httpx.Response(200, headers={"content-type": "text/event-stream"},
@@ -112,6 +118,9 @@ def factory(scope):
                     assert any(isinstance(row.get("content"), str)
                                and row["content"].startswith(OMITTED_NOTE) for row in messages)
                     selected = results[2] if REVISION_ADVICE in json.dumps(messages) else results[0]
+                    if selected is results[2]:
+                        with lock:
+                            revision_checkpoints.add("executor")
                     path, heading = "comparison-plan.md", "# Planning hypothesis"
                 else:
                     selected = results[3] if COMPARE_ADVICE in json.dumps(messages) else results[0]
@@ -259,7 +268,8 @@ if __name__ == "__main__":
                             "suppliedArtifactId": "artifact_id" in record["arguments"]})
         with lock:
             return {"reports": reports, "requests": len(requests),
-                    "fileActions": list(file_actions.values())}
+                    "fileActions": list(file_actions.values()),
+                    "revisionCheckpoints": sorted(revision_checkpoints)}
 
     route = app.router.routes.pop()
     index = next(i for i, value in enumerate(app.router.routes)

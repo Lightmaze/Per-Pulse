@@ -378,6 +378,9 @@ try {
   assert.equal(revisionBytes.toString('utf8'),
     '# Planning hypothesis\n\nProvisional candidate 2: interoperability proposal for testing.\n');
   await revisionArticle.getByRole('button', { name: 'Close file preview' }).click();
+  // A failed optional expert call can be swallowed by the native runner.
+  // Require successful passage through each checkpoint, not just a file.
+  assert.deepEqual((await status()).revisionCheckpoints, ['before_action', 'delivery', 'executor']);
   const settledComparison = await view(comparisonId);
   for (const observation of archivedObservations) {
     assert.ok(settledComparison.messages.some(row => row.role === 'user' && row.content === observation));
