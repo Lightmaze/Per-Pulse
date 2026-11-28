@@ -68,7 +68,9 @@ def handler(request):
                        for row in messages if isinstance(row.get("content"), str)
                        and "WORK_MATERIAL_JSON\n" in row["content"]), None)
         if packet and packet.get("candidate_response") == SAVED_REPLY_DRAFT:
-            source = selected_status(packet["current_selected_source"])
+            selected = packet["current_selected_source"]
+            assert selected["evidence"] == "native_world_verified_selected_source", selected
+            source = selected_status(selected["content"])
             assert source["status"] == "revised", source
             assert source["selectedRevision"] == 1 and source["currentRevision"] == 2, source
             assert source["currentSelection"]["note"] == SAVED_REPLY_NOTE, source
