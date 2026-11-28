@@ -318,6 +318,26 @@ try {
   await comparisonArticle.getByRole('button', { name: 'Close file preview' }).click();
   checks.push('current task survives four large native reads; attributed pre-action advice changes source selection and the final Home file without a delivery correction');
 
+  // Continue the same Work through ordinary sends, not injected database
+  // rows. Three substantial settled observations exceed the native model
+  // window; the final comparison must still make its own source decision.
+  await page.goto(comparisonUrl);
+  await comparisonComposer.waitFor();
+  const archivedObservations = [];
+  for (let i = 0; i < 3; i++) {
+    const observation = 'Archived comparison observation ' + i + ':\n' +
+      'An earlier observation is retained for later work, not the current decision. '.repeat(350).trim();
+    archivedObservations.push(observation);
+    await comparisonComposer.fill(observation);
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await wait(async () => {
+      const snapshot = await view(comparisonId);
+      const index = snapshot.messages.findIndex(row => row.role === 'user' && row.content === observation);
+      return index >= 0 && snapshot.page.status === 'idle' &&
+        snapshot.messages.slice(index + 1).some(row => row.content === resultText);
+    }, 'settle ordinary archived comparison observation ' + i, 30000);
+  }
+
   // Retain an earlier example for a different purpose, then grow the
   // journal with newer material matching the opening of the revised request.
   // Each saved passage belongs to the original, completed Work response.
@@ -358,7 +378,14 @@ try {
   assert.equal(revisionBytes.toString('utf8'),
     '# Planning hypothesis\n\nProvisional candidate 2: interoperability proposal for testing.\n');
   await revisionArticle.getByRole('button', { name: 'Close file preview' }).click();
-  checks.push('a revised purpose at the end of a long user message retrieves an older planning example, changes source selection, and delivers a separate real file');
+  // A failed optional expert call can be swallowed by the native runner.
+  // Require successful passage through each checkpoint, not just a file.
+  assert.deepEqual((await status()).revisionCheckpoints, ['before_action', 'delivery', 'executor']);
+  const settledComparison = await view(comparisonId);
+  for (const observation of archivedObservations) {
+    assert.ok(settledComparison.messages.some(row => row.role === 'user' && row.content === observation));
+  }
+  checks.push('after native context omission, the revised purpose retrieves an older planning example, changes the actual source selection and delivers a separate real file while original observations remain intact');
 
   if (screenshots) await page.screenshot({ path: join(screenshots, 'report-source-home-desktop.png') });
 
@@ -407,6 +434,10 @@ try {
   await revisionArticle.getByRole('button', { name: 'Open verified file' }).click();
   await revisionArticle.getByText('Provisional candidate 2: interoperability proposal for testing.', { exact: true }).waitFor();
   await revisionArticle.getByRole('button', { name: 'Close file preview' }).click();
+  const restartedComparison = await view(comparisonId);
+  for (const observation of archivedObservations) {
+    assert.ok(restartedComparison.messages.some(row => row.role === 'user' && row.content === observation));
+  }
   assert.equal(await homeArticle.locator('.message-label').innerText(), 'Workspace');
   checks.push('offline process restart retains exact native provenance and source navigation on a phone viewport');
 
