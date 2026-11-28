@@ -1160,6 +1160,9 @@ def test_compacted_work_still_computes_posture_before_action_and_delivery(tmp_pa
         store.close()
 
     requests.clear()
+    # TurnRunner.close() owns the previous provider's lifetime. Reopen the
+    # transport along with the Kernel, as a restarted process would.
+    model = model_fixture(monkeypatch, requests)
     store = HarnessStore(kernel_path)
     storage = Storage(tmp_path / "world.db")
     memory = PostureMemory(storage, "world")
