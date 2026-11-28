@@ -1141,3 +1141,57 @@ def test_unfit_complete_prompt_skips_both_checkpoints_without_provider_call(tmp_
         model.close()
         store.close()
         storage.close()
+
+
+def test_compacted_work_still_computes_posture_before_action_and_delivery(tmp_path, monkeypatch):
+    """A continuing Work must not silently lose both expert checkpoints."""
+    requests = []
+    kernel_path = tmp_path / "kernel.db"
+    scope = HarnessScope("world", "subject", "session", 0, "owner",
+                         context_id="work:continuing", turn_id="opening")
+    model = model_fixture(monkeypatch, requests)
+    store = HarnessStore(kernel_path)
+    first = TurnRunner(store, model_adapter=model, tool_provider=NoTools())
+    try:
+        assert first.run(scope, prompt="Prepare a first useful practice page.").status is TurnStatus.SUCCEEDED
+        assert first.run(scope.for_turn("long-history"), prompt="Earlier observations. " * 600).status is TurnStatus.SUCCEEDED
+    finally:
+        first.close()
+        store.close()
+
+    requests.clear()
+    store = HarnessStore(kernel_path)
+    storage = Storage(tmp_path / "world.db")
+    memory = PostureMemory(storage, "world")
+    memory.add_experience(**episode(scope="subject"))
+    expert = ExpertRuntime(tmp_path / "expert.db", guard=lambda: None,
+                           posture_memory=memory, expert_active=False)
+    current = scope.for_turn("later")
+    runner = TurnRunner(store, model_adapter=model, tool_provider=NoTools(),
+                        turn_advisor=expert.advisor(store, model, current),
+                        response_reviewer=expert.posture_reviewer(store, model, current),
+                        max_context_tokens=1000)
+    try:
+        outcome = runner.run(current, prompt="Continue the language practice experience.")
+        assert outcome.status is TurnStatus.SUCCEEDED
+        decisions = expert.store.turn_decisions(current.as_dict())
+        assert {d["computation"]["checkpoint"] for d in decisions} == {"before_action", "delivery"}
+        forks = [body for body in requests if "WORK_MATERIAL_JSON" in json.dumps(body["messages"])]
+        assert len(forks) == 2
+        for body in forks:
+            text = next(m["content"] for m in body["messages"]
+                        if "WORK_MATERIAL_JSON" in m["content"])
+            packet = json.loads(text.split("WORK_MATERIAL_JSON\n", 1)[1])
+            rows = packet["current_work"]["messages"]
+            assert any(row["item_id"] == "context-window:omitted" for row in rows)
+            assert any("Continue the language practice experience." in row["content"] for row in rows)
+            assert "Let a visitor experience the central value" in text
+        usage, accounted = recorded_expert_usage(store, current, trace=expert.trace)
+        assert accounted and usage["provider_requests"] == 2
+        assert any(m.content == "Earlier observations. " * 600
+                   for m in TranscriptStore(store).messages(current.session_scope()))
+    finally:
+        runner.close()
+        expert.close()
+        store.close()
+        storage.close()
