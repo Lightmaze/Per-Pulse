@@ -638,7 +638,7 @@ try {
   const outcomeAdvice = 'If the stored reading has no timestamp, obtain a fresh reading before relying on it.';
   const outcomeNote = 'For offline battery work, verify the timestamp of stored readings before use. If it is missing, obtain a fresh reading.';
   const reportedOutcome = 'The delivered brief checks the timestamp but does not say what to do when it is missing.';
-  let correctedExample, revisedWorkId, revisedResultId;
+  let correctedExample, revisedWorkId, revisedResultId, revisedDeliveryId;
   for (const [mode, filename, instruction] of decisionCases) {
     if (filename === 'revised') {
       // Follow the actual Activity entry into its receiving Work. The local
@@ -684,14 +684,21 @@ try {
       const receiverComposer = page.getByRole('textbox', { name: 'Message Decision brief: revised', exact: true });
       const receiverDraft = 'Keep this draft while reviewing the missing fallback.';
       await receiverComposer.fill(receiverDraft);
-      await page.getByRole('button', { name: 'Settings', exact: true }).click();
-      await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+      await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();
+      const originalDelivery = page.locator('#message-' + revisedDeliveryId);
+      const anchorRead = page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname === '/api/pages/' + revisedWorkId && url.searchParams.get('sourceMessageId') === revisedResultId && response.ok();
+      });
+      await originalDelivery.getByRole('button', { name: 'Give experience feedback on this result', exact: true }).click();
+      await anchorRead;
       const lesson = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: 'Offline battery reading procedure', exact: true }) });
       await lesson.getByText('In use · v2', { exact: true }).waitFor();
       await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
       await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(reportedOutcome);
       const picker = lesson.getByRole('combobox', { name: 'Link a result from this page (optional)', exact: true });
-      await picker.selectOption(revisedResultId);
+      assert.equal(await picker.inputValue(), revisedResultId);
+      assert.equal(await picker.isDisabled(), true);
       await lesson.getByRole('button', { name: 'No clear benefit', exact: true }).click();
       await lesson.getByText('In use · v3', { exact: true }).waitFor();
       const receiving = (await experiences(revisedWorkId)).find(row => row.id === correctedExample.id);
@@ -701,6 +708,8 @@ try {
       assert.equal(receiving.feedback[0].source.page_id, revisedWorkId);
       assert.equal(receiving.feedback[0].evidence, reportedOutcome);
       await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+      assert.equal(new URL(page.url()).pathname, '/');
+      await originalDelivery.waitFor();
       // The source owner can inspect the linked actual result and return.
       await page.getByRole('button', { name: 'Activity', exact: true }).click();
       const activity = page.locator('.pulse-activity-list li').filter({ hasText: 'Independent offline observation' });
@@ -740,13 +749,13 @@ try {
         .getByRole('link', { name: /^Decision brief: revised/ }).click();
       await wait(() => new URL(page.url()).pathname === '/page/' + revisedWorkId, 'late assessment of receiving Work');
       assert.equal(await receiverComposer.inputValue(), receiverDraft);
-      await page.getByRole('button', { name: 'Settings', exact: true }).click();
-      await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
+      await page.locator('#message-' + revisedResultId).getByRole('button', { name: 'Give experience feedback on this result', exact: true }).click();
       await lesson.getByText('In use · v4', { exact: true }).waitFor();
       await lesson.getByRole('button', { name: 'Give feedback', exact: true }).click();
       const lateReport = 'The old brief would permit reliance on a reading without a timestamp.';
       await lesson.getByRole('textbox', { name: 'What changed in the result?', exact: true }).fill(lateReport);
-      await picker.selectOption(revisedResultId);
+      assert.equal(await picker.inputValue(), revisedResultId);
+      assert.equal(await picker.isDisabled(), true);
       await lesson.getByRole('checkbox', { name: 'Record this result only (keep current guidance unchanged)', exact: true }).check();
       await lesson.getByRole('button', { name: 'It hurt · record only', exact: true }).click();
       await lesson.getByText('In use · v5', { exact: true }).waitFor();
@@ -829,11 +838,13 @@ try {
     }
     if (filename === 'revised') {
       revisedWorkId = id;
+      revisedDeliveryId = delivery.id;
       await wait(async () => {
         const snapshot = await get('/api/pages/' + id);
         revisedResultId = snapshot.messages.find(row => row.role === 'assistant' && row.status === 'settled')?.id;
         return snapshot.page.status === 'idle' && revisedResultId;
       }, 'settled receiving result for delivered file');
+      assert.equal(delivery.sourceMessageId, revisedResultId);
     }
     if (['revised', 'outcome', 'withdrawn'].includes(filename)) {
       await page.locator('.main-nav').getByRole('link', { name: 'Home', exact: true }).click();

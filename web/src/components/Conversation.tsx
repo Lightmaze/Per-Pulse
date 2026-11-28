@@ -13,10 +13,11 @@ import { initialWorkHandoffExcerpt } from '../workHandoffExcerpt';
 import { readTransferPresentation } from '../transferPresentation';
 import { useLiveReply } from '../liveReply';
 
-export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, stale = false }: {
+export function Conversation({ view, pages, navigate, onCreate, onReference, onReturn, onTransfer, onSaveExample, onHistory, onFind, onMaterial, onResultFeedback, stale = false }: {
   view: PageView; pages: PageSummary[]; navigate: Navigate; onCreate: (message?: Message, excerpt?: string, needsExactExcerpt?: boolean) => void; onReference: (message: Message) => void; onReturn: (message: Message, selection: string, needsExactExcerpt: boolean) => void; onTransfer?: (message: Message, excerpt: string) => void; onHistory: (beforeMessageId: string) => void; onFind: () => void; stale?: boolean;
   onSaveExample?: (message: Message, excerpt: string, needsExactExcerpt: boolean) => void;
   onMaterial?: (materialId: string, pageId: string) => void;
+  onResultFeedback?: (pageId: string, messageId: string, originMessageId?: string) => void;
 }) {
   const { t, pageTitle } = useLanguage();
   const pageMap = new Map(pages.map(page => [page.id, page]));
@@ -52,6 +53,8 @@ export function Conversation({ view, pages, navigate, onCreate, onReference, onR
         {activity ? <span className={`message-status tone-${activity.tone}`} title={t(activity.detailKey, activity.detailParams)}>{t(activity.labelKey)}</span> : null}
         <div className="message-actions">
           <CopyButton text={message.content} label={t('conversation.copyMessage')} />
+          {onResultFeedback && view.page.kind === 'work' && message.role === 'assistant' && message.status === 'settled' ? <button type="button" onClick={() => onResultFeedback(view.page.id, message.id)}>{t('learning.feedbackOnResult')}</button> : null}
+          {onResultFeedback && view.page.kind === 'home' && message.reportedArtifact && message.sourcePageId === message.reportedArtifact.pageId && message.sourceMessageId ? <button type="button" onClick={() => onResultFeedback(message.reportedArtifact!.pageId, message.sourceMessageId!, message.id)}>{t('learning.feedbackOnResult')}</button> : null}
           <button onMouseDown={event => {
             // Keep the highlighted passage through the button's focus change.
             const selected = window.getSelection();
