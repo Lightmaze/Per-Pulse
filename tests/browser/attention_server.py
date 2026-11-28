@@ -105,6 +105,27 @@ def handler(request):
                                   "artifact_path": "pulse-observation.md"}
             else:
                 assert len(results) == 2
+        elif isinstance(task, str) and task.startswith("Previously saved reply") and task.endswith(
+                "Write a Markdown file from this saved reply and report it Home."):
+            packet = json.loads(task.split("RESULT_EXPERIENCE_JSON\n", 1)[1]
+                                .split("\n\nMy request for this Work:", 1)[0])
+            assert packet["excerpt"] == "Synthetic fixture response. The local turn completed."
+            assert packet["record_type"] == "constructed_fixture"
+            assert packet["provider_evidence_class"] == "TEST_DOUBLE"
+            assert packet["meaning"] == "past_reply_not_rechecked"
+            assert "encounter" not in packet
+            results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
+            assert all(row["status"] == "succeeded" for row in results), results
+            if not results:
+                tool_name = "mutate_file"
+                tool_arguments = {"path": "saved-reply.md", "expected_digest": None,
+                                  "content": "# Saved reply\n\n" + packet["excerpt"] + "\n"}
+            elif len(results) == 1:
+                tool_name = "work"
+                tool_arguments = {"op": "report", "kind": "result", "note": "Used the saved reply.",
+                                  "artifact_path": "saved-reply.md"}
+            else:
+                assert len(results) == 2
         elif "Prepare a Markdown brief from the earlier completed background observation." in prompt:
             results = [json.loads(row["content"]) for row in messages[last_user + 1:] if row["role"] == "tool"]
             assert all(row["status"] == "succeeded" for row in results), results

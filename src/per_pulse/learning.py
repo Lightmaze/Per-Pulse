@@ -178,6 +178,25 @@ class PageLearning:
                 "id", "revision", "title", "lesson", "conditions",
                 "counterexamples", "shift", "record_type",
             )} | {"source_kind": "native_correction_lesson"}
+        # A reply explicitly retained by the person is useful as historical
+        # material, including a background answer. Keep its evidence class
+        # distinct from a verified file/web observation or a successful lesson.
+        result_example = (
+            source.get("capture_kind") == "operator_selected_example"
+            and ((record.get("record_type") == "observed_episode"
+                  and kind in {"native_result_example", "native_user_followup"})
+                 or (record.get("record_type") == "constructed_fixture"
+                     and kind == "synthetic_runtime_observation"
+                     and source.get("provider_evidence_class") in {"TEST_DOUBLE", "EXPLICIT_MOCK"}))
+        )
+        if (record["active"] and record["scope"] == "subject"
+                and record.get("representation") == "example" and result_example):
+            return {key: deepcopy(record[key]) for key in (
+                "id", "revision", "title", "excerpt", "note", "record_type",
+            )} | {"source_kind": "native_result_example",
+                  "provider_evidence_class": source.get("provider_evidence_class", "UNKNOWN"),
+                  **({"execution_regime": "replay"}
+                     if source.get("execution_regime") == "replay" else {})}
         fixture_selector = (
             record.get("record_type") == "constructed_fixture"
             and kind in {"native_reading_example", "native_command_example"}
