@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a41
+
+- Find completed Pulse answers from ordinary later Work and make task-relevant historical answers available before a decision, even when newer matching Works are unfinished (#392–395).
+- Match Chinese as well as English task conditions and present the relevant original passage instead of an unrelated opening excerpt (#396).
+- Save, revise and withdraw a sourced experience through its original Work; later Work can receive the applicable revision while historical answers remain available (#397, #398).
+- Carry actual later Work results into feedback and revisions, retain feedback drafts across concurrent edits, and record historical outcomes separately from current guidance (#399, #400).
+
 ## 0.1.0a40
 
 - Keep earlier Work file receipts and their input-read order verifiable through long histories and event retention; recover completed files by path without repeating the write (#385–387).
