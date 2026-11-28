@@ -278,6 +278,7 @@ export function LearningDialog({ pageId, pageTitle, messages, focusedResultId, c
   const [version, setVersion] = useState(0);
   const [search, setSearch] = useState('');
   const [focusedResult, setFocusedResult] = useState<Message | null>(null);
+  const [focusedReadFailed, setFocusedReadFailed] = useState(false);
   const results = focusedResultId ? (focusedResult ? [focusedResult] : []) : messages.filter(message => message.role === 'assistant' && message.status === 'settled');
   // Search only content eligible for sharing, never private encounters or feedback.
   const needle = search.trim().toLocaleLowerCase();
@@ -298,15 +299,18 @@ export function LearningDialog({ pageId, pageTitle, messages, focusedResultId, c
       return result;
     }) : Promise.resolve(null);
     Promise.all([api.posture(pageId, controller.signal), source]).then(([next, result]) => {
-      if (!controller.signal.aborted) { setView(next); setFocusedResult(result); }
+      if (!controller.signal.aborted) { setView(next); setFocusedResult(result); setFocusedReadFailed(false); }
     }).catch(problem => {
-      if (!controller.signal.aborted) setError(problem instanceof Error ? problem : t('learning.readError'));
+      if (!controller.signal.aborted) {
+        setError(problem instanceof Error ? problem : t('learning.readError'));
+        if (focusedResultId) setFocusedReadFailed(true);
+      }
     }).finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
     return () => controller.abort();
   }, [pageId, version, focusedResultId]);
 
   const update = async (operation: () => Promise<{ experience: PostureExperience }>) => {
-    if (writing.current || refreshing) throw new Error('Wait for the current experience request to finish.');
+    if (writing.current || refreshing || focusedReadFailed) throw new Error('Refresh the original result before sending feedback.');
     writing.current = true;
     setBusy(true); setError('');
     try {
@@ -321,7 +325,7 @@ export function LearningDialog({ pageId, pageTitle, messages, focusedResultId, c
     <p className="dialog-description">{t('learning.description', { page: pageTitle })}</p>
     {focusedResult ? <div className="lesson-note"><strong>{t('learning.feedbackOnResult')}</strong><p>{messageBody(focusedResult).slice(0, 240)}</p></div> : null}
     <button className="text-button" disabled={busy || refreshing} onClick={() => { setRefreshing(true); setVersion(value => value + 1); }}>{t('learning.refresh')}</button>
-    {error ? <div className="form-error" role="alert">{errorText(error)}</div> : null}
+    {error ? <div className="form-error" role="alert">{errorText(error)}{focusedReadFailed ? <p>{t('learning.focusedResultRetry')}</p> : null}</div> : null}
     {refreshing ? <p role="status">{t('learning.loading')}</p> : null}
     {view && !view.enabled ? <p>{t('learning.disabled')}</p> : null}
     {view?.enabled && !view.experiences.length ? <div className="lessons-empty"><h3>{t('learning.emptyTitle')}</h3><p>{t('learning.emptyHelp')}</p><p>{t('learning.emptyModel')}</p></div> : null}
@@ -332,7 +336,7 @@ export function LearningDialog({ pageId, pageTitle, messages, focusedResultId, c
     {view?.enabled && view.experiences.length > 0 && !visibleExperiences.length ? <p className="lesson-note" role="status">{t('learning.noMatches')}</p> : null}
     {/* Filtering only hides authorized lessons; unmounting their editors would
         discard unsent reports and refinements when the search changes. */}
-    {(!focusedResultId || focusedResult) ? (view?.experiences ?? []).filter(experience => !focusedResultId || experience.canReport).map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} focusedResultId={focusedResultId} busy={busy || refreshing} hidden={!visibleIds.has(experience.id)} navigate={navigate} continueWebWork={continueWebWork}
+    {(!focusedResultId || focusedResult) ? (view?.experiences ?? []).filter(experience => !focusedResultId || experience.canReport).map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} focusedResultId={focusedResultId} busy={busy || refreshing || focusedReadFailed} hidden={!visibleIds.has(experience.id)} navigate={navigate} continueWebWork={continueWebWork}
       revise={(item, changes, evidence) => update(() => api.reviseExperience(pageId, item, changes, evidence))}
       feedback={(item, verdict, evidence, resultMessageId, resultOnly) => update(() => api.experienceFeedback(pageId, item, verdict, evidence, resultMessageId, resultOnly))} />) : null}
   </Dialog>;

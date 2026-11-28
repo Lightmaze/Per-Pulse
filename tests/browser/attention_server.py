@@ -317,14 +317,36 @@ if __name__ == "__main__":
             assert Path(module.__file__).resolve().is_relative_to(prefix), module.__file__
         assert (Path(per_pulse.app.__file__).parent / 'static' / 'index.html').is_file()
     os.environ["PER_PULSE_ATTENTION_BROWSER_KEY"] = "explicit-synthetic-browser-credential"
-    uvicorn.run(
-        create_app(args.data_dir, pulse=PulseSettings(
-            enabled=not args.no_pulse, spontaneous_rate=1 if args.spontaneous else 0,
-            max_background_pulses_per_hour=1 if args.spontaneous else 2,
-            check_interval_seconds=0.01, refractory_seconds=.05 if args.spontaneous else 0,
-            max_background_provider_tokens_per_hour=128,
-            background_provider_token_reservation=64,
-        ), posture=True if args.posture else None, model_factory=factory,
-            **({"allow_workspace_actions": True, "auto_apply_edits": True} if args.deliverables else {})),
-        host="127.0.0.1", port=args.port, log_level="warning",
-    )
+    app = create_app(args.data_dir, pulse=PulseSettings(
+        enabled=not args.no_pulse, spontaneous_rate=1 if args.spontaneous else 0,
+        max_background_pulses_per_hour=1 if args.spontaneous else 2,
+        check_interval_seconds=0.01, refractory_seconds=.05 if args.spontaneous else 0,
+        max_background_provider_tokens_per_hour=128,
+        background_provider_token_reservation=64,
+    ), posture=True if args.posture else None, model_factory=factory,
+        **({"allow_workspace_actions": True, "auto_apply_edits": True} if args.deliverables else {}))
+
+    if args.deliverables and args.no_pulse:
+        @app.post("/__attention/age-result/{result_id}")
+        def age_result(result_id: str):
+            # Authored terminal history fixtures in the actual native ledger,
+            # not 520 model turns or a modified HTTP page projection. These
+            # rows have no claimable turn roots. The original result, Kernel
+            # computation, file receipt and experience remain untouched.
+            ledger = app.state.pages.runtime.causal_ledger
+            result = ledger.get_event(result_id)
+            assert result is not None and result.kind.value == "assistant_result"
+            assert result.status.value == "settled" and result.center_id is not None
+            parent = ledger.get_event(result.parent_event_id)
+            assert parent is not None
+            for index in range(520):
+                ledger.record_child(
+                    result.id, kind="stimulus", domain=parent.domain, source="user",
+                    content=f"Later field note {index:04d}. [Authored history fixture]",
+                    metadata={"authored_history_fixture": True},
+                )
+            return {"inserted": 520}
+
+        app.router.routes.insert(0, app.router.routes.pop())
+
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
