@@ -152,15 +152,15 @@ jobs:
           "$installed_python" -m pip check
           "$installed_python" tests/release/installed_wheel_smoke.py
           echo "PER_PULSE_INSTALLED_PYTHON=$installed_python" >> "$GITHUB_ENV"
-      - name: Continue a World created by the published a39 wheel
+      - name: Continue a World created by the published a40 wheel
         if: runner.os == 'Linux'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           previous="$RUNNER_TEMP/per-pulse-previous"
           mkdir -p "$previous"
-          gh release download v0.1.0a39 --repo "$GITHUB_REPOSITORY" --pattern 'per_pulse-0.1.0a39-py3-none-any.whl' --dir "$previous"
-          echo "f679c662c1f6fa9b7947fabbd6f0ddf2c363044bf9a4f865fae5971fd586a1e0  $previous/per_pulse-0.1.0a39-py3-none-any.whl" | sha256sum -c -
+          gh release download v0.1.0a40 --repo "$GITHUB_REPOSITORY" --pattern 'per_pulse-0.1.0a40-py3-none-any.whl' --dir "$previous"
+          echo "7307af284678c7974d38ac3bb3fcb6b3c43124dd0c83cb3aad9af1bb288ea051  $previous/per_pulse-0.1.0a40-py3-none-any.whl" | sha256sum -c -
           python -m venv "$previous/venv"
           "$previous/venv/bin/python" -m pip install --disable-pip-version-check "$previous/"*.whl
           "$previous/venv/bin/python" tests/release/installed_upgrade.py seed "$previous"
