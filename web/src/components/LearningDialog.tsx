@@ -45,9 +45,10 @@ function describeCondition(value: LessonCondition, t: Translate): string {
 
 type LessonRevision = { active?: boolean; scope?: 'context' | 'subject'; lesson?: string; note?: string; conditions?: LessonCondition; counterexamples?: string[]; shift?: LessonShift };
 
-function Experience({ experience, pageId, results, busy, hidden, revise, feedback, navigate, continueWebWork }: {
+function Experience({ experience, pageId, results, focusedResultId, busy, hidden, revise, feedback, navigate, continueWebWork }: {
   experience: PostureExperience; pageId: string; busy: boolean; hidden: boolean;
   results: Message[];
+  focusedResultId?: string;
   revise: (experience: PostureExperience, changes: LessonRevision, evidence?: string) => Promise<void>;
   feedback: (experience: PostureExperience, verdict: LessonVerdict, evidence: string, resultMessageId?: string, resultOnly?: boolean) => Promise<void>;
   navigate: Navigate;
@@ -59,7 +60,7 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   const [evidence, setEvidence] = useState('');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackRevision, setFeedbackRevision] = useState(experience.revision);
-  const [resultMessageId, setResultMessageId] = useState('');
+  const [resultMessageId, setResultMessageId] = useState(focusedResultId ?? '');
   const [resultOnly, setResultOnly] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineRevision, setRefineRevision] = useState(experience.revision);
@@ -111,13 +112,13 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
   const sourceOrigin = experience.sourcePageId && experience.sourcePageId !== pageId ? { pageId } : undefined;
   const feedbackStale = feedbackRevision !== experience.revision;
   const toggleFeedback = () => {
-    if (!feedbackOpen && !evidence.trim() && !resultMessageId) setFeedbackRevision(experience.revision);
+    if (!feedbackOpen && !evidence.trim() && (!resultMessageId || focusedResultId)) setFeedbackRevision(experience.revision);
     setFeedbackOpen(value => !value);
   };
   const submit = async (verdict: LessonVerdict) => {
     if (feedbackStale) return;
     await feedback({ ...experience, revision: feedbackRevision }, verdict, evidence.trim(), resultMessageId || undefined, resultOnly);
-    setEvidence(''); setResultMessageId(''); setResultOnly(false); setFeedbackOpen(false);
+    setEvidence(''); setResultMessageId(focusedResultId ?? ''); setResultOnly(false); setFeedbackOpen(false);
   };
   return <article hidden={hidden} className={`lesson ${experience.active ? '' : 'lesson-paused'}`}>
     <div className="lesson-heading"><h3>{experience.title}</h3><span>{t(experience.active ? 'learning.active' : 'learning.paused')} · v{experience.revision}</span></div>
@@ -181,12 +182,12 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
         </> : reportedPage ? <> · <button type="button" className="text-button" onClick={() => navigate(reportedPage, { pageId })}>{t('learning.reportedWork')}</button></> : null}
       </p>{entry.evidenceSource ? <ExperienceSourceLink source={entry.evidenceSource} pageId={pageId} navigate={navigate} /> : null}</div>;
     })}</details> : null}
-    {experience.canEdit ? <div className="lesson-actions">
+    {!focusedResultId && experience.canEdit ? <div className="lesson-actions">
       <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { active: !experience.active }).catch(() => {}); }}>{t(experience.active ? (example ? 'learning.pauseExample' : 'learning.pause') : 'learning.resume')}</button>
       <button className="secondary-button" disabled={busy} onClick={() => { void revise(experience, { scope: experience.scope === 'context' ? 'subject' : 'context' }).catch(() => {}); }}>{t(experience.scope === 'context' ? 'learning.share' : 'learning.keepLocal')}</button>
       <button className="text-button" disabled={busy || refineOpen} onClick={beginRefinement}>{t(example ? 'learning.refineExample' : 'learning.refine')}</button>
-    </div> : experience.sourcePageId && !experience.sourceAnchor ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin)}>{t('learning.editSource')}</button> : null}
-    {experience.active && experience.scope === 'subject' && experience.canEdit
+    </div> : !focusedResultId && experience.sourcePageId && !experience.sourceAnchor ? <button className="text-button" onClick={() => navigate(experience.sourcePageId!, sourceOrigin)}>{t('learning.editSource')}</button> : null}
+    {!focusedResultId && experience.active && experience.scope === 'subject' && experience.canEdit
       && experience.sourcePageId === pageId
       && ((lesson && (experience.source?.capture_kind === 'operator_selected_correction'
           || experience.source?.interpretation === 'model_proposed_lesson_from_user_followup'))
@@ -249,23 +250,23 @@ function Experience({ experience, pageId, results, busy, hidden, revise, feedbac
       <label className="field-label" htmlFor={`feedback-${experience.id}`}>{t('learning.changed')}</label>
       <textarea id={`feedback-${experience.id}`} rows={3} value={evidence} maxLength={1500} disabled={busy} onChange={event => setEvidence(event.target.value)} placeholder={t('learning.feedbackPlaceholder')} />
       <label className="field-label" htmlFor={`feedback-result-${experience.id}`}>{t('learning.selectResult')}</label>
-      <select id={`feedback-result-${experience.id}`} value={resultMessageId} disabled={busy} aria-describedby={`feedback-result-help-${experience.id}`} onChange={event => { setResultMessageId(event.target.value); if (!event.target.value) setResultOnly(false); }}>
-        <option value="">{t('learning.noResult')}</option>
+      <select id={`feedback-result-${experience.id}`} value={resultMessageId} disabled={busy || Boolean(focusedResultId)} aria-describedby={`feedback-result-help-${experience.id}`} onChange={event => { setResultMessageId(event.target.value); if (!event.target.value) setResultOnly(false); }}>
+        {!focusedResultId ? <option value="">{t('learning.noResult')}</option> : null}
         {results.map((message, index) => <option key={message.id} value={message.id}>{index + 1}. {message.content.replace(/\s+/g, ' ').slice(0, 120)}</option>)}
       </select>
-      <p className="lesson-note" id={`feedback-result-help-${experience.id}`}>{t('learning.resultHelp')}</p>
+      <p className="lesson-note" id={`feedback-result-help-${experience.id}`}>{t(focusedResultId ? 'learning.focusedResultHelp' : 'learning.resultHelp')}</p>
       {resultMessageId ? <label className="field-label"><input type="checkbox" checked={resultOnly} disabled={busy} onChange={event => setResultOnly(event.target.checked)} /> {t('learning.resultOnly')}</label> : null}
       <div className="lesson-actions">
         <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('useful').catch(() => {})}>{t('learning.helped')}</button>
         <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('not_useful').catch(() => {})}>{t('learning.noBenefit')}</button>
         <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('harmful').catch(() => {})}>{t(resultOnly ? 'learning.hurtResultOnly' : 'learning.hurt')}</button>
-        {experience.canEdit && experience.active && !resultOnly ? <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('withdrawn').catch(() => {})}>{t('learning.withdraw')}</button> : null}
+        {!focusedResultId && experience.canEdit && experience.active && !resultOnly ? <button className="secondary-button" disabled={busy || feedbackStale || !evidence.trim()} onClick={() => void submit('withdrawn').catch(() => {})}>{t('learning.withdraw')}</button> : null}
       </div>
     </div> : null}
   </article>;
 }
 
-export function LearningDialog({ pageId, pageTitle, messages, close, navigate, continueWebWork }: { pageId: string; pageTitle: string; messages: Message[]; close: () => void; navigate: Navigate; continueWebWork: (selected: { id: string; title: string; excerpt: string }) => void }) {
+export function LearningDialog({ pageId, pageTitle, messages, focusedResultId, close, navigate, continueWebWork }: { pageId: string; pageTitle: string; messages: Message[]; focusedResultId?: string; close: () => void; navigate: Navigate; continueWebWork: (selected: { id: string; title: string; excerpt: string }) => void }) {
   const { t, errorText } = useLanguage();
   const [view, setView] = useState<PostureView | null>(null);
   // Keep the error code so an interface-language switch updates the message
@@ -276,13 +277,14 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate, c
   const [refreshing, setRefreshing] = useState(true);
   const [version, setVersion] = useState(0);
   const [search, setSearch] = useState('');
-  const results = messages.filter(message => message.role === 'assistant' && message.status === 'settled');
+  const [focusedResult, setFocusedResult] = useState<Message | null>(null);
+  const results = focusedResultId ? (focusedResult ? [focusedResult] : []) : messages.filter(message => message.role === 'assistant' && message.status === 'settled');
   // Search only content eligible for sharing, never private encounters or feedback.
   const needle = search.trim().toLocaleLowerCase();
-  const visibleExperiences = (view?.experiences ?? []).filter(item => !needle || (item.representation === 'example' ? [item.title, item.excerpt, item.note] : [
+  const visibleExperiences = (view?.experiences ?? []).filter(item => (!focusedResultId || item.canReport) && (!needle || (item.representation === 'example' ? [item.title, item.excerpt, item.note] : [
     item.title, item.lesson, JSON.stringify(item.conditions), ...item.counterexamples,
     item.shift.understanding, item.shift.candidates, item.shift.delivery,
-  ]).some(value => value.toLocaleLowerCase().includes(needle)));
+  ]).some(value => value.toLocaleLowerCase().includes(needle))));
   const visibleIds = new Set(visibleExperiences.map(item => item.id));
   useEffect(() => {
     const controller = new AbortController();
@@ -290,13 +292,18 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate, c
     // typed report and selected result still belong to this page. App keys this
     // dialog by World/page, so neither drafts nor late writes cross contexts.
     setRefreshing(true); setError('');
-    api.posture(pageId, controller.signal).then(next => {
-      if (!controller.signal.aborted) setView(next);
+    const source = focusedResultId ? api.page(pageId, controller.signal, focusedResultId).then(page => {
+      const result = page.page.id === pageId && page.messages.find(message => message.id === focusedResultId && message.role === 'assistant' && message.status === 'settled');
+      if (!result) throw new Error(t('learning.focusedResultUnavailable'));
+      return result;
+    }) : Promise.resolve(null);
+    Promise.all([api.posture(pageId, controller.signal), source]).then(([next, result]) => {
+      if (!controller.signal.aborted) { setView(next); setFocusedResult(result); }
     }).catch(problem => {
       if (!controller.signal.aborted) setError(problem instanceof Error ? problem : t('learning.readError'));
     }).finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
     return () => controller.abort();
-  }, [pageId, version]);
+  }, [pageId, version, focusedResultId]);
 
   const update = async (operation: () => Promise<{ experience: PostureExperience }>) => {
     if (writing.current || refreshing) throw new Error('Wait for the current experience request to finish.');
@@ -312,6 +319,7 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate, c
   };
   return <Dialog title={t('learning.title')} className="learning-dialog" onClose={() => { if (!busy) close(); }}>
     <p className="dialog-description">{t('learning.description', { page: pageTitle })}</p>
+    {focusedResult ? <div className="lesson-note"><strong>{t('learning.feedbackOnResult')}</strong><p>{messageBody(focusedResult).slice(0, 240)}</p></div> : null}
     <button className="text-button" disabled={busy || refreshing} onClick={() => { setRefreshing(true); setVersion(value => value + 1); }}>{t('learning.refresh')}</button>
     {error ? <div className="form-error" role="alert">{errorText(error)}</div> : null}
     {refreshing ? <p role="status">{t('learning.loading')}</p> : null}
@@ -324,8 +332,8 @@ export function LearningDialog({ pageId, pageTitle, messages, close, navigate, c
     {view?.enabled && view.experiences.length > 0 && !visibleExperiences.length ? <p className="lesson-note" role="status">{t('learning.noMatches')}</p> : null}
     {/* Filtering only hides authorized lessons; unmounting their editors would
         discard unsent reports and refinements when the search changes. */}
-    {(view?.experiences ?? []).map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} busy={busy || refreshing} hidden={!visibleIds.has(experience.id)} navigate={navigate} continueWebWork={continueWebWork}
+    {(!focusedResultId || focusedResult) ? (view?.experiences ?? []).filter(experience => !focusedResultId || experience.canReport).map(experience => <Experience key={experience.id} experience={experience} pageId={pageId} results={results} focusedResultId={focusedResultId} busy={busy || refreshing} hidden={!visibleIds.has(experience.id)} navigate={navigate} continueWebWork={continueWebWork}
       revise={(item, changes, evidence) => update(() => api.reviseExperience(pageId, item, changes, evidence))}
-      feedback={(item, verdict, evidence, resultMessageId, resultOnly) => update(() => api.experienceFeedback(pageId, item, verdict, evidence, resultMessageId, resultOnly))} />)}
+      feedback={(item, verdict, evidence, resultMessageId, resultOnly) => update(() => api.experienceFeedback(pageId, item, verdict, evidence, resultMessageId, resultOnly))} />) : null}
   </Dialog>;
 }
