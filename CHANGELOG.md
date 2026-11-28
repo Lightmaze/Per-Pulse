@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.0a42
+
+- Open experience feedback from the exact delivered Home file or settled Work answer, with the original Work and result already selected (#402).
+- Restore feedback for older results outside the recent history window; retry a failed source read without losing the draft or allowing submission against unverified material (#403).
+- Keep pre-action and delivery posture computations running when long Work context is fitted to the model window, preserving original history and accounting (#404).
+- Exercise the ordinary file decision, source selection, Home delivery, download and restart after native context omission in the full installed browser journey (#405).
+
 ## 0.1.0a41
 
 - Find completed Pulse answers from ordinary later Work and make task-relevant historical answers available before a decision, even when newer matching Works are unfinished (#392–395).
