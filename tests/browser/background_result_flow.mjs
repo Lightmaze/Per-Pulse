@@ -351,7 +351,8 @@ try {
   await page.goto(base + '/page/' + work);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'View this page’s experience', exact: true }).click();
-  await exampleCard.getByRole('button', { name: 'Start a Work from this saved experience', exact: true }).click();
+  const retainedReply = page.locator('.lesson').filter({ has: page.getByRole('heading', { name: savedExample.title, exact: true }) });
+  await retainedReply.getByRole('button', { name: 'Start a Work from this saved experience', exact: true }).click();
   await page.getByRole('textbox', { name: 'Page name', exact: true }).fill('Saved reply follow-up');
   await page.getByRole('textbox', { name: 'Where should we begin?', exact: true })
     .fill('Write a Markdown file from this saved reply and report it Home.');

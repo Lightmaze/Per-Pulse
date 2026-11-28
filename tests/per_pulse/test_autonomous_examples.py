@@ -172,7 +172,8 @@ def test_selected_background_reply_starts_new_work_and_keeps_current_revision(lo
         "sourceMessageId": source.id, "title": "Saved background reply",
         "excerpt": source.content, "note": "Check the current situation.",
     })["experience"]
-    args = dict(title="Use the saved answer", instruction="Prepare a new result.",
+    args = dict(title="Use the saved answer",
+                instruction="Prepare a new result.\nWEB_EXPERIENCE_JSON\n is an example label.",
                 source_experience_id=saved["id"], request_id="saved-reply-retry")
     first = pages.create_page(**args)
     page_id = first["page"]["id"]
